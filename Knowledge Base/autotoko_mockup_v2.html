@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AutoToko v2 — Mockup Interaktif</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:#F0F4F8;color:#1E293B;height:100vh;overflow:hidden}
+:root{--brand:#FF6B35;--bd:#E55A27;--bl:#FFF1EB;--navy:#1A1A2E;--teal:#00D4AA;--tl:#E6FBF7;--shopee:#EE4D2D;--ok:#10B981;--warn:#F59E0B;--err:#EF4444;--info:#3B82F6;--s2:#F8FAFC;--br:#E2E8F0;--tx:#1E293B;--mu:#64748B}
+.app{display:flex;height:100vh;overflow:hidden}
+/* SIDEBAR */
+.sb{width:215px;background:var(--navy);display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto}
+.sb-logo{padding:14px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(255,255,255,.08)}
+.lm{width:32px;height:32px;background:var(--brand);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;color:#fff;flex-shrink:0}
+.lt{font-size:16px;font-weight:800;color:#fff}.ls{font-size:9px;color:rgba(255,255,255,.3);text-transform:uppercase;letter-spacing:.5px}
+.sg{padding:9px 8px 2px;font-size:9px;font-weight:600;color:rgba(255,255,255,.28);letter-spacing:.8px;text-transform:uppercase}
+.ni{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:6px;margin:1px 6px;cursor:pointer;color:rgba(255,255,255,.48);font-size:11.5px;font-weight:500;transition:all .15s}
+.ni:hover{background:rgba(255,255,255,.07);color:rgba(255,255,255,.9)}.ni.active{background:var(--brand);color:#fff}
+.nico{font-size:13px;width:16px;text-align:center;flex-shrink:0}
+.nb{margin-left:auto;background:var(--err);color:#fff;font-size:9px;font-weight:700;padding:1px 4px;border-radius:7px}.nb.g{background:var(--ok)}
+.sw{margin:auto 6px 9px;background:rgba(255,255,255,.06);border-radius:7px;padding:9px}
+.wl{font-size:9px;color:rgba(255,255,255,.32);margin-bottom:2px}.wa{font-size:15px;font-weight:700;color:#fff}.ws{font-size:9px;color:rgba(0,212,170,.75);margin-top:1px}
+.tb{width:100%;margin-top:6px;padding:5px;background:var(--brand);border:none;border-radius:5px;color:#fff;font-family:inherit;font-size:10px;font-weight:600;cursor:pointer}
+/* MAIN */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.bar{background:#fff;border-bottom:1px solid var(--br);padding:0 16px;height:48px;display:flex;align-items:center;gap:9px;flex-shrink:0}
+.bt{font-size:14px;font-weight:700;flex:1}.bs{display:flex;align-items:center;gap:6px;background:var(--s2);border:1px solid var(--br);border-radius:7px;padding:5px 10px;font-size:11px;color:var(--mu);cursor:pointer}
+.bauto{display:flex;align-items:center;gap:4px;padding:4px 10px;border-radius:7px;font-size:10px;font-weight:600;cursor:pointer;background:var(--tl);color:#059669}
+.av{width:28px;height:28px;background:var(--brand);border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700}
+.ct{flex:1;overflow-y:auto;padding:14px 16px}
+/* CARDS */
+.card{background:#fff;border-radius:10px;border:1px solid var(--br)}.cp{padding:12px 15px}
+.sg4{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:11px}
+.sc{background:#fff;border-radius:10px;border:1px solid var(--br);padding:12px 14px}
+.sl{font-size:9.5px;font-weight:600;color:var(--mu);letter-spacing:.3px;text-transform:uppercase;margin-bottom:4px}
+.sv{font-size:20px;font-weight:800;color:var(--tx);letter-spacing:-.5px}.ss{font-size:9.5px;color:var(--mu);margin-top:2px}
+.su{color:var(--ok)}.sdn{color:var(--err)}
+.si{width:31px;height:31px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;margin-bottom:7px}
+.io{background:var(--bl);color:var(--brand)}.it{background:var(--tl);color:#059669}.ib{background:#EFF6FF;color:var(--info)}.ip{background:#F5F3FF;color:#7C3AED}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin-bottom:10px}
+.mb{margin-bottom:10px}.sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.stt{font-size:12.5px;font-weight:700}.sl2{font-size:10px;color:var(--brand);font-weight:600;cursor:pointer;background:none;border:none;font-family:inherit}
+table{width:100%;border-collapse:collapse;font-size:11.5px}
+th{font-size:9.5px;font-weight:600;color:var(--mu);text-transform:uppercase;letter-spacing:.3px;padding:8px 10px;text-align:left;background:var(--s2);border-bottom:1px solid var(--br)}
+td{padding:8px 10px;border-bottom:1px solid #F1F5F9;color:var(--tx);vertical-align:middle}
+tr:last-child td{border-bottom:none}tr:hover td{background:#FAFBFC}
+.bx{display:inline-flex;align-items:center;gap:2px;padding:2px 7px;border-radius:4px;font-size:9.5px;font-weight:600;white-space:nowrap}
+.bg{background:#DCFCE7;color:#15803D}.bo{background:#FFF7ED;color:#C2410C}.br2{background:#FEE2E2;color:#B91C1C}.bb{background:#EFF6FF;color:#1D4ED8}.bgr{background:#F1F5F9;color:var(--mu)}.bt2{background:var(--tl);color:#047857}.bpu{background:#F5F3FF;color:#7C3AED}
+.mpp{display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:4px;font-size:9.5px;font-weight:600}
+.mps{background:#FFF0EE;color:var(--shopee)}.mpt{background:#F0F0F0;color:#000}
+.mpd{width:5px;height:5px;border-radius:50%}.mps .mpd{background:var(--shopee)}.mpt .mpd{background:#000}
+.btn{padding:5px 10px;border-radius:6px;font-size:10.5px;font-weight:600;border:none;cursor:pointer;font-family:inherit;transition:all .15s}
+.bpr{background:var(--brand);color:#fff}.bpr:hover{background:var(--bd)}
+.bse{background:var(--s2);color:var(--tx);border:1px solid var(--br)}.bse:hover{background:var(--br)}
+.bdk{background:#1A1A2E;color:#fff}.berr{background:#FEE2E2;color:#B91C1C;border:1px solid #FECACA}
+.tog{position:relative;width:35px;height:18px;flex-shrink:0}
+.tog input{opacity:0;width:0;height:0}
+.tsl{position:absolute;inset:0;background:#CBD5E1;border-radius:9px;cursor:pointer;transition:.2s}
+.tsl::before{content:'';position:absolute;width:12px;height:12px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+input:checked+.tsl{background:var(--teal)}input:checked+.tsl::before{transform:translateX(17px)}
+.al{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;font-size:11px;margin-bottom:9px}
+.alo{background:#FFF7ED;border:1px solid #FED7AA;color:#92400E}
+.alg{background:#F0FDF4;border:1px solid #BBF7D0;color:#14532D}
+.alb{background:#EFF6FF;border:1px solid #BFDBFE;color:#1E40AF}
+.alr{background:#FEF2F2;border:1px solid #FECACA;color:#991B1B}
+.pg{display:none}.pg.active{display:block}
+/* KANBAN */
+.kb{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;height:calc(100vh - 175px)}
+.kc{min-width:158px;max-width:158px;background:var(--s2);border-radius:9px;border:1px solid var(--br);display:flex;flex-direction:column}
+.kch{padding:8px 10px 6px;font-size:9.5px;font-weight:700;border-bottom:1px solid var(--br);display:flex;align-items:center;justify-content:space-between}
+.kd{width:6px;height:6px;border-radius:50%;margin-right:4px;display:inline-block}
+.kct{flex:1;padding:6px;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
+.kcard{background:#fff;border-radius:6px;border:1px solid var(--br);padding:7px 8px;cursor:pointer;transition:all .15s}
+.kcard:hover{border-color:var(--brand);box-shadow:0 2px 6px rgba(255,107,53,.12)}
+.kcard-id{font-size:8.5px;font-family:monospace;color:var(--mu);margin-bottom:1px}
+.kcard-prod{font-size:9.5px;font-weight:600;line-height:1.3;margin-bottom:2px}
+.kcard-buyer{font-size:8.5px;color:var(--mu)}.kcard-price{font-size:9.5px;font-weight:700;color:var(--brand);margin-top:2px}
+/* FLOW */
+.flow-wrap{overflow-x:auto;padding:5px 0 9px}
+.flow-row{display:flex;align-items:stretch;min-width:max-content}
+.flow-step{display:flex;flex-direction:column;align-items:center}
+.flow-box{width:108px;border-radius:8px;padding:9px 7px;text-align:center;border:1.5px solid var(--br);background:#fff;position:relative;margin-top:10px}
+.flow-box.auto{border-color:var(--teal);background:var(--tl)}
+.flow-box.human{border-color:#F59E0B;background:#FFFBEB}
+.flow-box.semi{border-color:var(--info);background:#EFF6FF}
+.flow-icon{font-size:17px;margin-bottom:3px}
+.flow-title{font-size:9.5px;font-weight:700;color:var(--tx);margin-bottom:2px}
+.flow-desc{font-size:8px;color:var(--mu);line-height:1.4}
+.flow-type{position:absolute;top:-8px;left:50%;transform:translateX(-50%);font-size:7.5px;font-weight:700;padding:1px 5px;border-radius:3px;white-space:nowrap}
+.flow-type.auto{background:var(--teal);color:#fff}.flow-type.human{background:#F59E0B;color:#fff}.flow-type.semi{background:var(--info);color:#fff}
+.flow-arr{display:flex;align-items:center;padding:0 2px;color:#94A3B8;font-size:13px;margin-top:34px}
+/* TABS */
+.tabs{display:flex;gap:1px;border-bottom:1.5px solid var(--br);margin-bottom:11px}
+.tab{padding:7px 12px;font-size:11.5px;font-weight:600;color:var(--mu);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1.5px;transition:all .15s;white-space:nowrap}
+.tab.active{color:var(--brand);border-bottom-color:var(--brand)}
+.tabp{display:none}.tabp.active{display:block}
+/* HUMAN STEP */
+.hs{background:#FFFBEB;border:1.5px solid #F59E0B;border-radius:8px;padding:10px 12px;margin-bottom:8px}
+.hs-head{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:#92400E;margin-bottom:4px}
+/* MINI STATS */
+.ms{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.msc{flex:1;min-width:80px;background:#fff;border-radius:8px;border:1px solid var(--br);padding:8px 10px}
+.msv{font-size:16px;font-weight:800}.msl{font-size:9.5px;color:var(--mu);margin-top:1px}
+/* MODALS */
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:999;align-items:center;justify-content:center}
+.modal.open{display:flex}
+.modal-box{background:#fff;border-radius:12px;padding:18px;max-width:460px;width:90%;max-height:85vh;overflow-y:auto}
+.modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.modal-title{font-size:14px;font-weight:700}
+.modal-close{font-size:16px;cursor:pointer;color:var(--mu);background:none;border:none;font-family:inherit}
+.fg{margin-bottom:10px}.fl{font-size:10px;font-weight:600;color:var(--mu);display:block;margin-bottom:3px}
+.fi{width:100%;padding:7px 9px;border-radius:6px;border:1px solid var(--br);font-family:inherit;font-size:11px;color:var(--tx)}
+.fi:focus{outline:none;border-color:var(--brand)}
+.fs{width:100%;padding:7px 9px;border-radius:6px;border:1px solid var(--br);font-family:inherit;font-size:11px;color:var(--tx);background:#fff}
+/* MISC */
+::-webkit-scrollbar{width:3px;height:3px}::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:3px}
+.nd{position:absolute;top:4px;right:4px;width:6px;height:6px;background:var(--err);border-radius:50%;border:1.5px solid #fff}
+.pb{height:4px;background:var(--br);border-radius:2px;overflow:hidden;margin-top:3px}
+.pf{height:100%;border-radius:2px}
+.toko-card{background:#fff;border-radius:10px;border:1px solid var(--br);overflow:hidden}
+.toko-head{padding:10px 12px;display:flex;align-items:center;gap:9px;border-bottom:1px solid var(--br)}
+.toko-av{width:35px;height:35px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.toko-s-bg{background:#FFF0EE}.toko-t-bg{background:#F0F0F0}
+.toko-stats{display:grid;grid-template-columns:repeat(3,1fr);text-align:center;padding:9px}
+.tsv{font-size:13px;font-weight:700}.tsl3{font-size:8.5px;color:var(--mu);margin-top:1px}
+.toko-foot{padding:7px 12px;background:var(--s2);display:flex;gap:6px;border-top:1px solid var(--br)}
+.wh{background:linear-gradient(135deg,#1A1A2E 0%,#252558 100%);border-radius:11px;padding:18px;color:#fff;margin-bottom:10px;position:relative;overflow:hidden}
+.wh::before{content:'';position:absolute;top:-20px;right:-20px;width:150px;height:150px;background:rgba(255,107,53,.12);border-radius:50%}
+.wh-l{font-size:9.5px;font-weight:600;color:rgba(255,255,255,.42);letter-spacing:.5px;text-transform:uppercase;margin-bottom:5px}
+.wh-a{font-size:28px;font-weight:800;letter-spacing:-1px}.wh-s{font-size:10px;color:rgba(255,255,255,.42);margin-top:2px}
+.wh-btns{display:flex;gap:7px;margin-top:12px}
+.wh-btn{padding:7px 15px;border-radius:6px;font-size:11px;font-weight:600;border:none;cursor:pointer;font-family:inherit}
+.eval-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:9px}
+.eval-card{border-radius:8px;padding:10px;text-align:center;border:1.5px solid}
+.eval-a{background:#F0FDF4;border-color:#BBF7D0}.eval-b{background:#EFF6FF;border-color:#BFDBFE}
+.eval-c{background:#FEFCE8;border-color:#FEF08A}.eval-d{background:#FEF2F2;border-color:#FECACA}
+.eval-num{font-size:22px;font-weight:800}.eval-lbl{font-size:9.5px;font-weight:600;margin-top:2px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:7px}
+.cal-day{background:var(--s2);border-radius:5px;padding:4px;min-height:48px;border:1px solid var(--br)}
+.cal-day-num{font-size:8.5px;font-weight:600;color:var(--mu);margin-bottom:1px}
+.cal-event{font-size:7.5px;padding:1px 3px;border-radius:2px;margin-bottom:1px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.ce-vid{background:#F3E8FF;color:#7C3AED}.ce-post{background:var(--tl);color:#047857}.ce-iklan{background:#FFF7ED;color:#C2410C}
+.bom-card{background:#fff;border-radius:9px;border:1.5px solid var(--br);margin-bottom:8px}
+.bom-head{padding:9px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--br)}
+.bom-body{padding:9px 12px}
+.chat-b{border-radius:7px;padding:7px 10px;font-size:10.5px;margin-bottom:5px}
+.chat-ai{background:var(--tl);border:1px solid #99F6E4}
+.chat-buy{background:var(--s2);border:1px solid var(--br)}
+</style>
+</head>
+<body>
+<div class="app">
+<!-- SIDEBAR -->
+<div class="sb">
+  <div class="sb-logo"><div class="lm">A</div><div><div class="lt">AutoToko</div><div class="ls">Autopilot Seller</div></div></div>
+  <div class="sg">OPERASIONAL</div>
+  <div class="ni active" onclick="go('dashboard')"><div class="nico">📊</div>Dashboard</div>
+  <div class="ni" onclick="go('toko')"><div class="nico">🏪</div>Toko Saya<span class="nb g">4</span></div>
+  <div class="ni" onclick="go('produk')"><div class="nico">📦</div>Master Produk</div>
+  <div class="ni" onclick="go('orders')"><div class="nico">🛒</div>Orders Kanban<span class="nb">12</span></div>
+  <div class="sg">BAHAN & LABEL</div>
+  <div class="ni" onclick="go('bom')"><div class="nico">🧪</div>BOM / Bahan Baku<span class="nb">!</span></div>
+  <div class="ni" onclick="go('printlabel')"><div class="nico">🏷️</div>Print Label Kemasan</div>
+  <div class="sg">AUTOPILOT FLOWS</div>
+  <div class="ni" onclick="go('ff')"><div class="nico">📬</div>Flow Fulfillment</div>
+  <div class="ni" onclick="go('fr')"><div class="nico">🔄</div>Flow Restock<span class="nb">!</span></div>
+  <div class="ni" onclick="go('fas')"><div class="nico">💼</div>Flow After-Sales</div>
+  <div class="ni" onclick="go('fmk')"><div class="nico">📣</div>Flow Get Customer</div>
+  <div class="sg">MARKETING</div>
+  <div class="ni" onclick="go('event')"><div class="nico">📅</div>Event & Promo</div>
+  <div class="ni" onclick="go('affiliator')"><div class="nico">🤝</div>Affiliator</div>
+  <div class="ni" onclick="go('konten')"><div class="nico">📹</div>Konten & Video</div>
+  <div class="ni" onclick="go('iklan')"><div class="nico">📢</div>Iklan</div>
+  <div class="sg">ANALITIK</div>
+  <div class="ni" onclick="go('evaluasi')"><div class="nico">⭐</div>Evaluasi Produk</div>
+  <div class="ni" onclick="go('laporan')"><div class="nico">📈</div>Laporan</div>
+  <div class="sg">AKUN</div>
+  <div class="ni" onclick="go('wallet')"><div class="nico">💳</div>Wallet</div>
+  <div class="ni" onclick="go('settings')"><div class="nico">⚙️</div>Pengaturan</div>
+  <div class="sw"><div class="wl">Saldo Wallet</div><div class="wa">Rp 1.240.000</div><div class="ws">▲ ~12 hari tersisa</div><button class="tb" onclick="go('wallet')">+ Top Up Saldo</button></div>
+</div>
+<!-- MAIN -->
+<div class="main">
+  <div class="bar">
+    <div class="bt" id="ptitle">Dashboard</div>
+    <div class="bs">🔍 Cari order, produk, bahan...</div>
+    <div class="bauto" onclick="go('ff')">🟢 Autopilot Aktif</div>
+    <div style="position:relative"><div style="width:27px;height:27px;background:var(--s2);border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:12px">🔔</div><div class="nd"></div></div>
+    <div class="av">RA</div>
+  </div>
+  <div class="ct">
+
+<!-- ===== DASHBOARD ===== -->
+<div id="pg-dashboard" class="pg active">
+  <div class="sg4">
+    <div class="sc"><div class="si io">🛒</div><div class="sl">Order Hari Ini</div><div class="sv">87</div><div class="ss"><span class="su">▲ 23%</span> vs kemarin</div></div>
+    <div class="sc"><div class="si it">💰</div><div class="sl">Revenue Hari Ini</div><div class="sv">8.4jt</div><div class="ss"><span class="su">▲ 15%</span> vs kemarin</div></div>
+    <div class="sc"><div class="si ib">🤖</div><div class="sl">Auto-Processed</div><div class="sv">74</div><div class="ss"><span class="su">85%</span> dari total order</div></div>
+    <div class="sc"><div class="si ip">📦</div><div class="sl">Postingan Aktif</div><div class="sv">246</div><div class="ss">4 toko · 2 marketplace</div></div>
+  </div>
+  <div class="al alo mb">⚠️ <strong>Saldo wallet menipis!</strong> Rp 1.240.000 tersisa ~12 hari. <button class="btn bpr" style="margin-left:auto" onclick="go('wallet')">Top Up</button></div>
+  <div class="al alr mb">🔴 <strong>Stok Kritis:</strong> Botol 100ml (12 pcs) & Label Kemasan A (5 lembar) → Auto-order sudah di-trigger! <button class="btn bpr" style="margin-left:auto" onclick="go('bom')">Lihat BOM</button></div>
+  <div class="g2 mb">
+    <div class="card cp" style="cursor:pointer;border-color:var(--teal)" onclick="go('ff')">
+      <div class="sh" style="margin-bottom:6px"><div class="stt">📬 Flow Fulfillment</div><span class="bx bt2">74 auto hari ini</span></div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:5px"><span class="bx bg">✓ Auto Approve</span><span class="bx bg">✓ WA Pembeli</span><span class="bx bo">👤 Print Resi</span><span class="bx bo">👤 Produksi</span><span class="bx bo">👤 Packing Scan</span><span class="bx bg">✓ AWB Auto</span></div>
+      <div style="font-size:9.5px;color:var(--brand);font-weight:600">→ Klik untuk lihat flow & manage</div>
+    </div>
+    <div class="card cp" style="cursor:pointer;border-color:#F59E0B" onclick="go('fr')">
+      <div class="sh" style="margin-bottom:6px"><div class="stt">🔄 Flow Restock Bahan</div><span class="bx bo">2 kritis!</span></div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:5px"><span class="bx bg">✓ Monitor Stok</span><span class="bx br2">⚠ Stok Kritis</span><span class="bx bg">✓ Auto Beli Shopee</span><span class="bx bg">✓ Auto Print Label</span></div>
+      <div style="font-size:9.5px;color:var(--brand);font-weight:600">→ Klik untuk lihat flow & manage</div>
+    </div>
+    <div class="card cp" style="cursor:pointer" onclick="go('fas')">
+      <div class="sh" style="margin-bottom:6px"><div class="stt">💼 Flow After-Sales</div><span class="bx bg">Normal</span></div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:5px"><span class="bx bg">✓ Monitor Balance</span><span class="bx bg">✓ Auto Reply Review</span><span class="bx bg">✓ Rekap Laporan</span></div>
+      <div style="font-size:9.5px;color:var(--brand);font-weight:600">→ Klik untuk lihat flow & manage</div>
+    </div>
+    <div class="card cp" style="cursor:pointer" onclick="go('fmk')">
+      <div class="sh" style="margin-bottom:6px"><div class="stt">📣 Flow Get Customer</div><span class="bx bg">Aktif</span></div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:5px"><span class="bx bg">✓ Event</span><span class="bx bg">✓ Affiliator AI</span><span class="bx bg">✓ Iklan Rp100k</span><span class="bx bg">✓ Evaluasi</span><span class="bx bt2">✓ Trend AI</span></div>
+      <div style="font-size:9.5px;color:var(--brand);font-weight:600">→ Klik untuk lihat flow & manage</div>
+    </div>
+  </div>
+  <div class="g2">
+    <div class="card"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="sh" style="margin-bottom:0"><div class="stt">Revenue 7 Hari</div><span class="bx bb">Rp 47.3jt</span></div></div><div style="padding:10px 12px"><canvas id="rChart" height="135"></canvas></div></div>
+    <div class="card"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="sh" style="margin-bottom:0"><div class="stt">Order Terbaru</div><button class="sl2" onclick="go('orders')">Kanban →</button></div></div>
+      <table><thead><tr><th>Order</th><th>Produk</th><th>MP</th><th>Status</th></tr></thead><tbody>
+        <tr><td style="font-family:monospace;font-size:9.5px">#SHP-88291</td><td>Batik Parang S</td><td><span class="mpp mps"><div class="mpd"></div>Shopee</span></td><td><span class="bx bpu">Produksi</span></td></tr>
+        <tr><td style="font-family:monospace;font-size:9.5px">#TTK-44821</td><td>Kerudung Voal</td><td><span class="mpp mpt"><div class="mpd"></div>TikTok</span></td><td><span class="bx bb">Packing</span></td></tr>
+        <tr><td style="font-family:monospace;font-size:9.5px">#SHP-88105</td><td>Celana Kulot XL</td><td><span class="mpp mps"><div class="mpd"></div>Shopee</span></td><td><span class="bx br2">Retur</span></td></tr>
+        <tr><td style="font-family:monospace;font-size:9.5px">#TTK-44790</td><td>Kemeja Flanel M</td><td><span class="mpp mpt"><div class="mpd"></div>TikTok</span></td><td><span class="bx bg">✓ Auto</span></td></tr>
+      </tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TOKO ===== -->
+<div id="pg-toko" class="pg">
+  <div class="ms mb">
+    <div class="msc"><div class="msv">4</div><div class="msl">Toko Terhubung</div></div>
+    <div class="msc"><div class="msv">246</div><div class="msl">Total Postingan</div></div>
+    <div class="msc"><div class="msv">2</div><div class="msl">Marketplace</div></div>
+    <div class="msc" style="flex:0"><button class="btn bpr" style="height:100%;padding:0 13px" onclick="alert('Hubungkan toko:\n• Shopee → OAuth redirect ke Shopee\n• TikTok Shop → OAuth redirect ke TikTok')">+ Tambah Toko</button></div>
+  </div>
+  <div class="al alb mb">ℹ️ <strong>Withdrawal tidak tersedia via API.</strong> AutoToko monitor saldo & kirim notif WA saat threshold tercapai. Withdrawal dilakukan manual di Seller Center masing-masing marketplace.</div>
+  <div class="g2">
+    <div class="toko-card"><div class="toko-head"><div class="toko-av toko-s-bg">🛍️</div><div><div style="font-size:11px;font-weight:700">Butik Nusantara Official</div><div style="font-size:9.5px;color:var(--mu)">Shopee Indonesia · Local Seller</div></div><span class="bx bg" style="margin-left:auto">● Aktif</span></div>
+      <div class="toko-stats"><div><div class="tsv">128</div><div class="tsl3">Postingan</div></div><div><div class="tsv">4.9★</div><div class="tsl3">Rating</div></div><div><div class="tsv">Rp 28jt</div><div class="tsl3">Bulan Ini</div></div></div>
+      <div style="padding:0 12px 9px;background:var(--s2);border-top:1px solid var(--br)">
+        <div style="font-size:9px;font-weight:600;color:var(--mu);margin:6px 0 3px">💰 BALANCE TOKO (View Only)</div>
+        <div style="display:flex;justify-content:space-between;font-size:10.5px;margin-bottom:2px"><span>Saldo Settlement</span><strong style="color:var(--ok)">Rp 12.450.000</strong></div>
+        <div style="display:flex;justify-content:space-between;font-size:10.5px;margin-bottom:3px"><span>Pending Release</span><strong style="color:var(--warn)">Rp 4.200.000</strong></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px"><span style="color:var(--ok)">✓ Notif WA terkirim (≥ Rp 5jt)</span><a href="#" style="color:var(--info);font-size:9.5px;text-decoration:none" onclick="alert('Buka Shopee Seller Center untuk withdrawal manual')">Withdrawal →</a></div>
+      </div>
+      <div class="toko-foot"><button class="btn bse" style="font-size:10px">Lihat Produk</button><button class="btn bse" style="font-size:10px">Kelola Toko</button></div>
+    </div>
+    <div class="toko-card"><div class="toko-head"><div class="toko-av toko-s-bg">🧥</div><div><div style="font-size:11px;font-weight:700">Fashion Wanita Store</div><div style="font-size:9.5px;color:var(--mu)">Shopee Indonesia</div></div><span class="bx bg" style="margin-left:auto">● Aktif</span></div>
+      <div class="toko-stats"><div><div class="tsv">67</div><div class="tsl3">Postingan</div></div><div><div class="tsv">4.7★</div><div class="tsl3">Rating</div></div><div><div class="tsv">Rp 11jt</div><div class="tsl3">Bulan Ini</div></div></div>
+      <div style="padding:0 12px 9px;background:var(--s2);border-top:1px solid var(--br)">
+        <div style="font-size:9px;font-weight:600;color:var(--mu);margin:6px 0 3px">💰 BALANCE TOKO (View Only)</div>
+        <div style="display:flex;justify-content:space-between;font-size:10.5px;margin-bottom:2px"><span>Saldo Settlement</span><strong style="color:var(--ok)">Rp 5.800.000</strong></div>
+        <div style="display:flex;justify-content:space-between;font-size:10.5px;margin-bottom:3px"><span>Pending Release</span><strong style="color:var(--warn)">Rp 1.200.000</strong></div>
+        <div style="font-size:9.5px;color:var(--mu)">Threshold Rp 5jt — belum tercapai</div>
+      </div>
+      <div class="toko-foot"><button class="btn bse" style="font-size:10px">Lihat Produk</button><button class="btn bse" style="font-size:10px">Kelola Toko</button></div>
+    </div>
+    <div class="toko-card"><div class="toko-head"><div class="toko-av toko-t-bg">🎵</div><div><div style="font-size:11px;font-weight:700">Nusantara Fashion ID</div><div style="font-size:9.5px;color:var(--mu)">TikTok Shop Indonesia</div></div><span class="bx bg" style="margin-left:auto">● Aktif</span></div>
+      <div class="toko-stats"><div><div class="tsv">38</div><div class="tsl3">Postingan</div></div><div><div class="tsv">4.8★</div><div class="tsl3">Rating</div></div><div><div class="tsv">Rp 6.2jt</div><div class="tsl3">Bulan Ini</div></div></div>
+      <div style="padding:0 12px 9px;background:var(--s2);border-top:1px solid var(--br)">
+        <div style="font-size:9px;font-weight:600;color:var(--mu);margin:6px 0 3px">💰 BALANCE TOKO (View Only)</div>
+        <div style="display:flex;justify-content:space-between;font-size:10.5px;margin-bottom:2px"><span>Saldo Settlement</span><strong style="color:var(--ok)">Rp 3.100.000</strong></div>
+        <div style="display:flex;justify-content:space-between;font-size:10.5px;margin-bottom:3px"><span>Pending Release</span><strong style="color:var(--warn)">Rp 800.000</strong></div>
+        <div style="font-size:9.5px;color:var(--mu)">Threshold Rp 3jt — hampir tercapai</div>
+      </div>
+      <div class="toko-foot"><button class="btn bse" style="font-size:10px">Lihat Produk</button><button class="btn bse" style="font-size:10px">Kelola</button></div>
+    </div>
+    <div class="toko-card"><div class="toko-head"><div class="toko-av toko-t-bg">👗</div><div><div style="font-size:11px;font-weight:700">Batik Parang Official</div><div style="font-size:9.5px;color:var(--mu)">TikTok Shop Indonesia</div></div><span class="bx bo" style="margin-left:auto">⚠ Token Expire</span></div>
+      <div class="toko-stats"><div><div class="tsv">13</div><div class="tsl3">Postingan</div></div><div><div class="tsv">4.6★</div><div class="tsl3">Rating</div></div><div><div class="tsv">Rp 2.1jt</div><div class="tsl3">Bulan Ini</div></div></div>
+      <div style="padding:0 12px 9px;background:#FFF7ED;border-top:1px solid #FED7AA">
+        <div class="al alo" style="margin:6px 0 0;padding:5px 8px;font-size:9.5px">⚠️ Token TikTok expire ~2 jam! Perbarui agar automation tidak terhenti.</div>
+      </div>
+      <div class="toko-foot"><button class="btn bpr" style="font-size:10px" onclick="alert('Re-authorize via TikTok OAuth')">🔄 Perbarui Token</button><button class="btn bse" style="font-size:10px">Kelola</button></div>
+    </div>
+    <div class="toko-card" style="border:2px dashed var(--br);cursor:pointer;background:#FAFBFC;grid-column:span 2" onclick="alert('Pilih marketplace:\n• Shopee → OAuth redirect ke Shopee\n• TikTok Shop → OAuth redirect ke TikTok')">
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:25px;color:var(--mu)">
+        <div style="font-size:26px;margin-bottom:8px">+</div>
+        <div style="font-weight:700;font-size:12px;color:var(--tx)">Tambah Toko Baru</div>
+        <div style="font-size:10.5px;margin-top:2px">Shopee atau TikTok Shop</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MASTER PRODUK ===== -->
+<div id="pg-produk" class="pg">
+  <div class="ms mb" id="p-ms">
+    <div class="msc"><div class="msv">42</div><div class="msl">Master Produk</div></div>
+    <div class="msc"><div class="msv">246</div><div class="msl">Total Postingan</div></div>
+    <div class="msc"><div class="msv" style="color:var(--err)">3</div><div class="msl">Skor D</div></div>
+    <div class="msc" style="flex:0;display:flex;gap:5px;align-items:center">
+      <button class="btn bpr" onclick="openM('modal-add-produk')">+ Produk Baru</button>
+      <button class="btn bse" onclick="go('fmk')">🤖 AI Posting</button>
+    </div>
+  </div>
+  <div class="al alo mb" id="p-alert">🤖 AI menemukan <strong>3 postingan</strong> yang bisa dioptimasi judulnya. <button class="btn bpr" style="margin-left:auto" onclick="alert('Rekomendasi AI:\n• Batik Parang → Tambah keyword trending\n• Kerudung Voal → Judul terlalu pendek\n• Celana Kulot → Foto kurang terang')">Review Saran AI</button></div>
+  <div class="card mb" id="p-list">
+    <div class="cp" style="border-bottom:1px solid var(--br)"><div class="sh" style="margin-bottom:0"><div class="stt">Semua Master Produk</div><div style="display:flex;gap:5px"><select class="fs" style="width:auto;padding:3px 7px;font-size:10px"><option>Semua Toko</option><option>Shopee</option><option>TikTok</option></select><button class="btn bse" style="font-size:10px">Export</button></div></div></div>
+    <table>
+      <thead><tr><th>Produk / SKU</th><th>Toko Terhubung</th><th>Postingan</th><th>Revenue/bln</th><th>Stok</th><th>Skor</th><th>Aksi</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><div style="font-weight:600">Baju Batik Parang</div><div style="font-size:9px;font-family:monospace;color:var(--mu)">SKU: BBP-001 · 4 varian</div></td>
+          <td><div style="font-size:9.5px;line-height:1.9"><span class="mpp mps"><div class="mpd"></div>Butik Nusantara</span><br><span class="mpp mps"><div class="mpd"></div>Fashion Wanita</span><br><span class="mpp mpt"><div class="mpd"></div>Nusantara Fashion</span></div></td>
+          <td><div style="display:flex;gap:3px"><span class="mpp mps"><div class="mpd"></div>7</span><span class="mpp mpt"><div class="mpd"></div>3</span></div></td>
+          <td><strong>Rp 12.4jt</strong></td><td>234 pcs</td>
+          <td><span class="bx bg">A</span></td>
+          <td><div style="display:flex;gap:2px;flex-wrap:wrap"><button class="btn bpr" style="font-size:9px;padding:2px 6px" onclick="showPD('BBP-001')">Detail</button><button class="btn bse" style="font-size:9px;padding:2px 6px" onclick="openM('modal-edit-produk')">Edit</button><button class="btn berr" style="font-size:9px;padding:2px 6px" onclick="if(confirm('Hapus BBP-001?'))alert('Dihapus')">Hapus</button></div></td>
+        </tr>
+        <tr>
+          <td><div style="font-weight:600">Kerudung Voal Premium</div><div style="font-size:9px;font-family:monospace;color:var(--mu)">SKU: KVP-042 · 6 warna</div></td>
+          <td><div style="font-size:9.5px;line-height:1.9"><span class="mpp mps"><div class="mpd"></div>Butik Nusantara</span><br><span class="mpp mpt"><div class="mpd"></div>Nusantara Fashion</span></div></td>
+          <td><div style="display:flex;gap:3px"><span class="mpp mps"><div class="mpd"></div>5</span><span class="mpp mpt"><div class="mpd"></div>3</span></div></td>
+          <td><strong>Rp 8.7jt</strong></td><td>892 pcs</td>
+          <td><span class="bx bg">A</span></td>
+          <td><div style="display:flex;gap:2px"><button class="btn bpr" style="font-size:9px;padding:2px 6px" onclick="alert('Detail KVP-042')">Detail</button><button class="btn bse" style="font-size:9px;padding:2px 6px">Edit</button></div></td>
+        </tr>
+        <tr>
+          <td><div style="font-weight:600">Celana Kulot Wanita</div><div style="font-size:9px;font-family:monospace;color:var(--mu)">SKU: CKW-018</div></td>
+          <td><div style="font-size:9.5px;line-height:1.9"><span class="mpp mps"><div class="mpd"></div>Fashion Wanita</span><br><span class="mpp mpt"><div class="mpd"></div>Batik Parang Official</span></div></td>
+          <td><div style="display:flex;gap:3px"><span class="mpp mps"><div class="mpd"></div>4</span><span class="mpp mpt"><div class="mpd"></div>2</span></div></td>
+          <td><strong>Rp 5.2jt</strong></td><td>156 pcs</td>
+          <td><span class="bx bb">B</span></td>
+          <td><div style="display:flex;gap:2px"><button class="btn bpr" style="font-size:9px;padding:2px 6px">Detail</button><button class="btn bse" style="font-size:9px;padding:2px 6px">Edit</button></div></td>
+        </tr>
+        <tr>
+          <td><div style="font-weight:600">Daster Motif Bunga</div><div style="font-size:9px;font-family:monospace;color:var(--mu)">SKU: DMB-034</div></td>
+          <td><div style="font-size:9.5px"><span class="mpp mps"><div class="mpd"></div>Fashion Wanita</span></div></td>
+          <td><div style="display:flex;gap:3px"><span class="mpp mps"><div class="mpd"></div>2</span></div></td>
+          <td><strong>Rp 420k</strong></td><td>12 pcs</td>
+          <td><span class="bx br2">D</span></td>
+          <td><div style="display:flex;gap:2px"><button class="btn bpr" style="font-size:9px;padding:2px 6px">Detail</button><button class="btn berr" style="font-size:9px;padding:2px 6px" onclick="alert('Eliminasi DMB-034?\n• 45 hari tidak terjual\n• Return 24%\n\nNonaktifkan semua postingan?')">Eliminasi</button></div></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <!-- POSTING DETAIL -->
+  <div id="pd-BBP-001" style="display:none">
+    <div class="card">
+      <div class="cp" style="border-bottom:1px solid var(--br);display:flex;align-items:center;gap:8px">
+        <button class="btn bse" style="font-size:10px" onclick="hidePD()">← Kembali</button>
+        <div class="stt">Baju Batik Parang (BBP-001) — Manajemen Postingan</div>
+        <div style="margin-left:auto;display:flex;gap:5px">
+          <button class="btn bse" style="font-size:10px" onclick="openM('modal-add-posting')">+ Tambah Postingan</button>
+          <button class="btn bpr" style="font-size:10px">Edit Master</button>
+        </div>
+      </div>
+      <div style="padding:11px 13px">
+        <div style="background:var(--bl);border:1.5px solid #FFD4C0;border-radius:7px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+          <div style="font-size:24px">👗</div>
+          <div><div style="font-size:12px;font-weight:700;color:var(--bd)">Baju Batik Motif Parang</div><div style="font-size:9.5px;color:var(--brand);margin-top:1px">SKU: BBP-001 · 234 stok · 10 postingan · Rp 12.4jt/bulan · Toko: Butik Nusantara, Fashion Wanita, Nusantara Fashion ID</div></div>
+        </div>
+        <div class="g2">
+          <div>
+            <div style="background:#FFF0EE;border-radius:6px;padding:7px 10px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between">
+              <div style="font-size:10px;font-weight:700;color:var(--shopee)">🛍️ Shopee — 7 postingan</div>
+              <button class="btn bpr" style="font-size:9px;padding:2px 6px" onclick="openM('modal-add-posting')">+ Tambah</button>
+            </div>
+            <table style="font-size:10.5px"><thead><tr><th>Judul</th><th>Harga</th><th>Terjual</th><th>Status</th><th>Aksi</th></tr></thead><tbody>
+              <tr><td>Batik Parang Normal</td><td>Rp 89k</td><td>89/bln</td><td><span class="bx bg">Aktif</span></td><td><div style="display:flex;gap:2px"><button class="btn bse" style="font-size:8.5px;padding:1px 4px">Edit</button><button class="btn bse" style="font-size:8.5px;padding:1px 4px" onclick="alert('Duplicate postingan ini?')">Duplikat</button><button class="btn berr" style="font-size:8.5px;padding:1px 4px" onclick="if(confirm('Hapus?'))alert('Dihapus')">Hapus</button></div></td></tr>
+              <tr><td>Batik Bundle 2pcs</td><td>Rp 160k</td><td>34/bln</td><td><span class="bx bg">Aktif</span></td><td><div style="display:flex;gap:2px"><button class="btn bse" style="font-size:8.5px;padding:1px 4px">Edit</button><button class="btn bse" style="font-size:8.5px;padding:1px 4px">Duplikat</button><button class="btn berr" style="font-size:8.5px;padding:1px 4px">Hapus</button></div></td></tr>
+              <tr><td style="color:var(--shopee)">⚡ Flash Sale</td><td style="color:var(--shopee)">Rp 69k</td><td>—</td><td><span class="bx br2">Flash Sale</span></td><td><div style="display:flex;gap:2px"><button class="btn bse" style="font-size:8.5px;padding:1px 4px">Edit</button><button class="btn bse" style="font-size:8.5px;padding:1px 4px">Duplikat</button></div></td></tr>
+              <tr><td>Batik 3pcs Grosir</td><td>Rp 230k</td><td>11/bln</td><td><span class="bx bg">Aktif</span></td><td><div style="display:flex;gap:2px"><button class="btn bse" style="font-size:8.5px;padding:1px 4px">Edit</button><button class="btn bse" style="font-size:8.5px;padding:1px 4px">Duplikat</button><button class="btn berr" style="font-size:8.5px;padding:1px 4px">Hapus</button></div></td></tr>
+            </tbody></table>
+          </div>
+          <div>
+            <div style="background:#F0F0F0;border-radius:6px;padding:7px 10px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between">
+              <div style="font-size:10px;font-weight:700">🎵 TikTok — 3 postingan</div>
+              <button class="btn bdk" style="font-size:9px;padding:2px 6px" onclick="openM('modal-add-posting')">+ Tambah</button>
+            </div>
+            <table style="font-size:10.5px"><thead><tr><th>Judul</th><th>Harga</th><th>Terjual</th><th>Status</th><th>Aksi</th></tr></thead><tbody>
+              <tr><td>Batik Parang Murah</td><td>Rp 92k</td><td>45/bln</td><td><span class="bx bg">Aktif</span></td><td><div style="display:flex;gap:2px"><button class="btn bse" style="font-size:8.5px;padding:1px 4px">Edit</button><button class="btn bse" style="font-size:8.5px;padding:1px 4px">Duplikat</button><button class="btn berr" style="font-size:8.5px;padding:1px 4px">Hapus</button></div></td></tr>
+              <tr><td>Batik Modern Parang</td><td>Rp 89k</td><td>28/bln</td><td><span class="bx bg">Aktif</span></td><td><div style="display:flex;gap:2px"><button class="btn bse" style="font-size:8.5px;padding:1px 4px">Edit</button><button class="btn bse" style="font-size:8.5px;padding:1px 4px">Duplikat</button><button class="btn berr" style="font-size:8.5px;padding:1px 4px">Hapus</button></div></td></tr>
+              <tr><td>PROMO Batik Parang</td><td>Rp 85k</td><td>18/bln</td><td><span class="bx bg">Aktif</span></td><td><div style="display:flex;gap:2px"><button class="btn bse" style="font-size:8.5px;padding:1px 4px">Edit</button><button class="btn bse" style="font-size:8.5px;padding:1px 4px">Duplikat</button></div></td></tr>
+            </tbody></table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== ORDERS KANBAN ===== -->
+<div id="pg-orders" class="pg">
+  <div class="ms mb">
+    <div class="msc"><div class="msv" style="color:var(--brand)">12</div><div class="msl">Butuh Aksi</div></div>
+    <div class="msc"><div class="msv" style="color:var(--warn)">34</div><div class="msl">Produksi</div></div>
+    <div class="msc"><div class="msv" style="color:#EC4899">28</div><div class="msl">Packing</div></div>
+    <div class="msc"><div class="msv" style="color:var(--ok)">41</div><div class="msl">Siap Kirim</div></div>
+    <div class="msc"><div class="msv">56</div><div class="msl">Dikirim</div></div>
+    <div class="msc"><div class="msv" style="color:var(--err)">3</div><div class="msl">Retur</div></div>
+    <div class="msc" style="flex:0"><button class="btn bpr" style="font-size:10px" onclick="alert('Print label massal untuk semua order Siap Kirim via Revo Print')">🖨️ Print Massal</button></div>
+  </div>
+  <div class="al alg mb">🤖 <strong>74 order auto-processed</strong> hari ini. Flow: Order Masuk → Auto Approve → WA Pembeli → (👤 Produksi) → (👤 Packing Scan) → Auto AWB. <button class="sl2" onclick="go('ff')">Lihat Flow →</button></div>
+  <div id="kanban-board" class="kb"></div>
+</div>
+
+<!-- ===== BOM ===== -->
+<div id="pg-bom" class="pg">
+  <div class="ms mb">
+    <div class="msc"><div class="msv">8</div><div class="msl">Total Bahan</div></div>
+    <div class="msc"><div class="msv" style="color:var(--err)">2</div><div class="msl">Stok Kritis</div></div>
+    <div class="msc"><div class="msv" style="color:var(--warn)">3</div><div class="msl">Hampir Habis</div></div>
+    <div class="msc" style="flex:0"><button class="btn bpr" onclick="openM('modal-add-bom')">+ Tambah Bahan</button></div>
+  </div>
+  <div class="al alr mb">🔴 <strong>2 bahan kritis:</strong> Botol 100ml (12 pcs) & Label Kemasan A (5 lembar) → Auto-order Shopee & Revo Print sudah di-trigger!</div>
+  <div class="tabs mb" id="bom-tabs">
+    <div class="tab active" onclick="swTab('bom-t1','bom-tabs',this)">📋 Mapping Produk × Bahan</div>
+    <div class="tab" onclick="swTab('bom-t2','bom-tabs',this)">🛍️ Config Auto Restock Shopee</div>
+    <div class="tab" onclick="swTab('bom-t3','bom-tabs',this)">📊 Stok Bahan Baku</div>
+  </div>
+  <div id="bom-t1" class="tabp active">
+    <div class="al alb mb">ℹ️ Setiap order masuk, stok bahan dikurangi sesuai mapping ini. Jika stok &lt; minimum → auto-trigger order ke Shopee (Tab 2) atau Revo Print (halaman Print Label Kemasan).</div>
+    <div class="card mb"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="sh" style="margin-bottom:0"><div class="stt">Mapping: Produk → Bahan Baku (BOM)</div><button class="btn bpr" style="font-size:10px" onclick="openM('modal-add-mapping')">+ Tambah Mapping</button></div></div>
+      <table><thead><tr><th>Master Produk</th><th>Bahan Baku</th><th>Qty/unit</th><th>Stok Saat Ini</th><th>Min Stok</th><th>Status</th><th>Aksi</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="3" style="vertical-align:top;padding-top:10px;font-weight:600;font-size:11px">Baju Batik Parang<br><span style="font-size:8.5px;font-family:monospace;color:var(--mu)">BBP-001</span></td><td>Kain Batik Parang</td><td>1.5 m</td><td>450 m</td><td>100 m</td><td><span style="color:var(--ok);font-size:10px;font-weight:600">✓ Aman</span></td><td><button class="btn bse" style="font-size:8.5px;padding:1px 5px">Edit</button></td></tr>
+        <tr><td>Benang Jahit Putih</td><td>10 g</td><td>2.4 kg</td><td>500 g</td><td><span style="color:var(--warn);font-size:10px;font-weight:600">⚠ Hampir Habis</span></td><td><button class="btn bse" style="font-size:8.5px;padding:1px 5px">Edit</button></td></tr>
+        <tr><td>Plastik Kemasan</td><td>1 pcs</td><td>84 pcs</td><td>50 pcs</td><td><span style="color:var(--err);font-size:10px;font-weight:600">✗ Kritis!</span></td><td><button class="btn bpr" style="font-size:8.5px;padding:1px 5px" onclick="alert('Auto-order Plastik Kemasan ke Shopee?')">Auto Order</button></td></tr>
+        <tr><td rowspan="2" style="vertical-align:top;padding-top:10px;font-weight:600;font-size:11px">Kerudung Voal<br><span style="font-size:8.5px;font-family:monospace;color:var(--mu)">KVP-042</span></td><td>Kain Voal</td><td>1.2 m</td><td>1.2 km</td><td>200 m</td><td><span style="color:var(--ok);font-size:10px;font-weight:600">✓ Aman</span></td><td><button class="btn bse" style="font-size:8.5px;padding:1px 5px">Edit</button></td></tr>
+        <tr><td>Label Kemasan A 🏷️</td><td>1 lembar</td><td style="color:var(--err);font-weight:700">5 lembar 🔴</td><td>50 lembar</td><td><span style="color:var(--err);font-size:10px;font-weight:600">✗ KRITIS!</span></td><td><button class="btn bpr" style="font-size:8.5px;padding:1px 5px" onclick="alert('Auto-order Label ke Revo Print!\nTemplate: TPL-042\nQty: 200 lembar')">→ Revo Print</button></td></tr>
+      </tbody></table>
+    </div>
+  </div>
+  <div id="bom-t2" class="tabp">
+    <div class="al alb mb">ℹ️ Konfigurasi ini menentukan <strong>dari mana sistem membeli bahan secara otomatis</strong> saat stok mencapai minimum. Sistem akan membuka link Shopee supplier dan order dengan metode + alamat yang sudah dikonfigurasi.</div>
+    <div id="brc-list"></div>
+    <button class="btn bpr" onclick="openM('modal-restock-config')">+ Tambah Konfigurasi Restock</button>
+  </div>
+  <div id="bom-t3" class="tabp">
+    <div class="card"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="sh" style="margin-bottom:0"><div class="stt">Monitor Stok Semua Bahan</div><button class="btn bse" style="font-size:10px">Export</button></div></div>
+      <table><thead><tr><th>Bahan Baku</th><th>Stok Saat Ini</th><th>Min Stok</th><th>Progress</th><th>Auto Restock</th></tr></thead>
+      <tbody id="stok-table"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PRINT LABEL KEMASAN ===== -->
+<div id="pg-printlabel" class="pg">
+  <div class="ms mb">
+    <div class="msc"><div class="msv">6</div><div class="msl">Jenis Label</div></div>
+    <div class="msc"><div class="msv" style="color:var(--ok)">5</div><div class="msl">Terkonfigurasi</div></div>
+    <div class="msc"><div class="msv" style="color:var(--err)">1</div><div class="msl">Perlu Setup</div></div>
+    <div class="msc" style="flex:0"><button class="btn bpr" onclick="openM('modal-add-label')">+ Tambah Label</button></div>
+  </div>
+  <div class="al alb mb">ℹ️ <strong>Print Label Kemasan ≠ Print Resi.</strong> Label kemasan = label merek/brand yang ditempel di produk (botol, kemasan, hang tag). Sistem auto-trigger order cetak ke Revo Print saat stok label di BOM mencapai minimum.</div>
+  <div class="al alg mb">🏷️ <strong>Label Kemasan A</strong> — stok 5 lembar (min: 50) → <strong>Auto-order 200 lembar ke Revo Print sudah di-trigger!</strong> Estimasi 2-3 hari kerja.</div>
+  <div class="card">
+    <div class="cp" style="border-bottom:1px solid var(--br)"><div class="sh" style="margin-bottom:0"><div class="stt">Konfigurasi Label Merek × Revo Print</div></div></div>
+    <table><thead><tr><th>Nama Label</th><th>Produk/SKU</th><th>Ukuran</th><th>Min Trigger</th><th>Qty/Order</th><th>Revo Print Config</th><th>Status</th><th>Aksi</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Label Kemasan A</strong><br><span style="font-size:8.5px;color:var(--mu)">Label botol voal</span></td>
+        <td><span class="mpp mps"><div class="mpd"></div>Shopee</span> KVP-042</td>
+        <td>5×8 cm</td><td>50 lembar</td><td>200 lembar</td>
+        <td><div style="font-size:9.5px"><div><strong>Endpoint:</strong> api.revoprint.id/v2</div><div><strong>Template:</strong> TPL-042</div></div></td>
+        <td><span class="bx bt2">✓ Aktif</span></td>
+        <td><div style="display:flex;gap:2px"><button class="btn bse" style="font-size:8.5px;padding:1px 5px" onclick="openM('modal-edit-label')">Edit</button><button class="btn bpr" style="font-size:8.5px;padding:1px 5px" onclick="alert('Test order 5 lembar ke Revo Print...\nStatus: Order terkirim!')">Test</button></div></td>
+      </tr>
+      <tr>
+        <td><strong>Label Botol 100ml</strong><br><span style="font-size:8.5px;color:var(--mu)">Produk skincare</span></td>
+        <td><span class="mpp mps"><div class="mpd"></div>Shopee</span> SKN-001</td>
+        <td>3×5 cm</td><td>100 pcs</td><td>500 lembar</td>
+        <td><div style="font-size:9.5px"><div><strong>Endpoint:</strong> api.revoprint.id/v2</div><div><strong>Template:</strong> TPL-001</div></div></td>
+        <td><span class="bx bt2">✓ Aktif</span></td>
+        <td><div style="display:flex;gap:2px"><button class="btn bse" style="font-size:8.5px;padding:1px 5px">Edit</button><button class="btn bpr" style="font-size:8.5px;padding:1px 5px">Test</button></div></td>
+      </tr>
+      <tr>
+        <td><strong>Hang Tag Baju</strong><br><span style="font-size:8.5px;color:var(--mu)">Batik, Kerudung, Kulot</span></td>
+        <td>Multi-produk</td>
+        <td>4×6 cm</td><td>200 pcs</td><td>500 pcs</td>
+        <td><div style="font-size:9.5px;color:var(--err)">⚠ Belum dikonfigurasi</div></td>
+        <td><span class="bx br2">Perlu Setup</span></td>
+        <td><button class="btn bpr" style="font-size:8.5px;padding:1px 5px" onclick="openM('modal-edit-label')">Setup</button></td>
+      </tr>
+    </tbody></table>
+  </div>
+</div>
+
+<!-- ===== FLOW FULFILLMENT ===== -->
+<div id="pg-ff" class="pg">
+  <div class="al alg mb">📬 <strong>Flow Fulfillment (6.1–6.5)</strong> — Order masuk hingga paket terkirim. 🤖 = otomatis, 👤 = aksi manusia.</div>
+  <div class="card mb"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="stt">Alur Order End-to-End</div></div>
+    <div style="padding:11px 13px"><div class="flow-wrap"><div class="flow-row" id="flow-ff"></div></div></div>
+  </div>
+  <div class="g2 mb">
+    <div class="card cp">
+      <div class="sh mb"><div class="stt">✅ 6.1 Auto-Approve Order</div><span class="bx bt2">🤖 Auto</span></div>
+      <div style="font-size:10.5px;color:var(--mu);margin-bottom:7px">Trigger: webhook order masuk dari Shopee/TikTok (real-time)</div>
+      <div style="font-size:10.5px;line-height:2">✓ Stok bahan baku tersedia (cek BOM)<br>✓ Alamat pengiriman valid<br>✓ Fraud score OK<br>✗ Gagal → flag manual + notif WA</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px"><span style="font-size:9.5px;color:var(--ok)">74 order auto-approved hari ini</span><label class="tog"><input type="checkbox" checked><span class="tsl"></span></label></div>
+    </div>
+    <div class="card cp">
+      <div class="sh mb"><div class="stt">💬 6.2 Chat AI ke Pembeli</div><span class="bx bt2">🤖 Auto AI</span></div>
+      <div style="font-size:10.5px;color:var(--mu);margin-bottom:7px">Setelah approved, AI kirim konfirmasi ke pembeli via marketplace chat.</div>
+      <div class="chat-b chat-ai"><div style="font-size:8.5px;color:var(--ok);font-weight:600;margin-bottom:2px">🤖 AI — Auto-sent</div><div style="font-size:10.5px">"Halo Kak Dian! Order Batik Parang (S) kami terima dan sedang diproses ya. Estimasi kirim 1-2 hari kerja 😊"</div></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:7px"><span style="font-size:9.5px;color:var(--ok)">12 pesan terkirim hari ini</span><label class="tog"><input type="checkbox" checked><span class="tsl"></span></label></div>
+    </div>
+  </div>
+  <div class="g2 mb">
+    <div class="hs">
+      <div class="hs-head">👤 6.3 Print Resi — Human Trigger</div>
+      <div style="font-size:10.5px;color:#78350F;margin-bottom:6px">AWB di-generate otomatis via API marketplace, tapi <strong>print resi harus di-trigger manual</strong> melalui dashboard atau mobile app. Resi dikirim ke printer via Revo Print.</div>
+      <div style="background:#fff;border-radius:6px;padding:8px;border:1px solid #FED7AA;margin-bottom:7px">
+        <div style="font-size:10.5px;font-weight:600;margin-bottom:4px">Order siap print resi (5 order):</div>
+        <div style="font-size:9.5px;color:var(--mu);line-height:2">#SHP-88001 · Batik Parang · J&T · JT001234<br>#SHP-88002 · Kerudung Voal · Shopee Xpress · SP002345<br>#TTK-44790 · Kemeja Flanel · J&T · JT003456</div>
+      </div>
+      <button class="btn bpr" style="width:100%;font-size:10px" onclick="alert('🖨️ Kirim 5 resi ke Revo Print?\nPrint dimulai dalam 30 detik.')">🖨️ Print Semua Resi (5)</button>
+    </div>
+    <div class="hs">
+      <div class="hs-head">👤 6.4 & 6.5 Produksi + Packing + Scan Resi</div>
+      <div style="font-size:10.5px;color:#78350F;margin-bottom:6px">Human activity. Platform bantu dengan checklist & scan resi via mobile app untuk validasi packing selesai.</div>
+      <div style="background:#fff;border-radius:6px;padding:8px;border:1px solid #FED7AA">
+        <div style="font-size:10.5px;font-weight:600;margin-bottom:4px">Queue Produksi (34 order):</div>
+        <div style="font-size:9.5px;line-height:2">
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox"> #SHP-88291 · Batik Parang S · Dian P.</label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox"> #SHP-88292 · Batik Parang M · Rizky</label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" checked> #SHP-88290 · Kerudung Navy · Maya ✓</label>
+        </div>
+        <div style="margin-top:6px;padding:5px;background:var(--s2);border-radius:5px;font-size:9.5px;color:var(--mu)">📱 Scan resi via mobile app AutoToko untuk tandai packing selesai</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== FLOW RESTOCK ===== -->
+<div id="pg-fr" class="pg">
+  <div class="al alr mb">🔴 <strong>2 bahan kritis sekarang!</strong> Botol 100ml & Label Kemasan A — Auto-order Shopee & Revo Print sudah di-trigger!</div>
+  <div class="card mb"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="stt">6.6–6.7 Flow Restock Bahan + Label Kemasan Otomatis</div></div>
+    <div style="padding:11px 13px"><div class="flow-wrap"><div class="flow-row" id="flow-rs"></div></div></div>
+  </div>
+  <div class="g2 mb">
+    <div class="card cp">
+      <div class="sh mb"><div class="stt">📊 6.6 Monitor & Auto Restock Bahan</div><span class="bx bt2">🤖 Auto (tiap jam)</span></div>
+      <div style="font-size:10.5px;color:var(--mu);margin-bottom:8px">Sistem cek stok bahan tiap 1 jam. Jika stok &lt; minimum → auto-order ke supplier Shopee sesuai konfigurasi BOM.</div>
+      <div id="mini-stok"></div>
+      <div style="background:#FFF0EE;border:1px solid #FFD4C0;border-radius:6px;padding:8px 10px;margin-top:7px;font-size:10.5px">
+        <div style="font-weight:700;color:var(--shopee);margin-bottom:3px">🛍️ Auto-order di-trigger:</div>
+        <div style="line-height:1.9">📦 Botol 100ml × 200 pcs → Supplier Jakarta<br>💳 COD · Alamat: Jl. Pahlawan No. 12, Serpong<br>💰 Est: Rp 180.000</div>
+      </div>
+      <button class="btn bse" style="width:100%;margin-top:7px;font-size:10px" onclick="go('bom')">Kelola BOM & Config Restock →</button>
+    </div>
+    <div class="card cp">
+      <div class="sh mb"><div class="stt">🏷️ 6.7 Auto Print Label Kemasan → Revo Print</div><span class="bx bt2">🤖 Auto</span></div>
+      <div style="font-size:10.5px;color:var(--mu);margin-bottom:8px"><strong>INGAT: Label ini bukan resi pengiriman!</strong> Ini adalah label merek/brand yang ditempel di produk (botol, kemasan, hang tag). Auto-trigger saat stok label di BOM mencapai minimum.</div>
+      <div style="background:var(--tl);border:1px solid #99F6E4;border-radius:6px;padding:8px 10px;font-size:10.5px;margin-bottom:6px">
+        <div style="font-weight:700;color:#047857;margin-bottom:3px">✓ Label Kemasan A — Triggered ke Revo Print!</div>
+        <div style="line-height:1.9">Template: TPL-042 (5×8cm)<br>Qty: 200 lembar<br>Status: Order terkirim ke API Revo Print<br>Est. selesai: 2-3 hari kerja</div>
+      </div>
+      <div style="background:var(--s2);border-radius:6px;padding:7px 9px;font-size:9.5px">
+        <div style="font-weight:600;margin-bottom:3px">Riwayat Print Label ke Revo Print:</div>
+        <div style="color:var(--mu);line-height:1.9">12 Jun: Label Voal × 500 → ✓ Selesai<br>05 Jun: Label Batik × 300 → ✓ Selesai</div>
+      </div>
+      <button class="btn bse" style="width:100%;margin-top:7px;font-size:10px" onclick="go('printlabel')">Kelola Konfigurasi Print Label →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== FLOW AFTER-SALES ===== -->
+<div id="pg-fas" class="pg">
+  <div class="al alg mb">💼 <strong>Flow After-Sales (6.8–6.10)</strong> — Monitor balance, reply review otomatis, rekap laporan.</div>
+  <div class="card mb"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="stt">6.8–6.10 Flow After-Sales End-to-End</div></div>
+    <div style="padding:11px 13px"><div class="flow-wrap"><div class="flow-row" id="flow-as"></div></div></div>
+  </div>
+  <div class="g2 mb">
+    <div class="card cp">
+      <div class="sh mb"><div class="stt">💰 6.8 Monitor Balance Toko</div><span class="bx bt2">🤖 Auto (harian)</span></div>
+      <div style="font-size:10.5px;color:var(--mu);margin-bottom:8px">Withdrawal tidak ada API. AutoToko monitor saldo settlement & kirim notif WA saat threshold tercapai. Withdrawal dilakukan manual oleh pemilik toko.</div>
+      <div id="bal-list"></div>
+      <div class="al alb" style="margin-top:7px;padding:6px 8px;font-size:9.5px">ℹ️ Notif WA berisi direct-link ke halaman withdrawal Seller Center marketplace.</div>
+    </div>
+    <div class="card cp">
+      <div class="sh mb"><div class="stt">⭐ 6.10 Auto Reply Review</div><span class="bx bt2">🤖 Auto AI</span></div>
+      <div style="font-size:10.5px;color:var(--mu);margin-bottom:7px">AI auto-balas semua review. Rating 4-5★ → terima kasih warm. Rating 1-3★ → empati + solusi.</div>
+      <div class="chat-b chat-ai" style="margin-bottom:4px"><div style="font-size:8.5px;color:var(--ok);font-weight:600;margin-bottom:1px">⭐⭐⭐⭐⭐ Siti R. — Auto-replied</div><div style="font-size:10.5px">"Terima kasih Kak Siti! Senang banget produk kami memuaskan 🙏"</div></div>
+      <div class="chat-b" style="background:#FEF2F2;border:1px solid #FECACA;margin-bottom:5px"><div style="font-size:8.5px;color:var(--err);font-weight:600;margin-bottom:1px">⭐⭐ Budi S. — AI Draft (menunggu review)</div><div style="font-size:10.5px">"Mohon maaf Kak Budi atas pengalaman yang kurang memuaskan..."</div><button class="btn bpr" style="margin-top:4px;font-size:9px;padding:1px 6px" onclick="alert('Approve & publish balasan AI?')">Approve & Publish</button></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px"><span style="color:var(--ok)">12 review dibalas otomatis hari ini</span><label class="tog"><input type="checkbox" checked><span class="tsl"></span></label></div>
+    </div>
+  </div>
+  <div class="card cp">
+    <div class="sh mb"><div class="stt">📊 6.9 Rekap Laporan Otomatis</div><span class="bx bt2">🤖 Auto (harian 23:55, mingguan, bulanan)</span></div>
+    <div class="g2">
+      <div><div style="font-size:10.5px;font-weight:600;margin-bottom:5px">Laporan Harian (WA 23:55):</div><div style="font-size:9.5px;color:var(--mu);line-height:2">• Total order: 87 · Revenue: Rp 8.4jt<br>• Top produk: Batik Parang (34 pcs)<br>• Auto-processed: 85% · Fee: Rp 17.400</div></div>
+      <div><div style="font-size:10.5px;font-weight:600;margin-bottom:5px">Export Bulanan:</div><button class="btn bse" style="width:100%;font-size:10px" onclick="alert('Export laporan Juni 2026 ke Excel/PDF')">📥 Export Juni 2026</button><button class="btn bse" style="width:100%;margin-top:5px;font-size:10px" onclick="go('laporan')">Lihat Detail Laporan →</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== FLOW GET CUSTOMER ===== -->
+<div id="pg-fmk" class="pg">
+  <div class="al alg mb">📣 <strong>Flow Get Customer (6.11–6.19)</strong> — 11 langkah otomasi marketing, katalog, dan pertumbuhan bisnis.</div>
+  <div class="card mb"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="stt">6.11–6.19 Flow Get Customer — End-to-End</div></div>
+    <div style="padding:11px 13px"><div class="flow-wrap"><div class="flow-row" id="flow-mk"></div></div></div>
+  </div>
+  <div class="g2 mb">
+    <div class="card cp"><div class="sh mb"><div class="stt">📅 6.11 Auto Apply Event/Promo</div><span class="bx bt2">🤖 Auto</span></div>
+      <div style="font-size:9.5px;line-height:2"><span class="bx bg" style="margin-right:3px">✓</span>Shopee 11.11 Sale — 12 produk terdaftar<br><span class="bx bg" style="margin-right:3px">✓</span>TikTok Flash Deal — 5 produk eligible<br><span class="bx bo" style="margin-right:3px">⚠</span>Shopee Voucher Day — 3 tidak memenuhi syarat</div>
+      <button class="btn bse" style="width:100%;margin-top:7px;font-size:10px" onclick="go('event')">Kelola Event →</button>
+    </div>
+    <div class="card cp"><div class="sh mb"><div class="stt">🤝 6.12 Auto Cari & Chat Affiliator</div><span class="bx bt2">🤖 Auto (2x/hari)</span></div>
+      <div style="font-size:9.5px;line-height:2"><span class="bx bg">✓</span> 4 creator baru ditemukan hari ini<br><span class="bx bg">✓</span> 2 undangan terkirim via AI Chat<br><span class="bx bg">✓</span> 1 affiliator aktif — GMV Rp 2.1jt</div>
+      <button class="btn bse" style="width:100%;margin-top:7px;font-size:10px" onclick="go('affiliator')">Kelola Affiliator →</button>
+    </div>
+  </div>
+  <div class="g2 mb">
+    <div class="card cp"><div class="sh mb"><div class="stt">📢 6.14 Auto Aktifkan Iklan</div><span class="bx bt2">🤖 Auto (07:00 WIB)</span></div>
+      <div class="g2" style="margin-bottom:0">
+        <div style="background:var(--tl);border-radius:6px;padding:7px;text-align:center;font-size:9.5px"><div style="font-weight:700;font-size:13px;color:var(--ok)">Rp 400k</div><div style="color:var(--mu)">Budget hari ini</div></div>
+        <div style="background:var(--s2);border-radius:6px;padding:7px;text-align:center;font-size:9.5px"><div style="font-weight:700;font-size:13px">3.2×</div><div style="color:var(--mu)">ROAS saat ini</div></div>
+      </div>
+      <button class="btn bse" style="width:100%;margin-top:7px;font-size:10px" onclick="go('iklan')">Kelola Iklan →</button>
+    </div>
+    <div class="card cp"><div class="sh mb"><div class="stt">📈 6.18 Auto Analyse Trend</div><span class="bx bt2">🤖 Auto (08:00 WIB)</span></div>
+      <div style="background:var(--s2);border-radius:6px;padding:8px;font-size:9.5px">
+        <div style="font-weight:600;margin-bottom:3px">📊 Trending hari ini:</div>
+        <div style="line-height:1.9;color:var(--mu)">🔥 "batik modern" +124% pencarian<br>🔥 "kerudung viral tiktok" +89%<br>💡 Peluang: Mukena travel case belum banyak saingan</div>
+      </div>
+    </div>
+  </div>
+  <div class="g2">
+    <div class="card cp"><div class="sh mb"><div class="stt">📊 6.15–6.16 Evaluasi & Eliminasi</div><span class="bx bt2">🤖 Auto (Minggu)</span></div>
+      <div style="font-size:10.5px;color:var(--mu);margin-bottom:7px">AI beri skor A/B/C/D tiap minggu. Produk D di-flag untuk eliminasi (human konfirmasi).</div>
+      <button class="btn bse" style="width:100%;font-size:10px" onclick="go('evaluasi')">Lihat Evaluasi Produk →</button>
+    </div>
+    <div class="card cp"><div class="sh mb"><div class="stt">📦 6.19 AI Bantu Posting Produk</div><span class="bx" style="background:#F3E8FF;color:#7C3AED">⚡ Semi-Auto</span></div>
+      <div style="background:#F3E8FF;border-radius:6px;padding:7px;font-size:9.5px;color:#7C3AED;margin-bottom:6px">
+        <div style="font-weight:700;margin-bottom:3px">🤖 AI sudah siapkan 3 produk baru:</div>
+        <div style="line-height:1.9">• Mukena Travel Case (dari trend analysis)<br>• Batik Eco Print Premium (demand tinggi)<br>• Kerudung Satin Glitter (trending TikTok)</div>
+      </div>
+      <button class="btn bpr" style="width:100%;font-size:10px" onclick="alert('Pilih produk yang mau di-posting duluan (human decision).\nAI akan siapkan detail listing di marketplace.')">Review & Posting Sekarang</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== EVENT ===== -->
+<div id="pg-event" class="pg">
+  <div class="ms mb">
+    <div class="msc"><div class="msv">7</div><div class="msl">Event Aktif</div></div>
+    <div class="msc"><div class="msv" style="color:var(--ok)">17</div><div class="msl">Produk Terdaftar</div></div>
+    <div class="msc"><div class="msv" style="color:var(--warn)">3</div><div class="msl">Perlu Manual</div></div>
+    <div class="msc" style="flex:0;display:flex;align-items:center;gap:6px"><label class="tog"><input type="checkbox" checked><span class="tsl"></span></label><span style="font-size:10px">Auto Apply</span></div>
+  </div>
+  <div class="card"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="sh" style="margin-bottom:0"><div class="stt">Daftar Event/Promo Marketplace (6.11)</div><button class="btn bpr" style="font-size:10px" onclick="alert('Refresh event list dari Shopee & TikTok')">🔄 Refresh</button></div></div>
+    <table><thead><tr><th>Event</th><th>Marketplace</th><th>Periode</th><th>Produk Eligible</th><th>Status</th><th>Aksi</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Shopee 11.11 Sale</strong></td><td><span class="mpp mps"><div class="mpd"></div>Shopee</span></td><td>11 Nov</td><td>12 produk</td><td><span class="bx bg">✓ Auto-terdaftar</span></td><td><button class="btn bse" style="font-size:9px;padding:1px 5px">Detail</button></td></tr>
+      <tr><td><strong>TikTok Flash Deal</strong></td><td><span class="mpp mpt"><div class="mpd"></div>TikTok</span></td><td>Setiap Jum'at</td><td>5 produk</td><td><span class="bx bg">✓ Auto-terdaftar</span></td><td><button class="btn bse" style="font-size:9px;padding:1px 5px">Detail</button></td></tr>
+      <tr><td><strong>Shopee Voucher Day</strong></td><td><span class="mpp mps"><div class="mpd"></div>Shopee</span></td><td>10-12 Jun</td><td>0 produk</td><td><span class="bx br2">Tidak Eligible</span></td><td><button class="btn bse" style="font-size:9px;padding:1px 5px">Lihat Syarat</button></td></tr>
+      <tr><td><strong>TikTok Campaign Sale</strong></td><td><span class="mpp mpt"><div class="mpd"></div>TikTok</span></td><td>20-25 Jun</td><td>8 produk</td><td><span class="bx bo">Pending Review</span></td><td><button class="btn bpr" style="font-size:9px;padding:1px 5px" onclick="alert('Daftar manual ke TikTok Campaign Sale?')">Daftar Manual</button></td></tr>
+    </tbody></table>
+  </div>
+</div>
+
+<!-- ===== AFFILIATOR ===== -->
+<div id="pg-affiliator" class="pg">
+  <div class="ms mb">
+    <div class="msc"><div class="msv">142</div><div class="msl">Total Creator</div></div>
+    <div class="msc"><div class="msv" style="color:var(--ok)">28</div><div class="msl">Aktif</div></div>
+    <div class="msc"><div class="msv" style="color:var(--info)">67</div><div class="msl">Diundang</div></div>
+    <div class="msc"><div class="msv" style="color:var(--ok)">Rp 4.2jt</div><div class="msl">Komisi Bulan Ini</div></div>
+  </div>
+  <div class="tabs mb" id="af-tabs">
+    <div class="tab active" onclick="swTab('af-t1','af-tabs',this)">🔍 Cari Creator (6.12)</div>
+    <div class="tab" onclick="swTab('af-t2','af-tabs',this)">🏷️ Tandai & Kelola</div>
+    <div class="tab" onclick="swTab('af-t3','af-tabs',this)">📨 Undang & Chat AI</div>
+  </div>
+  <div id="af-t1" class="tabp active">
+    <div class="card cp mb"><div class="sh mb"><div class="stt">Filter Pencarian Creator</div><span class="bx bt2">🤖 Auto 2x/hari</span></div>
+      <div class="g2" style="margin-bottom:0">
+        <div class="fg"><label class="fl">Niche/Kategori</label><select class="fs"><option>Fashion Wanita</option><option>Hijab</option><option>Batik</option></select></div>
+        <div class="fg"><label class="fl">Min Followers</label><select class="fs"><option>10.000</option><option>50.000</option><option>100.000</option></select></div>
+        <div class="fg"><label class="fl">Marketplace</label><select class="fs"><option>TikTok Shop</option><option>Shopee</option><option>Semua</option></select></div>
+        <div class="fg"><label class="fl">Min GMV</label><input class="fi" value="Rp 5.000.000" /></div>
+      </div>
+      <button class="btn bpr" onclick="alert('🤖 Cari creator... Hasil dalam beberapa menit')">🔍 Cari Sekarang</button>
+    </div>
+    <div class="card"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="stt">Hasil Terbaru</div></div>
+      <table><thead><tr><th>Creator</th><th>MP</th><th>Followers</th><th>GMV</th><th>Niche</th><th>Aksi</th></tr></thead><tbody>
+        <tr><td><strong>@fashionistaputri</strong></td><td><span class="mpp mpt"><div class="mpd"></div>TikTok</span></td><td>125.4K</td><td>Rp 28jt</td><td>Fashion</td><td><div style="display:flex;gap:3px"><button class="btn bse" style="font-size:9px;padding:1px 5px" onclick="alert('Tandai: Prospek / Undang / Blacklist')">Tandai</button><button class="btn bpr" style="font-size:9px;padding:1px 5px" onclick="alert('🤖 AI kirim undangan')">Undang AI</button></div></td></tr>
+        <tr><td><strong>@hijabmodern_id</strong></td><td><span class="mpp mps"><div class="mpd"></div>Shopee</span></td><td>89.2K</td><td>Rp 14jt</td><td>Hijab</td><td><div style="display:flex;gap:3px"><button class="btn bse" style="font-size:9px;padding:1px 5px">Tandai</button><button class="btn bpr" style="font-size:9px;padding:1px 5px" onclick="alert('🤖 AI kirim undangan')">Undang AI</button></div></td></tr>
+      </tbody></table>
+    </div>
+  </div>
+  <div id="af-t2" class="tabp">
+    <div class="card"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="stt">Kelola & Tandai Creator</div></div>
+      <table><thead><tr><th>Creator</th><th>MP</th><th>Followers</th><th>GMV</th><th>Status</th><th>Ubah Status</th></tr></thead><tbody>
+        <tr><td><strong>@fashionistaputri</strong></td><td><span class="mpp mpt"><div class="mpd"></div>TikTok</span></td><td>125K</td><td>Rp 28jt</td><td><span class="bx bg">Aktif</span></td><td><select class="fs" style="padding:2px 6px;font-size:10px;width:auto"><option>Aktif</option><option>Prospek</option><option>Blacklist</option></select></td></tr>
+        <tr><td><strong>@stylekreatif99</strong></td><td><span class="mpp mpt"><div class="mpd"></div>TikTok</span></td><td>42K</td><td>Rp 3.2jt</td><td><span class="bx bb">Diundang</span></td><td><select class="fs" style="padding:2px 6px;font-size:10px;width:auto"><option>Diundang</option><option>Aktif</option><option>Blacklist</option></select></td></tr>
+      </tbody></table>
+    </div>
+  </div>
+  <div id="af-t3" class="tabp">
+    <div class="g2">
+      <div class="card cp"><div class="sh mb"><div class="stt">AI Chat Affiliator</div><span class="bx bt2">🤖 Full AI</span></div>
+        <div class="chat-b chat-ai" style="margin-bottom:4px"><div style="font-size:8.5px;color:var(--ok);font-weight:600;margin-bottom:1px">🤖 AI → @stylekreatif99</div><div style="font-size:10.5px">"Hai Kak! Kami dari Butik Nusantara ingin kolaborasi afiliasi. Komisi 5%/penjualan. Tertarik? 😊"</div></div>
+        <div class="chat-b" style="background:#F0F0F0;border:1px solid #E2E8F0;margin-bottom:4px"><div style="font-size:8.5px;color:var(--mu);font-weight:600;margin-bottom:1px">@stylekreatif99</div><div style="font-size:10.5px">"Boleh! Produk apa yang bisa dipromosikan?"</div></div>
+        <div class="chat-b chat-ai"><div style="font-size:8.5px;color:var(--ok);font-weight:600;margin-bottom:1px">🤖 AI (typing...)</div><div style="font-size:10.5px">"Kami punya koleksi Batik Parang dan Kerudung Voal yang lagi trending..."</div></div>
+      </div>
+      <div class="card cp"><div class="stt mb">Template Pesan AI</div>
+        <div class="fg"><label class="fl">Template Opening</label><textarea class="fi" rows="3" style="resize:none">Hai Kak [nama]! Kami dari [nama_toko] ingin kolaborasi afiliasi. Komisi [X]%/penjualan. Tertarik? 😊</textarea></div>
+        <div class="fg"><label class="fl">Follow-up (3 hari tidak balas)</label><textarea class="fi" rows="2" style="resize:none">Halo Kak [nama], masih ingin berkolaborasi? 😊</textarea></div>
+        <button class="btn bpr" style="width:100%">Simpan Template</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== KONTEN ===== -->
+<div id="pg-konten" class="pg">
+  <div class="ms mb">
+    <div class="msc"><div class="msv">12</div><div class="msl">Video Bulan Ini</div></div>
+    <div class="msc"><div class="msv" style="color:var(--ok)">8</div><div class="msl">Sudah Upload</div></div>
+    <div class="msc"><div class="msv" style="color:var(--warn)">4</div><div class="msl">Perlu Produksi</div></div>
+    <div class="msc" style="flex:0"><button class="btn bpr" onclick="alert('AI generate script dari trend hari ini')">🤖 AI Generate Script</button></div>
+  </div>
+  <div class="al alb mb">ℹ️ <strong>6.13 Create Video</strong> — AI bantu script, caption & hashtag dari trend. Produksi tetap dilakukan manusia. Setelah upload, platform auto-optimize & post.</div>
+  <div class="card cp mb">
+    <div class="sh mb"><div class="stt">Content Calendar — Juni 2026</div></div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px"><div style="font-size:8.5px;font-weight:600;color:var(--mu);text-align:center">Sen</div><div style="font-size:8.5px;font-weight:600;color:var(--mu);text-align:center">Sel</div><div style="font-size:8.5px;font-weight:600;color:var(--mu);text-align:center">Rab</div><div style="font-size:8.5px;font-weight:600;color:var(--mu);text-align:center">Kam</div><div style="font-size:8.5px;font-weight:600;color:var(--mu);text-align:center">Jum</div><div style="font-size:8.5px;font-weight:600;color:var(--mu);text-align:center">Sab</div><div style="font-size:8.5px;font-weight:600;color:var(--mu);text-align:center">Min</div></div>
+    <div id="cal-grid" class="cal-grid"></div>
+    <div style="display:flex;gap:8px;font-size:9.5px"><span><span class="cal-event ce-vid" style="display:inline">Video</span></span><span><span class="cal-event ce-post" style="display:inline">Posting</span></span><span><span class="cal-event ce-iklan" style="display:inline">Iklan</span></span></div>
+  </div>
+  <div class="g2">
+    <div class="card cp"><div class="sh mb"><div class="stt">🤖 AI Script Generator</div></div>
+      <div class="fg"><label class="fl">Produk</label><select class="fs"><option>Baju Batik Parang</option><option>Kerudung Voal</option></select></div>
+      <div class="fg"><label class="fl">Platform</label><select class="fs"><option>TikTok</option><option>Shopee Live</option><option>Instagram Reels</option></select></div>
+      <div class="fg"><label class="fl">Durasi</label><select class="fs"><option>15 detik</option><option>30 detik</option><option>60 detik</option></select></div>
+      <button class="btn bpr" style="width:100%" onclick="alert('🤖 AI generating script berdasarkan trend hari ini...\nScript siap dalam 10 detik.')">Generate Script</button>
+    </div>
+    <div class="card cp"><div class="sh mb"><div class="stt">Script Terbaru — AI Generated</div></div>
+      <div style="background:var(--s2);border-radius:6px;padding:8px;font-size:10.5px;line-height:1.8">
+        <div style="font-weight:700;color:var(--brand);margin-bottom:2px">🎵 Hook (0-3 detik):</div>
+        <div style="color:var(--mu);margin-bottom:6px">"POV: Nemuin batik yang cocok buat kantor DAN kondangan 👗"</div>
+        <div style="font-weight:700;color:var(--brand);margin-bottom:2px">💡 Problem (3-10 detik):</div>
+        <div style="color:var(--mu);margin-bottom:6px">"Susah banget nyari baju yang oke buat formal sekaligus kasual..."</div>
+        <div style="font-weight:700;color:var(--brand);margin-bottom:2px">✅ Solution (10-25 detik):</div>
+        <div style="color:var(--mu)">"Batik Parang dari @ButikNusantara! Material adem, jahitan rapi..."</div>
+      </div>
+      <button class="btn bse" style="width:100%;margin-top:7px;font-size:10px">Copy Script</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== IKLAN ===== -->
+<div id="pg-iklan" class="pg">
+  <div class="sg4 mb">
+    <div class="sc"><div class="si io">💰</div><div class="sl">Budget Hari Ini</div><div class="sv">Rp 400k</div><div class="ss">4 toko × Rp 100rb</div></div>
+    <div class="sc"><div class="si it">📊</div><div class="sl">ROAS Rata-rata</div><div class="sv">3.2×</div><div class="ss"><span class="su">▲ 0.4×</span> vs kemarin</div></div>
+    <div class="sc"><div class="si ib">👁️</div><div class="sl">Impressions</div><div class="sv">48.2K</div><div class="ss">Hari ini</div></div>
+    <div class="sc"><div class="si ip">🛒</div><div class="sl">Konversi Iklan</div><div class="sv">2.8%</div><div class="ss">CTR 4.1%</div></div>
+  </div>
+  <div class="card"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="sh" style="margin-bottom:0"><div class="stt">6.14 Manajemen Kampanye Iklan</div><span class="bx bt2">🤖 Auto aktif 07:00 WIB</span></div></div>
+    <table><thead><tr><th>Kampanye</th><th>Toko</th><th>Budget/hari</th><th>ROAS</th><th>Impr.</th><th>Min ROAS</th><th>Status</th><th>Aksi</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Search Ads Batik</strong></td><td><span class="mpp mps"><div class="mpd"></div>Butik Nusantara</span></td><td>Rp 100k</td><td style="color:var(--ok);font-weight:700">4.1×</td><td>18.2K</td><td>2.0×</td><td><span class="bx bg">● Aktif</span></td><td><button class="btn bse" style="font-size:9px;padding:1px 5px">Edit</button></td></tr>
+      <tr><td><strong>Boost Kerudung</strong></td><td><span class="mpp mps"><div class="mpd"></div>Fashion Wanita</span></td><td>Rp 100k</td><td style="color:var(--ok);font-weight:700">3.8×</td><td>14.7K</td><td>2.0×</td><td><span class="bx bg">● Aktif</span></td><td><button class="btn bse" style="font-size:9px;padding:1px 5px">Edit</button></td></tr>
+      <tr><td><strong>TikTok Ads Batik</strong></td><td><span class="mpp mpt"><div class="mpd"></div>Nusantara Fashion</span></td><td>Rp 100k</td><td style="color:var(--warn);font-weight:700">1.9×</td><td>9.8K</td><td>2.0×</td><td><span class="bx bo">⚠ ROAS Rendah</span></td><td><button class="btn bpr" style="font-size:9px;padding:1px 5px" onclick="alert('ROAS 1.9× di bawah threshold 2.0×\nPause otomatis atau ubah target?')">Review</button></td></tr>
+      <tr><td><strong>TikTok Batik Parang</strong></td><td><span class="mpp mpt"><div class="mpd"></div>Batik Parang</span></td><td>Rp 100k</td><td>—</td><td>5.5K</td><td>2.0×</td><td><span class="bx br2">● Pause (token)</span></td><td><button class="btn bse" style="font-size:9px;padding:1px 5px" onclick="alert('Aktifkan iklan?')">Aktifkan</button></td></tr>
+    </tbody></table>
+  </div>
+</div>
+
+<!-- ===== EVALUASI ===== -->
+<div id="pg-evaluasi" class="pg">
+  <div class="al alg mb">🤖 <strong>Evaluasi terakhir:</strong> Minggu 15 Jun 2026. 42 produk dievaluasi berdasarkan conv. rate, GMV, review, return rate (30 hari).</div>
+  <div class="eval-grid mb">
+    <div class="eval-card eval-a"><div class="eval-num" style="color:#15803D">18</div><div class="eval-lbl" style="color:#15803D">Skor A — Excellent</div><div style="font-size:8.5px;color:var(--mu);margin-top:1px">Pertahankan & scale</div></div>
+    <div class="eval-card eval-b"><div class="eval-num" style="color:#1D4ED8">14</div><div class="eval-lbl" style="color:#1D4ED8">Skor B — Good</div><div style="font-size:8.5px;color:var(--mu);margin-top:1px">Optimasi ringan</div></div>
+    <div class="eval-card eval-c"><div class="eval-num" style="color:#854D0E">7</div><div class="eval-lbl" style="color:#854D0E">Skor C — Fair</div><div style="font-size:8.5px;color:var(--mu);margin-top:1px">Butuh optimasi</div></div>
+    <div class="eval-card eval-d"><div class="eval-num" style="color:var(--err)">3</div><div class="eval-lbl" style="color:var(--err)">Skor D — Eliminate</div><div style="font-size:8.5px;color:var(--mu);margin-top:1px">Disarankan hapus</div></div>
+  </div>
+  <div class="tabs mb" id="ev-tabs">
+    <div class="tab active" onclick="swTab('ev-t1','ev-tabs',this)">⭐ Semua Produk (6.15)</div>
+    <div class="tab" onclick="swTab('ev-t2','ev-tabs',this)">✏️ Optimasi Produk (6.17)</div>
+    <div class="tab" onclick="swTab('ev-t3','ev-tabs',this)">❌ Eliminasi Produk (6.16)</div>
+  </div>
+  <div id="ev-t1" class="tabp active">
+    <div class="card"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="sh" style="margin-bottom:0"><div class="stt">Health Score Semua Produk</div><button class="btn bse" style="font-size:10px">Export</button></div></div>
+      <table><thead><tr><th>Produk</th><th>Conv.Rate</th><th>GMV/bln</th><th>Review</th><th>Return</th><th>Skor</th><th>Rekomendasi AI</th></tr></thead><tbody>
+        <tr><td><strong>Baju Batik Parang</strong><br><span style="font-size:8.5px;font-family:monospace;color:var(--mu)">BBP-001</span></td><td>8.2%</td><td>Rp 12.4jt</td><td>4.8★</td><td>1.2%</td><td><span class="bx bg">A</span></td><td style="font-size:9.5px;color:var(--ok)">✓ Pertahankan. Tambah varian baru.</td></tr>
+        <tr><td><strong>Kerudung Voal</strong><br><span style="font-size:8.5px;font-family:monospace;color:var(--mu)">KVP-042</span></td><td>6.1%</td><td>Rp 8.7jt</td><td>4.7★</td><td>2.1%</td><td><span class="bx bg">A</span></td><td style="font-size:9.5px;color:var(--ok)">✓ Pertahankan. Tingkatkan iklan.</td></tr>
+        <tr><td><strong>Kemeja Flanel</strong><br><span style="font-size:8.5px;font-family:monospace;color:var(--mu)">KFP-091</span></td><td>2.1%</td><td>Rp 3.9jt</td><td>4.2★</td><td>6.8%</td><td><span class="bx" style="background:#FEF9C3;color:#854D0E">C</span></td><td style="font-size:9.5px;color:var(--warn)">⚠ Optimasi judul & foto. Return tinggi.</td></tr>
+        <tr><td><strong>Daster Motif Bunga</strong><br><span style="font-size:8.5px;font-family:monospace;color:var(--mu)">DMB-034</span></td><td>0.3%</td><td>Rp 420k</td><td>3.1★</td><td>24%</td><td><span class="bx br2">D</span></td><td style="font-size:9.5px;color:var(--err)">❌ Eliminasi. Tidak ada improvement 60 hari.</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+  <div id="ev-t2" class="tabp">
+    <div class="al alo mb">✏️ <strong>6.17 Optimasi Produk</strong> — AI sudah generate saran optimasi untuk 7 produk skor C. Review & approve agar perubahan diterapkan ke marketplace.</div>
+    <div class="card cp">
+      <div class="sh mb"><div class="stt">Kemeja Flanel Pria — Saran AI</div><span class="bx" style="background:#FEF9C3;color:#854D0E">Skor C</span></div>
+      <div class="g2">
+        <div><div style="font-size:10.5px;font-weight:600;margin-bottom:4px">Judul Produk:</div><div style="background:var(--s2);padding:6px;border-radius:5px;font-size:9.5px;color:var(--mu);margin-bottom:3px">Before: "Kemeja Flanel Pria"</div><div style="background:var(--tl);padding:6px;border-radius:5px;font-size:9.5px">After: "Kemeja Flanel Pria Kotak Premium Lengan Panjang Hangat | Bahan Tebal Anti Dingin"</div></div>
+        <div><div style="font-size:10.5px;font-weight:600;margin-bottom:4px">Keywords/Tags:</div><div style="background:var(--s2);padding:6px;border-radius:5px;font-size:9.5px;line-height:1.8">kemeja flanel, baju hangat pria, kemeja kotak, flannel shirt, baju musim hujan</div></div>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn bpr" style="font-size:10px" onclick="alert('Terapkan optimasi AI ke semua postingan KFP-091?')">✓ Apply Optimasi</button>
+        <button class="btn bse" style="font-size:10px">Edit Manual</button>
+        <button class="btn bse" style="font-size:10px">Skip</button>
+      </div>
+    </div>
+  </div>
+  <div id="ev-t3" class="tabp">
+    <div class="al alr mb">❌ <strong>6.16 Eliminasi Produk</strong> — 3 produk disarankan dieliminasi. Nonaktifkan semua postingan. Data tetap tersimpan.</div>
+    <div class="card cp">
+      <div class="stt mb">Kandidat Eliminasi</div>
+      <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:7px;padding:10px 12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px"><div><strong>Daster Motif Bunga (DMB-034)</strong></div><span class="bx br2">Skor D</span></div>
+        <div style="font-size:10.5px;color:var(--mu);line-height:1.8;margin-bottom:7px">Tidak terjual 45 hari · Return rate 24% · Margin negatif · Review 3.1★</div>
+        <div style="display:flex;gap:6px"><button class="btn berr" style="font-size:10px" onclick="alert('Nonaktifkan semua 2 postingan DMB-034?\nData tidak dihapus, hanya di-unlist.')">❌ Nonaktifkan Semua</button><button class="btn bse" style="font-size:10px">Tunda</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== LAPORAN ===== -->
+<div id="pg-laporan" class="pg">
+  <div class="sg4 mb">
+    <div class="sc"><div class="si it">💰</div><div class="sl">Revenue Bulan Ini</div><div class="sv">47.3jt</div><div class="ss"><span class="su">▲ 18%</span></div></div>
+    <div class="sc"><div class="si io">🛒</div><div class="sl">Total Order</div><div class="sv">1.842</div><div class="ss"><span class="su">▲ 12%</span></div></div>
+    <div class="sc"><div class="si ib">💸</div><div class="sl">Fee AutoToko</div><div class="sv">368k</div><div class="ss">Rp 200 × 1.842</div></div>
+    <div class="sc"><div class="si ip">📦</div><div class="sl">Avg Order Value</div><div class="sv">Rp 25.7k</div><div class="ss">Per transaksi</div></div>
+  </div>
+  <div class="g2">
+    <div class="card cp"><div class="stt mb">Revenue Per Toko (Juni 2026)</div><canvas id="barChart" height="175"></canvas></div>
+    <div class="card cp"><div class="sh mb"><div class="stt">Top 5 Produk Terlaris</div><button class="btn bpr" style="font-size:10px" onclick="alert('Export laporan ke Excel/PDF')">📥 Export</button></div>
+      <table><thead><tr><th>Produk</th><th>Terjual</th><th>Revenue</th></tr></thead><tbody>
+        <tr><td>Batik Parang</td><td>289 pcs</td><td><strong>Rp 12.4jt</strong></td></tr>
+        <tr><td>Kerudung Voal</td><td>201 pcs</td><td><strong>Rp 8.7jt</strong></td></tr>
+        <tr><td>Celana Kulot</td><td>178 pcs</td><td><strong>Rp 5.2jt</strong></td></tr>
+        <tr><td>Kemeja Flanel</td><td>102 pcs</td><td><strong>Rp 3.9jt</strong></td></tr>
+        <tr><td>Rok Plisket</td><td>87 pcs</td><td><strong>Rp 2.6jt</strong></td></tr>
+      </tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== WALLET ===== -->
+<div id="pg-wallet" class="pg">
+  <div class="wh mb">
+    <div class="wh-l">Saldo Wallet AutoToko</div>
+    <div class="wh-a">Rp 1.240.000</div>
+    <div class="wh-s">≈ 12 hari tersisa (est. 1.842 order/bln × Rp 200)</div>
+    <div class="wh-btns">
+      <button class="wh-btn" style="background:var(--brand);color:#fff" onclick="alert('Top Up via:\n• Transfer Bank (BCA, BNI, Mandiri)\n• QRIS\n• GoPay / OVO / Dana\n• Kartu Kredit\n\nPowered by Midtrans')">+ Top Up Saldo</button>
+      <button class="wh-btn" style="background:rgba(255,255,255,.1);color:#fff">Riwayat</button>
+    </div>
+  </div>
+  <div class="g3 mb">
+    <div class="card cp"><div class="sl">Subscription Bulanan</div><div class="sv" style="font-size:16px">Rp 299.000</div><div class="ss">Jatuh tempo: 1 Jul 2026</div></div>
+    <div class="card cp"><div class="sl">Fee Per Transaksi</div><div class="sv" style="font-size:16px">Rp 200</div><div class="ss">Per order yang diproses</div></div>
+    <div class="card cp"><div class="sl">Total Deducted Bulan Ini</div><div class="sv" style="font-size:16px">Rp 668.400</div><div class="ss">Sub + 1.842 × Rp 200</div></div>
+  </div>
+  <div class="card"><div class="cp" style="border-bottom:1px solid var(--br)"><div class="stt">Riwayat Transaksi Wallet</div></div>
+    <table><thead><tr><th>Tanggal</th><th>Deskripsi</th><th>Tipe</th><th>Jumlah</th><th>Saldo</th></tr></thead><tbody>
+      <tr><td>17 Jun 09:41</td><td>Fee order #SHP-88291</td><td><span class="bx br2">Deduct</span></td><td><span style="color:var(--err)">-Rp 200</span></td><td>Rp 1.240.000</td></tr>
+      <tr><td>15 Jun 14:30</td><td>Top Up via QRIS</td><td><span class="bx bg">Top Up</span></td><td><span style="color:var(--ok)">+Rp 2.000.000</span></td><td>Rp 1.450.000</td></tr>
+      <tr><td>01 Jun 00:00</td><td>Subscription Juni — Pro Plan</td><td><span class="bx bo">Subscription</span></td><td><span style="color:var(--err)">-Rp 299.000</span></td><td>Rp 820.000</td></tr>
+    </tbody></table>
+  </div>
+</div>
+
+<!-- ===== SETTINGS ===== -->
+<div id="pg-settings" class="pg">
+  <div class="g2">
+    <div class="card cp"><div class="stt mb">Profil Akun</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><div style="width:44px;height:44px;background:var(--brand);border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;font-weight:700">RA</div><div><div style="font-weight:700;font-size:12.5px">Raka Adiputra</div><div style="font-size:10.5px;color:var(--mu)">+62 812-3456-7890</div><div style="font-size:10.5px;color:var(--mu)">raka@butik-nusantara.com</div></div></div>
+      <span class="bx bpu" style="font-size:10.5px;padding:3px 10px">✨ Pro Plan</span>
+      <button class="btn bse" style="width:100%;margin-top:9px;font-size:10px">Edit Profil</button>
+    </div>
+    <div class="card cp"><div class="stt mb">Notifikasi WhatsApp</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px">Order masuk <label class="tog"><input type="checkbox" checked><span class="tsl"></span></label></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px">Laporan harian (23:55) <label class="tog"><input type="checkbox" checked><span class="tsl"></span></label></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px">Alert saldo wallet rendah <label class="tog"><input type="checkbox" checked><span class="tsl"></span></label></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px">Alert balance toko (withdrawal) <label class="tog"><input type="checkbox" checked><span class="tsl"></span></label></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px">Stok bahan baku kritis <label class="tog"><input type="checkbox" checked><span class="tsl"></span></label></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px">Produk disuspend marketplace <label class="tog"><input type="checkbox" checked><span class="tsl"></span></label></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+  </div><!-- /ct -->
+</div><!-- /main -->
+</div><!-- /app -->
+
+<!-- ===== MODALS ===== -->
+<div id="modal-add-produk" class="modal"><div class="modal-box"><div class="modal-head"><div class="modal-title">Tambah Master Produk</div><button class="modal-close" onclick="closeM('modal-add-produk')">✕</button></div><div class="fg"><label class="fl">Nama Produk</label><input class="fi" placeholder="Nama produk" /></div><div class="fg"><label class="fl">SKU Utama</label><input class="fi" placeholder="BBP-002" /></div><div class="g2"><div class="fg"><label class="fl">Harga Dasar (Rp)</label><input class="fi" /></div><div class="fg"><label class="fl">Berat (gram)</label><input class="fi" /></div></div><div class="fg"><label class="fl">Deskripsi</label><textarea class="fi" rows="3" style="resize:none" placeholder="Deskripsi produk..."></textarea></div><div style="display:flex;gap:6px;justify-content:flex-end;margin-top:12px"><button class="btn bse" onclick="closeM('modal-add-produk')">Batal</button><button class="btn bpr" onclick="alert('Master produk berhasil dibuat!');closeM('modal-add-produk')">Buat Produk</button></div></div></div>
+
+<div id="modal-edit-produk" class="modal"><div class="modal-box"><div class="modal-head"><div class="modal-title">Edit Master Produk</div><button class="modal-close" onclick="closeM('modal-edit-produk')">✕</button></div><div class="fg"><label class="fl">Nama Produk</label><input class="fi" value="Baju Batik Parang" /></div><div class="fg"><label class="fl">SKU</label><input class="fi" value="BBP-001" /></div><div class="g2"><div class="fg"><label class="fl">Harga Dasar</label><input class="fi" value="89000" /></div><div class="fg"><label class="fl">Berat (gram)</label><input class="fi" value="200" /></div></div><div style="display:flex;gap:6px;justify-content:flex-end;margin-top:12px"><button class="btn bse" onclick="closeM('modal-edit-produk')">Batal</button><button class="btn bpr" onclick="alert('Produk berhasil diperbarui!');closeM('modal-edit-produk')">Simpan</button></div></div></div>
+
+<div id="modal-add-posting" class="modal"><div class="modal-box"><div class="modal-head"><div class="modal-title">Tambah Postingan Baru</div><button class="modal-close" onclick="closeM('modal-add-posting')">✕</button></div><div class="fg"><label class="fl">Master Produk</label><select class="fs"><option>Baju Batik Parang (BBP-001)</option><option>Kerudung Voal (KVP-042)</option></select></div><div class="fg"><label class="fl">Toko / Marketplace</label><select class="fs"><option>Shopee — Butik Nusantara Official</option><option>Shopee — Fashion Wanita Store</option><option>TikTok — Nusantara Fashion ID</option><option>TikTok — Batik Parang Official</option></select></div><div class="fg"><label class="fl">Judul Postingan</label><input class="fi" placeholder="Contoh: Baju Batik Parang Bundle 2pcs Free Ongkir" /></div><div class="g2"><div class="fg"><label class="fl">Harga (Rp)</label><input class="fi" placeholder="89000" /></div><div class="fg"><label class="fl">Stok Awal</label><input class="fi" placeholder="100" /></div></div><div class="fg"><label class="fl">Tipe Posting</label><select class="fs"><option>Harga Normal</option><option>Bundle</option><option>Flash Sale</option><option>Grosir</option><option>Free Ongkir Campaign</option></select></div><div style="display:flex;gap:6px;justify-content:flex-end;margin-top:12px"><button class="btn bse" onclick="closeM('modal-add-posting')">Batal</button><button class="btn bpr" onclick="alert('Postingan berhasil ditambahkan!');closeM('modal-add-posting')">Tambah Postingan</button></div></div></div>
+
+<div id="modal-add-bom" class="modal"><div class="modal-box"><div class="modal-head"><div class="modal-title">Tambah Bahan Baku</div><button class="modal-close" onclick="closeM('modal-add-bom')">✕</button></div><div class="fg"><label class="fl">Nama Bahan Baku</label><input class="fi" placeholder="Kain Batik, Benang Jahit, Botol 100ml..." /></div><div class="g2"><div class="fg"><label class="fl">Qty per 1 produk</label><input class="fi" placeholder="1.5" /></div><div class="fg"><label class="fl">Satuan</label><select class="fs"><option>pcs</option><option>meter</option><option>gram</option><option>kg</option><option>ml</option><option>lembar</option></select></div></div><div class="g2"><div class="fg"><label class="fl">Stok Awal</label><input class="fi" placeholder="100" /></div><div class="fg"><label class="fl">Min Stok (trigger restock)</label><input class="fi" placeholder="50" /></div></div><div style="display:flex;gap:6px;justify-content:flex-end;margin-top:12px"><button class="btn bse" onclick="closeM('modal-add-bom')">Batal</button><button class="btn bpr" onclick="alert('Bahan berhasil ditambahkan!');closeM('modal-add-bom')">Simpan</button></div></div></div>
+
+<div id="modal-add-mapping" class="modal"><div class="modal-box"><div class="modal-head"><div class="modal-title">Tambah Mapping BOM</div><button class="modal-close" onclick="closeM('modal-add-mapping')">✕</button></div><div class="fg"><label class="fl">Produk</label><select class="fs"><option>Baju Batik Parang</option><option>Kerudung Voal</option></select></div><div class="fg"><label class="fl">Bahan Baku</label><select class="fs"><option>Kain Batik Parang</option><option>Benang Jahit</option><option>Plastik Kemasan</option><option>Label Kemasan A</option><option>Botol 100ml</option></select></div><div class="g2"><div class="fg"><label class="fl">Qty</label><input class="fi" value="1" /></div><div class="fg"><label class="fl">Unit</label><select class="fs"><option>pcs</option><option>meter</option><option>gram</option><option>lembar</option></select></div></div><div style="display:flex;gap:6px;justify-content:flex-end"><button class="btn bse" onclick="closeM('modal-add-mapping')">Batal</button><button class="btn bpr" onclick="alert('Mapping berhasil!');closeM('modal-add-mapping')">Simpan</button></div></div></div>
+
+<div id="modal-restock-config" class="modal"><div class="modal-box"><div class="modal-head"><div class="modal-title">⚙️ Konfigurasi Auto Restock Shopee</div><button class="modal-close" onclick="closeM('modal-restock-config')">✕</button></div><div class="al alb" style="margin-bottom:10px;padding:6px 8px;font-size:10.5px">Isi konfigurasi ini agar sistem bisa auto-order ke Shopee saat stok bahan mencapai minimum threshold.</div><div class="fg"><label class="fl">Bahan Baku</label><select class="fs"><option>Plastik Kemasan</option><option>Label Kemasan A</option><option>Botol 100ml</option><option>Benang Jahit</option></select></div><div class="fg"><label class="fl">Link Produk Shopee Supplier</label><input class="fi" type="url" placeholder="https://shopee.co.id/produk-supplier-xxxx" /></div><div class="g2"><div class="fg"><label class="fl">Qty per Order</label><input class="fi" placeholder="100" /></div><div class="fg"><label class="fl">Metode Pembayaran</label><select class="fs"><option>QRIS</option><option>COD (bayar di tempat)</option><option>Transfer Bank</option><option>ShopeePay</option></select></div></div><div class="fg"><label class="fl">Alamat Pengiriman Tujuan</label><select class="fs"><option>Jl. Pahlawan No. 12, Serpong, Tangerang Selatan</option><option>Gudang Utama — Jl. Raya Bintaro No. 5</option><option>+ Tambah Alamat Baru</option></select></div><div class="g2"><div class="fg"><label class="fl">Nama Penerima</label><input class="fi" placeholder="Raka Adiputra" /></div><div class="fg"><label class="fl">No. Telepon</label><input class="fi" placeholder="08123456789" /></div></div><div class="fg"><label class="fl">Catatan untuk Seller (opsional)</label><input class="fi" placeholder="Packing bubble wrap, pilih yang tutup hitam, dll" /></div><div style="display:flex;gap:6px;justify-content:flex-end;margin-top:12px"><button class="btn bse" onclick="closeM('modal-restock-config')">Batal</button><button class="btn bpr" onclick="alert('Konfigurasi restock berhasil disimpan!\nSistem akan auto-order saat stok mencapai minimum.');closeM('modal-restock-config')">Simpan Konfigurasi</button></div></div></div>
+
+<div id="modal-add-label" class="modal"><div class="modal-box"><div class="modal-head"><div class="modal-title">Tambah Konfigurasi Label Kemasan</div><button class="modal-close" onclick="closeM('modal-add-label')">✕</button></div><div class="al alb" style="margin-bottom:10px;padding:6px 8px;font-size:10.5px">Label kemasan = label merek/brand ditempel di produk (botol, kemasan, hang tag) — bukan resi pengiriman.</div><div class="fg"><label class="fl">Nama Label</label><input class="fi" placeholder="Label Kemasan B" /></div><div class="fg"><label class="fl">Produk Terkait</label><select class="fs"><option>BBP-001 — Baju Batik Parang</option><option>KVP-042 — Kerudung Voal</option><option>Multi-produk</option></select></div><div class="g2"><div class="fg"><label class="fl">Ukuran Label</label><input class="fi" placeholder="5×8 cm" /></div><div class="fg"><label class="fl">Qty Min Trigger</label><input class="fi" placeholder="50" /></div></div><div class="fg"><label class="fl">Revo Print API Endpoint</label><input class="fi" placeholder="https://api.revoprint.id/v2" /></div><div class="fg"><label class="fl">Revo Print API Key</label><input class="fi" type="password" placeholder="revo_live_xxxx" /></div><div class="fg"><label class="fl">Template ID Revo Print</label><input class="fi" placeholder="TPL-XXX" /></div><div class="fg"><label class="fl">Qty per Order</label><input class="fi" placeholder="200" /></div><div style="display:flex;gap:6px;justify-content:flex-end;margin-top:12px"><button class="btn bse" onclick="closeM('modal-add-label')">Batal</button><button class="btn bpr" onclick="alert('Label berhasil dikonfigurasi!');closeM('modal-add-label')">Simpan</button></div></div></div>
+
+<div id="modal-edit-label" class="modal"><div class="modal-box"><div class="modal-head"><div class="modal-title">Edit Konfigurasi — Label Kemasan A</div><button class="modal-close" onclick="closeM('modal-edit-label')">✕</button></div><div class="fg"><label class="fl">Revo Print API Endpoint</label><input class="fi" value="https://api.revoprint.id/v2" /></div><div class="fg"><label class="fl">API Key</label><input class="fi" type="password" value="revo_live_xxxxx" /></div><div class="fg"><label class="fl">Template ID</label><input class="fi" value="TPL-042" /></div><div class="g2"><div class="fg"><label class="fl">Lebar (mm)</label><input class="fi" value="50" /></div><div class="fg"><label class="fl">Tinggi (mm)</label><input class="fi" value="80" /></div></div><div class="fg"><label class="fl">Qty per Order ke Revo Print</label><input class="fi" value="200" /></div><div class="fg"><label class="fl">Harga per lembar (Rp)</label><input class="fi" value="350" /></div><div style="display:flex;gap:6px;justify-content:flex-end;margin-top:12px"><button class="btn bse" onclick="closeM('modal-edit-label')">Batal</button><button class="btn bpr" onclick="alert('Konfigurasi diperbarui!');closeM('modal-edit-label')">Simpan</button></div></div></div>
+
+<script>
+const PT={dashboard:'Dashboard',toko:'Toko Saya',produk:'Master Produk',orders:'Orders — Kanban Board',bom:'BOM / Bahan Baku',printlabel:'Print Label Kemasan',ff:'Flow Fulfillment (6.1–6.5)',fr:'Flow Restock Bahan (6.6–6.7)',fas:'Flow After-Sales (6.8–6.10)',fmk:'Flow Get Customer (6.11–6.19)',event:'Event & Promo',affiliator:'Manajemen Affiliator',konten:'Konten & Video',iklan:'Manajemen Iklan',evaluasi:'Evaluasi & Optimasi Produk',laporan:'Laporan & Rekap',wallet:'Wallet & Billing',settings:'Pengaturan'};
+let charts={};
+function go(p){
+  document.querySelectorAll('.pg').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.ni').forEach(x=>x.classList.remove('active'));
+  const el=document.getElementById('pg-'+p);if(el)el.classList.add('active');
+  document.querySelectorAll('.ni').forEach(n=>{if(n.getAttribute('onclick')&&n.getAttribute('onclick').includes("'"+p+"'"))n.classList.add('active')});
+  document.getElementById('ptitle').textContent=PT[p]||p;
+  initP(p);
+}
+function swTab(id,grp,el){
+  document.querySelectorAll('#'+grp+' ~ .tabp').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('#'+grp+' .tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById(id)&&document.getElementById(id).classList.add('active');
+  el&&el.classList.add('active');
+}
+function openM(id){document.getElementById(id)&&document.getElementById(id).classList.add('open')}
+function closeM(id){document.getElementById(id)&&document.getElementById(id).classList.remove('open')}
+document.addEventListener('click',e=>{if(e.target.classList.contains('modal'))e.target.classList.remove('open')});
+function showPD(sku){
+  document.getElementById('p-list').style.display='none';
+  document.getElementById('p-ms').style.display='none';
+  document.getElementById('p-alert').style.display='none';
+  const el=document.getElementById('pd-'+sku);if(el)el.style.display='block';
+}
+function hidePD(){
+  document.getElementById('p-list').style.display='';
+  document.getElementById('p-ms').style.display='';
+  document.getElementById('p-alert').style.display='';
+  document.querySelectorAll('[id^="pd-"]').forEach(el=>el.style.display='none');
+}
+// KANBAN DATA
+const KC=[
+  {id:'masuk',label:'📥 Order Masuk',col:'#F59E0B',cards:[{id:'SHP-88350',prod:'Batik Parang M',buyer:'Rina K.',p:'Rp 89k',mp:'s'},{id:'TTK-44850',prod:'Kerudung Navy',buyer:'Desi A.',p:'Rp 92k',mp:'t'},{id:'SHP-88351',prod:'Celana Kulot L',buyer:'Nita P.',p:'Rp 105k',mp:'s'}]},
+  {id:'approved',label:'✅ Auto Approved',col:'#00D4AA',cards:[{id:'TTK-44831',prod:'Kemeja Flanel M',buyer:'Budi S.',p:'Rp 195k',mp:'t'},{id:'SHP-88330',prod:'Batik Bundle 2pcs',buyer:'Dewi R.',p:'Rp 160k',mp:'s'}]},
+  {id:'wa',label:'💬 WA Terkirim',col:'#3B82F6',cards:[{id:'SHP-88320',prod:'Kerudung Pink',buyer:'Sari M.',p:'Rp 92k',mp:'s'}]},
+  {id:'produksi',label:'🔨 Produksi',col:'#7C3AED',cards:[{id:'SHP-88291',prod:'Batik Parang S',buyer:'Dian P.',p:'Rp 89k',mp:'s'},{id:'TTK-44821',prod:'Kerudung Navy',buyer:'Rizky M.',p:'Rp 145k',mp:'t'},{id:'SHP-88280',prod:'Batik 3pcs Grosir',buyer:'Sari W.',p:'Rp 230k',mp:'s'}]},
+  {id:'packing',label:'📦 Packing+Scan',col:'#EC4899',cards:[{id:'TTK-44810',prod:'Kerudung 3pcs',buyer:'Ahmad F.',p:'Rp 390k',mp:'t'},{id:'SHP-88270',prod:'Batik Parang XL',buyer:'Hadi W.',p:'Rp 89k',mp:'s'}]},
+  {id:'siapkirim',label:'🚚 Siap Kirim',col:'#10B981',cards:[{id:'SHP-88001',prod:'Batik Bundle',buyer:'Maya D.',p:'Rp 160k',mp:'s'},{id:'TTK-44756',prod:'Kerudung Pink',buyer:'Ahmad F.',p:'Rp 92k',mp:'t'},{id:'SHP-88002',prod:'Kerudung Voal',buyer:'Lisa R.',p:'Rp 92k',mp:'s'}]},
+  {id:'dikirim',label:'📬 Dikirim',col:'#64748B',cards:[{id:'SHP-87990',prod:'Batik Parang M',buyer:'Eko S.',p:'Rp 89k',mp:'s'},{id:'TTK-44730',prod:'Kemeja Flanel L',buyer:'Fajar A.',p:'Rp 195k',mp:'t'}]},
+  {id:'selesai',label:'✓ Selesai',col:'#10B981',cards:[{id:'SHP-87950',prod:'Kerudung Voal',buyer:'Putri A.',p:'Rp 92k',mp:'s'},{id:'TTK-44700',prod:'Batik Parang S',buyer:'Siti R.',p:'Rp 89k',mp:'t'}]},
+  {id:'retur',label:'🔄 Retur',col:'#EF4444',cards:[{id:'SHP-88105',prod:'Celana Kulot XL',buyer:'Siti R.',p:'Rp 120k',mp:'s'}]}
+];
+function buildKanban(){
+  const b=document.getElementById('kanban-board');if(!b)return;
+  b.innerHTML=KC.map(col=>`<div class="kc"><div class="kch"><span><span class="kd" style="background:${col.col}"></span>${col.label}</span><span style="background:${col.col}33;color:${col.col};font-size:8.5px;font-weight:700;padding:1px 4px;border-radius:5px">${col.cards.length}</span></div><div class="kct">${col.cards.map(c=>`<div class="kcard" onclick="alert('Order #${c.id}\nPembeli: ${c.buyer}\nProduk: ${c.prod}\nHarga: ${c.p}')"><div class="kcard-id">#${c.id}</div><div class="kcard-prod">${c.prod}</div><div class="kcard-buyer">${c.buyer}</div><div style="margin-top:2px"><span class="mpp ${c.mp==='s'?'mps':'mpt'}"><div class="mpd"></div>${c.mp==='s'?'Shopee':'TikTok'}</span></div><div class="kcard-price">${c.p}</div></div>`).join('')}</div></div>`).join('');
+}
+// FLOW DATA
+const FD={
+  ff:[{i:'📥',t:'Order Masuk',d:'Webhook real-time Shopee/TikTok',c:'auto'},{i:'🔍',t:'Validasi Auto',d:'Cek stok BOM, alamat, fraud',c:'auto'},{i:'✅',t:'Auto Approve',d:'Order di-approve otomatis',c:'auto'},{i:'💬',t:'WA ke Pembeli',d:'AI kirim konfirmasi order',c:'auto'},{i:'🔨',t:'Produksi',d:'Human activity. Notif WA ke tim',c:'human'},{i:'🖨️',t:'Print Resi',d:'Trigger manual di dashboard/app',c:'human'},{i:'📋',t:'Packing + Scan',d:'Scan resi via mobile checklist',c:'human'},{i:'🚚',t:'AWB Auto',d:'Generate AWB & update tracking',c:'auto'}],
+  rs:[{i:'📊',t:'Monitor Stok',d:'Cek stok bahan tiap 1 jam',c:'auto'},{i:'⚠️',t:'Alert Kritis',d:'Stok < minimum threshold',c:'auto'},{i:'📱',t:'Notif WA',d:'Alert ke pemilik toko',c:'auto'},{i:'🛍️',t:'Auto Order Shopee',d:'Beli bahan ke supplier Shopee',c:'auto'},{i:'🏷️',t:'Auto Print Label',d:'Auto order label kemasan ke Revo Print',c:'auto'},{i:'📦',t:'Stok Updated',d:'Update stok saat barang & label tiba',c:'semi'}],
+  as:[{i:'💰',t:'Monitor Balance',d:'Cek saldo settlement toko tiap hari',c:'auto'},{i:'📱',t:'Notif Withdrawal',d:'WA notif saat saldo ≥ threshold',c:'auto'},{i:'🏦',t:'Withdrawal Manual',d:'Pemilik tarik saldo di Seller Center',c:'human'},{i:'⭐',t:'Auto Reply Review',d:'AI balas semua review secara otomatis',c:'auto'},{i:'🔄',t:'Handle Retur',d:'Auto-terima atau flag ke manual',c:'semi'},{i:'📊',t:'Rekap Laporan',d:'Laporan harian WA 23:55 otomatis',c:'auto'}],
+  mk:[{i:'📅',t:'Apply Event',d:'Auto daftar promo Shopee & TikTok',c:'auto'},{i:'🤝',t:'Cari Affiliator',d:'AI cari creator baru 2x sehari',c:'auto'},{i:'💬',t:'Chat Affiliator',d:'AI handle undangan & negosiasi',c:'auto'},{i:'📹',t:'AI Script Konten',d:'AI generate script dari trend',c:'auto'},{i:'🎬',t:'Produksi Video',d:'Human produksi video dari script AI',c:'human'},{i:'📢',t:'Aktifkan Iklan',d:'Auto Rp 100rb/hari jam 07:00',c:'auto'},{i:'📊',t:'Evaluasi Katalog',d:'Skor A/B/C/D tiap Minggu malam',c:'auto'},{i:'❌',t:'Suggest Eliminasi',d:'Flag produk D ke human konfirmasi',c:'semi'},{i:'✏️',t:'Optimize Produk',d:'AI saran judul, deskripsi, keyword',c:'semi'},{i:'📈',t:'Analyse Trend',d:'AI analisis tren pasar tiap 08:00',c:'auto'},{i:'📦',t:'AI Posting Produk',d:'Human pilih, AI siapkan listing',c:'semi'}]
+};
+function buildFlow(cid,steps){
+  const el=document.getElementById(cid);if(!el)return;
+  el.innerHTML=steps.map((s,i)=>`<div class="flow-step"><div class="flow-box ${s.c}"><div class="flow-type ${s.c}">${s.c==='auto'?'🤖 Auto':s.c==='human'?'👤 Manual':'⚡ Semi'}</div><div class="flow-icon">${s.i}</div><div class="flow-title">${s.t}</div><div class="flow-desc">${s.d}</div></div></div>${i<steps.length-1?'<div class="flow-arr">→</div>':''}`).join('');
+}
+// BOM RESTOCK CONFIG
+const BRC=[
+  {n:'Plastik Kemasan',s:'84 pcs',m:'50 pcs',l:'https://shopee.co.id/plastik-kemasan-bening-pp',q:'500 pcs',b:'QRIS',a:'Jl. Pahlawan No. 12, Serpong',p:'Raka Adiputra',t:'08123456789',c:'Packing bubble wrap',st:'warn'},
+  {n:'Label Kemasan A 🏷️',s:'5 lembar 🔴',m:'50 lembar',l:'https://shopee.co.id/label-kemasan-stiker',q:'200 lembar',b:'Transfer Bank',a:'Gudang — Jl. Raya Bintaro No. 5',p:'Gudang AutoToko',t:'08129876543',c:'',st:'err'},
+  {n:'Botol 100ml',s:'12 pcs 🔴',m:'100 pcs',l:'https://shopee.co.id/botol-pet-100ml',q:'200 pcs',b:'COD',a:'Jl. Pahlawan No. 12, Serpong',p:'Raka Adiputra',t:'08123456789',c:'Pilih tutup hitam',st:'err'},
+  {n:'Benang Jahit',s:'2.4 kg',m:'0.5 kg',l:'https://shopee.co.id/benang-jahit-putih-100m',q:'5 kg',b:'QRIS',a:'Jl. Pahlawan No. 12, Serpong',p:'Raka Adiputra',t:'08123456789',c:'',st:'ok'}
+];
+function buildBRC(){
+  const el=document.getElementById('brc-list');if(!el)return;
+  el.innerHTML=BRC.map(b=>`<div class="bom-card" style="border-color:${b.st==='err'?'#FECACA':b.st==='warn'?'#FED7AA':'var(--br)'}"><div class="bom-head"><div><div style="font-size:11px;font-weight:700">${b.n}</div><div style="font-size:9.5px;color:var(--mu)">Stok: ${b.s} · Min: ${b.m}</div></div><div style="display:flex;gap:5px;align-items:center"><span class="bx ${b.st==='err'?'br2':b.st==='warn'?'bo':'bg'}">${b.st==='err'?'🔴 KRITIS':b.st==='warn'?'⚠ Hampir Habis':'✓ Normal'}</span><button class="btn bpr" style="font-size:9px;padding:2px 5px" onclick="openM('modal-restock-config')">Edit</button>${b.st!=='ok'?`<button class="btn" style="background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;font-size:9px;padding:2px 5px" onclick="alert('🛍️ Auto-order ${b.n} ke Shopee\nLink: ${b.l}\nQty: ${b.q}\nMetode: ${b.b}\nAlamat: ${b.a}')">Trigger Order</button>`:''}</div></div><div class="bom-body"><div class="g2" style="margin-bottom:7px"><div><div style="font-size:9px;font-weight:600;color:var(--mu);margin-bottom:2px">LINK SHOPEE SUPPLIER</div><div style="font-size:10px;color:var(--info);word-break:break-all">${b.l}</div></div><div class="g2" style="margin-bottom:0"><div><div style="font-size:9px;font-weight:600;color:var(--mu);margin-bottom:2px">QTY/ORDER</div><div style="font-size:11px;font-weight:600">${b.q}</div></div><div><div style="font-size:9px;font-weight:600;color:var(--mu);margin-bottom:2px">METODE BAYAR</div><div style="font-size:11px;font-weight:600">${b.b}</div></div></div></div><div class="g2" style="margin-bottom:0"><div><div style="font-size:9px;font-weight:600;color:var(--mu);margin-bottom:2px">ALAMAT TUJUAN</div><div style="font-size:10px">${b.a}</div></div><div><div style="font-size:9px;font-weight:600;color:var(--mu);margin-bottom:2px">PENERIMA / TELEPON</div><div style="font-size:10px">${b.p} · ${b.t}</div>${b.c?`<div style="font-size:9px;color:var(--mu);margin-top:1px">📝 ${b.c}</div>`:''}</div></div></div></div>`).join('');
+}
+// STOK TABLE
+const ST=[{n:'Kain Batik Parang',s:'450 m',m:'100 m',pct:82,a:true},{n:'Benang Jahit Putih',s:'2.4 kg',m:'0.5 kg',pct:35,a:true},{n:'Plastik Kemasan',s:'84 pcs',m:'50 pcs',pct:62,a:true},{n:'Label Kemasan A',s:'5 lembar',m:'50 lembar',pct:5,a:true},{n:'Kain Voal',s:'1.2 km',m:'200 m',pct:90,a:true},{n:'Botol 100ml',s:'12 pcs',m:'100 pcs',pct:8,a:true},{n:'Kancing Baju',s:'850 pcs',m:'200 pcs',pct:76,a:false}];
+function buildStok(){
+  const el=document.getElementById('stok-table');if(!el)return;
+  const c=p=>p<15?'#EF4444':p<40?'#F59E0B':'#10B981';
+  el.innerHTML=ST.map(s=>`<tr><td><strong>${s.n}</strong></td><td style="font-weight:600;color:${c(s.pct)}">${s.s}</td><td>${s.m}</td><td><div style="width:75px"><div class="pb"><div class="pf" style="width:${s.pct}%;background:${c(s.pct)}"></div></div><div style="font-size:8.5px;color:${c(s.pct)};margin-top:1px">${s.pct}%</div></div></td><td><label class="tog"><input type="checkbox" ${s.a?'checked':''}><span class="tsl"></span></label></td></tr>`).join('');
+}
+// BALANCE LIST
+const BL=[{n:'Butik Nusantara (Shopee)',s:12450000,p:4200000,th:5000000},{n:'Fashion Wanita (Shopee)',s:5800000,p:1200000,th:5000000},{n:'Nusantara Fashion (TikTok)',s:3100000,p:800000,th:3000000},{n:'Batik Parang (TikTok)',s:890000,p:200000,th:2000000}];
+function buildBal(){
+  const el=document.getElementById('bal-list');if(!el)return;
+  el.innerHTML=BL.map(b=>{const over=b.s>=b.th;return`<div style="background:var(--s2);border-radius:6px;padding:7px 9px;margin-bottom:5px;font-size:10.5px;border:1px solid ${over?'#BBF7D0':'var(--br)'}"><div style="font-weight:600;margin-bottom:3px">${b.n}</div><div style="display:flex;justify-content:space-between"><span style="color:var(--mu)">Saldo Settlement</span><span style="font-weight:700;color:var(--ok)">Rp ${(b.s/1e6).toFixed(1)}jt</span></div><div style="display:flex;justify-content:space-between"><span style="color:var(--mu)">Pending Release</span><span>Rp ${(b.p/1e6).toFixed(1)}jt</span></div>${over?`<div style="display:flex;justify-content:space-between;margin-top:3px"><span style="color:var(--ok);font-size:8.5px">✓ Notif WA terkirim! ≥ Rp ${(b.th/1e6).toFixed(0)}jt</span><a href="#" style="font-size:8.5px;color:var(--info)" onclick="alert('Buka Seller Center untuk withdrawal manual')">Withdrawal →</a></div>`:`<div style="font-size:8.5px;color:var(--mu);margin-top:2px">Threshold Rp ${(b.th/1e6).toFixed(0)}jt belum tercapai</div>`}</div>`}).join('');
+}
+// MINI STOK (flow-restock)
+function buildMiniStok(){
+  const el=document.getElementById('mini-stok');if(!el)return;
+  const data=[{n:'Label Kemasan A',s:5,m:50,u:'lembar',c:'err'},{n:'Botol 100ml',s:12,m:100,u:'pcs',c:'err'},{n:'Benang Jahit',s:240,m:500,u:'gram',c:'warn'},{n:'Kain Batik',s:450,m:100,u:'m',c:'ok'}];
+  el.innerHTML=data.map(d=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--br);font-size:10.5px"><div>${d.n}</div><div style="display:flex;align-items:center;gap:6px"><span style="font-weight:600;color:${d.c==='err'?'var(--err)':d.c==='warn'?'var(--warn)':'var(--ok)'}">${d.s} ${d.u}</span><span style="font-size:8.5px;color:var(--mu)">min:${d.m}</span></div></div>`).join('');
+}
+// CALENDAR
+function buildCal(){
+  const el=document.getElementById('cal-grid');if(!el)return;
+  const ev={3:[{c:'ce-vid',t:'Script Batik'}],5:[{c:'ce-iklan',t:'Iklan ON'}],7:[{c:'ce-post',t:'Post Voal'}],10:[{c:'ce-vid',t:'Video Batik'}],11:[{c:'ce-iklan',t:'11.11 Event'}],14:[{c:'ce-vid',t:'TikTok Live'}],17:[{c:'ce-post',t:'Post Flanel'},{c:'ce-iklan',t:'Iklan ON'}],21:[{c:'ce-post',t:'Post Batik XL'}],24:[{c:'ce-vid',t:'Collab'}],28:[{c:'ce-post',t:'Bundle Post'}]};
+  el.innerHTML=Array.from({length:30},(_,i)=>{const d=ev[i+1]||[];return`<div class="cal-day"><div class="cal-day-num">${i+1}</div>${d.map(e=>`<div class="cal-event ${e.c}">${e.t}</div>`).join('')}</div>`}).join('');
+}
+// PAGE INIT
+function initP(p){
+  if(p==='dashboard'){setTimeout(()=>{if(charts.r)charts.r.destroy();const c=document.getElementById('rChart')&&document.getElementById('rChart').getContext('2d');if(c)charts.r=new Chart(c,{type:'line',data:{labels:['11','12','13','14','15','16','17'],datasets:[{label:'Shopee',data:[4.2,3.8,5.1,4.9,6.2,5.8,5.1],borderColor:'#EE4D2D',backgroundColor:'rgba(238,77,45,.08)',tension:.4,fill:true,pointRadius:2.5},{label:'TikTok',data:[2.1,2.4,3.2,2.8,3.8,4.1,3.3],borderColor:'#000',backgroundColor:'rgba(0,0,0,.05)',tension:.4,fill:true,pointRadius:2.5}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:9},usePointStyle:true,boxWidth:7}}},scales:{y:{ticks:{callback:v=>v+'jt',font:{size:8.5}}},x:{ticks:{font:{size:8.5}}}}}});},100);}
+  if(p==='orders')buildKanban();
+  if(p==='bom'){buildBRC();buildStok();}
+  if(p==='ff')buildFlow('flow-ff',FD.ff);
+  if(p==='fr'){buildFlow('flow-rs',FD.rs);buildMiniStok();}
+  if(p==='fas'){buildFlow('flow-as',FD.as);buildBal();}
+  if(p==='fmk')buildFlow('flow-mk',FD.mk);
+  if(p==='konten')buildCal();
+  if(p==='laporan'){setTimeout(()=>{if(charts.b)charts.b.destroy();const c=document.getElementById('barChart')&&document.getElementById('barChart').getContext('2d');if(c)charts.b=new Chart(c,{type:'bar',data:{labels:['Butik Nusantara','Fashion Wanita','Nusantara TikTok','Batik Parang'],datasets:[{data:[28.1,11.3,6.2,2.1],backgroundColor:['rgba(238,77,45,.85)','rgba(238,77,45,.5)','rgba(0,0,0,.8)','rgba(0,0,0,.4)'],borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v+'jt',font:{size:8.5}}},x:{ticks:{font:{size:8.5}}}}}});},100);}
+}
+// INIT
+initP('dashboard');
+</script>
+</body>
+</html>

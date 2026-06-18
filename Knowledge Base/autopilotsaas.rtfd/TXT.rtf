@@ -1,0 +1,91 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2867
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;\f1\froman\fcharset0 Times-Roman;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww25400\viewh14040\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 Knowledge tambahan \
+0. Sistem ini menggunakan webbased & mobile Java native (mobile ini hanya untuk fitur yg sifatnya monitor, dan beberapa trigger yg sifatnya bisa dilakukan secara instant),backend menggunakan docker,dll(AI bebas memilih yg terbaik) & menggunakan n8n khusus untuk logic yang mengandung integrasi dengan pihak external seperti marketplaces,dll)\
+0. Login dari toko ke web/apps ini menggunakan WhatsApp (receive only) & email otp\
+0. Buatkan cms/control panel,untuk admin bisa memasukkan semua credential yg diperlukan\
+0. Definisi,plaftorm ini : platform yang membantu para pemilik toko online untuk menjalankan operasional bisnisnya secara autopilot,postingan : adalah produk list yang di marketplace,kenapa dianggap postingan? Karena akan ada multiple produk dgn SKU yg sama, master produk : adalah list produk yang ada di saas platform ini yang tujuannya untuk mengontrol postingan produk dibawahnya, user : adalah pemilik toko alias member dari saas ini\
+1. Saya ingin ada master produk yang terhubung ke list produk di setiap marketplace,sehingga di master produk terlihat datanya contoh : Produk A ini terposting di tiktok 7 postingan dengan produk yg sama,di shopee ada 3 (karena posisinya saat ini banyak sekali produk yang sengaja dibuat double karena alasan marketing) penghubung antara master dengan postingan produk di marketplace adalah nomor SKUnya,jika sama maka dianggap produknya sama\
+2. Ada fitur untuk duplicate postingan produk\
+3. Tiap user bisa add mutiple toko dalam 1 marketplace\
+4. Sistem pembayaran user : freemium,Ada paket yang menggunakan fee pembayaran awal,subscription perbulan dan fee disetiap transaksi\
+5. User bisa add balance/topup di akun saas ini yang tujuannya untuk di deduct/pemotongan fee pertransaksi atau biaya subscriptionnya atau biaya setup awal\
+6. Berikut list activity yang dilakukan oleh pemilik toko saat manual/tanpa platform ini, tugas kamu adalah membuatnya full auto pilot, khusus untuk activity yg sifatnya human activity tetap dilakukan secara manual : \
+6.1. Approve proses order \
+6.2. Chat/balas chat ke pembeli \
+6.3 Print resi (human activity)\
+6.4. Produksi barang (human activity)\
+6.5. Packing (human activity)\
+6.6. Restock bahan di marketplace (shopee) untuk auto restock perlu mapping bahan yang diperlukan untuk setiap produk\
+6.7. Order Print label ke pihak ketiga (revo print,dll)\
+6.8. Withdrawal balance\
+6.9. Rekap laporan\
+6.10. Reply review customer\
+6.11. Apply event/program di marketplace seller saya\
+6.12. Cari affiliator - tandai affiliator - undang affiliator - chat affiliator yg diundang\
+6.13. Create video rutin \
+6.14. Aktifkan iklan 100rb/hari\
+6.15. Evaluasi katalog product\
+6.16. Eliminate product\
+6.17. Optimize product\
+6.18. Analyze trend\
+6.19. Posting product\
+\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+\cf0 7. Fitur chat ke affiliator & ke pembeli sepenuh dilakukan oleh AI\
+8. Semua fitur based on Web based\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+\cf0 \
+\
+\pard\pardeftab720\sa240\partightenfactor0
+
+\f1 \cf0 \expnd0\expndtw0\kerning0
+\outl0\strokewidth0 \strokec2 revisi: \
+\pard\pardeftab720\sa240\partightenfactor0
+\cf0 \outl0\strokewidth0 1. ketika bahan baku habis maka otomatis melakukan order ke shopee via link yang sudah disiapkan dimaster (buatkan halaman mapping dan input linknya disetiap bahan baku, beserta metode belinya ke shopee, misal cod/qris,tujuan alamat pengirimannya dll
+\f0 \kerning1\expnd0\expndtw0 \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+\cf0 2. Buat halaman order layoutnya seperti kanban,agar user tahu flownya dari awal hingga akhir bagaimana\
+3. Halaman mapping bahan baku x produk belum ada\
+4. Dihalaman master produk,pada tabel produk tambahkan kolom nama toko apa saja yang terhubung dgn produk tersebut contoh : Shopee - Tokobagus\
+5. Dihalaman master produk,buat menjadi lebih interaktif karena harusnya user dihalaman ini bisa menghapus/mengedit/menambahkan postingan pada setiap produk\
+\pard\pardeftab720\sa240\partightenfactor0
+
+\f1 \cf0 \expnd0\expndtw0\kerning0
+6. Pastikan setiap activity autopilot berikut sudah ada halaman managementnya :\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardeftab720\pardirnatural\partightenfactor0
+
+\f0 \cf0 \kerning1\expnd0\expndtw0 6.1. Approve proses order \
+6.2. Chat/balas chat ke pembeli \
+6.3 Print resi (human activity)\
+6.4. Produksi barang (human activity)\
+6.5. Packing (human activity)\
+6.6. Restock bahan di marketplace (shopee) untuk auto restock perlu mapping bahan yang diperlukan untuk setiap produk\
+6.7. Order Print label ke pihak ketiga (revo print,dll)\
+6.8. Withdrawal balance (jika tidak ada APInya ganti jadi view balance yg muncul dihalaman toko saya)\
+6.9. Rekap laporan\
+6.10. Reply review customer\
+6.11. Apply event/program di marketplace seller saya\
+6.12. Cari affiliator - tandai affiliator - undang affiliator - chat affiliator yg diundang\
+6.13. Create video rutin \
+6.14. Aktifkan iklan 100rb/hari\
+6.15. Evaluasi katalog product\
+6.16. Eliminate product\
+6.17. Optimize product\
+6.18. Analyze trend\
+6.19. Posting product\
+7. di mockup yang kamu buat sekarang,user seperti tidak tahu alurnya secara menyeluruh seperti yg saya listkan dipoin 6,kalau bisa gambarkan flownya ke user,\
+7.1 contoh untuk fulfillment : mulai dari order masuk akan langsung dihandle auto approve,trs next auto kirim pesan ke pembeli untuk menginfokan trx sedang di proses,trs next ke fitur print resi disini kasih tahu perlu trigger dari manusia untuk melanjutkan prosesnya,trs lanjut packing barang dengan memberikan checklist via scan resi untuk menandai mana yang sudah di packing,\
+7.2 contoh untuk flow restock : mulai dari informasi kurang stok/stok mendekati habis,sehingga sistem men trigger auto beli ke shopee,trs next ke print label (fyi print label ini maksudnya bukan resi tapi label merek kemasan yang akan ditempel di botol produk sehingga ini bagian dari bahan baku) dibagian ini sistem akan otomatis mentrigger auto beli ke revo print yg detailnya sudah dimapping dihalaman print label kemasan,\
+7.3 contoh untuk flow after sales : mulai dari controlling balance, auto reply review customer, dll\
+
+\f1 \expnd0\expndtw0\kerning0
+\outl0\strokewidth0 \strokec2 7.4 contoh untuk flow get customer : mulai dari auto apply event/program,auto cari affiliator setiap beberapa jam, auto bikin konten,auto bikin campaign iklan,auto evaluasi produk,auto suggest eliminate produk yg kurang laku,auto optimise product, auto analyse trend untuk bahan pembuatan konten dan pembuatan produk baru,auto posting produk yang detailnya sudah disiapkan oleh AI tinggal trigger dari human mana yang harus depositing duluan\
+\pard\pardeftab720\sa240\partightenfactor0
+\cf0 \
+}
