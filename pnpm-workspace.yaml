@@ -1,0 +1,9 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# esbuild needs its postinstall to fetch the platform binary (required by Vite).
+# @nestjs/core's postinstall is only an info message — safe to skip.
+allowBuilds:
+  esbuild: true
+  '@nestjs/core': false

@@ -16,6 +16,8 @@ build/
 .next/
 out/
 coverage/
+.turbo/
+*.tsbuildinfo
 
 # Logs
 *.log

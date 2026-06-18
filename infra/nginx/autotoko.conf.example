@@ -1,0 +1,47 @@
+# Reference nginx config for AutoToko on cosger.online (shared host).
+# Frontends are STATIC (Vite build output) served directly by nginx — no Node process.
+# Only the backend (NestJS/Fastify, 127.0.0.1:8080) runs as a service.
+
+# User dashboard (SPA) + API proxy
+server {
+    listen 443 ssl;
+    server_name app.autotoko.id;
+
+    # ssl_certificate     /etc/letsencrypt/live/app.autotoko.id/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/app.autotoko.id/privkey.pem;
+
+    root /opt/autotoko/web;          # scp'd Vite build (apps/web/dist)
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;   # SPA fallback
+    }
+}
+
+# Admin CMS (SPA)
+server {
+    listen 443 ssl;
+    server_name admin.autotoko.id;
+
+    root /opt/autotoko/admin;        # scp'd Vite build (apps/admin/dist)
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

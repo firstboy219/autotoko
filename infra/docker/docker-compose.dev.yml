@@ -1,0 +1,24 @@
+# Local development only. On the server, AutoToko REUSES the shared postgres
+# and n8n containers (do NOT spin up new ones there) — see Knowledge Base/SERVER_KB.md.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: autotoko-postgres-dev
+    environment:
+      POSTGRES_USER: autotoko_user
+      POSTGRES_PASSWORD: autotoko_dev
+      POSTGRES_DB: autotoko
+    ports:
+      - "5432:5432"
+    volumes:
+      - autotoko_pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: autotoko-redis-dev
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+
+volumes:
+  autotoko_pgdata:
