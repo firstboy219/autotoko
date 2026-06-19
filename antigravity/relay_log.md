@@ -43,6 +43,23 @@
 ### ✅ Verifikasi akhir live (2026-06-19)
 - `apitoko/api/health` db:up · web 200 · `/admin/` 200 · dev login `user/user`→401 · admin login→201 · pm2 autotoko-backend + xtracker-backend keduanya online.
 
+---
+
+## Sesi 3 — 2026-06-19 (TikTok authorize URL, oleh Claude Code / Opus)
+
+Sumber perubahan: `Knowledge Base/CLAUDE2.md` §4 + "TikTok Shop OAuth Flow". (Catatan: CLAUDE2.md mendeskripsikan stack lama Prisma/Next — **diabaikan**; hanya bagian authorize/OAuth TikTok yang relevan & di-implement ke kode aktual Drizzle/Fastify.)
+
+### ✅ SELESAI & terverifikasi live (HEAD `b9debe1`, pushed develop)
+- **`tiktok.adapter.ts`**:
+  - `getAuthUrl` → `https://services.tiktokshop.com/open/authorize?service_id={tiktok_service_id}&state={signed-JWT}`. **service_id** = admin setting baru `tiktok_service_id` (authorize URL di-key oleh service_id, BUKAN app_key). Pakai `new URL()` — kalau admin paste authUrl yang sudah ada service_id, tidak ditimpa; kalau tak ada service_id, warn.
+  - Token exchange/refresh pindah ke `GET https://auth.tiktok-shops.com/api/v2/token/{get|refresh}` (dulu `open-api.tiktokglobalshop.com/authorization/202309/token`). Konstanta `TIKTOK_AUTH_BASE`. Response shape sama. Get-shops API tetap di `open-api.tiktokglobalshop.com` (benar).
+- **`crypto.service.ts`**: `decrypt` kini mengizinkan plaintext kosong round-trip (bagian data ciphertext kosong itu valid) — memperbaiki bug laten: 500 "Invalid ciphertext format" saat admin mengosongkan field jadi `""`.
+- **Data live dibersihkan**: ditemukan `tiktok_auth_url` warisan menunjuk ke backend **omniseller** (project lain) — diset ke kanonik `https://services.tiktokshop.com/open/authorize`. Key dummy uji (`tiktok_app_key/secret/service_id`) dihapus dari `admin_settings` via DB tunnel; sisa hanya `tiktok_auth_url`.
+- **Verifikasi**: dengan service_id dummy, connect/tiktok menghasilkan URL persis `…/open/authorize?service_id=…&state=…`; tanpa creds → connect 502 "not configured" (bukan 500). Backend redeploy + health db:up.
+
+### ⚙️ Untuk AI berikutnya — saat ada kredensial TikTok asli
+Set di Admin CMS (`https://viewtoko.cosger.online/admin/` → Settings, atau PUT `/api/admin/settings/<key>`): `tiktok_app_key`, `tiktok_app_secret`, `tiktok_service_id`. `tiktok_auth_url` sudah benar (boleh override bila perlu). Lalu uji OAuth round-trip nyata (auth_code expire 30 menit single-use; access_token 7 hari; refresh_token 1 tahun). Pastikan redirect/callback `…/api/shops/callback/tiktok` terdaftar di TikTok Partner Center.
+
 ### ⏳ BELUM dikerjakan (sisa Phase 1 — untuk AI berikutnya)
 - **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
 - **Postgres RLS** pada tabel tenant (sekarang isolasi hanya app-layer `user_id`).
