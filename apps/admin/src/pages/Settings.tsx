@@ -14,9 +14,10 @@ const GROUPS: { title: string; keys: { key: string; label: string }[] }[] = [
   {
     title: "TikTok Shop",
     keys: [
-      { key: "tiktok_app_key", label: "App Key" },
+      { key: "tiktok_app_key", label: "App Key (untuk token exchange)" },
       { key: "tiktok_app_secret", label: "App Secret" },
-      { key: "tiktok_auth_url", label: "Authorize URL (Partner Center)" },
+      { key: "tiktok_service_id", label: "Service ID / App ID (Partner Center → App Detail — WAJIB, BEDA dari App Key)" },
+      { key: "tiktok_auth_url", label: "Authorize URL (opsional override)" },
     ],
   },
   {

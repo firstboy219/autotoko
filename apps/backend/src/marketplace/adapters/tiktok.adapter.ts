@@ -49,10 +49,17 @@ export class TikTokAdapter implements MarketplaceAuthPort {
     if (serviceId && !url.searchParams.has("service_id")) {
       url.searchParams.set("service_id", serviceId);
     }
+    // service_id is MANDATORY. Without it TikTok rejects with "This service does
+    // not exist". Fail loudly instead of redirecting the seller to a broken URL.
+    // NOTE: service_id (App ID, Partner Center → App Detail) is DIFFERENT from
+    // app_key (used only for token exchange).
     if (!url.searchParams.has("service_id")) {
-      this.logger.warn(
-        "TikTok authorize URL has no service_id — set `tiktok_service_id` in Admin CMS.",
-      );
+      const msg =
+        "TikTok `tiktok_service_id` is not configured in Admin CMS — the authorize " +
+        "URL requires service_id (App ID from Partner Center → App Detail, which is " +
+        "different from App Key).";
+      this.logger.error(msg);
+      throw new BadGatewayException(msg);
     }
     url.searchParams.set("state", state);
     return url.toString();
