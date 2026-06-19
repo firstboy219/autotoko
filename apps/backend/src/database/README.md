@@ -28,12 +28,20 @@ That is a planned follow-up: a hand-written SQL migration will
 `current_setting('app.user_id')` GUC set per request/transaction. Not enabled
 yet — tracked as a TODO before multi-tenant data goes live.
 
-## Provisioning the server DB (when approved)
+## Server DB — PROVISIONED (2026-06-18)
 
-```sql
--- as postgres superuser (admin) inside the shared container:
-CREATE ROLE autotoko_user LOGIN PASSWORD '<secret>';
-CREATE DATABASE autotoko OWNER autotoko_user;
+The `autotoko` database + `autotoko_user` role exist on the shared postgres
+container (isolated from xtracker `saasdb` / `geoscan`). Migration `0000` has
+been applied there (18 tables + `__drizzle_migrations`). Credentials live in the
+gitignored `apps/backend/.env` (DB password, JWT/encryption/WA secrets).
+
+Local dev/migrations reach it through an SSH tunnel:
+
+```bash
+bash infra/scripts/db-tunnel.sh --bg     # localhost:15432 -> server postgres:5432
+# apps/backend/.env DATABASE_URL already points at 127.0.0.1:15432
+pnpm --filter @autotoko/backend db:migrate
 ```
-Then set `DATABASE_URL` and run the migration. This touches the shared host, so
-it needs explicit go-ahead (it was intentionally not auto-run during scaffold).
+
+On the server itself the backend connects directly to the postgres container
+over the docker network (no tunnel).
