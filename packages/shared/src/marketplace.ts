@@ -101,19 +101,34 @@ export interface DateRange {
   to: number;
 }
 
+/** Result of exchanging an auth code — token plus discovered shop metadata. */
+export interface ConnectResult extends TokenData {
+  shopName?: string;
+  sellerRegion?: string;
+  openId?: string;
+  merchantId?: string;
+}
+
+/**
+ * Auth slice of a marketplace adapter — implemented first (OAuth connect +
+ * token refresh). Concrete adapters add the rest of MarketplaceAdapter later.
+ */
+export interface MarketplaceAuthPort {
+  readonly marketplace: Marketplace;
+  /** Build the marketplace authorization URL; `state` round-trips our user id. */
+  getAuthUrl(state: string): Promise<string>;
+  /** Exchange the callback auth code for tokens + shop metadata. */
+  exchangeToken(code: string, shopId?: string): Promise<ConnectResult>;
+  /** Refresh an access token before it expires. */
+  refreshToken(refreshToken: string, shopId?: string): Promise<ConnectResult>;
+}
+
 /**
  * One uniform contract for all marketplaces. Concrete adapters
  * (TikTokShopAdapter, ShopeeAdapter, ...) implement this; the rest of the
  * codebase depends only on this interface.
  */
-export interface MarketplaceAdapter {
-  readonly marketplace: Marketplace;
-
-  // Auth
-  getAuthUrl(userId: string): string;
-  exchangeToken(code: string, shopId?: string): Promise<TokenData>;
-  refreshToken(refreshToken: string, shopId?: string): Promise<TokenData>;
-
+export interface MarketplaceAdapter extends MarketplaceAuthPort {
   // Orders
   getOrders(shopId: string, filters: OrderFilters): Promise<Order[]>;
   approveOrder(shopId: string, orderId: string): Promise<void>;
