@@ -5,6 +5,7 @@ import {
   boolean,
   timestamp,
   numeric,
+  integer,
 } from "drizzle-orm/pg-core";
 import { planTypeEnum, walletTxTypeEnum, waLoginStatusEnum } from "./enums";
 
@@ -57,5 +58,18 @@ export const waLoginSessions = pgTable("wa_login_sessions", {
   status: waLoginStatusEnum("status").notNull().default("pending"),
   callbackToken: varchar("callback_token", { length: 64 }).notNull().unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+});
+
+// Short-lived email OTP login sessions (PRD Bagian 3 — passwordless via email).
+// The 6-digit code is stored hashed; verified rows upsert a user by email.
+export const emailOtpSessions = pgTable("email_otp_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: varchar("email", { length: 255 }).notNull(),
+  codeHash: varchar("code_hash", { length: 128 }).notNull(),
+  status: waLoginStatusEnum("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
 });

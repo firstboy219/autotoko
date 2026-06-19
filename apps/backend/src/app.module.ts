@@ -3,6 +3,7 @@ import { ConfigModule } from "@nestjs/config";
 import { ScheduleModule } from "@nestjs/schedule";
 import { DatabaseModule } from "./database/database.module.js";
 import { CryptoModule } from "./common/crypto/crypto.module.js";
+import { MailModule } from "./common/mail/mail.module.js";
 import { AuthModule } from "./modules/auth/auth.module.js";
 import { AdminSettingsModule } from "./modules/admin-settings/admin-settings.module.js";
 import { ShopsModule } from "./modules/shops/shops.module.js";
@@ -21,6 +22,7 @@ import { HealthModule } from "./modules/health/health.module.js";
     ScheduleModule.forRoot(),
     DatabaseModule,
     CryptoModule,
+    MailModule,
     AuthModule,
     AdminSettingsModule,
     ShopsModule,

@@ -10,12 +10,14 @@ import {
 import { ConfigService } from "@nestjs/config";
 import type { ApiResponse } from "@autotoko/shared";
 import { AuthService } from "./auth.service.js";
-import { LoginDto, WaVerifyDto } from "./dto/auth.dto.js";
+import { EmailOtpService } from "./email-otp.service.js";
+import { LoginDto, WaVerifyDto, EmailStartDto, EmailVerifyDto } from "./dto/auth.dto.js";
 
 @Controller("auth")
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
+    private readonly emailOtp: EmailOtpService,
     private readonly config: ConfigService,
   ) {}
 
@@ -23,6 +25,18 @@ export class AuthController {
   @Post("login")
   async login(@Body() dto: LoginDto): Promise<ApiResponse<{ accessToken: string }>> {
     return { success: true, data: await this.auth.login(dto.username, dto.password) };
+  }
+
+  @Post("email/start")
+  async emailStart(@Body() dto: EmailStartDto): Promise<ApiResponse<{ ok: true }>> {
+    return { success: true, data: await this.emailOtp.start(dto.email) };
+  }
+
+  @Post("email/verify")
+  async emailVerify(
+    @Body() dto: EmailVerifyDto,
+  ): Promise<ApiResponse<{ accessToken: string }>> {
+    return { success: true, data: await this.emailOtp.verify(dto.email, dto.code) };
   }
 
   @Post("wa-login/start")

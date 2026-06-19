@@ -17,6 +17,20 @@ export class WaVerifyDto {
   wa_number!: string;
 }
 
+export class EmailStartDto {
+  @IsString()
+  email!: string;
+}
+
+export class EmailVerifyDto {
+  @IsString()
+  email!: string;
+
+  @IsString()
+  @MinLength(4)
+  code!: string;
+}
+
 export class WaStartResponse {
   code!: string;
   callbackToken!: string;

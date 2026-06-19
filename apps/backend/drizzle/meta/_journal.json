@@ -8,6 +8,13 @@
       "when": 1781825505559,
       "tag": "0000_nappy_nightshade",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781863299575,
+      "tag": "0001_smart_rocket_raccoon",
+      "breakpoints": true
     }
   ]
 }
