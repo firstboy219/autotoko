@@ -8,6 +8,7 @@ import { AdminSettingsModule } from "./modules/admin-settings/admin-settings.mod
 import { ShopsModule } from "./modules/shops/shops.module.js";
 import { ProductsModule } from "./modules/products/products.module.js";
 import { BillingModule } from "./modules/billing/billing.module.js";
+import { WebhooksModule } from "./modules/webhooks/webhooks.module.js";
 import { HealthModule } from "./modules/health/health.module.js";
 
 @Module({
@@ -24,6 +25,7 @@ import { HealthModule } from "./modules/health/health.module.js";
     ShopsModule,
     ProductsModule,
     BillingModule,
+    WebhooksModule,
     HealthModule,
   ],
 })
