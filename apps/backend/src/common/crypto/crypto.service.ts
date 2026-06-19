@@ -58,7 +58,9 @@ export class CryptoService {
 
   decrypt(payload: string): string {
     const [version, ivB64, tagB64, dataB64] = payload.split(":");
-    if (version !== CryptoService.VERSION || !ivB64 || !tagB64 || !dataB64) {
+    // dataB64 may legitimately be "" (empty plaintext round-trips to empty
+    // ciphertext) — only iv/tag are always present, so don't reject empty data.
+    if (version !== CryptoService.VERSION || !ivB64 || !tagB64 || dataB64 === undefined) {
       throw new Error("Invalid ciphertext format");
     }
     const decipher = createDecipheriv(
