@@ -20,9 +20,18 @@ export class CryptoService {
 
   constructor(config: ConfigService) {
     const secret = config.get<string>("ENCRYPTION_KEY");
-    if (!secret || secret.length < 16) {
+    const isProd = config.get<string>("NODE_ENV") === "production";
+    const weak = !secret || secret.length < 32;
+    if (weak) {
+      // In production a missing/weak key would silently fall back to a hardcoded
+      // dev key, making every encrypted secret trivially decryptable. Fail hard.
+      if (isProd) {
+        throw new Error(
+          "ENCRYPTION_KEY is missing or too weak (need >= 32 chars) — refusing to start in production.",
+        );
+      }
       this.logger.warn(
-        "ENCRYPTION_KEY is missing or weak — set a strong 32-byte key in production.",
+        "ENCRYPTION_KEY is missing or weak — using an insecure dev key. Set a strong 32-byte key in production.",
       );
     }
     // Normalize any provided secret to a fixed 32-byte key via SHA-256.

@@ -19,10 +19,10 @@ export class AuthController {
     private readonly config: ConfigService,
   ) {}
 
-  // Dev dummy login (user/user). Replace with real flows for production.
+  // Admin login (ADMIN_USERNAME/ADMIN_PASSWORD). Dev creds only outside prod.
   @Post("login")
   async login(@Body() dto: LoginDto): Promise<ApiResponse<{ accessToken: string }>> {
-    return { success: true, data: await this.auth.devLogin(dto.username, dto.password) };
+    return { success: true, data: await this.auth.login(dto.username, dto.password) };
   }
 
   @Post("wa-login/start")

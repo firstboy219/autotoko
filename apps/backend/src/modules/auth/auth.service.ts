@@ -7,7 +7,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { users, wallets, waLoginSessions } from "../../database/schema/index.js";
@@ -33,17 +33,43 @@ export class AuthService {
     return this.jwt.sign(payload);
   }
 
-  /** Dev-only dummy login (user/user by default) to unblock frontend work. */
-  async devLogin(username: string, password: string): Promise<{ accessToken: string }> {
-    const enabled = this.config.get<string>("DEV_LOGIN_ENABLED", "true") === "true";
-    const u = this.config.get<string>("DEV_LOGIN_USERNAME", "user");
-    const p = this.config.get<string>("DEV_LOGIN_PASSWORD", "user");
-    if (!enabled || username !== u || password !== p) {
-      throw new UnauthorizedException("Invalid credentials");
+  /** Constant-time string compare that tolerates length differences. */
+  private safeEqual(a: string, b: string): boolean {
+    const ab = Buffer.from(a);
+    const bb = Buffer.from(b);
+    if (ab.length !== bb.length) return false;
+    return timingSafeEqual(ab, bb);
+  }
+
+  /**
+   * Username/password admin login. Two credential sources:
+   *  1. ADMIN_USERNAME / ADMIN_PASSWORD — the real admin account (works in any
+   *     env, including production; intended for the Admin CMS).
+   *  2. DEV_LOGIN_* — convenience dev backdoor, only honored when
+   *     DEV_LOGIN_ENABLED=true AND NODE_ENV !== "production".
+   * Both issue an admin JWT bound to the dev/admin user row.
+   */
+  async login(username: string, password: string): Promise<{ accessToken: string }> {
+    const adminUser = this.config.get<string>("ADMIN_USERNAME", "");
+    const adminPass = this.config.get<string>("ADMIN_PASSWORD", "");
+    if (adminUser && adminPass && this.safeEqual(username, adminUser) && this.safeEqual(password, adminPass)) {
+      await this.ensureDummyUser();
+      return { accessToken: this.sign({ sub: DUMMY_USER_ID, role: "admin" }) };
     }
-    await this.ensureDummyUser();
-    // Dev user gets admin role so the Admin CMS is reachable during development.
-    return { accessToken: this.sign({ sub: DUMMY_USER_ID, role: "admin" }) };
+
+    const devEnabled = this.config.get<string>("DEV_LOGIN_ENABLED", "false") === "true";
+    const isProd = this.config.get<string>("NODE_ENV") === "production";
+    if (devEnabled && !isProd) {
+      const u = this.config.get<string>("DEV_LOGIN_USERNAME", "user");
+      const p = this.config.get<string>("DEV_LOGIN_PASSWORD", "user");
+      if (username === u && password === p) {
+        await this.ensureDummyUser();
+        // Dev user gets admin role so the Admin CMS is reachable during development.
+        return { accessToken: this.sign({ sub: DUMMY_USER_ID, role: "admin" }) };
+      }
+    }
+
+    throw new UnauthorizedException("Invalid credentials");
   }
 
   /** Seed the dev user + wallet so dev-login works against the real DB. */

@@ -24,7 +24,12 @@ export class WebhooksController {
 
   private guard(secret?: string): void {
     const expected = this.config.get<string>("WEBHOOK_INGEST_SECRET");
-    if (expected && secret !== expected) {
+    // Fail closed: with no configured secret the endpoint would otherwise accept
+    // any unauthenticated payload (the API is internet-facing). Reject instead.
+    if (!expected) {
+      throw new UnauthorizedException("Webhook ingest secret not configured");
+    }
+    if (secret !== expected) {
       throw new UnauthorizedException("Invalid webhook secret");
     }
   }
