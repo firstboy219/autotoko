@@ -37,14 +37,21 @@
    - **Deployed + verified live**: backend redeploy (nodemailer ikut bundle), web redeploy. email/start invalid→400, valid→email terkirim (Gmail), verify wrong code→"Kode salah". WA start→waLink benar. Admin asset hash konfirmasi fresh.
    - ⚠️ **Catatan build**: `pnpm --filter @autotoko/web build` GAGAL di pnpm deps-status-check (stale dist terdeploy). Workaround: build langsung `cd apps/<app> && npx vite build` lalu tar dist. (Backend `pnpm --filter ... deploy --legacy` tetap OK.)
 
-### ⏳ BELUM dikerjakan (urutan saran)
-- P3 Product detail + postings UI + pagination/search backend.
-- P4 Dashboard improvements (recent orders, quick actions, trend chart, limit/filter `/orders`).
-- P5 Orders page (pagination, filter marketplace/status, search, detail modal).
-- ~~P6 Email OTP (backend + web UI)~~ ✅ DONE.
-- P7 README update (port 8090), merge `develop`→`main`, push.
-- Security sisa: native webhook signature verify, Postgres RLS.
-- Register URL webhook/Midtrans di dashboard TikTok/Shopee/Midtrans.
+7. **P3/P4/P5 UI** (HEAD `39cc848`, pushed): Dashboard (trend 7-hari CSS bars, recent orders, quick actions, stat icons); Orders (search id/buyer, filter marketplace+status, pagination, detail modal, badge warna per-MP); Produk (search, kolom GMV-7d, detail modal: edit/delete master + postings per toko + tambah/hapus posting auto-SKU). Semua client-side dari endpoint yang ada — tanpa perubahan backend. Build via `npx vite build` (workaround pnpm). Deployed + verified.
+8. **P7 cleanup** (HEAD `f232a35`): README diperbarui (port 8090, URL live, status). **Merge `develop`→`main` + push kedua branch** — sekarang sinkron di `f232a35`.
+
+### ✅ Verifikasi akhir live (2026-06-19)
+- `apitoko/api/health` db:up · web 200 · `/admin/` 200 · dev login `user/user`→401 · admin login→201 · pm2 autotoko-backend + xtracker-backend keduanya online.
+
+### ⏳ BELUM dikerjakan (sisa Phase 1 — untuk AI berikutnya)
+- **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
+- **Postgres RLS** pada tabel tenant (sekarang isolasi hanya app-layer `user_id`).
+- **Daftarkan URL** webhook + Midtrans notif di dashboard TikTok/Shopee/Midtrans (URL siap di `infra/DEPLOY.md`).
+- **n8n daily/weekly reports** (PRD).
+- **AI autopilot** (chat buyer/affiliate, reply review, optimize) — belum ada; pakai abstraksi provider via Admin CMS (lihat memory `ai-provider-configurable-cms`).
+- **Landing page SSR** + **mobile Expo** (Phase 2).
+- Backend pagination `/products` & `/orders` bila data tumbuh besar (sekarang client-side, list ≤100).
+- OAuth round-trip marketplace belum diuji dengan kredensial asli (belum ada).
 
 ### Catatan teknis
 - `typecheck` semua workspace hijau. Build backend & admin OK.
