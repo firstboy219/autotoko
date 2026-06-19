@@ -34,13 +34,13 @@
 - [ ] Order detail modal
 - [ ] Deploy orders improvements
 
-## Priority 6: Email OTP Login
-- [ ] Add Gmail SMTP config to autotoko .env (reuse xtracker creds)
-- [ ] Create email OTP service (send via Gmail/nodemailer)
-- [ ] Add email OTP endpoints (start + verify)
-- [ ] Update Login.tsx: tab for WA vs Email login
-- [ ] Set correct WA_AUTOTOKO_NUMBER in server .env
-- [ ] Deploy email OTP + WA fixes
+## Priority 6: Email OTP Login  ✅ DONE (sesi 2)
+- [x] Add Gmail SMTP config to autotoko .env (reuse xtracker creds)
+- [x] Create email OTP service (send via Gmail/nodemailer) + MailService
+- [x] Add email OTP endpoints (start + verify) + email_otp_sessions table (migration 0001)
+- [x] Update Login.tsx: tab for WA vs Email login (+ WA polling flow)
+- [x] Set correct WA_AUTOTOKO_NUMBER in server .env (15556410810)
+- [x] Deploy email OTP + WA fixes (verified live)
 
 ## Priority 7: Final Cleanup & Merge
 - [ ] Update README.md (port, status)

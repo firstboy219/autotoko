@@ -31,17 +31,17 @@
 4. **Deploy backend** + restart → verified: public dev login `user/user`→401, admin login→token OK, webhook no-secret→401, `/api/health` db:up, xtracker tetap online.
 5. **Deploy Admin CMS static** ke `/opt/autotoko/admin` + nginx `location /admin/` (alias, try_files → /admin/index.html). Verified: index + assets 200, login admin publik OK.
 
-### ⚠️ KONSEKUENSI — kerjakan berikutnya (URGENT)
-- **Login web user rusak**: dev login dimatikan di prod, web app belum punya UI WA/Email OTP. User terkunci.
-  - Backend WA login SUDAH ada: `POST /api/auth/wa-login/start`, `GET /api/auth/wa-login/status?token=`.
-  - Email OTP backend BELUM ada (SMTP creds sudah di env). Perlu service + endpoints + store (opsi: tabel baru `email_otp_sessions` via migration, atau reuse pola `waLoginSessions`).
-  - Web `apps/web/src/pages/Login.tsx` perlu di-rewrite: tab WA | Email, polling status WA, input OTP email.
+6. **Login web diperbaiki (P6 + WA UI)** (HEAD `9fea375`, pushed):
+   - `apps/web/src/pages/Login.tsx` rewrite: tab WhatsApp (start→buka wa.me→poll status→JWT) + tab Email OTP + dev login (collapsible). `lib/auth.ts` tambah `applyToken`, `waLogin`, `emailLogin`.
+   - **Email OTP backend baru**: `common/mail/mail.service.ts` (nodemailer, reuse Gmail SMTP xtracker; no-op + warn bila SMTP kosong) + `MailModule` (@Global). `modules/auth/email-otp.service.ts` (kode 6-digit di-hash sha256, TTL 5 menit, max 5 attempt, max 3/15min per email). Tabel `email_otp_sessions` (migration `0001_smart_rocket_raccoon.sql`, SUDAH diterapkan ke DB live via tunnel). Endpoint `POST /api/auth/email/{start,verify}`.
+   - **Deployed + verified live**: backend redeploy (nodemailer ikut bundle), web redeploy. email/start invalid→400, valid→email terkirim (Gmail), verify wrong code→"Kode salah". WA start→waLink benar. Admin asset hash konfirmasi fresh.
+   - ⚠️ **Catatan build**: `pnpm --filter @autotoko/web build` GAGAL di pnpm deps-status-check (stale dist terdeploy). Workaround: build langsung `cd apps/<app> && npx vite build` lalu tar dist. (Backend `pnpm --filter ... deploy --legacy` tetap OK.)
 
 ### ⏳ BELUM dikerjakan (urutan saran)
 - P3 Product detail + postings UI + pagination/search backend.
 - P4 Dashboard improvements (recent orders, quick actions, trend chart, limit/filter `/orders`).
 - P5 Orders page (pagination, filter marketplace/status, search, detail modal).
-- P6 Email OTP (backend + web UI).
+- ~~P6 Email OTP (backend + web UI)~~ ✅ DONE.
 - P7 README update (port 8090), merge `develop`→`main`, push.
 - Security sisa: native webhook signature verify, Postgres RLS.
 - Register URL webhook/Midtrans di dashboard TikTok/Shopee/Midtrans.
