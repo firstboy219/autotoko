@@ -1,17 +1,17 @@
 # AutoToko Phase 1 — Task List
 
-## Priority 1: Commit & Deploy Admin CMS
-- [/] Commit 8 uncommitted files (Admin CMS + Pricing)
-- [ ] Build & deploy backend + admin static to server
-- [ ] Verify admin CMS accessible at /admin/
+## Priority 1: Commit & Deploy Admin CMS  ✅ DONE (sesi 2)
+- [x] Commit 8 uncommitted files (Admin CMS + Pricing)
+- [x] Build & deploy backend + admin static to server
+- [x] Verify admin CMS accessible at /admin/ (viewtoko.cosger.online/admin/)
 
-## Priority 2: Critical Security Hardening
-- [ ] Fix DEV_LOGIN: default to false, add NODE_ENV guard
-- [ ] Fix CryptoService: throw in production if key missing
-- [ ] Fix webhooks: reject if WEBHOOK_INGEST_SECRET empty
-- [ ] Update server .env: DEV_LOGIN_ENABLED=false, generate WEBHOOK_INGEST_SECRET
-- [ ] Deploy security fixes to server
-- [ ] Verify: dev login rejected, webhooks protected
+## Priority 2: Critical Security Hardening  ✅ DONE (sesi 2)
+- [x] Fix DEV_LOGIN: default to false, add NODE_ENV guard + real ADMIN login
+- [x] Fix CryptoService: throw in production if key missing/weak
+- [x] Fix webhooks: reject if WEBHOOK_INGEST_SECRET empty (fail-closed)
+- [x] Update server .env: DEV_LOGIN_ENABLED=false, generate WEBHOOK_INGEST_SECRET, ADMIN creds, WA number, SMTP
+- [x] Deploy security fixes to server
+- [x] Verify: dev login 401, admin login OK, webhooks 401 without secret
 
 ## Priority 3: Product Detail + Postings UI
 - [ ] Add product detail route /produk/:id
