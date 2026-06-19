@@ -34,15 +34,35 @@ export class AuthService {
   }
 
   /** Dev-only dummy login (user/user by default) to unblock frontend work. */
-  devLogin(username: string, password: string): { accessToken: string } {
+  async devLogin(username: string, password: string): Promise<{ accessToken: string }> {
     const enabled = this.config.get<string>("DEV_LOGIN_ENABLED", "true") === "true";
     const u = this.config.get<string>("DEV_LOGIN_USERNAME", "user");
     const p = this.config.get<string>("DEV_LOGIN_PASSWORD", "user");
     if (!enabled || username !== u || password !== p) {
       throw new UnauthorizedException("Invalid credentials");
     }
+    await this.ensureDummyUser();
     // Dev user gets admin role so the Admin CMS is reachable during development.
     return { accessToken: this.sign({ sub: DUMMY_USER_ID, role: "admin" }) };
+  }
+
+  /** Seed the dev user + wallet so dev-login works against the real DB. */
+  private async ensureDummyUser(): Promise<void> {
+    try {
+      const [u] = await this.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, DUMMY_USER_ID))
+        .limit(1);
+      if (!u) {
+        await this.db
+          .insert(users)
+          .values({ id: DUMMY_USER_ID, fullName: "Dev User", planType: "pro" });
+        await this.db.insert(wallets).values({ userId: DUMMY_USER_ID, balance: "1000000" });
+      }
+    } catch (e) {
+      this.logger.warn(`Could not seed dev user (DB down?): ${(e as Error).message}`);
+    }
   }
 
   private genCode(): string {

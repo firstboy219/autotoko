@@ -21,8 +21,8 @@ export class AuthController {
 
   // Dev dummy login (user/user). Replace with real flows for production.
   @Post("login")
-  login(@Body() dto: LoginDto): ApiResponse<{ accessToken: string }> {
-    return { success: true, data: this.auth.devLogin(dto.username, dto.password) };
+  async login(@Body() dto: LoginDto): Promise<ApiResponse<{ accessToken: string }>> {
+    return { success: true, data: await this.auth.devLogin(dto.username, dto.password) };
   }
 
   @Post("wa-login/start")

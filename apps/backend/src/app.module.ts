@@ -6,6 +6,7 @@ import { CryptoModule } from "./common/crypto/crypto.module.js";
 import { AuthModule } from "./modules/auth/auth.module.js";
 import { AdminSettingsModule } from "./modules/admin-settings/admin-settings.module.js";
 import { ShopsModule } from "./modules/shops/shops.module.js";
+import { ProductsModule } from "./modules/products/products.module.js";
 import { HealthModule } from "./modules/health/health.module.js";
 
 @Module({
@@ -20,6 +21,7 @@ import { HealthModule } from "./modules/health/health.module.js";
     AuthModule,
     AdminSettingsModule,
     ShopsModule,
+    ProductsModule,
     HealthModule,
   ],
 })
