@@ -14,8 +14,27 @@ self-contained bundle. It reuses the shared **postgres** (`autotoko` DB) and
 - Reachable from the **n8n container** via the host gateway `http://172.18.0.1:8090`.
 - Midtrans creds stored in `admin_settings` (encrypted) — shared with xtracker
   (PRODUCTION keys; use sandbox keys for test flows).
-- Not yet public: no nginx vhost / TLS / domain → Midtrans notifications and
-  marketplace webhooks (which need public HTTPS) are pending a subdomain.
+
+## Public endpoints (nginx + Let's Encrypt, live)
+
+| URL | Serves |
+|---|---|
+| `https://apitoko.cosger.online` | API → proxy `127.0.0.1:8090` |
+| `https://viewtoko.cosger.online` | web SPA (static, root `/opt/autotoko/web`) + `/api/` proxy |
+
+- nginx vhosts: `/etc/nginx/sites-enabled/{apitoko,viewtoko}`. TLS via certbot
+  (auto-renew). Configure these in the respective dashboards:
+  - Marketplace webhooks: `https://apitoko.cosger.online/api/webhooks/{tiktok,shopee}`
+  - Midtrans notification: `https://apitoko.cosger.online/api/wallet/midtrans/notification`
+- `APP_URL=https://viewtoko.cosger.online` (WA deep links + OAuth callback redirects).
+
+## Redeploy web SPA (static)
+
+```bash
+pnpm --filter @autotoko/web build
+tar czf - -C apps/web/dist . | ssh -i "$KEY" ubuntu@13.212.182.48 \
+  'sudo rm -rf /opt/autotoko/web && sudo mkdir -p /opt/autotoko/web && sudo tar xzf - -C /opt/autotoko/web && sudo chown -R www-data:www-data /opt/autotoko && sudo chmod -R a+rX /opt/autotoko'
+```
 
 ## Redeploy (build off-server → ship bundle)
 
