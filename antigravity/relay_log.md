@@ -60,6 +60,23 @@ Sumber perubahan: `Knowledge Base/CLAUDE2.md` §4 + "TikTok Shop OAuth Flow". (C
 ### ⚙️ Untuk AI berikutnya — saat ada kredensial TikTok asli
 Set di Admin CMS (`https://viewtoko.cosger.online/admin/` → Settings, atau PUT `/api/admin/settings/<key>`): `tiktok_app_key`, `tiktok_app_secret`, `tiktok_service_id`. `tiktok_auth_url` sudah benar (boleh override bila perlu). Lalu uji OAuth round-trip nyata (auth_code expire 30 menit single-use; access_token 7 hari; refresh_token 1 tahun). Pastikan redirect/callback `…/api/shops/callback/tiktok` terdaftar di TikTok Partner Center.
 
+---
+
+## Sesi 4 — 2026-06-20 (BUG FIX: TikTok service_id hilang dari authorize URL)
+
+**Laporan:** tombol "+ Hubungkan TikTok" → TikTok error "This service does not exist". URL yang dihasilkan: `…/open/authorize?state=…` TANPA `service_id`.
+
+**Root cause (terkonfirmasi live):** prod `admin_settings` punya `tiktok_app_key` + `tiktok_app_secret` (diisi user) tapi **`tiktok_service_id` tidak ada**. Kode sesi-3 hanya `logger.warn` lalu tetap kembalikan URL tanpa service_id (silent fail). Selain itu form Admin CMS Settings **tidak punya field** `tiktok_service_id` sama sekali → tak bisa diisi lewat UI.
+
+### ✅ Fix (HEAD `411b7c2`, pushed develop)
+- `tiktok.adapter.ts` `getAuthUrl`: kalau service_id tak resolvable → `throw BadGatewayException` dengan pesan jelas (service_id = App ID dari Partner Center → App Detail, BEDA dari app_key). Tidak lagi redirect ke URL rusak.
+- `apps/admin/src/pages/Settings.tsx`: tambah field `tiktok_service_id` (label tegas membedakan dari App Key) + perjelas label app_key/auth_url. Admin redeploy.
+- **Shopee dicek**: AMAN — `creds()` sudah `throw` bila partner_id/key/redirect kosong (fail-closed, tak ada pola bug serupa).
+- **Verifikasi live**: tanpa service_id → connect 502 + pesan jelas; dengan service_id dummy → URL `…?service_id=…&state=…` benar. Dummy dihapus lagi (prod kembali ke pesan error sampai value asli diisi).
+
+### ⚠️ ACTION OWNER (belum bisa dilakukan AI — butuh nilai rahasia)
+Isi **`tiktok_service_id`** di Admin CMS (`https://viewtoko.cosger.online/admin/` → Kredensial & Config → TikTok Shop → field "Service ID / App ID") dengan nilai dari **TikTok Partner Center → App Detail** (numerik, mis. `7431458374265161478`). Setelah itu connect TikTok akan menghasilkan authorize URL valid. `tiktok_app_key`/`tiktok_app_secret` sudah terisi; `tiktok_auth_url` sudah kanonik.
+
 ### ⏳ BELUM dikerjakan (sisa Phase 1 — untuk AI berikutnya)
 - **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
 - **Postgres RLS** pada tabel tenant (sekarang isolasi hanya app-layer `user_id`).
