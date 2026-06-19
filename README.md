@@ -55,5 +55,28 @@ pnpm dev                    # runs all apps via turbo
 
 Build off-server (local/CI), ship artifacts — the server (3.7 GB, shared with
 xtracker + geoscan) is too small to build on. Frontends deploy as static files
-to nginx; backend runs as a mem-limited Docker container. Reuse the shared
-postgres + n8n. See `Knowledge Base/SERVER_KB.md`.
+to nginx; the backend runs as a **pm2 process** (`autotoko-backend`, port
+**8090**) — not Docker, to avoid OOM. Reuse the shared postgres (`autotoko` DB)
++ n8n. Full procedure (build → bundle → ship → migrate → restart): `infra/DEPLOY.md`.
+
+> ⚠️ Frontend builds: `pnpm --filter <app> build` can fail in this workspace at
+> pnpm's deps-status check. Build directly instead: `cd apps/<app> && npx vite build`.
+
+### Live (production)
+
+| URL | Serves |
+|---|---|
+| `https://apitoko.cosger.online` | API (proxy → :8090) |
+| `https://viewtoko.cosger.online` | user dashboard (static) + `/api` proxy |
+| `https://viewtoko.cosger.online/admin/` | Admin CMS (static) |
+
+## Status (Phase 1)
+
+Live: passwordless login (WhatsApp OTP + Email OTP), marketplace OAuth connect
+(TikTok/Shopee), Master Produk + SKU linking, wallet/billing (Midtrans),
+order webhooks + per-transaction billing, Admin CMS (settings + pricing),
+user dashboard (orders/products/wallet). Security: real admin login, dev
+backdoor disabled in prod, webhooks fail-closed, encrypted secrets at rest.
+
+TODO: native webhook signature verification, Postgres RLS, daily/weekly
+reports (n8n), landing page (SSR), mobile (Phase 2), AI autopilot features.

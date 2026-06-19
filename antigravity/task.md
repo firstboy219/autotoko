@@ -13,26 +13,26 @@
 - [x] Deploy security fixes to server
 - [x] Verify: dev login 401, admin login OK, webhooks 401 without secret
 
-## Priority 3: Product Detail + Postings UI
-- [ ] Add product detail route /produk/:id
-- [ ] Product detail page: info, edit form, postings list
-- [ ] Product list: search/filter, pagination, gmv7d display
-- [ ] Backend: pagination + search on GET /products
-- [ ] Deploy product improvements
+## Priority 3: Product Detail + Postings UI  ✅ DONE (sesi 2)
+- [x] Product detail (modal) — info, edit form, delete, postings per shop
+- [x] Add/delete posting (auto-SKU linking)
+- [x] Product list: search, gmv7d display
+- [~] Backend pagination on GET /products — skipped (client-side filter; lists small)
+- [x] Deploy product improvements
 
-## Priority 4: Dashboard Improvements
-- [ ] Recent orders (last 5) on dashboard
-- [ ] Quick action buttons
-- [ ] Simple order trend chart (7 days, CSS bars)
-- [ ] Better stat cards with icons
-- [ ] Backend: add limit/filter params on GET /orders
+## Priority 4: Dashboard Improvements  ✅ DONE (sesi 2)
+- [x] Recent orders (last 5) on dashboard
+- [x] Quick action buttons
+- [x] Order trend chart (7 days, CSS bars, client-side)
+- [x] Better stat cards with icons
+- [~] Backend limit/filter on GET /orders — skipped (computed client-side)
 
-## Priority 5: Orders Page Improvements
-- [ ] Pagination controls
-- [ ] Filter by marketplace + status
-- [ ] Search by order ID / buyer
-- [ ] Order detail modal
-- [ ] Deploy orders improvements
+## Priority 5: Orders Page Improvements  ✅ DONE (sesi 2)
+- [x] Pagination controls (client-side)
+- [x] Filter by marketplace + status
+- [x] Search by order ID / buyer
+- [x] Order detail modal
+- [x] Deploy orders improvements
 
 ## Priority 6: Email OTP Login  ✅ DONE (sesi 2)
 - [x] Add Gmail SMTP config to autotoko .env (reuse xtracker creds)
@@ -43,7 +43,7 @@
 - [x] Deploy email OTP + WA fixes (verified live)
 
 ## Priority 7: Final Cleanup & Merge
-- [ ] Update README.md (port, status)
-- [ ] Final deploy & verify everything
-- [ ] Merge develop → main
-- [ ] Push both branches
+- [x] Update README.md (port 8090, live URLs, status)
+- [x] Final deploy & verify everything (security, admin, login, UI all live)
+- [x] Merge develop → main
+- [x] Push both branches
