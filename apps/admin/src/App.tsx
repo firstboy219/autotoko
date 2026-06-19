@@ -1,17 +1,23 @@
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useAuth } from "./lib/auth";
+import { Login } from "./pages/Login";
+import { Settings } from "./pages/Settings";
+import { Pricing } from "./pages/Pricing";
+
+function Protected({ children }: { children: React.ReactNode }) {
+  const authed = useAuth((s) => s.authenticated);
+  return authed ? <>{children}</> : <Navigate to="/login" replace />;
+}
+
 export function App() {
   return (
-    <div className="min-h-screen flex items-center justify-center font-sans text-slate-100">
-      <div className="text-center">
-        <div className="inline-flex items-center gap-2 mb-3">
-          <div className="w-9 h-9 rounded-lg bg-brand text-white font-extrabold flex items-center justify-center">
-            A
-          </div>
-          <span className="font-extrabold text-xl">AutoToko Admin</span>
-        </div>
-        <p className="text-sm text-slate-400">
-          Admin CMS (Vite + React SPA) — scaffold siap.
-        </p>
-      </div>
-    </div>
+    <BrowserRouter basename="/admin">
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/settings" element={<Protected><Settings /></Protected>} />
+        <Route path="/pricing" element={<Protected><Pricing /></Protected>} />
+        <Route path="*" element={<Navigate to="/settings" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
