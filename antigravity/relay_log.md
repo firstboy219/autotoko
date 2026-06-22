@@ -170,6 +170,26 @@ Dikerjakan paralel oleh 2 subagent Opus (backend & frontend, file disjoint), dii
 ### Catatan multi-agent
 - Subagent dibatasi: hanya edit kode area masing-masing, TANPA git/build-lain/deploy/server/migration. Orchestrator yang typecheck gabungan, build, commit, deploy, verifikasi. Pola aman: partisi file disjoint (backend service vs web page).
 
+---
+
+## Sesi 11 — 2026-06-23 (OAuth callback robust + manual connect sandbox)
+
+**Bug:** sandbox authorize dari Partner Center tak bawa state JWT AutoToko → `handleCallback` lempar "Invalid or expired state" → callback redirect ke `/toko?error=` → `/toko` protected → SPA pantul ke `/login` = "Koneksi Gagal".
+
+### ✅ Fix (HEAD `5e3583b`, pushed, deployed, verified)
+- `shops.controller.ts` callback: tambah logging (code/state/shop_id), dan saat error **render halaman HTML (HTTP 200)** berisi pesan + auth_code + cara selesaikan manual — TIDAK lagi redirect ke route protected. Sukses tetap redirect ke `/toko?connected=`.
+- **Endpoint manual** `POST /api/shops/connect/:mp/manual` (JwtAuthGuard + AdminOnly), body `{authCode, shopId?, userId?}` → exchange code→token→saveShop tanpa state. Untuk sandbox/admin.
+- `shops.service.connectManual()`.
+- Verified: callback state-invalid→200 HTML (bukan /login); connect/tiktok(admin)→authUrl service_id benar; manual no-auth→401, admin+dummy→502 (sampai exchange).
+
+### Cara connect sandbox "Bulanja" (shop_id 7494387970839184847) — untuk owner
+- **Opsi A (disarankan):** login viewtoko → Toko Saya → "+ Hubungkan TikTok" (authorize URL bawa state kita) → authorize sandbox shop → callback sukses → shop+token tersimpan. Berhasil selama authorize dimulai DARI AutoToko.
+- **Opsi B (manual, kalau authorize dari Partner Center):** setelah authorize, ambil `auth_code` (dari URL callback / halaman info baru) → admin POST `/api/shops/connect/tiktok/manual {"authCode":"…"}` (pakai admin JWT). auth_code single-use, ~30 menit.
+- Tabel `shops` masih KOSONG (belum ada token). HMAC webhook verify TIDAK butuh shop token (pakai app_secret), tapi agar webhook meng-upsert order, shop row harus ada.
+
+### ⏳ Subagent Notifikasi/BOM (Sesi 10.5) — TERTUNDA
+2 subagent Opus kena session limit (reset 3am WIB), kerja setengah-jadi diparkir di `/tmp/autotoko-partial-agents/` (notifications: 3 file tanpa migration; bom: dto saja). Repo bersih di `5e3583b`. Lanjutkan/selesaikan modul Notifikasi + BOM nanti.
+
 ### ⏳ BELUM dikerjakan (sisa Phase 1 — untuk AI berikutnya)
 - **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
 - **Postgres RLS** pada tabel tenant (sekarang isolasi hanya app-layer `user_id`).
