@@ -152,7 +152,23 @@ Pendaftaran URL webhook = **aksi manual owner di dashboard marketplace** (tak bi
 - `verifyTikTok`/`verifyShopee` kini coba beberapa varian HMAC (terima bila salah satu cocok; tetap butuh secret key). TikTok candidates: `appkey_body` = HMAC(app_secret, app_key+body), `body_only`, `secret_wrapped`. Log nama varian yang cocok.
 - **`WEBHOOK_DEBUG=true`** (sudah diset di server .env) → saat verifikasi gagal, log: tanda tangan diterima vs computed candidates + header kandidat (sign/auth/tts/…) + panjang body. Tujuan: tangkap test event asli dari Development Shop untuk kunci formula. **Matikan lagi (`WEBHOOK_DEBUG=false`) setelah formula terkonfirmasi.**
 - **NEXT (butuh owner)**: aktifkan event toggles + kirim test event dari Development Shop → AI cek `pm2 logs autotoko-backend` untuk lihat varian mana yang match / sesuaikan `webhook-verifier.service.ts` bila tak ada yang match.
-- Catatan: event auth-lifecycle (Type 6 Deauth, Type 7 Auth Expire) payload-nya bukan order → saat ini hanya terekam di `webhook_events` (handler order skip). Handling deauth (tandai shop disconnected) = enhancement berikutnya.
+- Catatan: event auth-lifecycle (Type 6 Deauth, Type 7 Auth Expire) → lihat Sesi 10 (sudah dihandle).
+
+---
+
+## Sesi 10 — 2026-06-23 (multi-agent Opus: webhook parser robust + Orders Kanban)
+
+Dikerjakan paralel oleh 2 subagent Opus (backend & frontend, file disjoint), diintegrasi + dideploy + diverifikasi oleh orchestrator.
+
+### ✅ Backend — TikTok webhook tipe numerik + auth lifecycle (HEAD `1101324`)
+- `webhooks.service.ts handleTikTok`: `type` diperlakukan sbg NUMBER. Map ke label (`TIKTOK_EVENT_TYPE_LABELS`); tidak ada "Order Status type 1" — order lifecycle = 4/11/12/64/65/67 (+2). Tipe order → resolve order id best-effort (`data.order_id ?? order_sn ?? order_list[0].order_id`) → upsert (jalur lama). Tipe non-order → hanya direkam. **Auth lifecycle**: type 6 (seller deauth) → `shops.shopStatus='disconnected'` (by marketplace+shopId, multi-tenant); type 7 (auth expire) → warn saja (token bisa di-refresh). Idempotensi pakai `tts_notification_id` bila ada. 
+- Verified live (secret path): type4 direkam, type6→`authAction:disconnect`, type99→`type_99`, replay→`duplicate:true`.
+
+### ✅ Frontend — Orders Kanban (HEAD `668c7eb`)
+- Toggle **Tabel | Kanban** di halaman Orders. Kanban: 1 kolom per status fulfillment (+retur/dibatalkan), kartu (badge MP/pembeli/total/tanggal), klik → modal detail yang sama, tombol ◀▶ pindah status via `PATCH /orders/:id/status`. Filter search+marketplace berlaku di kedua view. Tanpa lib baru. Verified live (bundle mengandung Kanban).
+
+### Catatan multi-agent
+- Subagent dibatasi: hanya edit kode area masing-masing, TANPA git/build-lain/deploy/server/migration. Orchestrator yang typecheck gabungan, build, commit, deploy, verifikasi. Pola aman: partisi file disjoint (backend service vs web page).
 
 ### ⏳ BELUM dikerjakan (sisa Phase 1 — untuk AI berikutnya)
 - **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
