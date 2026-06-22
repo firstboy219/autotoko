@@ -3,6 +3,19 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders } from "../../database/schema/index.js";
 
+export const FULFILLMENT_STATUSES = [
+  "masuk",
+  "approved",
+  "produksi",
+  "packing",
+  "siap_kirim",
+  "dikirim",
+  "selesai",
+  "retur",
+  "dibatalkan",
+] as const;
+export type FulfillmentStatus = (typeof FULFILLMENT_STATUSES)[number];
+
 @Injectable()
 export class OrdersService {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
@@ -37,5 +50,16 @@ export class OrdersService {
       .limit(1);
     if (!order) throw new NotFoundException("Order not found");
     return order;
+  }
+
+  /** Update the internal fulfillment status (multi-tenant guarded). */
+  async updateStatus(userId: string, id: string, status: FulfillmentStatus) {
+    const [row] = await this.db
+      .update(orders)
+      .set({ fulfillmentStatus: status, updatedAt: new Date() })
+      .where(and(eq(orders.id, id), eq(orders.userId, userId)))
+      .returning();
+    if (!row) throw new NotFoundException("Order not found");
+    return row;
   }
 }

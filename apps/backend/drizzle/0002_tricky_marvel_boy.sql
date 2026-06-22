@@ -1,0 +1,2 @@
+CREATE TYPE "public"."fulfillment_status" AS ENUM('masuk', 'approved', 'produksi', 'packing', 'siap_kirim', 'dikirim', 'selesai', 'retur', 'dibatalkan');--> statement-breakpoint
+ALTER TABLE "orders" ADD COLUMN "fulfillment_status" "fulfillment_status" DEFAULT 'masuk' NOT NULL;

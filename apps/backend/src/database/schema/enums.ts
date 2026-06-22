@@ -80,3 +80,17 @@ export const waLoginStatusEnum = pgEnum("wa_login_status", [
   "verified",
   "expired",
 ]);
+
+// Internal fulfillment workflow (PRD / CLAUDE2.md) — distinct from the raw
+// marketplace order status stored in orders.status.
+export const fulfillmentStatusEnum = pgEnum("fulfillment_status", [
+  "masuk",
+  "approved",
+  "produksi",
+  "packing",
+  "siap_kirim",
+  "dikirim",
+  "selesai",
+  "retur",
+  "dibatalkan",
+]);

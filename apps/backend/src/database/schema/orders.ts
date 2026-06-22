@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { shops } from "./shops";
-import { marketplaceEnum } from "./enums";
+import { marketplaceEnum, fulfillmentStatusEnum } from "./enums";
 
 // PRD Bagian 9.1 — ORDERS.
 export const orders = pgTable(
@@ -28,6 +28,7 @@ export const orders = pgTable(
     marketplaceOrderId: varchar("marketplace_order_id", { length: 128 }).notNull(),
     marketplace: marketplaceEnum("marketplace").notNull(),
     status: varchar("status", { length: 64 }), // UNPAID, AWAITING_SHIPMENT, ...
+    fulfillmentStatus: fulfillmentStatusEnum("fulfillment_status").notNull().default("masuk"),
     buyerName: varchar("buyer_name", { length: 255 }),
     buyerPhone: varchar("buyer_phone", { length: 32 }),
     shippingAddress: jsonb("shipping_address"),
