@@ -128,6 +128,21 @@ Algoritma HMAC di atas "best-effort" per dokумentasi TikTok/Shopee + CLAUDE2.m
 ### Catatan
 - `pnpm db:generate` / `pnpm -r typecheck` / `pnpm --filter <app> build` semua kena pnpm deps-status-check di mesin ini → pakai langsung: `npx drizzle-kit generate`, `npx tsc --noEmit`, `npx nest build`, `npx vite build`.
 
+---
+
+## Sesi 8 — 2026-06-22 (Pendaftaran URL webhook — kesiapan endpoint)
+
+Pendaftaran URL webhook = **aksi manual owner di dashboard marketplace** (tak bisa via AI). Yang sudah disiapkan & diverifikasi:
+- Endpoint publik SIAP: `POST https://apitoko.cosger.online/api/webhooks/{tiktok,shopee}` → tanpa auth 401, dengan `?secret=` 200. GET → 404 (marketplace pakai POST; tidak ada GET-challenge yang dibutuhkan).
+- **URL untuk didaftarkan** (pakai `?secret={WEBHOOK_INGEST_SECRET}` — jalur paling andal; native sig juga aktif sbg bonus):
+  - TikTok: `https://apitoko.cosger.online/api/webhooks/tiktok?secret={WEBHOOK_INGEST_SECRET}`
+  - Shopee: `https://apitoko.cosger.online/api/webhooks/shopee?secret={WEBHOOK_INGEST_SECRET}`
+  - Nilai `{WEBHOOK_INGEST_SECRET}` ada di server `.env` + Mac `/tmp/autotoko_new_secrets.txt` (JANGAN commit ke git).
+- **Owner action**:
+  - TikTok Partner Center (app "Jassa") → Manage App → Webhooks/Notifications → set Callback URL di atas → subscribe event order (Order Status Update, dll). App masih DRAFT → tes pakai Development Shop.
+  - Shopee: **belum bisa** — `shopee_partner_key/partner_id` belum diisi di Admin CMS. Set dulu, baru daftarkan Push URL (Shopee push URL bersifat GLOBAL per partner_id — hati-hati bila partner_id dipakai bersama project lain).
+- Setelah didaftarkan: saat order masuk, webhook → `orders` upsert (fulfillment_status default `masuk`) + fee per-tx terpotong. Native sig TikTok masih perlu validasi vs webhook asli (jalur `?secret=` aman).
+
 ### ⏳ BELUM dikerjakan (sisa Phase 1 — untuk AI berikutnya)
 - **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
 - **Postgres RLS** pada tabel tenant (sekarang isolasi hanya app-layer `user_id`).
