@@ -94,6 +94,27 @@ Isi **`tiktok_service_id`** di Admin CMS (`https://viewtoko.cosger.online/admin/
 ### ℹ️ Catatan owner (bukan bug)
 - App masih **DRAFT** → seller online biasa belum bisa authorize. Untuk tes pakai **Development Shop** (partner.tiktokshop.com → Development Shops → buat Seller Center test account → langsung approve, tak butuh link). Setelah app di-publish (review TikTok), seller umum baru bisa.
 
+---
+
+## Sesi 6 — 2026-06-22 (Pipeline order: webhook signature verification)
+
+Owner sudah ganti Redirect URL "Jassa" di Partner Center → `https://apitoko.cosger.online/api/shops/callback/tiktok`. Fokus: perkuat pipeline order marketplace.
+
+### ✅ SELESAI & terverifikasi live (HEAD `77d4155`, pushed)
+- **Native webhook HMAC verification** (`webhook-verifier.service.ts` + controller). Webhook diterima bila **`?secret=` valid (jalur n8n/manual) ATAU tanda tangan native valid (jalur marketplace langsung)**; selain itu 401 (fail-closed). Tidak merusak jalur secret lama; menambah penerimaan webhook marketplace asli.
+  - Shopee: `hex(HMAC-SHA256(partner_key, push_url + "|" + raw_body))`
+  - TikTok: `hex(HMAC-SHA256(app_secret, app_key + raw_body))`
+  - `main.ts` aktifkan Fastify `rawBody: true` (sign atas byte mentah). Header tanda tangan dibaca dari `authorization` / `x-tts-signature` / `x-tiktok-signature` / `x-shopee-signature`. Creds dari Admin CMS. Config: `WEBHOOK_PUBLIC_BASE_URL` (default `https://apitoko.cosger.online`), `SHOPEE_PUSH_URL` (opsional).
+- **Verifikasi**: secret→200, tanpa-auth→401, tanda tangan Shopee dummy valid (tanpa secret)→200, tanda tangan salah→401. Data uji dibersihkan.
+
+### ⚠️ Catatan akurasi algoritma (untuk AI berikutnya)
+Algoritma HMAC di atas "best-effort" per dokумentasi TikTok/Shopee + CLAUDE2.md — **belum diuji terhadap webhook marketplace ASLI** (app TikTok masih DRAFT). Saat uji dgn Development Shop / webhook asli: jika ditolak 401, sesuaikan formula/lokasi header di `webhook-verifier.service.ts` (mis. Shopee pakai `Authorization` header = url|body; TikTok header/format bisa beda). Jalur `?secret=` tetap jadi fallback aman selama tuning.
+
+### 🔜 Lanjutan pipeline order yang disarankan (belum dikerjakan)
+- **Order status management**: `PATCH /orders/:id/status`, approve/reject (orders module masih read-only). UI kanban status.
+- **Order pull/sync** via n8n (selain webhook push) — sesuai arsitektur "semua API marketplace lewat n8n".
+- **Daftarkan URL webhook** di dashboard TikTok/Shopee (`apitoko/api/webhooks/{tiktok,shopee}`) — bisa pakai `?secret=` atau native sig.
+
 ### ⏳ BELUM dikerjakan (sisa Phase 1 — untuk AI berikutnya)
 - **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
 - **Postgres RLS** pada tabel tenant (sekarang isolasi hanya app-layer `user_id`).
