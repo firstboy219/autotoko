@@ -27,9 +27,18 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     if (!location.pathname.startsWith("/admin/login")) location.href = "/admin/login";
     throw new ApiError("Unauthorized", res.status);
   }
-  const json = (await res.json().catch(() => null)) as ApiResponse<T> | null;
+  const json = (await res.json().catch(() => null)) as
+    | (ApiResponse<T> & { message?: string | string[] })
+    | null;
   if (!res.ok || !json?.success) {
-    throw new ApiError(json?.error?.message ?? `HTTP ${res.status}`, res.status);
+    // Our ApiResponse uses error.message; NestJS HttpException uses a top-level
+    // `message` (string or string[]). Surface whichever is present.
+    const nest = json?.message;
+    const msg =
+      json?.error?.message ??
+      (Array.isArray(nest) ? nest.join(", ") : nest) ??
+      `HTTP ${res.status}`;
+    throw new ApiError(msg, res.status);
   }
   return json.data as T;
 }

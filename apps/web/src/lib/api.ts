@@ -42,9 +42,19 @@ async function request<T>(
     throw new ApiError("Unauthorized", 401);
   }
 
-  const json = (await res.json().catch(() => null)) as ApiResponse<T> | null;
+  const json = (await res.json().catch(() => null)) as
+    | (ApiResponse<T> & { message?: string | string[] })
+    | null;
   if (!res.ok || !json?.success) {
-    throw new ApiError(json?.error?.message ?? `HTTP ${res.status}`, res.status);
+    // Our ApiResponse uses error.message; NestJS HttpException uses a top-level
+    // `message` (string or string[]). Surface whichever is present so the user
+    // sees the real reason instead of a bare "HTTP 502".
+    const nest = json?.message;
+    const msg =
+      json?.error?.message ??
+      (Array.isArray(nest) ? nest.join(", ") : nest) ??
+      `HTTP ${res.status}`;
+    throw new ApiError(msg, res.status);
   }
   return json.data as T;
 }
