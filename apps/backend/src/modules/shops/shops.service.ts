@@ -59,6 +59,25 @@ export class ShopsService {
     return { shopId: result.shopId, shopName: result.shopName };
   }
 
+  /**
+   * Exchange an auth_code → tokens → persist, WITHOUT the signed-state step.
+   * For admin/sandbox connections started outside our normal flow (e.g. a
+   * sandbox shop authorised from Partner Center). Caller must be trusted (the
+   * controller guards this with JwtAuthGuard + AdminOnly).
+   */
+  async connectManual(
+    userId: string,
+    mp: Marketplace,
+    code: string,
+    shopId?: string,
+  ): Promise<{ shopId: string; shopName?: string }> {
+    const adapter = this.marketplace.getAuthAdapter(mp);
+    const result = await adapter.exchangeToken(code, shopId);
+    await this.saveShop(userId, mp, result);
+    this.logger.log(`Manual connect ${mp} shop ${result.shopId} for user ${userId}`);
+    return { shopId: result.shopId, shopName: result.shopName };
+  }
+
   async listShops(userId: string) {
     const rows = await this.db.select().from(shops).where(eq(shops.userId, userId));
     return rows.map((s) => ({
