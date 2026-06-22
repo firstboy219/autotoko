@@ -77,6 +77,23 @@ Set di Admin CMS (`https://viewtoko.cosger.online/admin/` → Settings, atau PUT
 ### ⚠️ ACTION OWNER (belum bisa dilakukan AI — butuh nilai rahasia)
 Isi **`tiktok_service_id`** di Admin CMS (`https://viewtoko.cosger.online/admin/` → Kredensial & Config → TikTok Shop → field "Service ID / App ID") dengan nilai dari **TikTok Partner Center → App Detail** (numerik, mis. `7431458374265161478`). Setelah itu connect TikTok akan menghasilkan authorize URL valid. `tiktok_app_key`/`tiktok_app_secret` sudah terisi; `tiktok_auth_url` sudah kanonik.
 
+---
+
+## Sesi 5 — 2026-06-22 (TikTok service_id diisi + error UX + temuan blocker redirect)
+
+**Data Partner Center (app "Jassa", dari owner):** Service ID `7561008038686230293`, App Key `6hq6fedc0u5cg`, **Redirect URL = `https://backend-gcp-omniseller-974841669069.asia-southeast2.run.app/api/auth/callback/tiktok`**, status **DRAFT**.
+
+### ✅ SELESAI (HEAD `8480cef`, pushed develop)
+- **`tiktok_service_id` = `7561008038686230293`** diisi di prod Admin CMS (via API). connect/tiktok kini menghasilkan `…/open/authorize?service_id=7561008038686230293&state=…` (verified).
+- **Error UX (#4)**: `apps/web/src/lib/api.ts` + `apps/admin/src/lib/api.ts` kini surface pesan dari body NestJS (`message` string|array), bukan "HTTP 502". Web+admin redeploy.
+
+### 🚨 BLOCKER untuk owner (OAuth round-trip TIDAK akan selesai sampai ini dibetulkan)
+**Redirect URL app "Jassa" di Partner Center menunjuk ke backend OMNISELLER (project lain), BUKAN AutoToko.** Setelah seller approve, TikTok redirect ke omniseller GCP → callback AutoToko (`https://apitoko.cosger.online/api/shops/callback/tiktok`) tak pernah menerima `code`. 
+→ Owner harus ubah **Redirect URL di Partner Center → `https://apitoko.cosger.online/api/shops/callback/tiktok`** (atau buat app TikTok terpisah milik AutoToko). App "Jassa" tampaknya milik project omniseller yang dipinjam (jejak omniseller juga sempat ada di `tiktok_auth_url`, sudah dibersihkan sesi 3).
+
+### ℹ️ Catatan owner (bukan bug)
+- App masih **DRAFT** → seller online biasa belum bisa authorize. Untuk tes pakai **Development Shop** (partner.tiktokshop.com → Development Shops → buat Seller Center test account → langsung approve, tak butuh link). Setelah app di-publish (review TikTok), seller umum baru bisa.
+
 ### ⏳ BELUM dikerjakan (sisa Phase 1 — untuk AI berikutnya)
 - **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
 - **Postgres RLS** pada tabel tenant (sekarang isolasi hanya app-layer `user_id`).
