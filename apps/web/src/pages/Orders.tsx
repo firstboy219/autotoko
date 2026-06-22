@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
@@ -43,8 +43,11 @@ const FS_COLOR: Record<string, string> = {
 
 const PAGE_SIZE = 15;
 
+type ViewMode = "tabel" | "kanban";
+
 export function Orders() {
   const { data, loading, reload } = useFetch<Order[]>("/orders");
+  const [view, setView] = useState<ViewMode>("tabel");
   const [q, setQ] = useState("");
   const [mp, setMp] = useState("");
   const [fs, setFs] = useState("");
@@ -54,27 +57,46 @@ export function Orders() {
   const all = data ?? [];
   const marketplaces = useMemo(() => [...new Set(all.map((o) => o.marketplace))], [all]);
 
+  // Shared search + marketplace filter for both views. The fulfillment-status
+  // dropdown only applies to the table view (each Kanban column is a status).
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return all.filter((o) => {
       if (mp && o.marketplace !== mp) return false;
-      if (fs && o.fulfillmentStatus !== fs) return false;
+      if (view === "tabel" && fs && o.fulfillmentStatus !== fs) return false;
       if (needle) {
         const hay = `${o.marketplaceOrderId} ${o.buyerName ?? ""}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
     });
-  }, [all, q, mp, fs]);
+  }, [all, q, mp, fs, view]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
   const rows = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
   const selClass = "px-3 py-2 rounded-md border border-slate-200 text-sm bg-white";
 
+  // Keep the live modal order in sync with reloaded data so the board reflects moves.
+  const liveSelected = selected && (all.find((o) => o.id === selected.id) ?? selected);
+
+  async function moveStatus(order: Order, status: string) {
+    await api.patch<Order>(`/orders/${order.id}/status`, { status });
+    reload();
+  }
+
+  const tabBtn = (mode: ViewMode, label: string) =>
+    `px-3 py-2 rounded-md text-sm font-semibold border ${
+      view === mode ? "bg-brand text-white border-brand" : "bg-white text-slate-600 border-slate-200"
+    }`;
+
   return (
     <Layout title="Orders">
       <div className="flex flex-wrap gap-2 mb-3">
+        <div className="flex gap-1">
+          <button className={tabBtn("tabel", "Tabel")} onClick={() => setView("tabel")}>Tabel</button>
+          <button className={tabBtn("kanban", "Kanban")} onClick={() => setView("kanban")}>Kanban</button>
+        </div>
         <input
           className="flex-1 min-w-[180px] px-3 py-2 rounded-md border border-slate-200 text-sm"
           placeholder="Cari order ID / pembeli…"
@@ -85,12 +107,22 @@ export function Orders() {
           <option value="">Semua marketplace</option>
           {marketplaces.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
-        <select className={selClass} value={fs} onChange={(e) => { setFs(e.target.value); setPage(0); }}>
-          <option value="">Semua status</option>
-          {ALL_FS.map((s) => <option key={s} value={s}>{FS_LABEL[s]}</option>)}
-        </select>
+        {view === "tabel" && (
+          <select className={selClass} value={fs} onChange={(e) => { setFs(e.target.value); setPage(0); }}>
+            <option value="">Semua status</option>
+            {ALL_FS.map((s) => <option key={s} value={s}>{FS_LABEL[s]}</option>)}
+          </select>
+        )}
       </div>
 
+      {view === "kanban" ? (
+        <KanbanBoard
+          orders={filtered}
+          loading={loading}
+          onSelect={setSelected}
+          onMove={moveStatus}
+        />
+      ) : (
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -133,8 +165,9 @@ export function Orders() {
           </tbody>
         </table>
       </div>
+      )}
 
-      {filtered.length > PAGE_SIZE && (
+      {view === "tabel" && filtered.length > PAGE_SIZE && (
         <div className="flex items-center justify-between mt-3 text-sm">
           <div className="text-slate-500">{filtered.length} order · hal {safePage + 1}/{pages}</div>
           <div className="flex gap-2">
@@ -144,14 +177,119 @@ export function Orders() {
         </div>
       )}
 
-      {selected && (
+      {liveSelected && (
         <OrderDetail
-          order={selected}
+          order={liveSelected}
           onClose={() => setSelected(null)}
           onChanged={(updated) => { setSelected(updated); reload(); }}
         />
       )}
     </Layout>
+  );
+}
+
+// Kanban: one column per FLOW status, with the two SIDE states appended at the end.
+const KANBAN_COLUMNS = [...FLOW, ...SIDE];
+
+function KanbanBoard({
+  orders,
+  loading,
+  onSelect,
+  onMove,
+}: {
+  orders: Order[];
+  loading: boolean;
+  onSelect: (o: Order) => void;
+  onMove: (o: Order, status: string) => void | Promise<void>;
+}) {
+  const byStatus = useMemo(() => {
+    const map: Record<string, Order[]> = {};
+    for (const s of KANBAN_COLUMNS) map[s] = [];
+    for (const o of orders) (map[o.fulfillmentStatus] ??= []).push(o);
+    return map;
+  }, [orders]);
+
+  if (loading) return <div className="py-6 text-center text-slate-400">Memuat…</div>;
+
+  return (
+    <div className="flex gap-3 overflow-x-auto pb-3">
+      {KANBAN_COLUMNS.map((s) => {
+        const items = byStatus[s] ?? [];
+        return (
+          <div key={s} className="flex-shrink-0 w-64 bg-slate-50 rounded-xl border border-slate-200 flex flex-col">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200">
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${FS_COLOR[s] ?? "bg-slate-100 text-slate-600"}`}>
+                {FS_LABEL[s] ?? s}
+              </span>
+              <span className="text-[11px] font-semibold text-slate-400">{items.length}</span>
+            </div>
+            <div className="p-2 flex flex-col gap-2 min-h-[60px]">
+              {items.length === 0 ? (
+                <div className="text-[11px] text-slate-300 text-center py-3">—</div>
+              ) : (
+                items.map((o) => <KanbanCard key={o.id} order={o} onSelect={onSelect} onMove={onMove} />)
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function KanbanCard({
+  order,
+  onSelect,
+  onMove,
+}: {
+  order: Order;
+  onSelect: (o: Order) => void;
+  onMove: (o: Order, status: string) => void | Promise<void>;
+}) {
+  const idx = FLOW.indexOf(order.fulfillmentStatus as (typeof FLOW)[number]);
+  const prev = idx > 0 ? FLOW[idx - 1] : null;
+  const next = idx >= 0 && idx < FLOW.length - 1 ? FLOW[idx + 1] : null;
+
+  const move = (status: string) => async (e: MouseEvent) => {
+    e.stopPropagation();
+    await onMove(order, status);
+  };
+
+  return (
+    <div
+      className="bg-white rounded-lg border border-slate-200 p-2.5 cursor-pointer hover:border-brand hover:shadow-sm"
+      onClick={() => onSelect(order)}
+    >
+      <div className="flex items-center justify-between mb-1">
+        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded capitalize ${MP_COLORS[order.marketplace] ?? "bg-slate-100 text-slate-600"}`}>
+          {order.marketplace}
+        </span>
+        <span className="font-mono text-[10px] text-slate-400">{order.marketplaceOrderId}</span>
+      </div>
+      <div className="text-sm font-medium truncate">{order.buyerName ?? "-"}</div>
+      <div className="flex items-center justify-between mt-1">
+        <span className="text-xs font-semibold">{rupiah(order.totalAmount)}</span>
+        <span className="text-[10px] text-slate-400">{dateShort(order.createdAt)}</span>
+      </div>
+      {(prev || next) && (
+        <div className="flex gap-1 mt-2">
+          {prev ? (
+            <button
+              onClick={move(prev)}
+              title={`Kembali ke ${FS_LABEL[prev]}`}
+              className="flex-1 px-2 py-1 rounded border border-slate-200 text-[11px] text-slate-500 hover:bg-slate-50"
+            >◀</button>
+          ) : <span className="flex-1" />}
+          {next ? (
+            <button
+              onClick={move(next)}
+              title={`Lanjut ke ${FS_LABEL[next]}`}
+              className="flex-1 px-2 py-1 rounded border border-slate-200 text-[11px] text-brand hover:bg-slate-50"
+            >▶</button>
+          ) : <span className="flex-1" />}
+        </div>
+      )}
+    </div>
   );
 }
 
