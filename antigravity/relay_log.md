@@ -111,9 +111,22 @@ Owner sudah ganti Redirect URL "Jassa" di Partner Center → `https://apitoko.co
 Algoritma HMAC di atas "best-effort" per dokумentasi TikTok/Shopee + CLAUDE2.md — **belum diuji terhadap webhook marketplace ASLI** (app TikTok masih DRAFT). Saat uji dgn Development Shop / webhook asli: jika ditolak 401, sesuaikan formula/lokasi header di `webhook-verifier.service.ts` (mis. Shopee pakai `Authorization` header = url|body; TikTok header/format bisa beda). Jalur `?secret=` tetap jadi fallback aman selama tuning.
 
 ### 🔜 Lanjutan pipeline order yang disarankan (belum dikerjakan)
-- **Order status management**: `PATCH /orders/:id/status`, approve/reject (orders module masih read-only). UI kanban status.
 - **Order pull/sync** via n8n (selain webhook push) — sesuai arsitektur "semua API marketplace lewat n8n".
 - **Daftarkan URL webhook** di dashboard TikTok/Shopee (`apitoko/api/webhooks/{tiktok,shopee}`) — bisa pakai `?secret=` atau native sig.
+- **Kanban board** (opsional) — sekarang UI status berupa tabel+badge+filter+modal; bisa diupgrade ke kanban drag-drop.
+
+---
+
+## Sesi 7 — 2026-06-22 (Pipeline order: fulfillment status management + UI)
+
+### ✅ SELESAI & terverifikasi live (HEAD `e4c9c0b`, pushed)
+- **Status fulfillment internal** (terpisah dari `orders.status` mentah marketplace). Enum `fulfillment_status`: masuk→approved→produksi→packing→siap_kirim→dikirim→selesai (+retur, dibatalkan). Kolom `orders.fulfillment_status` default `masuk`. **Migration `0002_tricky_marvel_boy.sql` diterapkan ke DB live** via tunnel (additive: enum + kolom).
+- **Backend**: `PATCH /api/orders/:id/status` (multi-tenant, divalidasi `@IsIn`). `OrdersService.updateStatus` + ekspor `FULFILLMENT_STATUSES`.
+- **UI** (`apps/web/src/pages/Orders.tsx`): kolom badge "Status Proses" + filter status; modal detail dengan tombol cepat **Setujui/Tolak** (saat masuk), **Lanjut → tahap berikut**, dan select manual ke status apa pun. Reload list setelah ubah.
+- **Verifikasi**: order baru default `masuk`; PATCH→`approved` 200; status invalid→400. Data uji dibersihkan.
+
+### Catatan
+- `pnpm db:generate` / `pnpm -r typecheck` / `pnpm --filter <app> build` semua kena pnpm deps-status-check di mesin ini → pakai langsung: `npx drizzle-kit generate`, `npx tsc --noEmit`, `npx nest build`, `npx vite build`.
 
 ### ⏳ BELUM dikerjakan (sisa Phase 1 — untuk AI berikutnya)
 - **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
