@@ -22,7 +22,41 @@ interface OrderEvent {
   totalAmount?: string;
   items?: unknown;
   payload: unknown;
+  /**
+   * Auth-lifecycle side effect to run during processing (instead of upsertOrder).
+   * "disconnect"  -> set shopStatus = "disconnected" (TikTok seller deauthorisation).
+   * "auth_expire" -> log a warning that the token needs refreshing (no state change).
+   */
+  authAction?: "disconnect" | "auth_expire";
 }
+
+/**
+ * TikTok Shop webhook `type` is a NUMBER (not a string). Map it to a readable
+ * label. Types currently subscribed in Partner Center are covered; unknown
+ * numeric types fall back to `type_<n>`.
+ */
+const TIKTOK_EVENT_TYPE_LABELS: Record<number, string> = {
+  2: "reverse",
+  3: "recipient_address",
+  4: "package_update",
+  5: "product",
+  6: "seller_deauthorisation",
+  7: "auth_expire",
+  11: "cancellation",
+  12: "order_return",
+  15: "product",
+  16: "product",
+  17: "product",
+  18: "product",
+  27: "inventory",
+  64: "aftersales_request",
+  65: "rma",
+  67: "aftersales_refund",
+  68: "inventory",
+};
+
+/** TikTok numeric types that carry order-lifecycle info worth upserting. */
+const TIKTOK_ORDER_EVENT_TYPES = new Set([2, 4, 11, 12, 64, 65, 67]);
 
 @Injectable()
 export class WebhooksService {
@@ -33,23 +67,55 @@ export class WebhooksService {
     private readonly wallet: WalletService,
   ) {}
 
-  /** TikTok Order Status webhook (PRD Bagian 8.1). */
+  /**
+   * TikTok Shop webhook (PRD Bagian 8.1).
+   *
+   * The `type` field is a NUMBER, not a string. There is NO "Order Status
+   * Update (type 1)"; order lifecycle is represented by types 4/11/12/64/65/67.
+   * We map the numeric type to a readable label, extract a best-effort order id
+   * for order-related types, and handle auth-lifecycle types (6/7) as side
+   * effects through the shared ingest()/dedup path.
+   */
   async handleTikTok(payload: any): Promise<unknown> {
     const data = payload?.data ?? {};
+    const rawType = payload?.type;
+    const typeNum = Number(rawType);
+    const eventType = Number.isFinite(typeNum)
+      ? (TIKTOK_EVENT_TYPE_LABELS[typeNum] ?? `type_${typeNum}`)
+      : String(rawType ?? "unknown");
+
     const mpShopId = String(payload?.shop_id ?? data.shop_id ?? "");
-    const orderId = String(data.order_id ?? "");
-    const status = String(data.order_status ?? payload?.type ?? "");
+
+    // Best-effort order id — TikTok puts it in several places depending on type.
+    const orderId = String(
+      data.order_id ?? data.order_sn ?? data.order_list?.[0]?.order_id ?? "",
+    );
+    // Best-effort status; fall back to the readable event label.
+    const status = String(data.order_status ?? data.package_status ?? eventType);
+
+    // Stable + unique dedup id. Prefer the provider's notification id when present.
+    const eventId = payload?.tts_notification_id
+      ? `tiktok:${String(payload.tts_notification_id)}`
+      : `tiktok:${typeNum}:${orderId}:${status}:${payload?.timestamp ?? ""}`;
+
+    let authAction: OrderEvent["authAction"];
+    if (typeNum === 6) authAction = "disconnect";
+    else if (typeNum === 7) authAction = "auth_expire";
+
     return this.ingest({
       marketplace: "tiktok",
-      eventType: String(payload?.type ?? "ORDER_STATUS"),
-      eventId: `tiktok:${payload?.type ?? "evt"}:${orderId}:${status}:${payload?.timestamp ?? ""}`,
+      eventType,
+      eventId,
       mpShopId,
-      orderId,
+      // Only treat as an order event for order-lifecycle types; otherwise leave
+      // orderId blank so ingest() just records the event without upserting.
+      orderId: TIKTOK_ORDER_EVENT_TYPES.has(typeNum) ? orderId : "",
       status,
       buyerName: data.buyer_name,
       totalAmount: data.payment?.total_amount ? String(data.payment.total_amount) : undefined,
       items: data.line_items,
       payload,
+      authAction,
     });
   }
 
@@ -98,7 +164,10 @@ export class WebhooksService {
     let result: Record<string, unknown> = { recorded: true };
     let errorMessage: string | undefined;
     try {
-      if (!shop) {
+      if (e.authAction) {
+        // Auth-lifecycle side effect runs even when no order is involved.
+        result = await this.handleAuthLifecycle(shop, e);
+      } else if (!shop) {
         result = { skipped: "shop_not_connected", mpShopId: e.mpShopId };
       } else if (e.orderId) {
         result = await this.upsertOrder(shop, e);
@@ -114,6 +183,38 @@ export class WebhooksService {
       .where(eq(webhookEvents.id, eventRowId));
 
     return { ...result, error: errorMessage };
+  }
+
+  /**
+   * Auth-lifecycle side effects (TikTok types 6 & 7). Operates strictly by
+   * marketplace + shopId for multi-tenant safety.
+   *
+   * - "disconnect" (type 6, seller deauthorisation): mark the shop disconnected.
+   * - "auth_expire" (type 7): only log a warning. We deliberately do NOT mutate
+   *   shopStatus here — an expired access token is recoverable via refresh, so
+   *   flipping the shop to "deactivated" would be surprising/destructive state.
+   */
+  private async handleAuthLifecycle(
+    shop: typeof shops.$inferSelect | undefined,
+    e: OrderEvent,
+  ): Promise<Record<string, unknown>> {
+    if (e.authAction === "auth_expire") {
+      this.logger.warn(
+        `TikTok auth expired for shop ${e.mpShopId} — access token needs refresh.`,
+      );
+      return { authAction: "auth_expire", shop: shop?.id, action: "logged" };
+    }
+
+    // "disconnect"
+    if (!shop) {
+      return { authAction: "disconnect", skipped: "shop_not_connected", mpShopId: e.mpShopId };
+    }
+    await this.db
+      .update(shops)
+      .set({ shopStatus: "disconnected" })
+      .where(and(eq(shops.marketplace, e.marketplace), eq(shops.shopId, e.mpShopId)));
+    this.logger.warn(`TikTok shop ${e.mpShopId} deauthorised — marked disconnected.`);
+    return { authAction: "disconnect", shop: shop.id, action: "disconnected" };
   }
 
   private async upsertOrder(shop: typeof shops.$inferSelect, e: OrderEvent) {
