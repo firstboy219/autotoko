@@ -143,6 +143,17 @@ Pendaftaran URL webhook = **aksi manual owner di dashboard marketplace** (tak bi
   - Shopee: **belum bisa** — `shopee_partner_key/partner_id` belum diisi di Admin CMS. Set dulu, baru daftarkan Push URL (Shopee push URL bersifat GLOBAL per partner_id — hati-hati bila partner_id dipakai bersama project lain).
 - Setelah didaftarkan: saat order masuk, webhook → `orders` upsert (fulfillment_status default `masuk`) + fee per-tx terpotong. Native sig TikTok masih perlu validasi vs webhook asli (jalur `?secret=` aman).
 
+### 🔑 TEMUAN dari Chrome extension (Partner Center, app "Jassa")
+- **TikTok MENOLAK `?secret=`** di callback URL (error "internal error"). URL tersimpan = `https://apitoko.cosger.online/api/webhooks/tiktok` (TANPA secret). → webhook TikTok asli **HANYA** bisa lewat **verifikasi tanda tangan native** (bukan `?secret=`).
+- Event toggles belum diaktifkan (butuh klik manual di UI). Owner harus aktifkan: Type 4 Package Update, Type 6 Seller Deauthorisation, Type 7 Auth Expire, Type 11 Cancellation, Type 12 Order return (+ Reverse/Recipient sesuai kebutuhan).
+- Redirect URL Partner Center sudah benar: `https://apitoko.cosger.online/api/shops/callback/tiktok`. Service ID `7561008038686230293`, App Key `6hq6fedc0u5cg` (di CMS).
+
+### ✅ Sesi 9 (HEAD `74672e8`): TikTok sig native diperkuat + mode debug
+- `verifyTikTok`/`verifyShopee` kini coba beberapa varian HMAC (terima bila salah satu cocok; tetap butuh secret key). TikTok candidates: `appkey_body` = HMAC(app_secret, app_key+body), `body_only`, `secret_wrapped`. Log nama varian yang cocok.
+- **`WEBHOOK_DEBUG=true`** (sudah diset di server .env) → saat verifikasi gagal, log: tanda tangan diterima vs computed candidates + header kandidat (sign/auth/tts/…) + panjang body. Tujuan: tangkap test event asli dari Development Shop untuk kunci formula. **Matikan lagi (`WEBHOOK_DEBUG=false`) setelah formula terkonfirmasi.**
+- **NEXT (butuh owner)**: aktifkan event toggles + kirim test event dari Development Shop → AI cek `pm2 logs autotoko-backend` untuk lihat varian mana yang match / sesuaikan `webhook-verifier.service.ts` bila tak ada yang match.
+- Catatan: event auth-lifecycle (Type 6 Deauth, Type 7 Auth Expire) payload-nya bukan order → saat ini hanya terekam di `webhook_events` (handler order skip). Handling deauth (tandai shop disconnected) = enhancement berikutnya.
+
 ### ⏳ BELUM dikerjakan (sisa Phase 1 — untuk AI berikutnya)
 - **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
 - **Postgres RLS** pada tabel tenant (sekarang isolasi hanya app-layer `user_id`).
