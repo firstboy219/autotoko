@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Logger,
   Post,
   Query,
   Req,
@@ -23,11 +24,26 @@ import { WebhookVerifierService } from "./webhook-verifier.service.js";
  */
 @Controller("webhooks")
 export class WebhooksController {
+  private readonly logger = new Logger(WebhooksController.name);
+
   constructor(
     private readonly webhooks: WebhooksService,
     private readonly verifier: WebhookVerifierService,
     private readonly config: ConfigService,
   ) {}
+
+  /** Dump candidate signature headers + body length to help lock the real algo. */
+  private debugDump(mp: Marketplace, req: RawBodyRequest<FastifyRequest>): void {
+    if (this.config.get<string>("WEBHOOK_DEBUG") !== "true") return;
+    const h = req.headers;
+    const interesting = Object.keys(h).filter((k) =>
+      /sign|auth|tts|tiktok|shopee|secret/i.test(k),
+    );
+    const dump = interesting.map((k) => `${k}=${String(h[k]).slice(0, 24)}…`).join("  ");
+    this.logger.warn(
+      `[WEBHOOK_DEBUG ${mp}] bodyLen=${req.rawBody?.length ?? 0} headers: ${dump || "<none matched>"}`,
+    );
+  }
 
   private signatureHeader(req: FastifyRequest): string | undefined {
     const h = req.headers;
@@ -57,6 +73,7 @@ export class WebhooksController {
         : await this.verifier.verifyShopee(req.rawBody, sig);
     if (ok) return;
 
+    this.debugDump(mp, req);
     throw new UnauthorizedException(
       "Webhook authentication failed: no valid ?secret= and no valid signature",
     );
