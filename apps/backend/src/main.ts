@@ -12,6 +12,9 @@ async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({ trustProxy: true }),
+    // rawBody is needed to verify marketplace webhook HMAC signatures over the
+    // exact bytes received (parsed JSON would re-serialize differently).
+    { rawBody: true },
   );
 
   app.setGlobalPrefix("api");
