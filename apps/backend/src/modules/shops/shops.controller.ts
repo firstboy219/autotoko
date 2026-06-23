@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Logger,
   Param,
@@ -60,14 +61,29 @@ export class ShopsController {
     return { success: true, data: await this.shops.listShops(uid(req)) };
   }
 
+  // Requires a valid JWT (401 otherwise) — the connecting user's id is taken
+  // from the token, never a fallback. Admins may pass ?userId=<uuid> to generate
+  // a connect URL on behalf of a specific user (state.sub bound to that user).
   @Get("connect/:marketplace")
   @UseGuards(JwtAuthGuard)
   async connect(
     @Param("marketplace") marketplace: string,
+    @Query("userId") userIdOverride: string | undefined,
     @Req() req: FastifyRequest,
   ): Promise<ApiResponse<{ authUrl: string }>> {
     const mp = assertMarketplace(marketplace);
-    return { success: true, data: await this.shops.getConnectUrl(uid(req), mp) };
+    const caller = (req as FastifyRequest & { user: JwtPayload }).user;
+    let targetUser = caller.sub;
+    if (userIdOverride) {
+      if (caller.role !== "admin") {
+        throw new ForbiddenException("Only admins may connect on behalf of another user");
+      }
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userIdOverride)) {
+        throw new BadRequestException("Invalid userId");
+      }
+      targetUser = userIdOverride;
+    }
+    return { success: true, data: await this.shops.getConnectUrl(targetUser, mp) };
   }
 
   /**
