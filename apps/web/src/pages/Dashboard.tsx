@@ -64,12 +64,39 @@ interface Summary {
   total_revenue: string;
 }
 
+interface DashAlerts {
+  low_stock: { id: string; name: string; current: number; min: number; unit: string | null }[];
+  low_wallet: { balance: number; threshold: number } | null;
+  expiring_tokens: { shop_id: string; shop_name: string | null; expires_at: string }[];
+}
+
+function AlertCards({ a }: { a: DashAlerts | null }) {
+  if (!a) return null;
+  const cards: { key: string; text: string; to: string }[] = [];
+  if (a.low_stock.length)
+    cards.push({ key: "stock", to: "/bom", text: `🧪 ${a.low_stock.length} bahan baku stok menipis: ${a.low_stock.slice(0, 3).map((s) => s.name).join(", ")}` });
+  if (a.low_wallet)
+    cards.push({ key: "wallet", to: "/wallet", text: `💳 Saldo wallet rendah: ${rupiah(a.low_wallet.balance)} (min ${rupiah(a.low_wallet.threshold)})` });
+  if (a.expiring_tokens.length)
+    cards.push({ key: "token", to: "/toko", text: `🔑 ${a.expiring_tokens.length} token toko akan kedaluwarsa: ${a.expiring_tokens.map((t) => t.shop_name ?? t.shop_id).join(", ")}` });
+  if (!cards.length) return null;
+  return (
+    <div className="space-y-2 mb-3">
+      {cards.map((c) => (
+        <Link key={c.key} to={c.to} className="block rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium px-4 py-2.5 hover:bg-amber-100">
+          {c.text} <span className="underline">→</span>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 export function Dashboard() {
   const wallet = useFetch<{ balance: string }>("/wallet");
   const summary = useFetch<Summary>("/dashboard/summary");
   const products = useFetch<unknown[]>("/products");
   const orders = useFetch<Order[]>("/orders");
-  const alerts = useFetch<{ id: string; materialName: string; currentStock: string; unit: string | null }[]>("/bom/alerts");
+  const alerts = useFetch<DashAlerts>("/dashboard/alerts");
 
   useRealtime(
     useCallback(() => {
@@ -83,6 +110,7 @@ export function Dashboard() {
 
   return (
     <Layout title="Dashboard">
+      <AlertCards a={alerts.data} />
       <div className="grid grid-cols-4 gap-3">
         <Stat icon="📦" label="Order Hari Ini" value={String(summary.data?.today_orders ?? 0)} sub={`total ${summary.data?.total_orders ?? 0} sepanjang waktu`} />
         <Stat icon="📈" label="Revenue Hari Ini" value={rupiah(summary.data?.today_revenue)} sub={`total ${rupiah(summary.data?.total_revenue)}`} />
@@ -102,19 +130,6 @@ export function Dashboard() {
             <Link to="/produk" className="px-3 py-2 rounded-md bg-brand/10 text-brand text-sm font-semibold hover:bg-brand/20">+ Master Produk</Link>
             <Link to="/wallet" className="px-3 py-2 rounded-md bg-brand/10 text-brand text-sm font-semibold hover:bg-brand/20">+ Top-up Saldo</Link>
           </div>
-          {(alerts.data?.length ?? 0) > 0 && (
-            <div className="mt-3 pt-3 border-t border-slate-100">
-              <Link to="/bom" className="font-bold text-sm text-red-600">⚠️ Peringatan Stok ({alerts.data!.length})</Link>
-              <div className="mt-1 space-y-1">
-                {alerts.data!.slice(0, 4).map((a) => (
-                  <div key={a.id} className="text-[11px] text-slate-500 flex justify-between">
-                    <span>{a.materialName}</span>
-                    <span className="text-red-600 font-semibold">{a.currentStock} {a.unit}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
 

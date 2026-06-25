@@ -17,4 +17,9 @@ export class DashboardController {
   async summary(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.dashboard.summary(uid(req)) };
   }
+
+  @Get("alerts")
+  async alerts(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.dashboard.alerts(uid(req)) };
+  }
 }

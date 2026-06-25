@@ -295,9 +295,72 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
                 </div>
               ))
             )}
+
+            <MasterBom masterId={id} masterName={data.name} />
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+interface BomLite {
+  id: string;
+  masterProductId: string;
+  materialName: string;
+  quantity: string;
+  unit: string | null;
+  currentStock: string;
+  minimumThreshold: string;
+  lowStock: boolean;
+}
+
+/** BOM materials linked to this master product (read + quick add). */
+function MasterBom({ masterId, masterName }: { masterId: string; masterName: string }) {
+  const { data, reload } = useFetch<BomLite[]>("/bom");
+  const linked = (data ?? []).filter((b) => b.masterProductId === masterId);
+  const [show, setShow] = useState(false);
+  const [name, setName] = useState("");
+  const [qty, setQty] = useState("");
+  const [unit, setUnit] = useState("pcs");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault(); setBusy(true); setErr(null);
+    try {
+      await api.post("/bom", { masterProductId: masterId, materialName: name, quantity: qty, unit: unit || undefined });
+      setShow(false); setName(""); setQty(""); reload();
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="mt-4 pt-3 border-t border-slate-100">
+      <div className="flex items-center justify-between mb-2">
+        <div className="font-bold text-sm">Bahan Baku (BOM)</div>
+        <button onClick={() => setShow(!show)} className="text-xs text-brand font-semibold">+ Tambah bahan</button>
+      </div>
+      {show && (
+        <form onSubmit={add} className="mb-2 grid grid-cols-4 gap-2 bg-slate-50 rounded-lg p-2">
+          <input className="col-span-2 px-2 py-1.5 rounded-md border border-slate-200 text-sm" placeholder="Nama bahan" value={name} onChange={(e) => setName(e.target.value)} required />
+          <input className="px-2 py-1.5 rounded-md border border-slate-200 text-sm" placeholder="Qty/produk" value={qty} onChange={(e) => setQty(e.target.value)} required />
+          <input className="px-2 py-1.5 rounded-md border border-slate-200 text-sm" placeholder="Satuan" value={unit} onChange={(e) => setUnit(e.target.value)} />
+          <button disabled={busy} className="col-span-4 px-3 py-1.5 rounded-md bg-brand text-white text-xs font-semibold disabled:opacity-60">Tambah ke {masterName}</button>
+          {err && <div className="col-span-4 text-red-500 text-xs">{err}</div>}
+        </form>
+      )}
+      {!linked.length ? (
+        <div className="text-slate-400 text-xs py-2">Belum ada bahan baku. Tambahkan agar stok auto-deduct saat order masuk.</div>
+      ) : (
+        <div className="border border-slate-100 rounded-lg divide-y divide-slate-100">
+          {linked.map((b) => (
+            <div key={b.id} className={`flex items-center justify-between px-3 py-2 text-sm ${b.lowStock ? "bg-red-50" : ""}`}>
+              <div>{b.materialName} <span className="text-[10px] text-slate-400">{b.quantity}{b.unit}/produk</span></div>
+              <div className="text-[11px]">stok <b className={b.lowStock ? "text-red-600" : ""}>{b.currentStock}</b> / min {b.minimumThreshold}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
