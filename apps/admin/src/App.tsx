@@ -3,6 +3,7 @@ import { useAuth } from "./lib/auth";
 import { Login } from "./pages/Login";
 import { Settings } from "./pages/Settings";
 import { Pricing } from "./pages/Pricing";
+import { AiAutopilot } from "./pages/AiAutopilot";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const authed = useAuth((s) => s.authenticated);
@@ -16,6 +17,7 @@ export function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/settings" element={<Protected><Settings /></Protected>} />
         <Route path="/pricing" element={<Protected><Pricing /></Protected>} />
+        <Route path="/ai" element={<Protected><AiAutopilot /></Protected>} />
         <Route path="*" element={<Navigate to="/settings" replace />} />
       </Routes>
     </BrowserRouter>

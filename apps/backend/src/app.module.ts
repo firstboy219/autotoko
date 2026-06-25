@@ -13,6 +13,7 @@ import { BillingModule } from "./modules/billing/billing.module.js";
 import { WebhooksModule } from "./modules/webhooks/webhooks.module.js";
 import { OrdersModule } from "./modules/orders/orders.module.js";
 import { BomModule } from "./modules/bom/bom.module.js";
+import { AiModule } from "./modules/ai/ai.module.js";
 import { DashboardModule } from "./modules/dashboard/dashboard.module.js";
 import { HealthModule } from "./modules/health/health.module.js";
 
@@ -35,6 +36,7 @@ import { HealthModule } from "./modules/health/health.module.js";
     WebhooksModule,
     OrdersModule,
     BomModule,
+    AiModule,
     DashboardModule,
     HealthModule,
   ],

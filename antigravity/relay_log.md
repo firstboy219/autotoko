@@ -262,3 +262,26 @@ Dibangun di atas schema `bom_items` AKTUAL (TANPA migration): kolom `master_prod
 - `typecheck` semua workspace hijau. Build backend & admin OK.
 - Admin & web pakai API path relatif `/api` (proxy nginx) — aman lintas-domain.
 - DB: 18 tabel live di `autotoko`. Migration runner: `node dist/database/migrate.js`. Generate migration baru lokal dgn drizzle-kit lalu jalankan runner di server (tunnel `infra/scripts/db-tunnel.sh --bg` → localhost:15432).
+
+---
+
+## Sesi 16 — 2026-06-26 (AI Autopilot — provider per-fitur via CMS)
+
+Owner pilih fitur #1 (AI autopilot) dgn syarat: **provider/model AI dipilih PER FITUR dari Admin CMS** (mis. auto-chat-pembeli→Gemini, auto-chat-affiliator→OpenAI, auto-approve→Claude). Selesai (kode + build + boot-test rute). E2E AI call MENUNGGU owner isi API key di CMS.
+
+### ✅ Backend — modul `ai` (`apps/backend/src/modules/ai/`)
+- `ai.types.ts` — provider (`anthropic|openai|gemini`), 5 fitur (`buyer_chat, affiliate_chat, review_reply, auto_approve, product_optimize`), default model per provider, mapping key API (`anthropic_api_key|openai_api_key|gemini_api_key`).
+- `ai-providers.ts` — caller stateless per vendor pakai global `fetch` (Node 24): Anthropic Messages API, OpenAI Chat Completions, Gemini generateContent. Normalisasi → `complete({system,messages,maxTokens,temperature})`.
+- `ai-provider.service.ts` — `resolveConfig(feature)` baca `ai_feature_<feat>_provider` + `ai_feature_<feat>_model` dari `admin_settings`, fallback ke global `ai_provider/ai_model`, lalu default per provider. `complete(feature,…)` ambil key provider (encrypted) → dispatch; lempar 502 jelas bila key kosong/gagal. `featureStatus()` utk UI CMS (config tiap fitur + apakah key provider terisi).
+- `ai.service.ts` — fitur autopilot: `buyerChat`, `affiliateChat`, `reviewReply`, `autoApprove` (JSON verdict, default tolak bila tak ter-parse), `optimizeProduct` (JSON {title,description}). Semua pakai `complete(feature,…)` → provider per fitur.
+- `ai.controller.ts` (`/api/ai`, JwtAuthGuard): `GET /features` + `PUT /features/:feature` (AdminOnly) utk konfigurasi; `POST /buyer-chat|affiliate-chat|review-reply|auto-approve|optimize-product`.
+- Terdaftar di `app.module.ts`. **Boot-test lokal: 7 rute `/api/ai/*` ter-map, app start sukses** (DI resolve AdminSettings/Auth). typecheck BE hijau, `nest build` hijau.
+
+### ✅ Frontend — Admin CMS `AiAutopilot.tsx`
+- Halaman baru (nav 🤖 "AI Autopilot", route `/admin/ai`). Tiap fitur: dropdown provider + input model (auto-isi default saat ganti provider) → `PUT /ai/features/:feature`. Peringatan kuning bila API key provider belum diisi. Section "API Key Provider" (anthropic/openai/gemini → `PUT /admin/settings/:key`, encrypted). Box "Uji Coba" (kirim ke `buyer-chat`) utk tes key+model. typecheck + `vite build` admin hijau.
+
+### ⏳ Owner / berikutnya
+- **Isi API key** di Admin CMS (≥1 provider) lalu pilih provider per fitur → fitur AI aktif. Tanpa key → endpoint balas 502 jelas.
+- Belum di-deploy (tunnel DB & SSH prod di luar scope sesi ini / diblok auto-mode). Deploy BE+admin sesuai cheatsheet saat siap.
+- `auto_approve`/`buyer_chat` BELUM di-hook otomatis ke webhook order/chat — saat ini endpoint manual; wiring otomatis (gated setting) menyusul bila diinginkan.
+- Default model: anthropic `claude-opus-4-8`, openai `gpt-4o`, gemini `gemini-1.5-pro` (owner bisa ganti di CMS).
