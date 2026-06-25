@@ -238,9 +238,17 @@ Dibangun di atas schema `bom_items` AKTUAL (TANPA migration): kolom `master_prod
 ### Status 4 prioritas owner: SEMUA selesai/terblokir
 1. ✅ WebSocket new_order · 2. ⏳ Shopee (blocked creds) · 3. ✅ Kanban · 4. ✅ BOM auto-deduct.
 
+---
+
+## Sesi 15 — 2026-06-25 (TikTok sig SKIP, dashboard alerts, produk×BOM)
+
+- **Task TikTok sig verify: SKIP** (sesuai instruksi) — `WEBHOOK_DEBUG=true` masih ON, tapi 0 webhook TikTok asli & 0 shops (otorisasi sandbox belum tuntas). Verifier multi-kandidat + debug sudah siap; lock formula saat event asli pertama datang.
+- **Dashboard alerts** (HEAD `3902494`): `GET /api/dashboard/alerts` → `{low_stock[], low_wallet|null, expiring_tokens[]}` (low_stock dari bom_items; wallet < Rp150k; token exp < 3 hari). Frontend: kartu alert amber di atas stats (realtime). Verified.
+- **Master Produk × BOM**: Produk CRUD sudah lengkap (sesi 4). Ditambah section "Bahan Baku (BOM)" di modal detail produk — list bahan ter-link + quick-add (POST /bom). Verified.
+
 ### ⏳ BELUM dikerjakan (sisa Phase 1)
 - Shopee creds + push URL (owner). Order pull via n8n. AI autopilot. RLS. Landing/mobile.
-- WEBHOOK_DEBUG=true masih ON di server (untuk capture sig TikTok asli) — matikan setelah formula terkonfirmasi.
+- WEBHOOK_DEBUG=true masih ON di server — matikan setelah formula sig TikTok terkonfirmasi.
 - **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
 - **Postgres RLS** pada tabel tenant (sekarang isolasi hanya app-layer `user_id`).
 - **Daftarkan URL** webhook + Midtrans notif di dashboard TikTok/Shopee/Midtrans (URL siap di `infra/DEPLOY.md`).
