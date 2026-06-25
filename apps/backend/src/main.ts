@@ -6,6 +6,7 @@ import {
 } from "@nestjs/platform-fastify";
 import { Logger, ValidationPipe } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { IoAdapter } from "@nestjs/platform-socket.io";
 import { AppModule } from "./app.module.js";
 
 async function bootstrap() {
@@ -22,6 +23,9 @@ async function bootstrap() {
     new ValidationPipe({ whitelist: true, transform: true }),
   );
   app.enableCors();
+  // socket.io attaches to the same HTTP server at /socket.io/ (nginx proxies it
+  // with WS upgrade). Used for real-time order push to the dashboard.
+  app.useWebSocketAdapter(new IoAdapter(app));
 
   const config = app.get(ConfigService);
   const port = config.get<number>("PORT", 8080);

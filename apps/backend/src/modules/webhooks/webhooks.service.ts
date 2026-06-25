@@ -10,6 +10,7 @@ import {
   pricingConfig,
 } from "../../database/schema/index.js";
 import { WalletService } from "../billing/wallet.service.js";
+import { EventsGateway } from "../events/events.gateway.js";
 
 interface OrderEvent {
   marketplace: Marketplace;
@@ -65,6 +66,7 @@ export class WebhooksService {
   constructor(
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly wallet: WalletService,
+    private readonly events: EventsGateway,
   ) {}
 
   /**
@@ -227,10 +229,12 @@ export class WebhooksService {
       .limit(1);
 
     if (existing) {
-      await this.db
+      const [updated] = await this.db
         .update(orders)
         .set({ status: e.status, updatedAt: new Date() })
-        .where(eq(orders.id, existing.id));
+        .where(eq(orders.id, existing.id))
+        .returning();
+      this.events.emitOrderUpdate(shop.userId, updated);
       return { order: existing.id, action: "updated", status: e.status };
     }
 
@@ -249,6 +253,8 @@ export class WebhooksService {
       .returning();
 
     const billing = await this.chargeTransactionFee(shop.userId, order!.id);
+    // Real-time push to the seller's dashboard.
+    this.events.emitNewOrder(shop.userId, order);
     return { order: order!.id, action: "created", billing };
   }
 

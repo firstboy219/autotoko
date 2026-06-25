@@ -44,6 +44,7 @@ export const useAuth = create<AuthState>((set) => ({
   },
   logout() {
     clearToken();
+    void import("./realtime").then((m) => m.disconnectSocket());
     set({ authenticated: false });
   },
 }));

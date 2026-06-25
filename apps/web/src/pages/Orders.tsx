@@ -1,6 +1,7 @@
-import { useMemo, useState, type MouseEvent } from "react";
+import { useCallback, useMemo, useState, type MouseEvent } from "react";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
+import { useRealtime } from "../lib/realtime";
 import { api } from "../lib/api";
 import { rupiah, dateShort } from "../lib/fmt";
 
@@ -47,6 +48,7 @@ type ViewMode = "tabel" | "kanban";
 
 export function Orders() {
   const { data, loading, reload } = useFetch<Order[]>("/orders");
+  useRealtime(useCallback(() => reload(), [reload]));
   const [view, setView] = useState<ViewMode>("tabel");
   const [q, setQ] = useState("");
   const [mp, setMp] = useState("");

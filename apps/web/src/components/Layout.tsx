@@ -1,5 +1,7 @@
+import { useCallback, useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { useRealtime } from "../lib/realtime";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: "📊", end: true },
@@ -12,9 +14,29 @@ const NAV = [
 export function Layout({ children, title }: { children: React.ReactNode; title: string }) {
   const navigate = useNavigate();
   const logout = useAuth((s) => s.logout);
+  const [toast, setToast] = useState<string | null>(null);
+
+  useRealtime(
+    useCallback((type) => {
+      if (type === "new_order") setToast("🛒 Pesanan baru masuk!");
+    }, []),
+  );
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   return (
     <div className="flex h-screen overflow-hidden font-sans text-slate-800">
+      {toast && (
+        <div
+          onClick={() => navigate("/orders")}
+          className="fixed top-4 right-4 z-50 cursor-pointer rounded-lg bg-brand text-white text-sm font-semibold px-4 py-3 shadow-lg animate-pulse"
+        >
+          {toast} <span className="underline ml-1">Lihat →</span>
+        </div>
+      )}
       {/* Sidebar */}
       <aside className="w-56 bg-navy flex flex-col flex-shrink-0">
         <div className="flex items-center gap-2 px-4 py-3.5 border-b border-white/10">

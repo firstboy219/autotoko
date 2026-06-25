@@ -1,6 +1,8 @@
+import { useCallback } from "react";
 import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
+import { useRealtime } from "../lib/realtime";
 import { rupiah, dateShort } from "../lib/fmt";
 
 interface Order {
@@ -67,6 +69,13 @@ export function Dashboard() {
   const summary = useFetch<Summary>("/dashboard/summary");
   const products = useFetch<unknown[]>("/products");
   const orders = useFetch<Order[]>("/orders");
+
+  useRealtime(
+    useCallback(() => {
+      summary.reload();
+      orders.reload();
+    }, [summary, orders]),
+  );
 
   const recent = (orders.data ?? []).slice(0, 5);
 
