@@ -11,6 +11,7 @@ import {
 } from "../../database/schema/index.js";
 import { WalletService } from "../billing/wallet.service.js";
 import { EventsGateway } from "../events/events.gateway.js";
+import { BomService } from "../bom/bom.service.js";
 
 interface OrderEvent {
   marketplace: Marketplace;
@@ -67,6 +68,7 @@ export class WebhooksService {
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly wallet: WalletService,
     private readonly events: EventsGateway,
+    private readonly bom: BomService,
   ) {}
 
   /**
@@ -253,9 +255,21 @@ export class WebhooksService {
       .returning();
 
     const billing = await this.chargeTransactionFee(shop.userId, order!.id);
+    // Auto-deduct raw materials (BOM) for the sold items; never blocks the order.
+    let bom: { deducted: number } | { error: string } = { deducted: 0 };
+    try {
+      bom = await this.bom.deductForOrder({
+        id: order!.id,
+        userId: shop.userId,
+        items: e.items,
+      });
+    } catch (err) {
+      bom = { error: (err as Error).message };
+      this.logger.warn(`BOM deduct failed for order ${order!.id}: ${(err as Error).message}`);
+    }
     // Real-time push to the seller's dashboard.
     this.events.emitNewOrder(shop.userId, order);
-    return { order: order!.id, action: "created", billing };
+    return { order: order!.id, action: "created", billing, bom };
   }
 
   /** Per-transaction billing (PRD Bagian 4.3): deduct fee on new order. */

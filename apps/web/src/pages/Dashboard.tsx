@@ -69,12 +69,14 @@ export function Dashboard() {
   const summary = useFetch<Summary>("/dashboard/summary");
   const products = useFetch<unknown[]>("/products");
   const orders = useFetch<Order[]>("/orders");
+  const alerts = useFetch<{ id: string; materialName: string; currentStock: string; unit: string | null }[]>("/bom/alerts");
 
   useRealtime(
     useCallback(() => {
       summary.reload();
       orders.reload();
-    }, [summary, orders]),
+      alerts.reload();
+    }, [summary, orders, alerts]),
   );
 
   const recent = (orders.data ?? []).slice(0, 5);
@@ -100,6 +102,19 @@ export function Dashboard() {
             <Link to="/produk" className="px-3 py-2 rounded-md bg-brand/10 text-brand text-sm font-semibold hover:bg-brand/20">+ Master Produk</Link>
             <Link to="/wallet" className="px-3 py-2 rounded-md bg-brand/10 text-brand text-sm font-semibold hover:bg-brand/20">+ Top-up Saldo</Link>
           </div>
+          {(alerts.data?.length ?? 0) > 0 && (
+            <div className="mt-3 pt-3 border-t border-slate-100">
+              <Link to="/bom" className="font-bold text-sm text-red-600">⚠️ Peringatan Stok ({alerts.data!.length})</Link>
+              <div className="mt-1 space-y-1">
+                {alerts.data!.slice(0, 4).map((a) => (
+                  <div key={a.id} className="text-[11px] text-slate-500 flex justify-between">
+                    <span>{a.materialName}</span>
+                    <span className="text-red-600 font-semibold">{a.currentStock} {a.unit}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
