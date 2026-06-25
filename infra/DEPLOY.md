@@ -28,30 +28,52 @@ self-contained bundle. It reuses the shared **postgres** (`autotoko` DB) and
   - Midtrans notification: `https://apitoko.cosger.online/api/wallet/midtrans/notification`
 - `APP_URL=https://viewtoko.cosger.online` (WA deep links + OAuth callback redirects).
 
-## Redeploy web SPA (static)
+> ⚠️ **FLAKY-NETWORK / .env RULES (read first — see relay sesi 12 & 16 incidents).**
+> 1. **NEVER** `rm -rf live-dir && tar x` in one pipe (a mid-transfer drop wiped the
+>    server in sesi 12). Use `rsync --partial` (resumable) and only swap statics atomically.
+> 2. The `pnpm deploy` bundle **contains the local gitignored `apps/backend/.env`**
+>    (PORT=8080, DB→tunnel `15432`). A plain rsync of the bundle **overwrites the
+>    server `.env`** → app boots on :8080 against an unreachable DB → nginx 502
+>    (sesi 16). **ALWAYS rsync the backend bundle with `--exclude='.env*'`.**
+> 3. **Canonical good prod `.env` backup lives on the server at `/tmp/at.env`**
+>    (22 lines, PORT=8090, DB on `5432`). If `.env` is ever clobbered, restore it:
+>    `cp -a /tmp/at.env /home/ubuntu/apps/autotoko/.env && pm2 restart autotoko-backend --update-env`.
+> 4. Verify externally with `curl -4` (owner IPv6/NAT64 times out).
 
 ```bash
-pnpm --filter @autotoko/web build
-tar czf - -C apps/web/dist . | ssh -i "$KEY" ubuntu@13.212.182.48 \
-  'sudo rm -rf /opt/autotoko/web && sudo mkdir -p /opt/autotoko/web && sudo tar xzf - -C /opt/autotoko/web && sudo chown -R www-data:www-data /opt/autotoko && sudo chmod -R a+rX /opt/autotoko'
+KEY=/Users/mm/Projects/geoscan/LightsailDefaultKey-ap-southeast-1.pem
+SSHI=(-i "$KEY" -o ConnectTimeout=15 -o ServerAliveInterval=10)   # use inline, zsh won't word-split a var
 ```
 
-## Redeploy (build off-server → ship bundle)
+## Redeploy web/admin SPA (static, atomic swap)
+
+```bash
+cd apps/web && npx vite build && cd -        # or apps/admin (npx vite build avoids the pnpm deps-check)
+# ship to a temp dir, then atomic swap — live dir untouched if the transfer fails
+rsync -az --partial --delete -e "ssh ${SSHI[*]}" apps/web/dist/ ubuntu@13.212.182.48:/tmp/web-new/
+ssh "${SSHI[@]}" ubuntu@13.212.182.48 \
+  'sudo rsync -a --delete /tmp/web-new/ /opt/autotoko/web/ && sudo chown -R www-data:www-data /opt/autotoko && sudo chmod -R a+rX /opt/autotoko'
+# admin → /tmp/admin-new → /opt/autotoko/admin (same pattern)
+```
+
+## Redeploy backend (build off-server → ship bundle)
 
 ```bash
 # 1) build + bundle locally (all backend deps are pure-JS → portable)
-pnpm --filter @autotoko/shared build && pnpm --filter @autotoko/backend build
+#    build shared+backend directly (the pnpm wrapper trips a deps-status check):
+(cd packages/shared && npx tsc -p tsconfig.json) && (cd apps/backend && npx nest build)
 rm -rf /tmp/autotoko-deploy
 pnpm --filter=@autotoko/backend --legacy deploy --prod /tmp/autotoko-deploy
 
-# 2) ship (preserve symlinks); keep the server .env in place
-KEY=/Users/mm/Projects/geoscan/LightsailDefaultKey-ap-southeast-1.pem
-ssh -i "$KEY" ubuntu@13.212.182.48 'cp /home/ubuntu/apps/autotoko/.env /tmp/at.env'
-tar czf - -C /tmp/autotoko-deploy . | ssh -i "$KEY" ubuntu@13.212.182.48 \
-  'rm -rf /home/ubuntu/apps/autotoko && mkdir -p /home/ubuntu/apps/autotoko && tar xzf - -C /home/ubuntu/apps/autotoko && cp /tmp/at.env /home/ubuntu/apps/autotoko/.env'
+# 2) back up the LIVE server .env first, then rsync the bundle EXCLUDING env files
+ssh "${SSHI[@]}" ubuntu@13.212.182.48 'cp -a /home/ubuntu/apps/autotoko/.env /tmp/at.env.predeploy'
+rsync -az --partial --exclude='.env*' -e "ssh ${SSHI[*]}" \
+  /tmp/autotoko-deploy/ ubuntu@13.212.182.48:/home/ubuntu/apps/autotoko/
 
-# 3) migrate (if schema changed) + restart
-ssh -i "$KEY" ubuntu@13.212.182.48 'cd /home/ubuntu/apps/autotoko && node dist/database/migrate.js && pm2 restart autotoko-backend'
+# 3) migrate (only if schema changed) + restart, then verify
+ssh "${SSHI[@]}" ubuntu@13.212.182.48 \
+  'cd /home/ubuntu/apps/autotoko && grep -q "^PORT=8090" .env || cp -a /tmp/at.env .env; node dist/database/migrate.js; pm2 restart autotoko-backend --update-env'
+curl -4 -s https://apitoko.cosger.online/api/health   # expect db:up on :8090
 ```
 
 ## WA login n8n integration
