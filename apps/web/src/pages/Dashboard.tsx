@@ -54,10 +54,17 @@ function TrendChart({ orders }: { orders: Order[] }) {
   );
 }
 
+interface Summary {
+  today_orders: number;
+  today_revenue: string;
+  active_shops: number;
+  total_orders: number;
+  total_revenue: string;
+}
+
 export function Dashboard() {
   const wallet = useFetch<{ balance: string }>("/wallet");
-  const summary = useFetch<{ total: number; revenue: string; feeCharged: string }>("/orders/summary");
-  const shops = useFetch<unknown[]>("/shops");
+  const summary = useFetch<Summary>("/dashboard/summary");
   const products = useFetch<unknown[]>("/products");
   const orders = useFetch<Order[]>("/orders");
 
@@ -66,10 +73,10 @@ export function Dashboard() {
   return (
     <Layout title="Dashboard">
       <div className="grid grid-cols-4 gap-3">
+        <Stat icon="📦" label="Order Hari Ini" value={String(summary.data?.today_orders ?? 0)} sub={`total ${summary.data?.total_orders ?? 0} sepanjang waktu`} />
+        <Stat icon="📈" label="Revenue Hari Ini" value={rupiah(summary.data?.today_revenue)} sub={`total ${rupiah(summary.data?.total_revenue)}`} />
+        <Stat icon="🏪" label="Toko Aktif" value={String(summary.data?.active_shops ?? 0)} sub={`${products.data?.length ?? 0} master produk`} />
         <Stat icon="💰" label="Saldo Wallet" value={rupiah(wallet.data?.balance)} sub="AutoToko balance" />
-        <Stat icon="📦" label="Total Order" value={String(summary.data?.total ?? 0)} sub="semua waktu" />
-        <Stat icon="📈" label="Revenue" value={rupiah(summary.data?.revenue)} sub="dari order" />
-        <Stat icon="🏪" label="Toko / Produk" value={`${shops.data?.length ?? 0} / ${products.data?.length ?? 0}`} sub="terhubung / master" />
       </div>
 
       <div className="grid grid-cols-3 gap-3 mt-4">
