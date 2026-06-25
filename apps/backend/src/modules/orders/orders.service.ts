@@ -1,7 +1,16 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders } from "../../database/schema/index.js";
+
+export interface ListOrdersOpts {
+  status?: FulfillmentStatus;
+  shopId?: string;
+  dateFrom?: Date;
+  dateTo?: Date;
+  limit?: number;
+  offset?: number;
+}
 
 export const FULFILLMENT_STATUSES = [
   "masuk",
@@ -20,13 +29,19 @@ export type FulfillmentStatus = (typeof FULFILLMENT_STATUSES)[number];
 export class OrdersService {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
-  async list(userId: string, limit = 100) {
+  async list(userId: string, opts: ListOrdersOpts = {}) {
+    const conds: SQL[] = [eq(orders.userId, userId)];
+    if (opts.status) conds.push(eq(orders.fulfillmentStatus, opts.status));
+    if (opts.shopId) conds.push(eq(orders.shopId, opts.shopId));
+    if (opts.dateFrom) conds.push(gte(orders.createdAt, opts.dateFrom));
+    if (opts.dateTo) conds.push(lte(orders.createdAt, opts.dateTo));
     return this.db
       .select()
       .from(orders)
-      .where(eq(orders.userId, userId))
+      .where(and(...conds))
       .orderBy(desc(orders.createdAt))
-      .limit(limit);
+      .limit(Math.min(opts.limit ?? 100, 500))
+      .offset(opts.offset ?? 0);
   }
 
   /** Lightweight counters for the dashboard. */

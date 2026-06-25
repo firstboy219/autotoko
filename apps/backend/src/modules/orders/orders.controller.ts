@@ -4,10 +4,12 @@ import {
   Get,
   Param,
   Patch,
+  Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { IsIn } from "class-validator";
+import { IsIn, IsInt, IsOptional, IsISO8601, IsUUID, Min } from "class-validator";
+import { Type } from "class-transformer";
 import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, type JwtPayload } from "../auth/jwt-auth.guard.js";
@@ -26,14 +28,47 @@ class UpdateStatusDto {
   status!: FulfillmentStatus;
 }
 
+class ListOrdersQuery {
+  @IsOptional() @IsIn(FULFILLMENT_STATUSES as unknown as string[])
+  status?: FulfillmentStatus;
+
+  @IsOptional() @IsUUID()
+  shopId?: string;
+
+  @IsOptional() @IsISO8601()
+  dateFrom?: string;
+
+  @IsOptional() @IsISO8601()
+  dateTo?: string;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
+  limit?: number;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0)
+  offset?: number;
+}
+
 @Controller("orders")
 @UseGuards(JwtAuthGuard)
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
   @Get()
-  async list(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.orders.list(uid(req)) };
+  async list(
+    @Req() req: FastifyRequest,
+    @Query() q: ListOrdersQuery,
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.orders.list(uid(req), {
+        status: q.status,
+        shopId: q.shopId,
+        dateFrom: q.dateFrom ? new Date(q.dateFrom) : undefined,
+        dateTo: q.dateTo ? new Date(q.dateTo) : undefined,
+        limit: q.limit,
+        offset: q.offset,
+      }),
+    };
   }
 
   @Get("summary")
