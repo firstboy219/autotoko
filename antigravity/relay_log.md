@@ -208,8 +208,24 @@ Jaringan owner sedang LABIL (IPv6/NAT64 + SSH drop). Saat deploy backend, perint
 - Pakai `ssh -o ServerAliveInterval=10` + loop retry.
 - Verifikasi eksternal pakai `curl -4` (IPv6 NAT64 owner timeout). `/tmp/autotoko_new_secrets.txt` sempat hilang (/tmp dibersihkan) — ADMIN_PASSWORD/WEBHOOK_INGEST_SECRET bisa diambil ulang dari server `.env`.
 
-### ⏳ BELUM dikerjakan (sisa Phase 1 — untuk AI berikutnya)
-- **WebSocket `new_order`** (P1) — belum; perlu WS gateway (Fastify) + nginx upgrade proxy + klien FE. Untuk sekarang FE polling/refresh.
+---
+
+## Sesi 13 — 2026-06-25 (WebSocket new_order + status 4 prioritas)
+
+### ✅ WebSocket real-time (HEAD `9f2258f`, deployed, verified e2e)
+- Backend: `EventsGateway` socket.io (@Global, `EventsModule`), auth JWT di handshake (`auth.token`), room per-user `user:<sub>`. `IoAdapter` di main.ts. `webhooks.service.upsertOrder` emit `new_order` (order baru) + `order_update` (status). socket.io di `/socket.io/` (HTTP server yg sama, port 8090).
+- nginx **viewtoko**: ditambah `location /socket.io/` (proxy_pass :8090 + Upgrade/Connection upgrade headers, read_timeout 3600s). Hanya viewtoko — xtracker/geoscan tak tersentuh.
+- Frontend: `lib/realtime.ts` (socket.io-client singleton same-origin, `transports:['websocket']`, token dari localStorage) + `useRealtime` hook. Layout → toast "Pesanan baru masuk!" (klik → /orders). Orders & Dashboard → live-reload. Disconnect saat logout.
+- **Verified e2e live**: connect via nginx WS → server ack → webhook (secret) bikin order → klien terima `new_order`. Pakai `dns.setDefaultResultOrder('ipv4first')` di test (hindari IPv6 NAT64).
+
+### Status 4 prioritas owner
+1. ✅ **WebSocket new_order** — DONE (sesi ini).
+2. ⏳ **Shopee** — terblokir kredensial (`shopee_partner_id/key` belum ada di Admin CMS). Adapter + webhook sig + push-URL doc sudah siap; tinggal isi creds → daftarkan push URL.
+3. ✅ **Order Kanban** — sudah ada sejak sesi 10 (toggle Tabel|Kanban di Orders).
+4. ⏳ **BOM auto-deduct** — BELUM. Modul BOM CRUD belum dibuat (kerja agent sesi 10.5 terparkir di `/tmp/autotoko-partial-agents/`). Perlu: bangun modul BOM (CRUD bahan, schema `bom_items` sudah ada) → lalu hook auto-deduct di `webhooks.service.upsertOrder` (kurangi `bom_items.current_stock` per `quantity` × item terjual; alert email bila < `minimum_threshold`). Multi-tenant via `master_products.user_id`.
+
+### ⏳ BELUM dikerjakan (sisa Phase 1)
+- BOM module + auto-deduct (#4 di atas).
 - **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
 - **Postgres RLS** pada tabel tenant (sekarang isolasi hanya app-layer `user_id`).
 - **Daftarkan URL** webhook + Midtrans notif di dashboard TikTok/Shopee/Midtrans (URL siap di `infra/DEPLOY.md`).
