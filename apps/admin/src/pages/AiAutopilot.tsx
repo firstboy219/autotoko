@@ -12,7 +12,12 @@ interface FeatureRow {
   provider: Provider;
   model: string;
   keyConfigured: boolean;
+  enabled: boolean;
 }
+
+// Features that currently run fully automatically when enabled. Others store the
+// toggle but their auto-trigger path (chat/review ingestion) is not wired yet.
+const AUTO_WIRED = new Set(["auto_approve"]);
 
 interface FeatureStatus {
   providers: Provider[];
@@ -43,6 +48,7 @@ function FeatureCard({
 }) {
   const [provider, setProvider] = useState<Provider>(f.provider);
   const [model, setModel] = useState(f.model);
+  const [enabled, setEnabled] = useState(f.enabled);
   const [busy, setBusy] = useState(false);
   const [ok, setOk] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -51,12 +57,13 @@ function FeatureCard({
   useEffect(() => {
     setProvider(f.provider);
     setModel(f.model);
-  }, [f.provider, f.model]);
+    setEnabled(f.enabled);
+  }, [f.provider, f.model, f.enabled]);
 
   async function save() {
     setBusy(true); setErr(null); setOk(false);
     try {
-      await api.put(`/ai/features/${f.key}`, { provider, model: model.trim() });
+      await api.put(`/ai/features/${f.key}`, { provider, model: model.trim(), enabled });
       setOk(true); onSaved();
     } catch (e) { setErr((e as Error).message); }
     finally { setBusy(false); }
@@ -71,8 +78,25 @@ function FeatureCard({
           <div className="font-bold text-sm text-white">{f.label}</div>
           <div className="text-[12px] text-slate-400 mt-0.5">{f.description}</div>
         </div>
-        {ok && <span className="text-green-400 text-xs">✓ tersimpan</span>}
+        {ok && <span className="text-green-400 text-xs whitespace-nowrap">✓ tersimpan</span>}
       </div>
+
+      <label className="flex items-center gap-2 mt-2.5 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          className="accent-brand w-4 h-4"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+        />
+        <span className="text-[12px] text-slate-200">
+          Jalankan otomatis (full-auto)
+          {!AUTO_WIRED.has(f.key) && (
+            <span className="ml-1 text-[10px] text-slate-500">
+              — tersimpan; trigger otomatis menyusul (butuh ingest chat/review)
+            </span>
+          )}
+        </span>
+      </label>
 
       <div className="flex flex-wrap items-end gap-2 mt-3">
         <label className="text-[11px] text-slate-400">

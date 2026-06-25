@@ -38,6 +38,9 @@ export class AiController {
   ): Promise<ApiResponse<{ feature: string }>> {
     await this.settings.set(`ai_feature_${feature}_provider`, dto.provider);
     await this.settings.set(`ai_feature_${feature}_model`, dto.model);
+    if (dto.enabled !== undefined) {
+      await this.settings.set(`ai_feature_${feature}_enabled`, String(dto.enabled));
+    }
     return { success: true, data: { feature } };
   }
 

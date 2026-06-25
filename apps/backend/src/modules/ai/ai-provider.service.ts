@@ -69,6 +69,11 @@ export class AiProviderService {
     }
   }
 
+  /** Whether the owner switched this feature to run automatically (CMS toggle). */
+  async isFeatureEnabled(feature: AiFeature): Promise<boolean> {
+    return (await this.settings.get(`ai_feature_${feature}_enabled`)) === "true";
+  }
+
   /** CMS view: every feature's current config + whether its provider key is set. */
   async featureStatus() {
     const keyPresent: Partial<Record<AiProvider, boolean>> = {};
@@ -83,6 +88,7 @@ export class AiProviderService {
         provider: cfg.provider,
         model: cfg.model,
         keyConfigured: keyPresent[cfg.provider] ?? false,
+        enabled: await this.isFeatureEnabled(def.key),
       });
     }
     return {

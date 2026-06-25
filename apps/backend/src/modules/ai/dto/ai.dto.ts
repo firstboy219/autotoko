@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsNumber,
@@ -16,6 +17,11 @@ export class SetFeatureConfigDto {
 
   @IsString()
   model!: string;
+
+  /** When true, the feature runs automatically (e.g. auto-approve on new order). */
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
 }
 
 class ChatMessageDto {
