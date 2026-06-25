@@ -224,8 +224,23 @@ Jaringan owner sedang LABIL (IPv6/NAT64 + SSH drop). Saat deploy backend, perint
 3. ✅ **Order Kanban** — sudah ada sejak sesi 10 (toggle Tabel|Kanban di Orders).
 4. ⏳ **BOM auto-deduct** — BELUM. Modul BOM CRUD belum dibuat (kerja agent sesi 10.5 terparkir di `/tmp/autotoko-partial-agents/`). Perlu: bangun modul BOM (CRUD bahan, schema `bom_items` sudah ada) → lalu hook auto-deduct di `webhooks.service.upsertOrder` (kurangi `bom_items.current_stock` per `quantity` × item terjual; alert email bila < `minimum_threshold`). Multi-tenant via `master_products.user_id`.
 
+---
+
+## Sesi 14 — 2026-06-25 (BOM module + auto-deduct) — #4 SELESAI
+
+### ✅ BOM (HEAD `33415f0`, deployed, verified e2e)
+Dibangun di atas schema `bom_items` AKTUAL (TANPA migration): kolom `master_product_id` (WAJIB), `material_name`, `quantity` (per produk), `current_stock`, `minimum_threshold`, supplier*, dll. **Tidak ada `user_id`** → multi-tenant via join `master_products.user_id`. (Spec owner sebut user_id/linked_product_id-nullable/quantity_per_order — beda dari DB; saya pakai DB riil + nama API yang sesuai, agar tanpa migration = aman.)
+- `BomModule` (CRUD): `GET /bom`, `POST /bom`, `PATCH /bom/:id`, `DELETE /bom/:id`, `POST /bom/:id/restock`, `GET /bom/alerts`. `supplierApiKey` di-encrypt. DTO dari partial agent (sesi 10.5, di /tmp) dipakai (IsEnum→IsIn).
+- **Auto-deduct** di `webhooks.service.upsertOrder` (saat order baru): `BomService.deductForOrder` → parse `order.items` (line_items) ambil SKU+qty → resolve `product_postings.marketplaceSku → masterProductId` (cek milik user) → `bom_items` by master → `current_stock -= qty × quantity` → email alert bila `< minimum_threshold` (MailService). Skip rapi bila tak ter-map; tidak pernah blokir order. Hasil ikut di response webhook (`bom:{deducted}`).
+- Frontend: `pages/Bom.tsx` (tabel, tambah, restock, set-stok, hapus, highlight merah low-stock, realtime reload), nav sidebar "BOM / Bahan" (🧪), route `/bom`. Dashboard: widget "⚠️ Peringatan Stok" dari `/bom/alerts`.
+- **Verified e2e live**: POST /bom stok 10 (qty/produk 3, min 5) → webhook jual 2 → stok 4, lowStock true, masuk /bom/alerts. ✅
+
+### Status 4 prioritas owner: SEMUA selesai/terblokir
+1. ✅ WebSocket new_order · 2. ⏳ Shopee (blocked creds) · 3. ✅ Kanban · 4. ✅ BOM auto-deduct.
+
 ### ⏳ BELUM dikerjakan (sisa Phase 1)
-- BOM module + auto-deduct (#4 di atas).
+- Shopee creds + push URL (owner). Order pull via n8n. AI autopilot. RLS. Landing/mobile.
+- WEBHOOK_DEBUG=true masih ON di server (untuk capture sig TikTok asli) — matikan setelah formula terkonfirmasi.
 - **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
 - **Postgres RLS** pada tabel tenant (sekarang isolasi hanya app-layer `user_id`).
 - **Daftarkan URL** webhook + Midtrans notif di dashboard TikTok/Shopee/Midtrans (URL siap di `infra/DEPLOY.md`).
