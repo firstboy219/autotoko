@@ -190,7 +190,26 @@ Dikerjakan paralel oleh 2 subagent Opus (backend & frontend, file disjoint), dii
 ### ⏳ Subagent Notifikasi/BOM (Sesi 10.5) — TERTUNDA
 2 subagent Opus kena session limit (reset 3am WIB), kerja setengah-jadi diparkir di `/tmp/autotoko-partial-agents/` (notifications: 3 file tanpa migration; bom: dto saja). Repo bersih di `5e3583b`. Lanjutkan/selesaikan modul Notifikasi + BOM nanti.
 
+---
+
+## Sesi 12 — 2026-06-25 (audit + order filters + dashboard summary; INSIDEN deploy)
+
+### ✅ Fitur (HEAD `8bcbda1`, deployed, verified)
+- **GET /orders** kini terima query `status, shopId, dateFrom, dateTo, limit, offset` (divalidasi; multi-tenant; tetap kembalikan array → backward-compatible). `OrdersService.list(userId, opts)`.
+- **GET /api/dashboard/summary** (DashboardModule baru) → `{today_orders, today_revenue, active_shops, total_orders, total_revenue, total_fee_charged}` (today dihitung di Asia/Jakarta). Web Dashboard memakainya (kartu "Hari Ini").
+- Verified live: summary OK, filter OK, validasi invalid→400.
+
+### 🚨 INSIDEN DEPLOY (penting untuk AI berikutnya!)
+Jaringan owner sedang LABIL (IPv6/NAT64 + SSH drop). Saat deploy backend, perintah `tar | ssh 'rm -rf dir && tar xzf -'` PUTUS di tengah → **`rm -rf` jalan, extract gagal → seluruh `dist`+`node_modules`+`.env` di server TERHAPUS**. Proses pm2 masih jalan dari memori (sempat menyelamatkan). Pemulihan: `.env` ke-backup di `/tmp/at.env` (langkah pertama deploy) → dipulihkan; bundle di-`rsync --partial` ulang (resumable) → pm2 restart → sehat.
+**ATURAN DEPLOY BARU (jaringan labil):**
+- JANGAN `rm -rf live-dir && tar xzf -` dalam satu pipe (korupsi bila putus).
+- Backend: pakai **`rsync -az --partial`** (resumable, idempoten) ke app dir, JANGAN rm dulu. Atau transfer tar ke `/tmp` dulu → extract → swap.
+- Web: tar ke `/tmp/web.tgz` (rsync) → `sudo tar x` ke `web-new` → `mv` atomik → swap. Live dir tak tersentuh bila gagal.
+- Pakai `ssh -o ServerAliveInterval=10` + loop retry.
+- Verifikasi eksternal pakai `curl -4` (IPv6 NAT64 owner timeout). `/tmp/autotoko_new_secrets.txt` sempat hilang (/tmp dibersihkan) — ADMIN_PASSWORD/WEBHOOK_INGEST_SECRET bisa diambil ulang dari server `.env`.
+
 ### ⏳ BELUM dikerjakan (sisa Phase 1 — untuk AI berikutnya)
+- **WebSocket `new_order`** (P1) — belum; perlu WS gateway (Fastify) + nginx upgrade proxy + klien FE. Untuk sekarang FE polling/refresh.
 - **Native webhook signature verify** (TikTok/Shopee) — saat ini hanya `?secret=` guard (fail-closed). Pasang verifikasi tanda tangan asli saat ada app keys marketplace.
 - **Postgres RLS** pada tabel tenant (sekarang isolasi hanya app-layer `user_id`).
 - **Daftarkan URL** webhook + Midtrans notif di dashboard TikTok/Shopee/Midtrans (URL siap di `infra/DEPLOY.md`).
