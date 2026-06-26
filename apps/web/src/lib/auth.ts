@@ -14,6 +14,8 @@ interface AuthState {
   error: string | null;
   /** Dev-only username/password login (rejected by the backend in production). */
   login: (username: string, password: string) => Promise<boolean>;
+  /** One-click passwordless demo login (TikTok App Review). */
+  demoLogin: () => Promise<boolean>;
   /** Apply a freshly issued access token (e.g. after WA/email OTP verify). */
   applyToken: (token: string) => void;
   logout: () => void;
@@ -30,6 +32,18 @@ export const useAuth = create<AuthState>((set) => ({
         "/auth/login",
         { username, password },
       );
+      setToken(accessToken);
+      set({ authenticated: true, loading: false });
+      return true;
+    } catch (e) {
+      set({ loading: false, error: (e as Error).message, authenticated: false });
+      return false;
+    }
+  },
+  async demoLogin() {
+    set({ loading: true, error: null });
+    try {
+      const { accessToken } = await api.post<{ accessToken: string }>("/auth/demo-login");
       setToken(accessToken);
       set({ authenticated: true, loading: false });
       return true;

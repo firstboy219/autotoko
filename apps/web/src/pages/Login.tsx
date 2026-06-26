@@ -216,7 +216,7 @@ function EmailLogin({ onDone }: { onDone: (token: string) => void }) {
 
 /** Username/password login — only works in non-production (backend rejects in prod). */
 function DevLogin() {
-  const { login, loading, error } = useAuth();
+  const { login, demoLogin, loading, error } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [username, setUsername] = useState("user");
@@ -227,6 +227,10 @@ function DevLogin() {
     if (await login(username, password)) navigate("/");
   }
 
+  async function demo() {
+    if (await demoLogin()) navigate("/");
+  }
+
   return (
     <div className="mt-5 pt-4 border-t border-slate-100">
       <button
@@ -235,6 +239,17 @@ function DevLogin() {
       >
         {open ? "▾" : "▸"} Login developer
       </button>
+      {open && (
+        <div className="mt-2">
+          <button
+            onClick={demo}
+            disabled={loading}
+            className="w-full py-2 mb-3 rounded-md bg-brand hover:bg-brand-dark text-white text-sm font-semibold disabled:opacity-60"
+          >
+            {loading ? "Masuk…" : "Masuk sebagai Demo (reviewer)"}
+          </button>
+        </div>
+      )}
       {open && (
         <form onSubmit={submit} className="mt-2">
           <input

@@ -18,6 +18,10 @@ import type { JwtPayload } from "./jwt-auth.guard.js";
 const WA_PREFIX = "AUTOTOKO-";
 const CODE_TTL_SEC = 300; // 5 minutes (PRD Bagian 3.2)
 const DUMMY_USER_ID = "00000000-0000-0000-0000-000000000001";
+// Fixed demo seller (demo@autotoko.id) used for the TikTok App Review. The seed
+// script (scripts/seed-demo) populates this same id with shops/products/orders.
+export const DEMO_USER_ID = "00000000-0000-0000-0000-0000000000de";
+const DEMO_EMAIL = "demo@autotoko.id";
 
 @Injectable()
 export class AuthService {
@@ -88,6 +92,49 @@ export class AuthService {
       }
     } catch (e) {
       this.logger.warn(`Could not seed dev user (DB down?): ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * Passwordless demo login for the TikTok App Review reviewer. Issues a JWT for
+   * the fixed demo seller ONLY (never admin, never an arbitrary account), and
+   * only when DEMO_LOGIN_ENABLED=true. Much narrower than the old user/user →
+   * admin dev backdoor, so it is safe to expose on the public login page.
+   */
+  async demoLogin(): Promise<{ accessToken: string }> {
+    if (this.config.get<string>("DEMO_LOGIN_ENABLED", "false") !== "true") {
+      throw new UnauthorizedException("Demo login disabled");
+    }
+    await this.ensureDemoUser();
+    return { accessToken: this.sign({ sub: DEMO_USER_ID, role: "user" }) };
+  }
+
+  /** Ensure the demo seller + wallet exist (idempotent). */
+  private async ensureDemoUser(): Promise<void> {
+    try {
+      const [u] = await this.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, DEMO_USER_ID))
+        .limit(1);
+      if (!u) {
+        await this.db
+          .insert(users)
+          .values({
+            id: DEMO_USER_ID,
+            email: DEMO_EMAIL,
+            whatsapp: "+6281234567890",
+            fullName: "Demo AutoToko",
+            planType: "pro",
+          })
+          .onConflictDoNothing();
+        await this.db
+          .insert(wallets)
+          .values({ userId: DEMO_USER_ID, balance: "450000" })
+          .onConflictDoNothing();
+      }
+    } catch (e) {
+      this.logger.warn(`Could not seed demo user (DB down?): ${(e as Error).message}`);
     }
   }
 

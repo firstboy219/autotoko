@@ -27,6 +27,12 @@ export class AuthController {
     return { success: true, data: await this.auth.login(dto.username, dto.password) };
   }
 
+  // Passwordless demo login for the TikTok App Review (DEMO_LOGIN_ENABLED=true).
+  @Post("demo-login")
+  async demoLogin(): Promise<ApiResponse<{ accessToken: string }>> {
+    return { success: true, data: await this.auth.demoLogin() };
+  }
+
   @Post("email/start")
   async emailStart(@Body() dto: EmailStartDto): Promise<ApiResponse<{ ok: true }>> {
     return { success: true, data: await this.emailOtp.start(dto.email) };
