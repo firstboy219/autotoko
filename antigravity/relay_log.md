@@ -285,3 +285,45 @@ Owner pilih fitur #1 (AI autopilot) dgn syarat: **provider/model AI dipilih PER 
 - Belum di-deploy (tunnel DB & SSH prod di luar scope sesi ini / diblok auto-mode). Deploy BE+admin sesuai cheatsheet saat siap.
 - `auto_approve`/`buyer_chat` BELUM di-hook otomatis ke webhook order/chat — saat ini endpoint manual; wiring otomatis (gated setting) menyusul bila diinginkan.
 - Default model: anthropic `claude-opus-4-8`, openai `gpt-4o`, gemini `gemini-1.5-pro` (owner bisa ganti di CMS).
+
+### Sesi 16 (lanjutan) — deploy + auto-approve hook + activity log + AUDIT
+
+**Deployed live (BE pm2 :8090 + web + admin):** commits `0067325`→`e519a28` di develop (pushed).
+- **Auto-approve autopilot** di-hook ke `webhooks.upsertOrder` (`maybeAutoApprove`): bila owner ON-kan `auto_approve` di CMS (`ai_feature_auto_approve_enabled=true`), order baru dinilai AI → approve → `fulfillmentStatus masuk→approved` + `order_update` realtime; reject/error → tetap `masuk` (fail-safe), tak pernah blokir ingest.
+- **Activity log** (monitorable, syarat owner): tabel baru `autopilot_activity` (migration **0003**), `AutopilotLogService.record/list`, `GET /api/ai/activity`, halaman web baru **Autopilot** (🤖, realtime). Auto-approve mencatat done/held/error + provider + alasan.
+- Per-feature toggle "Jalankan otomatis" ditambah di Admin CMS AI Autopilot.
+
+**🚨 INSIDEN DEPLOY #2 (penting):** `pnpm deploy --prod` bundle **menyertakan `apps/backend/.env` lokal** (PORT=8080, DB→tunnel 15432). `rsync` bundle **menimpa `.env` server** → app boot di :8080 ke DB tak terjangkau → nginx **502**. Pulih dari **`/tmp/at.env`** server (22 baris, :8090, DB 5432 — backup kanonik sesi 12). **FIX permanen:** `rsync --exclude='.env*'` (sudah di DEPLOY.md). 
+**INSIDEN #3:** migrate runner `import "dotenv/config"` → `dotenv` TIDAK ada di prod bundle (devDep) → `node dist/database/migrate.js` MODULE_NOT_FOUND. Migration 0003 di-apply manual via script Node pakai paket `postgres` bundel. **FIX:** `migrate.ts` kini punya loader `.env` zero-dep (commit `e519a28`) — migration berikutnya jalan otomatis saat deploy.
+DEPLOY.md diperbarui menyeluruh (rsync --exclude env, atomic swap, curl -4, restore /tmp/at.env).
+
+### 📋 AUDIT FITUR vs PRD Bagian 8 (6.1–6.19) — status SOURCE CODE
+Marketplace adapter **HANYA** auth/token (getAuthUrl/exchangeToken/refreshToken) — **TIDAK ada write-back API** (confirm order, send chat, reply review, create/update listing). Ini blocker utama "full-auto".
+
+| # | Fitur | Kelas PRD | Di source | Auto-trigger? |
+|---|---|---|---|---|
+|6.1|Order Approval|AUTO|✅ ai.autoApprove + hook|⚠️ auto-DECISION + set fulfillment_status internal; TIDAK call TikTok confirm API|
+|6.2|Chat Pembeli|SEMI-AUTO(AI)|⚠️ endpoint buyerChat saja|❌ tak ada ingest chat webhook|
+|6.3|Print Resi|HUMAN|❌ no AWB/Revo|n/a|
+|6.4|Produksi|HUMAN|⚠️ status 'produksi' ada; no notif|n/a|
+|6.5|Packing|HUMAN|⚠️ status 'packing' ada|n/a|
+|6.6|Restock BOM|AUTO|✅ deduct+email lowstock|⚠️ restock_request + opsi supplier(wa_owner/wa_supplier/api) BELUM|
+|6.7|Print Label Revo|AUTO|❌|❌|
+|6.8|Withdrawal|semi|❌|❌|
+|6.9|Rekap Laporan|AUTO|❌ no scheduled report (summary dashboard ada)|❌|
+|6.10|Reply Review|AUTO|⚠️ endpoint reviewReply; tabel review_logs ADA|❌ tak ada ingest review|
+|6.11|Apply Event/Promo|AUTO|❌|❌|
+|6.12|Affiliate Mgmt|AUTO|⚠️ endpoint affiliateChat; tabel affiliates ADA; no search/invite|❌|
+|6.13|Create Video|SEMI|❌|❌|
+|6.14|Aktifkan Iklan|AUTO|❌|❌|
+|6.15|Evaluasi Katalog|AUTO|❌ no health-score job|❌|
+|6.16|Eliminate Produk|AUTO|❌|❌|
+|6.17|Optimize Produk|AUTO|⚠️ endpoint optimizeProduct|❌ no weekly job / no auto-apply ke marketplace|
+|6.18|Analyze Trend|AUTO|❌|❌|
+|6.19|Posting Produk|AUTO|⚠️ master/posting CRUD DB; no create-listing API|❌ master saja, tak push ke marketplace|
+
+**VERDICT autonomi:** sekarang yang benar-benar auto-jalan = **auto-approve (keputusan, status internal)** + **BOM deduct + email**. Sisanya = endpoint MANUAL. 3 blocker untuk "full-auto setup-sekali":
+1. **Marketplace write-back layer** di adapter (confirm/chat/reply/listing) — butuh app keys non-sandbox (TikTok app "Jassa" masih draft; Shopee creds belum ada).
+2. **Ingest inbound** (chat/review/event webhook + pull job) — chat_logs/review_logs sudah ada, tinggal isi.
+3. **Scheduler** (n8n / @nestjs/schedule) untuk fitur periodik (laporan, trend, evaluasi, iklan, event).
+Plus tetap: native webhook sig verify, RLS, daftar URL webhook/Midtrans di dashboard.
