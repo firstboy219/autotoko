@@ -15,6 +15,7 @@ import { OrdersModule } from "./modules/orders/orders.module.js";
 import { BomModule } from "./modules/bom/bom.module.js";
 import { AiModule } from "./modules/ai/ai.module.js";
 import { ReportsModule } from "./modules/reports/reports.module.js";
+import { CatalogModule } from "./modules/catalog/catalog.module.js";
 import { DashboardModule } from "./modules/dashboard/dashboard.module.js";
 import { HealthModule } from "./modules/health/health.module.js";
 
@@ -39,6 +40,7 @@ import { HealthModule } from "./modules/health/health.module.js";
     BomModule,
     AiModule,
     ReportsModule,
+    CatalogModule,
     DashboardModule,
     HealthModule,
   ],
