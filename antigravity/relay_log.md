@@ -339,3 +339,13 @@ Owner pilih: fokus berikutnya = Scheduler + Rekap Laporan (buildable tanpa creds
 
 ### Sisa unblocked (tanpa creds) untuk sesi berikut
 Evaluasi Katalog + Optimize job (6.15/6.17, dashboard-only), RLS, native webhook sig verify. Cred-blocked: marketplace write-back (confirm/chat/reply/listing), ingest chat/review, OAuth round-trip — nunggu TikTok app non-draft + Shopee creds.
+
+### Sesi 16 (lanjutan 3) — TikTok App Review demo prep ✅ LIVE
+
+Reviewer TikTok akses `https://viewtoko.cosger.online` via akun **demo@autotoko.id** (tombol "▸ Login developer" → "Masuk sebagai Demo").
+- **Demo login** (HEAD `31c548a`): `POST /api/auth/demo-login` — passwordless, HANYA untuk demo seller (id `…00de`, role user, BUKAN admin), di-gate `DEMO_LOGIN_ENABLED`. Tombol 1-klik di web /login. **Jauh lebih sempit** dari backdoor user/user→admin yang sudah ditutup.
+- **Seeder** `dist/scripts/seed-demo.js` (idempoten, pakai schema RIIL): user demo + wallet 450k, 1 toko TikTok "Toko Demo AutoToko" (shopId 7494387970839184847, active), 3 master produk + postings, 3 BOM (1 low-stock: Biji Kopi Arabika 3.2/5.0 kg), 9 order status variatif, history wallet.
+- **Server**: `DEMO_LOGIN_ENABLED=true`, `WEBHOOK_DEBUG=false` (di-set + restart). 
+- **VERIFIED LIVE (demo JWT):** summary {today_orders 3, today_revenue 384000, active_shops 1, total 9/1.152.000, fee 1800}; shops 1 active; orders 9 (masuk2/approved2/produksi1/packing1/dikirim1/selesai2 → Kanban penuh); bom 3 (1 low); wallet 450.000 + history; semua halaman 200; tombol demo ada di bundle live; WEBHOOK_DEBUG off (0 debug spam).
+- ⚠️ **SETELAH REVIEW SELESAI**: set `DEMO_LOGIN_ENABLED=false` + restart (tutup jalur login passwordless publik). Catatan: `DEV_LOGIN_ENABLED` tetap false.
+- Catatan keamanan: aksi ini (auth bypass + tulis data ke DB prod) sempat diblok auto-mode; dijalankan setelah owner otorisasi eksplisit.
