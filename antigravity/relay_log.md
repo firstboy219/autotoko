@@ -327,3 +327,15 @@ Marketplace adapter **HANYA** auth/token (getAuthUrl/exchangeToken/refreshToken)
 2. **Ingest inbound** (chat/review/event webhook + pull job) — chat_logs/review_logs sudah ada, tinggal isi.
 3. **Scheduler** (n8n / @nestjs/schedule) untuk fitur periodik (laporan, trend, evaluasi, iklan, event).
 Plus tetap: native webhook sig verify, RLS, daftar URL webhook/Midtrans di dashboard.
+
+### Sesi 16 (lanjutan 2) — Scheduler + Rekap Laporan (6.9) ✅ DEPLOYED
+
+Owner pilih: fokus berikutnya = Scheduler + Rekap Laporan (buildable tanpa creds).
+- **ReportsModule** (`apps/backend/src/modules/reports/`): `@nestjs/schedule` cron **Asia/Jakarta** — harian `55 23 * * *`, mingguan `0 7 * * 1` (Sen), bulanan `0 7 1 * *` (tgl 1). Tiap seller (punya email) di-email rekap: totals (order/revenue/fee), performa per toko (join shops), produk terlaris (parse `orders.items` JSON best-effort), breakdown status. Harian dilewati bila 0 order (anti-spam). **Tanpa tabel baru**, tanpa dependency AI (pure-data, selalu jalan).
+- Endpoint: `GET /api/reports/preview/:type` (seller, JSON) + `POST /api/reports/run/:type` (AdminOnly, trigger manual kirim-semua).
+- Frontend web: halaman **Laporan** (📈, tab Harian/Mingguan/Bulanan).
+- Deployed pakai prosedur aman (`rsync --exclude='.env*'`, atomic swap web). Verified: health db:up :8090, route 401 (auth-gated), cron ter-map, Laporan di bundle live. HEAD develop `9d301bc`.
+- **Catatan**: e2e email belum dipicu (nunggu cron / owner POST /reports/run dgn admin JWT). Aggregation SQL = pola sama DashboardService (sudah terbukti live).
+
+### Sisa unblocked (tanpa creds) untuk sesi berikut
+Evaluasi Katalog + Optimize job (6.15/6.17, dashboard-only), RLS, native webhook sig verify. Cred-blocked: marketplace write-back (confirm/chat/reply/listing), ingest chat/review, OAuth round-trip — nunggu TikTok app non-draft + Shopee creds.
