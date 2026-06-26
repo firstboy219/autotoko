@@ -14,6 +14,7 @@ import { EventsGateway } from "../events/events.gateway.js";
 import { BomService } from "../bom/bom.service.js";
 import { AiService } from "../ai/ai.service.js";
 import { AiProviderService } from "../ai/ai-provider.service.js";
+import { AutopilotLogService } from "../ai/autopilot-log.service.js";
 
 interface OrderEvent {
   marketplace: Marketplace;
@@ -73,6 +74,7 @@ export class WebhooksService {
     private readonly bom: BomService,
     private readonly ai: AiService,
     private readonly aiProvider: AiProviderService,
+    private readonly autopilotLog: AutopilotLogService,
   ) {}
 
   /**
@@ -301,6 +303,7 @@ export class WebhooksService {
         itemCount,
         raw: order.items,
       });
+      const provider = (await this.aiProvider.resolveConfig("auto_approve")).provider;
       if (verdict.approve) {
         const [updated] = await this.db
           .update(orders)
@@ -309,14 +312,43 @@ export class WebhooksService {
           .returning();
         this.events.emitOrderUpdate(userId, updated);
         this.logger.log(`Autopilot approved order ${order.id}: ${verdict.reason}`);
+        await this.autopilotLog.record({
+          userId,
+          feature: "auto_approve",
+          action: "auto_approve",
+          status: "done",
+          provider,
+          summary: `Disetujui otomatis: ${verdict.reason}`,
+          refType: "order",
+          refId: order.id,
+        });
         return { enabled: true, approved: true, reason: verdict.reason };
       }
       this.logger.log(`Autopilot held order ${order.id} for review: ${verdict.reason}`);
+      await this.autopilotLog.record({
+        userId,
+        feature: "auto_approve",
+        action: "auto_approve",
+        status: "held",
+        provider,
+        summary: `Ditahan untuk review manual: ${verdict.reason}`,
+        refType: "order",
+        refId: order.id,
+      });
       return { enabled: true, approved: false, reason: verdict.reason };
     } catch (err) {
       this.logger.warn(
         `Autopilot auto-approve failed for order ${order.id}: ${(err as Error).message}`,
       );
+      await this.autopilotLog.record({
+        userId,
+        feature: "auto_approve",
+        action: "auto_approve",
+        status: "error",
+        summary: (err as Error).message,
+        refType: "order",
+        refId: order.id,
+      });
       return { enabled: true, error: (err as Error).message };
     }
   }

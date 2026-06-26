@@ -8,6 +8,7 @@ const NAV = [
   { to: "/toko", label: "Toko Saya", icon: "🏪" },
   { to: "/produk", label: "Master Produk", icon: "📦" },
   { to: "/orders", label: "Orders", icon: "🛒" },
+  { to: "/autopilot", label: "Autopilot", icon: "🤖" },
   { to: "/bom", label: "BOM / Bahan", icon: "🧪" },
   { to: "/wallet", label: "Wallet", icon: "💳" },
 ];

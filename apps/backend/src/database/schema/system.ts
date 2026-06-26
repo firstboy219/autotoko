@@ -4,7 +4,9 @@ import {
   varchar,
   text,
   boolean,
+  jsonb,
   timestamp,
+  index,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { notifChannelEnum } from "./enums";
@@ -35,3 +37,31 @@ export const adminSettings = pgTable("admin_settings", {
   updatedBy: varchar("updated_by", { length: 128 }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Audit feed for AI autopilot actions (PRD Bagian 8). Every automatic decision
+ * the platform makes on the seller's behalf is recorded here so a human can
+ * monitor the "full-auto" activity (owner requirement: setup is manual, running
+ * activity stays observable). `status`: done | held | error.
+ */
+export const autopilotActivity = pgTable(
+  "autopilot_activity",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    feature: varchar("feature", { length: 64 }).notNull(), // ai feature key
+    action: varchar("action", { length: 64 }).notNull(), // e.g. auto_approve
+    status: varchar("status", { length: 16 }).notNull(), // done | held | error
+    provider: varchar("provider", { length: 32 }), // ai provider used
+    summary: text("summary"), // human-readable reason/result
+    refType: varchar("ref_type", { length: 32 }), // e.g. order
+    refId: uuid("ref_id"), // related entity id (order id, ...)
+    meta: jsonb("meta"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("autopilot_activity_user_idx").on(t.userId),
+  }),
+);

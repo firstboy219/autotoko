@@ -1,9 +1,21 @@
-import { Body, Controller, Get, Param, Post, Put, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Put,
+  Query,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
+import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
-import { JwtAuthGuard, AdminOnly } from "../auth/jwt-auth.guard.js";
+import { JwtAuthGuard, AdminOnly, type JwtPayload } from "../auth/jwt-auth.guard.js";
 import { AdminSettingsService } from "../admin-settings/admin-settings.service.js";
 import { AiProviderService } from "./ai-provider.service.js";
 import { AiService } from "./ai.service.js";
+import { AutopilotLogService } from "./autopilot-log.service.js";
 import {
   AffiliateChatDto,
   AutoApproveDto,
@@ -20,7 +32,19 @@ export class AiController {
     private readonly ai: AiService,
     private readonly provider: AiProviderService,
     private readonly settings: AdminSettingsService,
+    private readonly activity: AutopilotLogService,
   ) {}
+
+  /** Recent autopilot actions for the signed-in seller (monitorable feed). */
+  @Get("activity")
+  async listActivity(
+    @Req() req: FastifyRequest,
+    @Query("limit") limit?: string,
+  ): Promise<ApiResponse<unknown[]>> {
+    const user = (req as FastifyRequest & { user?: JwtPayload }).user!;
+    const rows = await this.activity.list(user.sub, limit ? Number(limit) : 50);
+    return { success: true, data: rows };
+  }
 
   /** CMS: list features + their assigned provider/model + provider key status. */
   @Get("features")
