@@ -1,7 +1,9 @@
 import { Module } from "@nestjs/common";
+import { APP_INTERCEPTOR } from "@nestjs/core";
 import { ConfigModule } from "@nestjs/config";
 import { ScheduleModule } from "@nestjs/schedule";
 import { DatabaseModule } from "./database/database.module.js";
+import { TenantInterceptor } from "./common/tenant/tenant.interceptor.js";
 import { CryptoModule } from "./common/crypto/crypto.module.js";
 import { MailModule } from "./common/mail/mail.module.js";
 import { EventsModule } from "./modules/events/events.module.js";
@@ -43,6 +45,10 @@ import { HealthModule } from "./modules/health/health.module.js";
     CatalogModule,
     DashboardModule,
     HealthModule,
+  ],
+  providers: [
+    // Global RLS request-context wrapper (no-op unless RLS_ENABLED=true).
+    { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
   ],
 })
 export class AppModule {}

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { CatalogService } from "./catalog.service.js";
+import { TenantService } from "../../database/tenant.service.js";
 
 /**
  * Weekly catalog evaluation (PRD Bagian 8.15 — "setiap Minggu malam").
@@ -10,11 +11,14 @@ import { CatalogService } from "./catalog.service.js";
 export class CatalogScheduler {
   private readonly logger = new Logger(CatalogScheduler.name);
 
-  constructor(private readonly catalog: CatalogService) {}
+  constructor(
+    private readonly catalog: CatalogService,
+    private readonly tenant: TenantService,
+  ) {}
 
   @Cron("0 22 * * 0", { timeZone: "Asia/Jakarta" })
   async weekly() {
     this.logger.log("Cron: weekly catalog evaluation");
-    await this.catalog.evaluateAllUsers();
+    await this.tenant.runBypass(() => this.catalog.evaluateAllUsers());
   }
 }
