@@ -14,6 +14,7 @@ import { WebhooksModule } from "./modules/webhooks/webhooks.module.js";
 import { OrdersModule } from "./modules/orders/orders.module.js";
 import { BomModule } from "./modules/bom/bom.module.js";
 import { AiModule } from "./modules/ai/ai.module.js";
+import { ReportsModule } from "./modules/reports/reports.module.js";
 import { DashboardModule } from "./modules/dashboard/dashboard.module.js";
 import { HealthModule } from "./modules/health/health.module.js";
 
@@ -37,6 +38,7 @@ import { HealthModule } from "./modules/health/health.module.js";
     OrdersModule,
     BomModule,
     AiModule,
+    ReportsModule,
     DashboardModule,
     HealthModule,
   ],
