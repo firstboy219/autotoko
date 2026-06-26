@@ -349,3 +349,13 @@ Reviewer TikTok akses `https://viewtoko.cosger.online` via akun **demo@autotoko.
 - **VERIFIED LIVE (demo JWT):** summary {today_orders 3, today_revenue 384000, active_shops 1, total 9/1.152.000, fee 1800}; shops 1 active; orders 9 (masuk2/approved2/produksi1/packing1/dikirim1/selesai2 → Kanban penuh); bom 3 (1 low); wallet 450.000 + history; semua halaman 200; tombol demo ada di bundle live; WEBHOOK_DEBUG off (0 debug spam).
 - ⚠️ **SETELAH REVIEW SELESAI**: set `DEMO_LOGIN_ENABLED=false` + restart (tutup jalur login passwordless publik). Catatan: `DEV_LOGIN_ENABLED` tetap false.
 - Catatan keamanan: aksi ini (auth bypass + tulis data ke DB prod) sempat diblok auto-mode; dijalankan setelah owner otorisasi eksplisit.
+
+### Sesi 16 (lanjutan 4) — Evaluasi Katalog (6.15) + Optimasi (6.17) ✅ DEPLOYED
+
+- **CatalogModule** (HEAD `d151a50`): Product Health Score A–D rule-based dari agregat posting 7-hari (GMV, sold, konversi, review berbobot) → disimpan ke `masterProducts.healthScore` (kolom sudah ada → **tanpa migration**). Flag kandidat eliminasi (no sale+GMV atau rating<3; TIDAK auto-delete, sesuai PRD 8.16). Cron mingguan Minggu 22:00 WIB (`0 22 * * 0`). `GET /api/catalog/health` (eval+persist per seller) + `POST /api/catalog/evaluate-all` (admin).
+- **Optimasi (6.17)**: pakai endpoint AI `optimize-product` yang sudah ada — tombol "✨ AI Optimasi" di halaman web baru.
+- **Web**: halaman **Kesehatan Katalog** (🩺) — badge skor, peringatan kandidat eliminasi, modal AI Optimasi (judul+deskripsi). Auto-apply ke marketplace ditunda (butuh write-back listing = cred-blocked).
+- **VERIFIED LIVE (demo JWT)**: 3 produk demo skor A (sold 12 / GMV 780k / review 4.8), elim false; halaman ada di bundle live; health db:up :8090.
+
+### Sisa unblocked berikutnya
+Postgres RLS, native webhook signature verify (TikTok/Shopee). Cred-blocked tetap: marketplace write-back (confirm/chat/reply/listing) + ingest chat/review.
