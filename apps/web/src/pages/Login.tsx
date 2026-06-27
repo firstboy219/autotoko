@@ -45,6 +45,10 @@ export function Login() {
           <EmailLogin onDone={(t) => { applyToken(t); navigate("/"); }} />
         )}
 
+        <p className="text-[11px] text-slate-400 text-center mt-4">
+          Pengguna baru? Akun otomatis dibuat saat login pertama — tanpa password.
+        </p>
+
         <DevLogin />
       </div>
     </div>

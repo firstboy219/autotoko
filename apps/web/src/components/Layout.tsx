@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { useAccount } from "../lib/account";
 import { useRealtime } from "../lib/realtime";
 
 const NAV = [
@@ -14,12 +15,23 @@ const NAV = [
   { to: "/laporan", label: "Laporan", icon: "📈" },
   { to: "/bom", label: "BOM / Bahan", icon: "🧪" },
   { to: "/wallet", label: "Wallet", icon: "💳" },
+  { to: "/notifikasi", label: "Notifikasi", icon: "🔔" },
 ];
 
 export function Layout({ children, title }: { children: React.ReactNode; title: string }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const logout = useAuth((s) => s.logout);
+  const { me, load } = useAccount();
   const [toast, setToast] = useState<string | null>(null);
+
+  // Load profile once; route brand-new (un-onboarded) users to onboarding.
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (me && !me.onboarded && location.pathname !== "/onboarding") {
+      navigate("/onboarding", { replace: true });
+    }
+  }, [me, location.pathname, navigate]);
 
   useRealtime(
     useCallback((type) => {
@@ -74,12 +86,23 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
             </NavLink>
           ))}
         </nav>
+        <NavLink
+          to="/akun"
+          className={({ isActive }) =>
+            `flex items-center gap-2.5 mx-2 mb-1 px-3 py-2 rounded-md text-[12.5px] font-medium transition ${
+              isActive ? "bg-brand text-white" : "text-white/50 hover:bg-white/5 hover:text-white/90"
+            }`
+          }
+        >
+          <span className="w-4 text-center">👤</span>
+          <span className="truncate">{me?.fullName ?? "Akun Saya"}</span>
+        </NavLink>
         <button
           onClick={() => {
             logout();
             navigate("/login");
           }}
-          className="m-3 px-3 py-2 rounded-md text-[12px] text-white/60 hover:bg-white/5 text-left"
+          className="m-3 mt-0 px-3 py-2 rounded-md text-[12px] text-white/60 hover:bg-white/5 text-left"
         >
           ⎋ Keluar
         </button>

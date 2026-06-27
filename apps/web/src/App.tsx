@@ -11,6 +11,11 @@ import { Autopilot } from "./pages/Autopilot";
 import { Laporan } from "./pages/Laporan";
 import { Katalog } from "./pages/Katalog";
 import { Affiliate } from "./pages/Affiliate";
+import { Onboarding } from "./pages/Onboarding";
+import { Akun } from "./pages/Akun";
+import { Paket } from "./pages/Paket";
+import { Notifikasi } from "./pages/Notifikasi";
+import { Landing } from "./pages/Landing";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const authed = useAuth((s) => s.authenticated);
@@ -21,7 +26,12 @@ export function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/welcome" element={<Landing />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/onboarding" element={<Protected><Onboarding /></Protected>} />
+        <Route path="/akun" element={<Protected><Akun /></Protected>} />
+        <Route path="/paket" element={<Protected><Paket /></Protected>} />
+        <Route path="/notifikasi" element={<Protected><Notifikasi /></Protected>} />
         <Route path="/" element={<Protected><Dashboard /></Protected>} />
         <Route path="/toko" element={<Protected><Toko /></Protected>} />
         <Route path="/produk" element={<Protected><Produk /></Protected>} />

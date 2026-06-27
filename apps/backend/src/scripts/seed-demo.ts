@@ -17,6 +17,7 @@ import {
   reviewLogs,
   notifications,
   autopilotActivity,
+  pricingConfig,
 } from "../database/schema/index.js";
 
 /**
@@ -80,6 +81,21 @@ async function main() {
       .from(wallets)
       .where(eq(wallets.userId, DEMO_USER_ID))
       .limit(1);
+
+    // 1b) PRICING PLANS (global config; for onboarding / Paket page) ---------
+    const plans = [
+      { planType: "freemium" as const, monthlyFee: "0", setupFee: "0", perTransactionFee: "0", maxShops: 1, maxOrdersPerMonth: 50 },
+      { planType: "starter" as const, monthlyFee: "99000", setupFee: "99000", perTransactionFee: "200", maxShops: 3, maxOrdersPerMonth: 500 },
+      { planType: "pro" as const, monthlyFee: "299000", setupFee: "199000", perTransactionFee: "100", maxShops: 0, maxOrdersPerMonth: 0 },
+    ];
+    for (const p of plans) {
+      const [exists] = await tx
+        .select({ id: pricingConfig.id })
+        .from(pricingConfig)
+        .where(eq(pricingConfig.planType, p.planType))
+        .limit(1);
+      if (!exists) await tx.insert(pricingConfig).values({ ...p, isActive: true });
+    }
 
     // 2) SHOP ----------------------------------------------------------------
     let [shop] = await tx
