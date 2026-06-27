@@ -359,3 +359,16 @@ Reviewer TikTok akses `https://viewtoko.cosger.online` via akun **demo@autotoko.
 
 ### Sisa unblocked berikutnya
 Postgres RLS, native webhook signature verify (TikTok/Shopee). Cred-blocked tetap: marketplace write-back (confirm/chat/reply/listing) + ingest chat/review.
+
+### Sesi 16 (lanjutan 5) — Postgres RLS ✅ LIVE + reviewer simulation
+
+**RLS (HEAD `bcfcd04`, flag-gated) ROLLED OUT & VERIFIED di prod.** Defense-in-depth di atas filter app-layer.
+- Runtime: global `TenantInterceptor` bungkus tiap request HTTP dlm transaksi tenant (`set_config('app.user_id', sub)` utk user authed; `app.bypass='on'` utk admin/unauth/webhook). Cron (reports/catalog/token-refresh) pakai `TenantService.runBypass`. `DRIZZLE` jadi Proxy yg route ke tx aktif via AsyncLocalStorage → **0 perubahan call-site** `this.db.*`. No-op total bila `RLS_ENABLED!=true`.
+- DB: `rls/enable-rls.sql` (FORCE RLS + policy `tenant_isolation` di 9 tabel ber-user_id: users[id], wallets, shops, master_products, orders, affiliates, platform_invoices, autopilot_activity, notifications). `rls/disable-rls.sql` = rollback.
+- **Rollout aman**: deploy kode (flag off, no-op) → set `RLS_ENABLED=true` + restart (GUC dikirim, blm ada policy → tetap jalan) → apply enable-rls.sql → tes. Urutan ini wajib (FORCE RLS tanpa GUC = app ke-deny).
+- **VERIFIED**: enforcement `select count(*) from orders` → **no-context: 0 | as-demo-user: 9 | bypass: 9** (default-deny bekerja, owner pun ter-FORCE). Semua endpoint demo utuh (shops 1, orders 9, bom 3, wallet 450k/6tx, products 3, catalog 3, dashboard/alerts OK). Webhook (bypass) → 201. Tanpa rollback.
+- Fix sampingan: `reports.service` COALESCE(shopName varchar, marketplace enum) → cast `::text` (HEAD bcfcd04).
+- ⚠️ Catatan ops: 9 tabel ini sekarang FORCE RLS. Akses DB langsung (psql/script) HARUS `set_config('app.bypass','on',true)` dalam transaksi, atau pakai user yg punya BYPASSRLS, kalau tidak query balik kosong. Migration drizzle berikutnya (DDL) tetap jalan (DDL tak kena RLS).
+
+### Reviewer TikTok simulation (diminta owner) — semua jalan
+Login demo → Dashboard (1 toko, 9 order, Rp1.152.000) → Toko (Toko Demo AutoToko/tiktok/active) → Produk (3) → Orders Kanban (masuk2/approved2/produksi1/packing1/dikirim1/selesai2) → BOM (Biji Kopi Arabika LOW) → Wallet (Rp450.000) → **Hubungkan TikTok → redirect authorize valid** (`services.tiktokshop.com/open/authorize?service_id=7561008038686230293&state=<JWT>`). Round-trip tuntas saat reviewer authorize dgn akun TikTok Shop-nya (callback pakai bypass, aman dari RLS).
