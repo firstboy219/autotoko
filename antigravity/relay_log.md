@@ -372,3 +372,11 @@ Postgres RLS, native webhook signature verify (TikTok/Shopee). Cred-blocked teta
 
 ### Reviewer TikTok simulation (diminta owner) — semua jalan
 Login demo → Dashboard (1 toko, 9 order, Rp1.152.000) → Toko (Toko Demo AutoToko/tiktok/active) → Produk (3) → Orders Kanban (masuk2/approved2/produksi1/packing1/dikirim1/selesai2) → BOM (Biji Kopi Arabika LOW) → Wallet (Rp450.000) → **Hubungkan TikTok → redirect authorize valid** (`services.tiktokshop.com/open/authorize?service_id=7561008038686230293&state=<JWT>`). Round-trip tuntas saat reviewer authorize dgn akun TikTok Shop-nya (callback pakai bypass, aman dari RLS).
+
+### Sesi 16 (lanjutan 6) — demo data diperkaya + UI affiliate/chat/review (untuk reviewer)
+
+Owner minta data dummy yg menjelaskan konteks+fungsi platform ke reviewer.
+- **Seeder diperkaya** (HEAD `7e8a782`, run di server): kini **wrap di transaksi `SET app.bypass`** (wajib krn RLS FORCE). Cerita "Kopi Nusantara": 16 order (tersebar 7 hari, 4 terbaru di-refresh ke hari ini → dashboard selalu fresh), **4 autopilot_activity** (auto-approve 3 done + 1 held), **3 affiliates** (active/invited/prospect), **3 chat_logs** (AI buyer/affiliate), **2 review_logs** (AI balas review 5★/3★), **3 notifications**, **2 platform_invoices**. Showcase tables = delete+reinsert (idempoten + tanggal selalu baru).
+- **Surface ke UI** (HEAD `84e524d`): MarketingModule read-only (`GET /api/marketing/{affiliates,chat-logs,review-logs}`, tenant-scoped). Web: halaman **Affiliate** (🤝) + section **Auto Chat AI** & **Auto Balas Review AI** di halaman Autopilot. Deployed BE+web.
+- **VERIFIED**: dashboard today=4 order/Rp514k, 16 total, Kanban penuh; autopilot feed 4 aksi; affiliates 3; chat 3; review 2; weekly report Rp768k. Semua via akun demo di bawah RLS.
+- Re-run seeder kapan saja agar tanggal fresh: `node dist/scripts/seed-demo.js` (di app dir; otomatis bypass RLS).
