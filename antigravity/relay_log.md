@@ -380,3 +380,13 @@ Owner minta data dummy yg menjelaskan konteks+fungsi platform ke reviewer.
 - **Surface ke UI** (HEAD `84e524d`): MarketingModule read-only (`GET /api/marketing/{affiliates,chat-logs,review-logs}`, tenant-scoped). Web: halaman **Affiliate** (🤝) + section **Auto Chat AI** & **Auto Balas Review AI** di halaman Autopilot. Deployed BE+web.
 - **VERIFIED**: dashboard today=4 order/Rp514k, 16 total, Kanban penuh; autopilot feed 4 aksi; affiliates 3; chat 3; review 2; weekly report Rp768k. Semua via akun demo di bawah RLS.
 - Re-run seeder kapan saja agar tanggal fresh: `node dist/scripts/seed-demo.js` (di app dir; otomatis bypass RLS).
+
+### Sesi 16 (lanjutan 7) — fitur akun: onboarding, profil, paket, notifikasi, landing
+
+Audit fitur user-facing yang belum ada (diminta owner). Signup sudah implisit (OTP auto-create user); yang kurang dibangun:
+- **Backend AccountModule** (HEAD `ad2b17d`): `GET/PATCH /api/account/me` (profil + flag `onboarded`=Boolean(fullName)), `GET /api/account/plans`, `POST /api/account/plan`, `GET /api/account/notifications`.
+- **Web**: **Onboarding** wizard (nama → pilih paket → connect toko) yang otomatis muncul untuk user baru (fullName kosong) via gate di Layout; **Akun** (profil/edit nama/logout); **Paket** (pilih/upgrade freemium/starter/pro); **Notifikasi** (pakai tabel notifications); **Landing** publik `/welcome` (hero+fitur+CTA); hint di Login "akun otomatis dibuat saat login pertama". Nav web tambah 🔔 Notifikasi + 👤 Akun (nama user).
+- Seeder juga seed `pricing_config` (freemium/starter/pro) bila kosong (prod sudah ada sejak 2026-06-19, dipertahankan).
+- Bug fix sebelumnya: web/admin api client tak kirim `Content-Type: application/json` saat body kosong (demo-login 400 "Body cannot be empty").
+- **VERIFIED LIVE (demo)**: account/me (Demo AutoToko, pro, onboarded), plans 3 tier, notifications 3, /welcome 200, semua page ada di bundle live. Demo user onboarded=true → reviewer TIDAK dipaksa onboarding.
+- ⏳ Catatan: pilih paket berbayar (starter/pro) saat ini langsung set planType tanpa pembayaran setup-fee Midtrans (follow-up bila perlu gating bayar).
