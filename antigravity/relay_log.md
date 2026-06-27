@@ -405,3 +405,19 @@ Temuan owner (minta AI proaktif cari temuan semacam ini sendiri → [[proactive-
 - New user OTP → onboarding kini load /account/me & tampilkan "Mendaftar sebagai <email/WA>" (identity pre-filled).
 - Halaman **/signup** ("Daftar") berdiri sendiri (tab Email/WA, reuse `components/AuthForms`), dijangkau dari CTA Landing + link "Daftar di sini" di Login; sukses → onboarding. WA/Email OTP form di-extract jadi shared component (Login & Signup pakai bersama).
 - Deployed web. Verified: /signup 200, link + prefill ada di bundle. HEAD `488c0b4`.
+
+### Sesi 16 (lanjutan 10) — temuan TikTok reviewer (P1/P2) dikerjakan
+Reviewer kirim laporan (tanpa akses situs, jadi beberapa "FAIL" sudah ada). Hasil:
+- **Sudah ada (reviewer salah):** Orders detail modal + pagination + update status; BOM Restock + konfirmasi hapus; onboarding wizard; token-expiry text.
+- **Dikerjakan & deployed (HEAD `8b5117a`):**
+  - P1-1 tombol **"🔍 Masuk sebagai Demo Reviewer"** VISIBLE di /login (tak perlu expand).
+  - P1-4 **Refresh Token** per-toko (`POST /api/shops/:id/refresh`) + badge "X hari/kedaluwarsa" (merah <7h) di Toko Saya.
+  - P1-5 **halaman 404** custom (`*` → NotFound).
+  - P1-6 **/terms** + **/privacy** (konten ID: data, penyimpanan, hak hapus, kontak info@autotoko.id) + link di Login/Signup/Landing/Toko.
+  - P1-7 **rate limiting** `@nestjs/throttler` (global 120/mnt, auth 10/mnt, trustProxy sudah on). Verified: demo-login 10×201 lalu 429.
+  - P2-1 **Putus Koneksi** toko (`DELETE /api/shops/:id` → shopStatus disconnected, token dihapus) + konfirmasi.
+  - P2-5 indikator **● Live/Offline** WebSocket di header.
+  - P2-6 **peringatan saldo rendah** di Wallet (+ estimasi sisa order).
+  - P2-8 **favicon** SVG (hijau "A").
+- **Owner-side / belum:** App name "Jassa"→"AutoToko" (ubah di TikTok Partner Center, bukan kode); P2-7 konsistensi bahasa (sebagian), P3 (export CSV, sound, skeleton, mobile responsive) = post-launch.
+- Verified live: /terms,/privacy,/signup,favicon 200; 429 throttle; semua string reviewer ada di bundle.
