@@ -1,7 +1,8 @@
 import { Module } from "@nestjs/common";
-import { APP_INTERCEPTOR } from "@nestjs/core";
+import { APP_INTERCEPTOR, APP_GUARD } from "@nestjs/core";
 import { ConfigModule } from "@nestjs/config";
 import { ScheduleModule } from "@nestjs/schedule";
+import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 import { DatabaseModule } from "./database/database.module.js";
 import { TenantInterceptor } from "./common/tenant/tenant.interceptor.js";
 import { CryptoModule } from "./common/crypto/crypto.module.js";
@@ -31,6 +32,9 @@ import { HealthModule } from "./modules/health/health.module.js";
       envFilePath: [".env.local", ".env"],
     }),
     ScheduleModule.forRoot(),
+    // Global rate limit (per client IP via trustProxy). Auth endpoints add a
+    // tighter @Throttle. Protects against login/OTP brute force.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     DatabaseModule,
     CryptoModule,
     MailModule,
@@ -55,6 +59,8 @@ import { HealthModule } from "./modules/health/health.module.js";
   providers: [
     // Global RLS request-context wrapper (no-op unless RLS_ENABLED=true).
     { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
+    // Global rate limiter.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

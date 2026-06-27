@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   Logger,
@@ -59,6 +60,24 @@ export class ShopsController {
   @UseGuards(JwtAuthGuard)
   async list(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.shops.listShops(uid(req)) };
+  }
+
+  @Post(":id/refresh")
+  @UseGuards(JwtAuthGuard)
+  async refresh(
+    @Param("id") id: string,
+    @Req() req: FastifyRequest,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.shops.refreshOne(uid(req), id) };
+  }
+
+  @Delete(":id")
+  @UseGuards(JwtAuthGuard)
+  async disconnect(
+    @Param("id") id: string,
+    @Req() req: FastifyRequest,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.shops.disconnect(uid(req), id) };
   }
 
   // Requires a valid JWT (401 otherwise) — the connecting user's id is taken

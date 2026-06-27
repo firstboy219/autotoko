@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { getToken } from "./api";
 
@@ -22,6 +22,25 @@ function getSocket(): Socket | null {
 export function disconnectSocket(): void {
   socket?.disconnect();
   socket = null;
+}
+
+/** Live connection status for the dashboard indicator. */
+export function useConnectionStatus(): boolean {
+  const [connected, setConnected] = useState(false);
+  useEffect(() => {
+    const s = getSocket();
+    if (!s) return;
+    setConnected(s.connected);
+    const on = () => setConnected(true);
+    const off = () => setConnected(false);
+    s.on("connect", on);
+    s.on("disconnect", off);
+    return () => {
+      s.off("connect", on);
+      s.off("disconnect", off);
+    };
+  }, []);
+  return connected;
 }
 
 type RealtimeHandler = (type: "new_order" | "order_update", data: unknown) => void;

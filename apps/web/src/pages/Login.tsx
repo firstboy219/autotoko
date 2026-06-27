@@ -9,9 +9,15 @@ type Tab = "wa" | "email";
 export function Login() {
   const navigate = useNavigate();
   const applyToken = useAuth((s) => s.applyToken);
+  const demoLogin = useAuth((s) => s.demoLogin);
+  const demoLoading = useAuth((s) => s.loading);
   const brand = useBranding((s) => s.branding);
   const brandName = brand?.name ?? "AutoToko";
   const [tab, setTab] = useState<Tab>("wa");
+
+  async function reviewerDemo() {
+    if (await demoLogin()) navigate("/");
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center font-sans bg-[#F0F4F8]">
@@ -58,6 +64,22 @@ export function Login() {
           <Link to="/signup" className="text-brand font-semibold hover:underline">Daftar di sini</Link>
         </p>
 
+        <div className="mt-5 pt-4 border-t border-slate-100 text-center">
+          <p className="text-[11px] text-slate-500 mb-2">Untuk TikTok App Reviewer:</p>
+          <button
+            onClick={reviewerDemo}
+            disabled={demoLoading}
+            className="w-full py-2 rounded-md bg-brand hover:bg-brand-dark text-sm font-semibold disabled:opacity-60"
+          >
+            {demoLoading ? "Masuk…" : "🔍 Masuk sebagai Demo Reviewer"}
+          </button>
+        </div>
+
+        <div className="text-center mt-3 text-[10px] text-slate-400">
+          <Link to="/terms" className="hover:underline">Ketentuan</Link> ·{" "}
+          <Link to="/privacy" className="hover:underline">Privasi</Link>
+        </div>
+
         <DevLogin />
       </div>
     </div>
@@ -66,7 +88,7 @@ export function Login() {
 
 /** Username/password login — only works in non-production (backend rejects in prod). */
 function DevLogin() {
-  const { login, demoLogin, loading, error } = useAuth();
+  const { login, loading, error } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [username, setUsername] = useState("user");
@@ -77,29 +99,14 @@ function DevLogin() {
     if (await login(username, password)) navigate("/");
   }
 
-  async function demo() {
-    if (await demoLogin()) navigate("/");
-  }
-
   return (
-    <div className="mt-5 pt-4 border-t border-slate-100">
+    <div className="mt-3">
       <button
         onClick={() => setOpen((o) => !o)}
         className="text-[11px] text-slate-400 hover:text-slate-600"
       >
         {open ? "▾" : "▸"} Login developer
       </button>
-      {open && (
-        <div className="mt-2">
-          <button
-            onClick={demo}
-            disabled={loading}
-            className="w-full py-2 mb-3 rounded-md bg-brand hover:bg-brand-dark text-white text-sm font-semibold disabled:opacity-60"
-          >
-            {loading ? "Masuk…" : "Masuk sebagai Demo (reviewer)"}
-          </button>
-        </div>
-      )}
       {open && (
         <form onSubmit={submit} className="mt-2">
           <input

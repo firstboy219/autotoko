@@ -51,7 +51,11 @@ export function Landing() {
         <Link to="/signup" className="inline-block mt-5 px-6 py-3 rounded-lg bg-brand hover:bg-brand-dark text-white font-semibold">Daftar Gratis</Link>
       </section>
 
-      <footer className="border-t border-slate-100 py-6 text-center text-[12px] text-slate-400">© {new Date().getFullYear()} AutoToko · Autopilot Seller</footer>
+      <footer className="border-t border-slate-100 py-6 text-center text-[12px] text-slate-400">
+        © {new Date().getFullYear()} AutoToko · Autopilot Seller ·{" "}
+        <Link to="/terms" className="hover:underline">Ketentuan</Link> ·{" "}
+        <Link to="/privacy" className="hover:underline">Privasi</Link>
+      </footer>
     </div>
   );
 }

@@ -53,6 +53,11 @@ export function Signup() {
           Sudah punya akun?{" "}
           <Link to="/login" className="text-brand font-semibold hover:underline">Masuk</Link>
         </p>
+        <p className="text-[10px] text-slate-400 text-center mt-3">
+          Dengan mendaftar kamu setuju pada{" "}
+          <Link to="/terms" className="hover:underline">Ketentuan</Link> &{" "}
+          <Link to="/privacy" className="hover:underline">Privasi</Link>.
+        </p>
       </div>
     </div>
   );

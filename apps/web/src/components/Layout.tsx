@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useAccount } from "../lib/account";
 import { useBranding } from "../lib/branding";
-import { useRealtime } from "../lib/realtime";
+import { useRealtime, useConnectionStatus } from "../lib/realtime";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: "📊", end: true },
@@ -26,6 +26,7 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
   const { me, load } = useAccount();
   const brand = useBranding((s) => s.branding);
   const brandName = brand?.name ?? "AutoToko";
+  const connected = useConnectionStatus();
   const [toast, setToast] = useState<string | null>(null);
 
   // Load profile once; route brand-new (un-onboarded) users to onboarding.
@@ -117,8 +118,12 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
 
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-12 bg-white border-b border-slate-200 flex items-center px-4">
+        <header className="h-12 bg-white border-b border-slate-200 flex items-center justify-between px-4">
           <div className="font-bold">{title}</div>
+          <div className={`flex items-center gap-1.5 text-[11px] font-semibold ${connected ? "text-green-600" : "text-slate-400"}`}>
+            <span className={`inline-block w-2 h-2 rounded-full ${connected ? "bg-green-500" : "bg-slate-300"}`} />
+            {connected ? "Live" : "Offline"}
+          </div>
         </header>
         <main className="flex-1 overflow-y-auto p-4 bg-[#F0F4F8]">{children}</main>
       </div>

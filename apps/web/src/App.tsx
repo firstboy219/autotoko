@@ -17,6 +17,9 @@ import { Paket } from "./pages/Paket";
 import { Notifikasi } from "./pages/Notifikasi";
 import { Landing } from "./pages/Landing";
 import { Signup } from "./pages/Signup";
+import { Terms } from "./pages/Terms";
+import { Privacy } from "./pages/Privacy";
+import { NotFound } from "./pages/NotFound";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const authed = useAuth((s) => s.authenticated);
@@ -30,6 +33,8 @@ export function App() {
         <Route path="/welcome" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/privacy" element={<Privacy />} />
         <Route path="/onboarding" element={<Protected><Onboarding /></Protected>} />
         <Route path="/akun" element={<Protected><Akun /></Protected>} />
         <Route path="/paket" element={<Protected><Paket /></Protected>} />
@@ -44,7 +49,7 @@ export function App() {
         <Route path="/katalog" element={<Protected><Katalog /></Protected>} />
         <Route path="/affiliate" element={<Protected><Affiliate /></Protected>} />
         <Route path="/wallet" element={<Protected><Wallet /></Protected>} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
   );

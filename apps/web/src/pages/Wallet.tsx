@@ -38,8 +38,19 @@ export function Wallet() {
     }
   }
 
+  const balance = Number(data?.balance ?? 0);
+  const PER_ORDER_FEE = 200; // matches pricing default
+  const LOW = PER_ORDER_FEE * 100; // ~100 orders runway
+  const ordersLeft = Math.floor(balance / PER_ORDER_FEE);
+
   return (
     <Layout title="Wallet">
+      {!loading && balance < LOW && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-sm text-amber-800">
+          ⚠️ Saldo hampir habis. Top-up sekarang agar pesanan terus diproses otomatis.
+          {" "}Dengan saldo {rupiah(data?.balance)}, kamu bisa memproses ±{ordersLeft} pesanan lagi.
+        </div>
+      )}
       <div className="bg-gradient-to-br from-navy to-[#252558] rounded-xl p-6 text-white mb-4">
         <div className="text-[10px] uppercase tracking-wide text-white/40">Saldo Wallet</div>
         <div className="text-3xl font-extrabold mt-1">
