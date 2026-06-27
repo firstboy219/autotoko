@@ -1,23 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth, waLogin, emailLogin } from "../lib/auth";
+import { useBranding } from "../lib/branding";
 
 type Tab = "wa" | "email";
 
 export function Login() {
   const navigate = useNavigate();
   const applyToken = useAuth((s) => s.applyToken);
+  const brand = useBranding((s) => s.branding);
+  const brandName = brand?.name ?? "AutoToko";
   const [tab, setTab] = useState<Tab>("wa");
 
   return (
     <div className="min-h-screen flex items-center justify-center font-sans bg-[#F0F4F8]">
       <div className="bg-white rounded-xl border border-slate-200 p-8 w-[380px] shadow-sm">
         <div className="flex items-center gap-2 mb-6">
-          <div className="w-9 h-9 rounded-lg bg-brand text-white font-extrabold flex items-center justify-center">
-            A
-          </div>
+          {brand?.logoUrl ? (
+            <img src={brand.logoUrl} alt={brandName} className="w-9 h-9 rounded-lg object-contain" />
+          ) : (
+            <div className="w-9 h-9 rounded-lg bg-brand font-extrabold flex items-center justify-center">
+              {brandName.charAt(0).toUpperCase()}
+            </div>
+          )}
           <div>
-            <div className="font-extrabold text-lg leading-none">AutoToko</div>
+            <div className="font-extrabold text-lg leading-none">{brandName}</div>
             <div className="text-[10px] uppercase tracking-wide text-slate-400">
               Autopilot Seller
             </div>

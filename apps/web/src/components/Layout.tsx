@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useAccount } from "../lib/account";
+import { useBranding } from "../lib/branding";
 import { useRealtime } from "../lib/realtime";
 
 const NAV = [
@@ -23,6 +24,8 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
   const location = useLocation();
   const logout = useAuth((s) => s.logout);
   const { me, load } = useAccount();
+  const brand = useBranding((s) => s.branding);
+  const brandName = brand?.name ?? "AutoToko";
   const [toast, setToast] = useState<string | null>(null);
 
   // Load profile once; route brand-new (un-onboarded) users to onboarding.
@@ -57,11 +60,15 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
       {/* Sidebar */}
       <aside className="w-56 bg-navy flex flex-col flex-shrink-0">
         <div className="flex items-center gap-2 px-4 py-3.5 border-b border-white/10">
-          <div className="w-8 h-8 rounded-lg bg-brand text-white font-extrabold flex items-center justify-center">
-            A
-          </div>
+          {brand?.logoUrl ? (
+            <img src={brand.logoUrl} alt={brandName} className="w-8 h-8 rounded-lg object-contain" />
+          ) : (
+            <div className="w-8 h-8 rounded-lg bg-brand font-extrabold flex items-center justify-center">
+              {brandName.charAt(0).toUpperCase()}
+            </div>
+          )}
           <div>
-            <div className="text-white font-extrabold leading-none">AutoToko</div>
+            <div className="text-white font-extrabold leading-none">{brandName}</div>
             <div className="text-[9px] uppercase tracking-wider text-white/30">
               Autopilot Seller
             </div>

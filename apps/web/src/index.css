@@ -4,9 +4,23 @@
 
 :root {
   color-scheme: light;
+  /* Default branding — highlight green + dark navy (Superbank-style).
+     Channels are "R G B"; overridden at runtime from /api/branding. */
+  --c-brand: 163 224 11;        /* #A3E00B highlight green */
+  --c-brand-dark: 132 184 0;    /* #84B800 */
+  --c-brand-light: 240 250 219; /* #F0FADB */
+  --c-navy: 11 27 46;           /* #0B1B2E dark navy */
+  --c-onbrand: 11 27 46;        /* text on the (light) green brand surfaces */
 }
 
 body {
   margin: 0;
   background: #f0f4f8;
+}
+
+/* The highlight-green brand is light, so text on bg-brand surfaces (buttons,
+   active nav, logo) must be the dark on-brand color — this overrides any
+   text-white on those elements without editing every button. */
+.bg-brand {
+  color: rgb(var(--c-onbrand));
 }

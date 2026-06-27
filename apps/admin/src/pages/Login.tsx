@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { useBranding } from "../lib/branding";
 
 export function Login() {
   const navigate = useNavigate();
   const { login, loading, error } = useAuth();
+  const brand = useBranding((s) => s.branding);
+  const brandName = brand?.name ?? "AutoToko";
   const [username, setUsername] = useState("user");
   const [password, setPassword] = useState("user");
 
@@ -17,9 +20,13 @@ export function Login() {
     <div className="min-h-screen flex items-center justify-center font-sans bg-[#0f172a]">
       <form onSubmit={submit} className="bg-[#1e293b] rounded-xl border border-white/10 p-8 w-[360px]">
         <div className="flex items-center gap-2 mb-6">
-          <div className="w-9 h-9 rounded-lg bg-brand text-white font-extrabold flex items-center justify-center">A</div>
+          {brand?.logoUrl ? (
+            <img src={brand.logoUrl} alt={brandName} className="w-9 h-9 rounded-lg object-contain" />
+          ) : (
+            <div className="w-9 h-9 rounded-lg bg-brand font-extrabold flex items-center justify-center">{brandName.charAt(0).toUpperCase()}</div>
+          )}
           <div>
-            <div className="font-extrabold text-lg text-white leading-none">AutoToko</div>
+            <div className="font-extrabold text-lg text-white leading-none">{brandName}</div>
             <div className="text-[10px] uppercase tracking-wide text-brand">Admin CMS</div>
           </div>
         </div>

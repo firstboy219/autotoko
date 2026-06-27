@@ -4,9 +4,15 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Brand palette from the approved mockup (autotoko_mockup_v2.html)
-        brand: { DEFAULT: "#FF6B35", dark: "#E55A27", light: "#FFF1EB" },
-        navy: "#1A1A2E",
+        // CSS-variable driven so branding (color) can be changed live from the
+        // Admin CMS. Channels are "R G B" so Tailwind opacity (bg-brand/10) works.
+        brand: {
+          DEFAULT: "rgb(var(--c-brand) / <alpha-value>)",
+          dark: "rgb(var(--c-brand-dark) / <alpha-value>)",
+          light: "rgb(var(--c-brand-light) / <alpha-value>)",
+        },
+        navy: "rgb(var(--c-navy) / <alpha-value>)",
+        onbrand: "rgb(var(--c-onbrand) / <alpha-value>)",
         teal: { DEFAULT: "#00D4AA", light: "#E6FBF7" },
         shopee: "#EE4D2D",
       },

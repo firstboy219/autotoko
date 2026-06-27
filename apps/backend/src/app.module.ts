@@ -20,6 +20,7 @@ import { ReportsModule } from "./modules/reports/reports.module.js";
 import { CatalogModule } from "./modules/catalog/catalog.module.js";
 import { MarketingModule } from "./modules/marketing/marketing.module.js";
 import { AccountModule } from "./modules/account/account.module.js";
+import { BrandingModule } from "./modules/branding/branding.module.js";
 import { DashboardModule } from "./modules/dashboard/dashboard.module.js";
 import { HealthModule } from "./modules/health/health.module.js";
 
@@ -47,6 +48,7 @@ import { HealthModule } from "./modules/health/health.module.js";
     CatalogModule,
     MarketingModule,
     AccountModule,
+    BrandingModule,
     DashboardModule,
     HealthModule,
   ],

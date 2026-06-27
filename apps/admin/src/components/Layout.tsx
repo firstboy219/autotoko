@@ -1,23 +1,31 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { useBranding } from "../lib/branding";
 
 const NAV = [
   { to: "/settings", label: "Kredensial & Config", icon: "🔑" },
   { to: "/pricing", label: "Pricing", icon: "💰" },
   { to: "/ai", label: "AI Autopilot", icon: "🤖" },
+  { to: "/branding", label: "Branding", icon: "🎨" },
 ];
 
 export function Layout({ children, title }: { children: React.ReactNode; title: string }) {
   const navigate = useNavigate();
   const logout = useAuth((s) => s.logout);
+  const brand = useBranding((s) => s.branding);
+  const brandName = brand?.name ?? "AutoToko";
 
   return (
     <div className="flex h-screen overflow-hidden font-sans text-slate-100">
       <aside className="w-60 bg-navy flex flex-col flex-shrink-0">
         <div className="flex items-center gap-2 px-4 py-3.5 border-b border-white/10">
-          <div className="w-8 h-8 rounded-lg bg-brand text-white font-extrabold flex items-center justify-center">A</div>
+          {brand?.logoUrl ? (
+            <img src={brand.logoUrl} alt={brandName} className="w-8 h-8 rounded-lg object-contain" />
+          ) : (
+            <div className="w-8 h-8 rounded-lg bg-brand font-extrabold flex items-center justify-center">{brandName.charAt(0).toUpperCase()}</div>
+          )}
           <div>
-            <div className="text-white font-extrabold leading-none">AutoToko</div>
+            <div className="text-white font-extrabold leading-none">{brandName}</div>
             <div className="text-[9px] uppercase tracking-wider text-brand">Admin CMS</div>
           </div>
         </div>
