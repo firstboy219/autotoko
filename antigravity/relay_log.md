@@ -390,3 +390,12 @@ Audit fitur user-facing yang belum ada (diminta owner). Signup sudah implisit (O
 - Bug fix sebelumnya: web/admin api client tak kirim `Content-Type: application/json` saat body kosong (demo-login 400 "Body cannot be empty").
 - **VERIFIED LIVE (demo)**: account/me (Demo AutoToko, pro, onboarded), plans 3 tier, notifications 3, /welcome 200, semua page ada di bundle live. Demo user onboarded=true → reviewer TIDAK dipaksa onboarding.
 - ⏳ Catatan: pilih paket berbayar (starter/pro) saat ini langsung set planType tanpa pembayaran setup-fee Midtrans (follow-up bila perlu gating bayar).
+
+### Sesi 16 (lanjutan 8) — tema hijau+navy + Branding CMS (white-label)
+
+Owner: ganti warna ke hijau-highlight + navy ala Superbank + fitur CMS atur warna/nama/logo.
+- **Tema CSS-variable** (HEAD `f33388c`): tailwind `brand/navy/onbrand` → `rgb(var(--c-*) / <alpha>)`. Default di index.css: brand hijau `#A3E00B` (163 224 11), navy `#0B1B2E`. **Trik kontras**: satu rule `.bg-brand{color:rgb(var(--c-onbrand))}` membalik teks tombol jadi navy otomatis → tanpa edit puluhan tombol. onbrand dihitung dari luminance brand (gelap utk hijau terang).
+- **Backend**: `GET /api/branding` publik (BrandingModule, baca admin_settings `brand_name/brand_logo_url/brand_primary/brand_primary_dark/brand_navy`, default hijau+navy).
+- **Runtime apply**: web & admin `lib/branding.ts` (zustand) fetch saat load → set CSS vars (hex→channels) + nama + logo. Dipanggil di main.tsx (sebelum render). Layout & Login web+admin pakai nama/logo brand.
+- **Admin CMS Branding page** (🎨): atur Nama, URL Logo, Warna Highlight, Highlight-gelap, Navy — color picker + hex, **pratinjau live**, simpan via PUT /admin/settings (brand_*). 
+- **VERIFIED LIVE**: /api/branding default OK; web & admin CSS punya channel hijau `163 224 11`; admin bundle punya page Branding. Deployed BE+web+admin. Catatan: simpan branding butuh login admin (ADMIN_PASSWORD) — owner test via /admin.
