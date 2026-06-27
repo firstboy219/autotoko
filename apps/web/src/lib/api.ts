@@ -27,13 +27,17 @@ async function request<T>(
   body?: unknown,
 ): Promise<T> {
   const token = getToken();
+  const hasBody = body !== undefined;
   const res = await fetch(`/api${path}`, {
     method,
     headers: {
-      "Content-Type": "application/json",
+      // Only declare a JSON content-type when we actually send a body — Fastify
+      // rejects an empty body when content-type is application/json (e.g. the
+      // bodyless POSTs: demo-login, wa-login/start).
+      ...(hasBody ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: hasBody ? JSON.stringify(body) : undefined,
   });
 
   if (res.status === 401) {

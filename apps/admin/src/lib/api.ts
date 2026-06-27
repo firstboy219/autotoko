@@ -14,13 +14,16 @@ export class ApiError extends Error {
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const token = getToken();
+  const hasBody = body !== undefined;
   const res = await fetch(`/api${path}`, {
     method,
     headers: {
-      "Content-Type": "application/json",
+      // Only set JSON content-type with an actual body (Fastify rejects empty
+      // body + application/json, e.g. bodyless admin POST triggers).
+      ...(hasBody ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: hasBody ? JSON.stringify(body) : undefined,
   });
   if (res.status === 401 || res.status === 403) {
     if (res.status === 401) clearToken();
