@@ -421,3 +421,14 @@ Reviewer kirim laporan (tanpa akses situs, jadi beberapa "FAIL" sudah ada). Hasi
   - P2-8 **favicon** SVG (hijau "A").
 - **Owner-side / belum:** App name "Jassa"→"AutoToko" (ubah di TikTok Partner Center, bukan kode); P2-7 konsistensi bahasa (sebagian), P3 (export CSV, sound, skeleton, mobile responsive) = post-launch.
 - Verified live: /terms,/privacy,/signup,favicon 200; 429 throttle; semua string reviewer ada di bundle.
+
+### Sesi 16 (lanjutan 11) — temuan uji real-seller (P1 bugs)
+Banyak item "tidak ada" ternyata SUDAH ADA (Produk klik-row+edit/hapus, Order detail modal, /akun profil dari sidebar, Notifikasi page, Orders search+pagination). Yang diperbaiki & deployed (HEAD `b6e30a8`):
+- **BUG-1 session pendek**: bukan JWT expiry (server 1h). Akar paling mungkin = rate limiter terlalu ketat (120/mnt global) bikin SPA multi-tab kena 429 → pengalaman rusak. Fix: **JWT default 12h** + set server `JWT_EXPIRES_IN=12h` (verified TTL 43200s); **global 120→600/mnt, auth 10→30/mnt** (verified 14× login 201, tak ada 429 dini). Jika logout masih terjadi, butuh Network tab user utk lihat call mana yg 401.
+- **BUG-2**: label transaksi wallet ramah (Biaya Order/Top-up/Refund) + badge warna (hijau/oranye), bukan enum mentah.
+- **BUG-3**: pesan 429 ramah di web+admin api client ("Terlalu banyak permintaan…"), bukan "ThrottlerException".
+- **UX-1**: tombol nominal cepat top-up (100k/200k/500k/1jt) + input ber-format Rupiah + min 50k + label "Top Up Saldo".
+- **UX-3**: tooltip di indikator Live/Offline (merah saat offline).
+- **UX-7**: search bahan di BOM.
+- Sudah ada → UX-2/UX-4/UX-6/FEAT-4. UX-5 (Autopilot/Affiliate "coming soon"): keduanya FUNGSIONAL (empty-state sudah jelas), tidak dilabeli coming-soon.
+- Sisa P3 (bulk actions, export CSV, notif mark-read+badge, Kanban session repro) = belum.
