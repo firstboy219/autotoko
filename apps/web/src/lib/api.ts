@@ -43,7 +43,10 @@ async function request<T>(
   if (res.status === 401) {
     clearToken();
     if (!location.pathname.startsWith("/login")) location.href = "/login";
-    throw new ApiError("Unauthorized", 401);
+    throw new ApiError("Sesi berakhir, silakan masuk lagi.", 401);
+  }
+  if (res.status === 429) {
+    throw new ApiError("Terlalu banyak permintaan. Tunggu sebentar lalu coba lagi.", 429);
   }
 
   const json = (await res.json().catch(() => null)) as

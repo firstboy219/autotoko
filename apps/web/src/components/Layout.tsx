@@ -120,8 +120,11 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="h-12 bg-white border-b border-slate-200 flex items-center justify-between px-4">
           <div className="font-bold">{title}</div>
-          <div className={`flex items-center gap-1.5 text-[11px] font-semibold ${connected ? "text-green-600" : "text-slate-400"}`}>
-            <span className={`inline-block w-2 h-2 rounded-full ${connected ? "bg-green-500" : "bg-slate-300"}`} />
+          <div
+            title={connected ? "Terhubung realtime — notifikasi order baru muncul otomatis." : "Koneksi realtime terputus. Coba refresh halaman."}
+            className={`flex items-center gap-1.5 text-[11px] font-semibold cursor-help ${connected ? "text-green-600" : "text-red-500"}`}
+          >
+            <span className={`inline-block w-2 h-2 rounded-full ${connected ? "bg-green-500" : "bg-red-400"}`} />
             {connected ? "Live" : "Offline"}
           </div>
         </header>

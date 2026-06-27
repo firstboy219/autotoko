@@ -30,6 +30,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     if (!location.pathname.startsWith("/admin/login")) location.href = "/admin/login";
     throw new ApiError("Unauthorized", res.status);
   }
+  if (res.status === 429) {
+    throw new ApiError("Terlalu banyak permintaan. Tunggu sebentar lalu coba lagi.", 429);
+  }
   const json = (await res.json().catch(() => null)) as
     | (ApiResponse<T> & { message?: string | string[] })
     | null;

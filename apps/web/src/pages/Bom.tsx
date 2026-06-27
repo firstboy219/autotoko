@@ -29,6 +29,7 @@ export function Bom() {
   useRealtime(useCallback(() => reload(), [reload]));
 
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // create form
@@ -124,6 +125,13 @@ export function Bom() {
         </form>
       )}
 
+      <input
+        className="w-full max-w-xs mb-3 px-3 py-2 rounded-md border border-slate-200 text-sm"
+        placeholder="Cari nama bahan / produk…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -142,7 +150,16 @@ export function Bom() {
             ) : !data?.length ? (
               <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400">Belum ada bahan baku. Tambahkan untuk auto-deduct saat order masuk.</td></tr>
             ) : (
-              data.map((b) => (
+              data
+                .filter((b) => {
+                  const q = query.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    b.materialName.toLowerCase().includes(q) ||
+                    (b.masterName ?? "").toLowerCase().includes(q)
+                  );
+                })
+                .map((b) => (
                 <tr key={b.id} className={`border-t border-slate-100 ${b.lowStock ? "bg-red-50" : ""}`}>
                   <td className="px-3 py-2 font-medium">{b.materialName} <span className="text-[10px] text-slate-400">{b.unit}</span></td>
                   <td className="px-3 py-2 text-slate-500">{b.masterName ?? "-"}</td>

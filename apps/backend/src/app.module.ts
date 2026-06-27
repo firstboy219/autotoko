@@ -32,9 +32,10 @@ import { HealthModule } from "./modules/health/health.module.js";
       envFilePath: [".env.local", ".env"],
     }),
     ScheduleModule.forRoot(),
-    // Global rate limit (per client IP via trustProxy). Auth endpoints add a
-    // tighter @Throttle. Protects against login/OTP brute force.
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    // Global rate limit (per client IP via trustProxy). Generous so a normal
+    // multi-tab SPA never trips it; auth endpoints add a tighter @Throttle to
+    // protect against login/OTP brute force.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 600 }]),
     DatabaseModule,
     CryptoModule,
     MailModule,

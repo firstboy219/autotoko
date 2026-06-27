@@ -14,8 +14,9 @@ import { AuthService } from "./auth.service.js";
 import { EmailOtpService } from "./email-otp.service.js";
 import { LoginDto, WaVerifyDto, EmailStartDto, EmailVerifyDto } from "./dto/auth.dto.js";
 
-// Tighter limit on auth: max 10 requests/min per IP (brute-force protection).
-@Throttle({ default: { limit: 10, ttl: 60_000 } })
+// Tighter limit on auth: max 30 requests/min per IP (brute-force protection
+// without blocking legit retries/OTP).
+@Throttle({ default: { limit: 30, ttl: 60_000 } })
 @Controller("auth")
 export class AuthController {
   constructor(
