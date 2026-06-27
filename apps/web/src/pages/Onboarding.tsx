@@ -18,6 +18,7 @@ export function Onboarding() {
   const navigate = useNavigate();
   const setMe = useAccount((s) => s.setMe);
   const me = useAccount((s) => s.me);
+  const loadMe = useAccount((s) => s.load);
   const [step, setStep] = useState(1);
   const [fullName, setFullName] = useState("");
   const [plan, setPlan] = useState<"freemium" | "starter" | "pro">("freemium");
@@ -25,10 +26,17 @@ export function Onboarding() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Ensure we know who is signing up (email/WhatsApp from OTP).
+  useEffect(() => { loadMe(); }, [loadMe]);
+  // Pre-fill name if it somehow already exists.
+  useEffect(() => { if (me?.fullName) setFullName(me.fullName); }, [me?.fullName]);
+
   // Already onboarded? skip.
   useEffect(() => {
     if (me?.onboarded) navigate("/", { replace: true });
   }, [me, navigate]);
+
+  const identity = me?.email ?? me?.whatsapp ?? null;
 
   useEffect(() => {
     api.get<Plan[]>("/account/plans").then(setPlans).catch(() => {});
@@ -56,7 +64,12 @@ export function Onboarding() {
           <div className="w-9 h-9 rounded-lg bg-brand text-white font-extrabold flex items-center justify-center">A</div>
           <div className="font-extrabold text-lg">Selamat datang di AutoToko</div>
         </div>
-        <div className="text-xs text-slate-400 mb-5">Langkah {step} dari 3 — yuk siapkan akunmu.</div>
+        <div className="text-xs text-slate-400 mb-3">Langkah {step} dari 3 — yuk siapkan akunmu.</div>
+        {identity && (
+          <div className="mb-4 text-[12px] bg-brand-light text-slate-600 rounded-md px-3 py-2">
+            Mendaftar sebagai <b className="text-slate-800">{identity}</b>
+          </div>
+        )}
 
         {step === 1 && (
           <div>

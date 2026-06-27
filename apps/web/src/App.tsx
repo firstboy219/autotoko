@@ -16,6 +16,7 @@ import { Akun } from "./pages/Akun";
 import { Paket } from "./pages/Paket";
 import { Notifikasi } from "./pages/Notifikasi";
 import { Landing } from "./pages/Landing";
+import { Signup } from "./pages/Signup";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const authed = useAuth((s) => s.authenticated);
@@ -28,6 +29,7 @@ export function App() {
       <Routes>
         <Route path="/welcome" element={<Landing />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
         <Route path="/onboarding" element={<Protected><Onboarding /></Protected>} />
         <Route path="/akun" element={<Protected><Akun /></Protected>} />
         <Route path="/paket" element={<Protected><Paket /></Protected>} />

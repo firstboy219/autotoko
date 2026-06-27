@@ -25,7 +25,7 @@ export function Landing() {
         <h1 className="text-4xl md:text-5xl font-extrabold leading-tight">Jualan online <span className="text-brand">otomatis</span>, kamu tinggal pantau.</h1>
         <p className="text-slate-500 mt-4 text-lg">AutoToko menjalankan operasional toko-mu dengan AI: approve order, balas chat & review, kelola stok, affiliate, dan laporan — full-auto, bisa dipantau kapan saja.</p>
         <div className="flex gap-3 justify-center mt-7">
-          <Link to="/login" className="px-6 py-3 rounded-lg bg-brand hover:bg-brand-dark text-white font-semibold">Mulai Gratis</Link>
+          <Link to="/signup" className="px-6 py-3 rounded-lg bg-brand hover:bg-brand-dark text-white font-semibold">Mulai Gratis</Link>
           <a href="#fitur" className="px-6 py-3 rounded-lg border border-slate-200 hover:bg-slate-50 font-semibold">Lihat Fitur</a>
         </div>
         <p className="text-[12px] text-slate-400 mt-3">Tanpa password — login pakai WhatsApp atau email. Akun baru otomatis dibuat saat login pertama.</p>
@@ -48,7 +48,7 @@ export function Landing() {
 
       <section className="max-w-3xl mx-auto text-center px-6 py-16">
         <h2 className="text-2xl font-bold">Siap autopilot-kan toko-mu?</h2>
-        <Link to="/login" className="inline-block mt-5 px-6 py-3 rounded-lg bg-brand hover:bg-brand-dark text-white font-semibold">Masuk / Daftar</Link>
+        <Link to="/signup" className="inline-block mt-5 px-6 py-3 rounded-lg bg-brand hover:bg-brand-dark text-white font-semibold">Daftar Gratis</Link>
       </section>
 
       <footer className="border-t border-slate-100 py-6 text-center text-[12px] text-slate-400">© {new Date().getFullYear()} AutoToko · Autopilot Seller</footer>
