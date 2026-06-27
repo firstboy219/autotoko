@@ -399,3 +399,9 @@ Owner: ganti warna ke hijau-highlight + navy ala Superbank + fitur CMS atur warn
 - **Runtime apply**: web & admin `lib/branding.ts` (zustand) fetch saat load → set CSS vars (hex→channels) + nama + logo. Dipanggil di main.tsx (sebelum render). Layout & Login web+admin pakai nama/logo brand.
 - **Admin CMS Branding page** (🎨): atur Nama, URL Logo, Warna Highlight, Highlight-gelap, Navy — color picker + hex, **pratinjau live**, simpan via PUT /admin/settings (brand_*). 
 - **VERIFIED LIVE**: /api/branding default OK; web & admin CSS punya channel hijau `163 224 11`; admin bundle punya page Branding. Deployed BE+web+admin. Catatan: simpan branding butuh login admin (ADMIN_PASSWORD) — owner test via /admin.
+
+### Sesi 16 (lanjutan 9) — signup langsung + onboarding email pre-filled
+Temuan owner (minta AI proaktif cari temuan semacam ini sendiri → [[proactive-findings-and-enhancements]]):
+- New user OTP → onboarding kini load /account/me & tampilkan "Mendaftar sebagai <email/WA>" (identity pre-filled).
+- Halaman **/signup** ("Daftar") berdiri sendiri (tab Email/WA, reuse `components/AuthForms`), dijangkau dari CTA Landing + link "Daftar di sini" di Login; sukses → onboarding. WA/Email OTP form di-extract jadi shared component (Login & Signup pakai bersama).
+- Deployed web. Verified: /signup 200, link + prefill ada di bundle. HEAD `488c0b4`.
