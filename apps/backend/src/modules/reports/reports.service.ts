@@ -97,14 +97,14 @@ export class ReportsService {
 
     const byShopRows = await this.db
       .select({
-        shop: sql<string>`coalesce(${shops.shopName}, ${orders.marketplace})`,
+        shop: sql<string>`coalesce(${shops.shopName}, ${orders.marketplace}::text)`,
         orders: sql<number>`count(*)::int`,
         revenue: sql<string>`coalesce(sum(${orders.totalAmount}), 0)`,
       })
       .from(orders)
       .leftJoin(shops, eq(orders.shopId, shops.id))
       .where(where)
-      .groupBy(sql`coalesce(${shops.shopName}, ${orders.marketplace})`);
+      .groupBy(sql`coalesce(${shops.shopName}, ${orders.marketplace}::text)`);
 
     const byStatusRows = await this.db
       .select({
