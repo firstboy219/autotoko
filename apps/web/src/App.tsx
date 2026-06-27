@@ -10,6 +10,7 @@ import { Bom } from "./pages/Bom";
 import { Autopilot } from "./pages/Autopilot";
 import { Laporan } from "./pages/Laporan";
 import { Katalog } from "./pages/Katalog";
+import { Affiliate } from "./pages/Affiliate";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const authed = useAuth((s) => s.authenticated);
@@ -29,6 +30,7 @@ export function App() {
         <Route path="/autopilot" element={<Protected><Autopilot /></Protected>} />
         <Route path="/laporan" element={<Protected><Laporan /></Protected>} />
         <Route path="/katalog" element={<Protected><Katalog /></Protected>} />
+        <Route path="/affiliate" element={<Protected><Affiliate /></Protected>} />
         <Route path="/wallet" element={<Protected><Wallet /></Protected>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

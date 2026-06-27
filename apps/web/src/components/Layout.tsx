@@ -10,6 +10,7 @@ const NAV = [
   { to: "/katalog", label: "Kesehatan Katalog", icon: "🩺" },
   { to: "/orders", label: "Orders", icon: "🛒" },
   { to: "/autopilot", label: "Autopilot", icon: "🤖" },
+  { to: "/affiliate", label: "Affiliate", icon: "🤝" },
   { to: "/laporan", label: "Laporan", icon: "📈" },
   { to: "/bom", label: "BOM / Bahan", icon: "🧪" },
   { to: "/wallet", label: "Wallet", icon: "💳" },

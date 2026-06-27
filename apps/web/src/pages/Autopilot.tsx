@@ -34,8 +34,25 @@ function timeAgo(iso: string): string {
   return d.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" });
 }
 
+interface ChatLog {
+  id: string;
+  chatType: "buyer" | "affiliate";
+  counterpartName: string | null;
+  messageIn: string | null;
+  messageOut: string | null;
+  aiModel: string | null;
+}
+interface ReviewLog {
+  id: string;
+  rating: number | null;
+  reviewText: string | null;
+  replyText: string | null;
+}
+
 export function Autopilot() {
   const { data, reload } = useFetch<Activity[]>("/ai/activity?limit=100");
+  const { data: chats } = useFetch<ChatLog[]>("/marketing/chat-logs");
+  const { data: reviews } = useFetch<ReviewLog[]>("/marketing/review-logs");
 
   // Live-refresh when an order event arrives (autopilot may have just acted).
   useRealtime(
@@ -91,6 +108,40 @@ export function Autopilot() {
           );
         })}
       </div>
+
+      {chats && chats.length > 0 && (
+        <div className="mt-6">
+          <h2 className="text-sm font-bold text-slate-700 mb-2">💬 Auto Chat AI</h2>
+          <div className="space-y-2">
+            {chats.map((c) => (
+              <div key={c.id} className="bg-white rounded-xl border border-slate-200 p-3">
+                <div className="text-[11px] text-slate-400 mb-1">
+                  {c.chatType === "buyer" ? "Pembeli" : "Affiliator"}
+                  {c.counterpartName ? ` · ${c.counterpartName}` : ""}
+                  {c.aiModel ? ` · ${c.aiModel}` : ""}
+                </div>
+                {c.messageIn && <div className="text-[13px] text-slate-500">🗨️ {c.messageIn}</div>}
+                {c.messageOut && <div className="text-[13px] text-slate-800 mt-1">🤖 {c.messageOut}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {reviews && reviews.length > 0 && (
+        <div className="mt-6">
+          <h2 className="text-sm font-bold text-slate-700 mb-2">⭐ Auto Balas Review AI</h2>
+          <div className="space-y-2">
+            {reviews.map((r) => (
+              <div key={r.id} className="bg-white rounded-xl border border-slate-200 p-3">
+                <div className="text-[12px] text-amber-600 mb-0.5">{"★".repeat(r.rating ?? 0)}{"☆".repeat(5 - (r.rating ?? 0))}</div>
+                {r.reviewText && <div className="text-[13px] text-slate-500">🗨️ {r.reviewText}</div>}
+                {r.replyText && <div className="text-[13px] text-slate-800 mt-1">🤖 {r.replyText}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }
