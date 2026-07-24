@@ -25,3 +25,5 @@ export interface BrandingConfig {
   fontFamily: string;
   tagline: string;
 }
+
+export * from "./payout";

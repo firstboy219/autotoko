@@ -20,6 +20,11 @@ import { Signup } from "./pages/Signup";
 import { Terms } from "./pages/Terms";
 import { Privacy } from "./pages/Privacy";
 import { NotFound } from "./pages/NotFound";
+import { Pencairan } from "./pages/Pencairan";
+import { PencairanBatch } from "./pages/PencairanBatch";
+import { PencairanSubSeller } from "./pages/PencairanSubSeller";
+import { PencairanSettings } from "./pages/PencairanSettings";
+import { PencairanMutasi } from "./pages/PencairanMutasi";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const authed = useAuth((s) => s.authenticated);
@@ -49,6 +54,11 @@ export function App() {
         <Route path="/katalog" element={<Protected><Katalog /></Protected>} />
         <Route path="/affiliate" element={<Protected><Affiliate /></Protected>} />
         <Route path="/wallet" element={<Protected><Wallet /></Protected>} />
+        <Route path="/pencairan" element={<Protected><Pencairan /></Protected>} />
+        <Route path="/pencairan/batch/:id" element={<Protected><PencairanBatch /></Protected>} />
+        <Route path="/pencairan/sub-seller" element={<Protected><PencairanSubSeller /></Protected>} />
+        <Route path="/pencairan/pengaturan" element={<Protected><PencairanSettings /></Protected>} />
+        <Route path="/pencairan/mutasi" element={<Protected><PencairanMutasi /></Protected>} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>

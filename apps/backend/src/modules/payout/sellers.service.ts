@@ -185,6 +185,44 @@ export class PayoutSellersService {
     return row;
   }
 
+  /**
+   * Shops with their payout assignment resolved to EFFECTIVE rates (override ??
+   * entity default) plus owner names. Purpose-built for the mutation input form
+   * so its real-time split preview needs no client-side joining.
+   */
+  async listShopsForPayout(userId: string) {
+    const [shopRows, subs, subsubs] = await Promise.all([
+      this.db.select().from(shops).where(eq(shops.userId, userId)),
+      this.db.select().from(subSellers).where(eq(subSellers.userId, userId)),
+      this.db.select().from(subSubSellers).where(eq(subSubSellers.userId, userId)),
+    ]);
+    const subById = new Map(subs.map((s) => [s.id, s]));
+    const subsubById = new Map(subsubs.map((s) => [s.id, s]));
+    return shopRows.map((shop) => {
+      const sub = shop.subSellerId ? subById.get(shop.subSellerId) : null;
+      const subsub = shop.subSubSellerId ? subsubById.get(shop.subSubSellerId) : null;
+      const num = (v: string | null) => (v == null ? null : Number(v));
+      const effSubSeller = sub
+        ? (num(shop.rateOverrideSubSeller) ?? Number(sub.defaultRate))
+        : null;
+      const effSubSub = subsub
+        ? (num(shop.rateOverrideSubSubSeller) ?? Number(subsub.defaultRate))
+        : null;
+      return {
+        id: shop.id,
+        marketplace: shop.marketplace,
+        shopName: shop.shopName ?? shop.shopId,
+        subSellerId: shop.subSellerId,
+        subSubSellerId: shop.subSubSellerId,
+        subSellerName: sub?.name ?? null,
+        subSubSellerName: subsub?.name ?? null,
+        effectiveSubSellerRate: effSubSeller,
+        effectiveSubSubSellerRate: effSubSub,
+        scenario: shop.subSubSellerId ? "C" : shop.subSellerId ? "B" : "A",
+      };
+    });
+  }
+
   // --- Payout settings (requirement 5.4) — one row per tenant, lazily created ---
 
   async getSettings(userId: string) {

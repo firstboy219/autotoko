@@ -16,6 +16,7 @@ const NAV = [
   { to: "/laporan", label: "Laporan", icon: "📈" },
   { to: "/bom", label: "BOM / Bahan", icon: "🧪" },
   { to: "/wallet", label: "Wallet", icon: "💳" },
+  { to: "/pencairan", label: "Pencairan Dana", icon: "💸" },
   { to: "/notifikasi", label: "Notifikasi", icon: "🔔" },
 ];
 

@@ -89,6 +89,12 @@ export class PayoutController {
     return ok(await this.sellers.updateSubSubSeller(uid(req), id, dto));
   }
 
+  // --- Shops (with resolved payout rates, for the mutation form) ---
+  @Get("shops")
+  async listShops(@Req() req: FastifyRequest) {
+    return ok(await this.sellers.listShopsForPayout(uid(req)));
+  }
+
   // --- Shop assignment ---
   @Post("shops/:shopId/assign")
   async assignShop(
