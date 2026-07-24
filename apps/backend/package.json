@@ -9,12 +9,13 @@
     "start:prod": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "test": "echo \"(backend) no tests yet\"",
+    "test": "vitest run",
     "clean": "rm -rf dist .turbo *.tsbuildinfo",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@autotoko/shared": "workspace:*",
@@ -44,6 +45,7 @@
     "@types/nodemailer": "^8.0.1",
     "dotenv": "^16.4.5",
     "drizzle-kit": "^0.28.1",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
   }
 }
