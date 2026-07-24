@@ -13,7 +13,9 @@ DECLARE t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY[
     'wallets','shops','master_products','orders','affiliates',
-    'platform_invoices','autopilot_activity','notifications'
+    'platform_invoices','autopilot_activity','notifications',
+    'sub_sellers','sub_sub_sellers','payout_settings',
+    'payout_batches','payout_mutations','payout_adjustments'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
