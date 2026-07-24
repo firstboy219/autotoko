@@ -35,6 +35,41 @@ import {
  */
 const DEMO_USER_ID = "00000000-0000-0000-0000-0000000000de";
 const DEMO_SHOP_ID = "7494387970839184847";
+
+/**
+ * Real TikTok-Shop ID formats (required by App Review):
+ *  - Order IDs are 18-digit numeric strings beginning with 57 or 58.
+ *  - Product/item IDs are 17-digit numeric strings beginning with 17.
+ * These replace the old `DEMO-000N` / `ITEM-<sku>` placeholders so a reviewer
+ * sees data that is indistinguishable from a live TikTok Shop sync.
+ */
+const PRODUCT_IDS: Record<string, string> = {
+  "KOPI-ARABIKA-200": "17293847561920384",
+  "TEH-HIJAU-100": "17849201736482910",
+  "KOPI-ROBUSTA-500": "17384920173648291",
+};
+// 16 stable TikTok-format order IDs (18 digits, prefixed 57/58).
+// Indexed 1-based via orderIdAt(n) so the old `DEMO-000N` references map 1:1.
+const ORDER_IDS = [
+  "574298163847291648", // 1
+  "581937264819203847", // 2
+  "576482901847362091", // 3
+  "578394756201948372", // 4
+  "571920384756291038", // 5
+  "582019374856201938", // 6
+  "579283746192038475", // 7
+  "583746192058471029", // 8
+  "575610293847561082", // 9
+  "580192837465019273", // 10
+  "577463829105647301", // 11
+  "584756102938475612", // 12
+  "572938475610293841", // 13
+  "586019283746510277", // 14
+  "573648291056473822", // 15
+  "585102938475610288", // 16
+] as const;
+const orderIdAt = (n: number) => ORDER_IDS[n - 1]!; // 1-based (DEMO-0003 → orderIdAt(3))
+
 const now = () => new Date();
 const daysAgo = (d: number) => new Date(Date.now() - d * 86400_000);
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000);
@@ -162,7 +197,7 @@ async function main() {
         await tx.insert(productPostings).values({
           masterProductId: m.id,
           shopId,
-          marketplaceItemId: `ITEM-${m.sku}`,
+          marketplaceItemId: PRODUCT_IDS[m.sku] ?? `ITEM-${m.sku}`,
           marketplaceSku: m.sku,
           title: m.name,
           price: m.price,
@@ -209,17 +244,19 @@ async function main() {
     // 6) ORDERS (16, spread over 7 days; recent few refreshed to today) ------
     const buyers = ["Andi", "Budi", "Citra", "Dewi", "Eka", "Fajar", "Gita", "Hadi", "Indah", "Joko", "Kirana", "Lina", "Maya", "Nanda", "Oki", "Putri"];
     const statuses = ["masuk", "masuk", "approved", "approved", "produksi", "produksi", "packing", "packing", "siap_kirim", "dikirim", "dikirim", "selesai", "selesai", "selesai", "approved", "masuk"] as const;
+    // Line items carry the TikTok-format item_id + sale_price so order detail
+    // shows a real TikTok product reference (PRD / App Review requirement).
     const itemSets = [
-      [{ product_name: "Kopi Arabika Premium 200gr", seller_sku: "KOPI-ARABIKA-200", quantity: 2 }],
-      [{ product_name: "Teh Hijau Organik 100gr", seller_sku: "TEH-HIJAU-100", quantity: 1 }],
-      [{ product_name: "Kopi Robusta 500gr", seller_sku: "KOPI-ROBUSTA-500", quantity: 3 }],
+      [{ item_id: PRODUCT_IDS["KOPI-ARABIKA-200"], product_name: "Kopi Arabika Premium 200gr", seller_sku: "KOPI-ARABIKA-200", quantity: 2, sale_price: "65000" }],
+      [{ item_id: PRODUCT_IDS["TEH-HIJAU-100"], product_name: "Teh Hijau Organik 100gr", seller_sku: "TEH-HIJAU-100", quantity: 1, sale_price: "38000" }],
+      [{ item_id: PRODUCT_IDS["KOPI-ROBUSTA-500"], product_name: "Kopi Robusta 500gr", seller_sku: "KOPI-ROBUSTA-500", quantity: 3, sale_price: "72000" }],
       [
-        { product_name: "Kopi Arabika Premium 200gr", seller_sku: "KOPI-ARABIKA-200", quantity: 1 },
-        { product_name: "Teh Hijau Organik 100gr", seller_sku: "TEH-HIJAU-100", quantity: 2 },
+        { item_id: PRODUCT_IDS["KOPI-ARABIKA-200"], product_name: "Kopi Arabika Premium 200gr", seller_sku: "KOPI-ARABIKA-200", quantity: 1, sale_price: "65000" },
+        { item_id: PRODUCT_IDS["TEH-HIJAU-100"], product_name: "Teh Hijau Organik 100gr", seller_sku: "TEH-HIJAU-100", quantity: 2, sale_price: "38000" },
       ],
     ];
     for (let i = 0; i < 16; i++) {
-      const orderNo = `DEMO-${String(i + 1).padStart(4, "0")}`;
+      const orderNo = orderIdAt(i + 1);
       const it = itemSets[i % itemSets.length]!;
       const total = it.reduce((s, x) => s + (Number(bySku.get(x.seller_sku)?.price ?? 50000)) * x.quantity, 0);
       // Spread across the last 7 days; first 4 are "today" (kept fresh below).
@@ -248,7 +285,7 @@ async function main() {
       await tx
         .update(orders)
         .set({ createdAt: hoursAgo(i), createdAtMarketplace: hoursAgo(i) })
-        .where(and(eq(orders.userId, DEMO_USER_ID), eq(orders.marketplaceOrderId, `DEMO-${String(i).padStart(4, "0")}`)));
+        .where(and(eq(orders.userId, DEMO_USER_ID), eq(orders.marketplaceOrderId, orderIdAt(i))));
     }
     const demoOrders = await tx
       .select({ id: orders.id, no: orders.marketplaceOrderId, buyer: orders.buyerName, total: orders.totalAmount })
@@ -262,10 +299,10 @@ async function main() {
     await tx.delete(autopilotActivity).where(eq(autopilotActivity.userId, DEMO_USER_ID));
     const apFor = (no: string) => orderByNo.get(no);
     const apRows = [
-      { no: "DEMO-0003", status: "done", summary: "Disetujui otomatis: stok cukup, alamat valid, tidak ada indikasi fraud." },
-      { no: "DEMO-0004", status: "done", summary: "Disetujui otomatis: pembeli reguler, nominal wajar." },
-      { no: "DEMO-0015", status: "done", summary: "Disetujui otomatis: order standar 1 item." },
-      { no: "DEMO-0001", status: "held", summary: "Ditahan untuk review: alamat kirim berbeda jauh dari riwayat pembeli." },
+      { no: orderIdAt(3), status: "done", summary: "Disetujui otomatis: stok cukup, alamat valid, tidak ada indikasi fraud." },
+      { no: orderIdAt(4), status: "done", summary: "Disetujui otomatis: pembeli reguler, nominal wajar." },
+      { no: orderIdAt(15), status: "done", summary: "Disetujui otomatis: order standar 1 item." },
+      { no: orderIdAt(1), status: "held", summary: "Ditahan untuk review: alamat kirim berbeda jauh dari riwayat pembeli." },
     ];
     for (let i = 0; i < apRows.length; i++) {
       const r = apRows[i]!;
@@ -294,7 +331,7 @@ async function main() {
     // 9) AI CHAT LOGS (auto chat to buyer / affiliate) -----------------------
     await tx.delete(chatLogs).where(eq(chatLogs.shopId, shopId));
     await tx.insert(chatLogs).values([
-      { shopId, orderId: orderByNo.get("DEMO-0002")?.id ?? null, chatType: "buyer", counterpartName: "Dewi", messageIn: "Kak, kopinya masih ready? Bisa kirim hari ini?", messageOut: "Halo Kak Dewi! Ready ya 😊 Kalau order sebelum jam 3 sore, kami kirim hari ini juga. Terima kasih!", aiModel: "claude-opus-4-8", tokensUsed: 320, marketplaceSent: true },
+      { shopId, orderId: orderByNo.get(orderIdAt(2))?.id ?? null, chatType: "buyer", counterpartName: "Dewi", messageIn: "Kak, kopinya masih ready? Bisa kirim hari ini?", messageOut: "Halo Kak Dewi! Ready ya 😊 Kalau order sebelum jam 3 sore, kami kirim hari ini juga. Terima kasih!", aiModel: "claude-opus-4-8", tokensUsed: 320, marketplaceSent: true },
       { shopId, chatType: "buyer", counterpartName: "Fajar", messageIn: "Beda arabika sama robusta apa ya?", messageOut: "Arabika lebih ringan & sedikit asam-buah, cocok diseduh manual. Robusta lebih strong & pahit, mantap buat espresso/kopi susu. Mau direkomendasikan yang mana, Kak?", aiModel: "claude-opus-4-8", tokensUsed: 410, marketplaceSent: true },
       { shopId, chatType: "affiliate", counterpartId: "@ngopiyuk", counterpartName: "Ngopi Yuk", messageIn: "Komisinya berapa kalau aku promoin produk kopinya?", messageOut: "Halo! Senang kamu tertarik 🙌 Komisi 10% per penjualan + bonus untuk video yang tembus 10rb views. Kami kirim sample gratis untuk konten pertama. Gas?", aiModel: "claude-opus-4-8", tokensUsed: 380, marketplaceSent: true },
     ]);
@@ -302,8 +339,8 @@ async function main() {
     // 10) AI REVIEW REPLIES (auto reply review) ------------------------------
     await tx.delete(reviewLogs).where(eq(reviewLogs.shopId, shopId));
     await tx.insert(reviewLogs).values([
-      { shopId, orderId: orderByNo.get("DEMO-0012")?.id ?? null, marketplaceReviewId: "RV-1001", rating: 5, reviewText: "Kopinya wangi banget, packing rapi!", replyText: "Terima kasih banyak Kak atas reviewnya! 🙏 Senang kopinya cocok. Ditunggu order berikutnya ya!", aiGenerated: true, repliedAt: daysAgo(2) },
-      { shopId, orderId: orderByNo.get("DEMO-0013")?.id ?? null, marketplaceReviewId: "RV-1002", rating: 3, reviewText: "Rasanya enak tapi pengiriman agak lama.", replyText: "Terima kasih masukannya, Kak. Mohon maaf untuk pengirimannya 🙏 Kami sedang tingkatkan proses agar lebih cepat. Boleh DM kami untuk kompensasi voucher ya.", aiGenerated: true, repliedAt: daysAgo(1) },
+      { shopId, orderId: orderByNo.get(orderIdAt(12))?.id ?? null, marketplaceReviewId: "RV-1001", rating: 5, reviewText: "Kopinya wangi banget, packing rapi!", replyText: "Terima kasih banyak Kak atas reviewnya! 🙏 Senang kopinya cocok. Ditunggu order berikutnya ya!", aiGenerated: true, repliedAt: daysAgo(2) },
+      { shopId, orderId: orderByNo.get(orderIdAt(13))?.id ?? null, marketplaceReviewId: "RV-1002", rating: 3, reviewText: "Rasanya enak tapi pengiriman agak lama.", replyText: "Terima kasih masukannya, Kak. Mohon maaf untuk pengirimannya 🙏 Kami sedang tingkatkan proses agar lebih cepat. Boleh DM kami untuk kompensasi voucher ya.", aiGenerated: true, repliedAt: daysAgo(1) },
     ]);
 
     // 11) NOTIFICATIONS (email-channel events) -------------------------------
@@ -335,7 +372,7 @@ async function main() {
         bal = after1;
         for (let i = 1; i <= 5; i++) {
           const after = bal - 200;
-          await tx.insert(walletTransactions).values({ walletId: wallet.id, type: "deduct_transaction", amount: "200", balanceBefore: String(bal), balanceAfter: String(after), referenceId: `DEMO-${String(i).padStart(4, "0")}`, description: "Biaya per-transaksi (demo)" });
+          await tx.insert(walletTransactions).values({ walletId: wallet.id, type: "deduct_transaction", amount: "200", balanceBefore: String(bal), balanceAfter: String(after), referenceId: orderIdAt(i), description: "Biaya per-transaksi (demo)" });
           bal = after;
         }
       }

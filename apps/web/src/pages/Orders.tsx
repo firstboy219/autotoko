@@ -5,6 +5,14 @@ import { useRealtime } from "../lib/realtime";
 import { api } from "../lib/api";
 import { rupiah, dateShort } from "../lib/fmt";
 
+interface OrderItem {
+  item_id?: string;
+  product_name?: string;
+  seller_sku?: string;
+  quantity?: number;
+  sale_price?: string;
+}
+
 interface Order {
   id: string;
   marketplace: string;
@@ -15,8 +23,16 @@ interface Order {
   totalAmount: string | null;
   platformFee: string | null;
   feeDeducted: boolean;
+  items: OrderItem[] | null;
   createdAt: string;
 }
+
+const MP_LABEL: Record<string, string> = {
+  tiktok: "TikTok Shop",
+  shopee: "Shopee",
+  tokopedia: "Tokopedia",
+  lazada: "Lazada",
+};
 
 const MP_COLORS: Record<string, string> = {
   tiktok: "bg-black text-white",
@@ -148,7 +164,7 @@ export function Orders() {
                 <tr key={o.id} className="border-t border-slate-100 cursor-pointer hover:bg-slate-50" onClick={() => setSelected(o)}>
                   <td className="px-3 py-2 font-mono text-[11px]">{o.marketplaceOrderId}</td>
                   <td className="px-3 py-2">
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded capitalize ${MP_COLORS[o.marketplace] ?? "bg-slate-100 text-slate-600"}`}>{o.marketplace}</span>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${MP_COLORS[o.marketplace] ?? "bg-slate-100 text-slate-600"}`}>{MP_LABEL[o.marketplace] ?? o.marketplace}</span>
                   </td>
                   <td className="px-3 py-2">
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${FS_COLOR[o.fulfillmentStatus] ?? "bg-slate-100 text-slate-600"}`}>
@@ -328,7 +344,7 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
 
         <dl className="text-sm divide-y divide-slate-100 mb-4">
           {[
-            ["Marketplace", order.marketplace],
+            ["Platform", MP_LABEL[order.marketplace] ?? order.marketplace],
             ["Status marketplace", order.status ?? "-"],
             ["Pembeli", order.buyerName ?? "-"],
             ["Total", rupiah(order.totalAmount)],
@@ -337,10 +353,31 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
           ].map(([k, v]) => (
             <div key={k} className="flex justify-between py-2">
               <dt className="text-slate-500">{k}</dt>
-              <dd className="font-semibold capitalize">{v}</dd>
+              <dd className="font-semibold">{v}</dd>
             </div>
           ))}
         </dl>
+
+        {order.items && order.items.length > 0 && (
+          <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 mb-4">
+            <div className="text-xs font-semibold text-slate-500 mb-2">
+              Produk ({MP_LABEL[order.marketplace] ?? order.marketplace})
+            </div>
+            <div className="divide-y divide-slate-200">
+              {order.items.map((it, i) => (
+                <div key={it.item_id ?? i} className="py-2">
+                  <div className="flex justify-between gap-2">
+                    <span className="font-medium">{it.product_name ?? it.seller_sku ?? "-"}</span>
+                    <span className="text-slate-500 whitespace-nowrap">×{it.quantity ?? 1}</span>
+                  </div>
+                  {it.item_id && (
+                    <div className="text-[11px] font-mono text-slate-500">Product ID: {it.item_id}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
           <div className="flex items-center justify-between mb-2">

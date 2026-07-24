@@ -18,11 +18,19 @@ interface Master {
 interface Posting {
   id: string;
   title: string | null;
+  marketplaceItemId: string | null;
   marketplaceSku: string | null;
   price: string | null;
   stock: number | null;
   status: string;
 }
+
+const MP_BADGE: Record<string, { label: string; cls: string }> = {
+  tiktok: { label: "TikTok Shop", cls: "bg-black text-white" },
+  shopee: { label: "Shopee", cls: "bg-orange-100 text-orange-700" },
+  tokopedia: { label: "Tokopedia", cls: "bg-green-100 text-green-700" },
+  lazada: { label: "Lazada", cls: "bg-blue-100 text-blue-700" },
+};
 interface ShopGroup { shopId: string; shopName: string | null; marketplace: string; postings: Posting[]; }
 interface MasterDetail extends Master { shops: ShopGroup[]; }
 interface Shop { id: string; shopName: string | null; marketplace: string; }
@@ -278,14 +286,22 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
             {!data.shops.length ? (
               <div className="text-slate-400 text-sm py-3 text-center">Belum ada postingan terhubung.</div>
             ) : (
-              data.shops.map((sg) => (
+              data.shops.map((sg) => {
+                const badge = MP_BADGE[sg.marketplace] ?? { label: sg.marketplace, cls: "bg-slate-100 text-slate-600" };
+                return (
                 <div key={sg.shopId} className="mb-3">
-                  <div className="text-xs font-semibold text-slate-500 mb-1 capitalize">{sg.shopName ?? sg.shopId} · {sg.marketplace}</div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-semibold text-slate-500">{sg.shopName ?? sg.shopId}</span>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${badge.cls}`}>{badge.label}</span>
+                  </div>
                   <div className="border border-slate-100 rounded-lg divide-y divide-slate-100">
                     {sg.postings.map((p) => (
                       <div key={p.id} className="flex items-center justify-between px-3 py-2 text-sm">
                         <div>
                           <div className="font-medium">{p.title ?? p.marketplaceSku ?? p.id}</div>
+                          {p.marketplaceItemId && (
+                            <div className="text-[11px] font-mono text-slate-500">Product ID: {p.marketplaceItemId}</div>
+                          )}
                           <div className="text-[11px] text-slate-400">{rupiah(p.price)} · stok {p.stock ?? 0} · {p.status}</div>
                         </div>
                         <button onClick={() => removePosting(p.id)} className="text-red-500 text-xs hover:underline">Hapus</button>
@@ -293,7 +309,8 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
                     ))}
                   </div>
                 </div>
-              ))
+                );
+              })
             )}
 
             <MasterBom masterId={id} masterName={data.name} />
