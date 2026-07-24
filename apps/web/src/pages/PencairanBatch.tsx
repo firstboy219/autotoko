@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { calculatePayoutSplit, type SedekahBasis } from "@autotoko/shared";
 import { Layout } from "../components/Layout";
+import { FileUpload } from "../components/FileUpload";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
 import { rupiah, dateShort } from "../lib/fmt";
@@ -94,9 +95,8 @@ function BatchActions({ batch, onDone }: { batch: BatchDetail; onDone: () => voi
             </button>
           )}
           {batch.status === "awaiting_transfer" && (
-            <div className="flex gap-2 items-center">
-              <input value={proof} onChange={(e) => setProof(e.target.value)} placeholder="URL bukti transfer ke Admin"
-                className="px-2 py-2 rounded-md border border-slate-300 text-sm w-64" />
+            <div className="flex gap-3 items-end">
+              <FileUpload label="Bukti transfer ke Admin" value={proof} onChange={setProof} />
               <button onClick={() => run(() => api.post(`/payout/batches/${batch.id}/transferred`, { transferProofUrl: proof }))}
                 disabled={busy || !proof}
                 className="px-3 py-2 rounded-md bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold disabled:opacity-50">
@@ -204,11 +204,9 @@ function MutationForm({
           <input value={receiving} onChange={(e) => setReceiving(e.target.value)}
             className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
         </label>
-        <label className="text-xs font-semibold text-slate-600">
-          URL Bukti Pencairan Marketplace (opsional saat draft)
-          <input value={proofUrl} onChange={(e) => setProofUrl(e.target.value)} placeholder="ditempel dari upload"
-            className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
-        </label>
+        <div className="md:col-span-2">
+          <FileUpload label="Bukti Pencairan Marketplace (opsional saat draft)" value={proofUrl} onChange={setProofUrl} />
+        </div>
       </div>
 
       {proofDiff && (
@@ -340,16 +338,16 @@ function MutationRow({
 
       {completing && (
         <div className="mt-2 rounded-lg bg-slate-50 border border-slate-200 p-3 space-y-2">
-          <ProofInput label="URL Bukti Pencairan Marketplace (wajib)" value={proofs.marketplaceProofUrl}
+          <FileUpload label="Bukti Pencairan Marketplace (wajib)" value={proofs.marketplaceProofUrl}
             onChange={(v) => setProofs((p) => ({ ...p, marketplaceProofUrl: v }))} />
-          <ProofInput label="URL Bukti Transfer Sedekah (wajib jika > 0)" value={proofs.sedekahTransferProofUrl}
+          <FileUpload label="Bukti Transfer Sedekah (wajib jika > 0)" value={proofs.sedekahTransferProofUrl}
             onChange={(v) => setProofs((p) => ({ ...p, sedekahTransferProofUrl: v }))} />
           {needSub && (
-            <ProofInput label="URL Bukti Transfer Sub-seller (wajib)" value={proofs.subSellerTransferProofUrl}
+            <FileUpload label="Bukti Transfer Sub-seller (wajib)" value={proofs.subSellerTransferProofUrl}
               onChange={(v) => setProofs((p) => ({ ...p, subSellerTransferProofUrl: v }))} />
           )}
           {needSubSub && (
-            <ProofInput label="URL Bukti Transfer Sub-sub-seller (wajib)" value={proofs.subSubSellerTransferProofUrl}
+            <FileUpload label="Bukti Transfer Sub-sub-seller (wajib)" value={proofs.subSubSellerTransferProofUrl}
               onChange={(v) => setProofs((p) => ({ ...p, subSubSellerTransferProofUrl: v }))} />
           )}
           <button onClick={() => run(() => api.post(`/payout/mutations/${m.id}/complete`, proofs))} disabled={busy}
@@ -360,15 +358,5 @@ function MutationRow({
       )}
       {err && <div className="text-red-500 text-xs mt-1">{err}</div>}
     </div>
-  );
-}
-
-function ProofInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <label className="block text-[11px] font-semibold text-slate-600">
-      {label}
-      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="URL bukti"
-        className="mt-0.5 w-full px-2 py-1.5 rounded-md border border-slate-300 text-sm font-normal" />
-    </label>
   );
 }
