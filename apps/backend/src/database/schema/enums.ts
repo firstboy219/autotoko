@@ -94,3 +94,33 @@ export const fulfillmentStatusEnum = pgEnum("fulfillment_status", [
   "retur",
   "dibatalkan",
 ]);
+
+// --- Payout / Pencairan Dana module (PAYOUT_MODULE_REQUIREMENT.md) ---
+
+// Which figure the sedekah percentage is taken from (requirement 4.2).
+export const sedekahBasisEnum = pgEnum("sedekah_basis", [
+  "total_credit",
+  "after_subseller_split",
+]);
+
+export const subSellerStatusEnum = pgEnum("sub_seller_status", [
+  "active",
+  "inactive",
+]);
+
+export const payoutBatchStatusEnum = pgEnum("payout_batch_status", [
+  "running",
+  "awaiting_transfer",
+  "transferred",
+  "completed",
+]);
+
+export const payoutMutationStatusEnum = pgEnum("payout_mutation_status", [
+  "draft",
+  "completed",
+]);
+
+export const payoutForwardStatusEnum = pgEnum("payout_forward_status", [
+  "pending",
+  "forwarded",
+]);
