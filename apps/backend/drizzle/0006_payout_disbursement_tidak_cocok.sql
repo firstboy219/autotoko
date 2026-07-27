@@ -1,0 +1,1 @@
+ALTER TYPE "public"."payout_disbursement_validation_status" ADD VALUE 'tidak_cocok' BEFORE 'override_manual';

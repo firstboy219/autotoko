@@ -16,6 +16,8 @@ import { JwtAuthGuard, type JwtPayload } from "../auth/jwt-auth.guard.js";
 import { PayoutSellersService } from "./sellers.service.js";
 import { PayoutBatchService } from "./batch.service.js";
 import { PayoutMutationService } from "./mutation.service.js";
+import { DisbursementsService } from "./disbursements.service.js";
+import { OcrService } from "./ocr.service.js";
 import {
   CreateSubSellerDto,
   UpdateSubSellerDto,
@@ -23,12 +25,13 @@ import {
   UpdateSubSubSellerDto,
   AssignShopDto,
   UpdatePayoutSettingsDto,
-  MarkBatchTransferredDto,
   CreateMutationDto,
   UpdateMutationDto,
-  CompleteMutationDto,
   ListMutationQueryDto,
   CreateAdjustmentDto,
+  UploadDisbursementProofDto,
+  OverrideDisbursementDto,
+  OcrExtractDto,
 } from "./dto.js";
 
 function uid(req: FastifyRequest): string {
@@ -44,6 +47,8 @@ export class PayoutController {
     private readonly sellers: PayoutSellersService,
     private readonly batches: PayoutBatchService,
     private readonly mutations: PayoutMutationService,
+    private readonly disbursements: DisbursementsService,
+    private readonly ocr: OcrService,
   ) {}
 
   // --- Sub-sellers ---
@@ -89,13 +94,12 @@ export class PayoutController {
     return ok(await this.sellers.updateSubSubSeller(uid(req), id, dto));
   }
 
-  // --- Shops (with resolved payout rates, for the mutation form) ---
+  // --- Shops (with resolved payout rates, for the mutation form + mapping page) ---
   @Get("shops")
   async listShops(@Req() req: FastifyRequest) {
     return ok(await this.sellers.listShopsForPayout(uid(req)));
   }
 
-  // --- Shop assignment ---
   @Post("shops/:shopId/assign")
   async assignShop(
     @Req() req: FastifyRequest,
@@ -116,6 +120,14 @@ export class PayoutController {
     return ok(await this.sellers.updateSettings(uid(req), dto));
   }
 
+  // --- OCR (Titik 1): extract-only preview called right after uploading a
+  // pencairan screenshot, BEFORE the mutation form is submitted, so staff can
+  // review/correct the suggested nominal + rekening (Bagian 1, Tahap 1).
+  @Post("ocr/extract-pencairan")
+  async extractPencairanProof(@Body() dto: OcrExtractDto) {
+    return ok(await this.ocr.extractProofFields(dto.imageUrl));
+  }
+
   // --- Batches ---
   @Get("batches")
   async listBatches(@Req() req: FastifyRequest, @Query("status") status?: string) {
@@ -132,21 +144,19 @@ export class PayoutController {
     return ok(await this.batches.start(uid(req), uid(req)));
   }
 
+  /** Tahap 2 — "Selesai Pencairan Semua Toko": locks input, generates the disbursement rekap. */
+  @Post("batches/:id/close-input")
+  async closeInput(@Req() req: FastifyRequest, @Param("id") id: string) {
+    return ok(await this.batches.closeInput(uid(req), id));
+  }
+
+  /** Tahap 4 — "Tutup Batch": only once every disbursement is validated/overridden. */
   @Post("batches/:id/close")
   async closeBatch(@Req() req: FastifyRequest, @Param("id") id: string) {
-    return ok(await this.batches.closeAndReport(uid(req), id));
+    return ok(await this.batches.closeBatch(uid(req), id));
   }
 
-  @Post("batches/:id/transferred")
-  async markBatchTransferred(
-    @Req() req: FastifyRequest,
-    @Param("id") id: string,
-    @Body() dto: MarkBatchTransferredDto,
-  ) {
-    return ok(await this.batches.markTransferred(uid(req), id, dto));
-  }
-
-  // --- Mutations ---
+  // --- Mutations (Tahap 1) ---
   @Get("mutations")
   async listMutations(@Req() req: FastifyRequest, @Query() q: ListMutationQueryDto) {
     return ok(await this.mutations.list(uid(req), q));
@@ -171,20 +181,6 @@ export class PayoutController {
     return ok(await this.mutations.remove(uid(req), id));
   }
 
-  @Post("mutations/:id/complete")
-  async completeMutation(
-    @Req() req: FastifyRequest,
-    @Param("id") id: string,
-    @Body() dto: CompleteMutationDto,
-  ) {
-    return ok(await this.mutations.complete(uid(req), id, dto));
-  }
-
-  @Post("mutations/:id/forward")
-  async forwardMutation(@Req() req: FastifyRequest, @Param("id") id: string) {
-    return ok(await this.mutations.markForwarded(uid(req), id));
-  }
-
   @Get("mutations/:id/adjustments")
   async listAdjustments(@Req() req: FastifyRequest, @Param("id") id: string) {
     return ok(await this.mutations.listAdjustments(uid(req), id));
@@ -194,5 +190,24 @@ export class PayoutController {
   @Post("adjustments")
   async createAdjustment(@Req() req: FastifyRequest, @Body() dto: CreateAdjustmentDto) {
     return ok(await this.mutations.createAdjustment(uid(req), uid(req), dto));
+  }
+
+  // --- Disbursements (Tahap 3 — per-recipient transfer, Titik 2 OCR happens inside uploadProof) ---
+  @Post("disbursements/:id/proof")
+  async uploadDisbursementProof(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: UploadDisbursementProofDto,
+  ) {
+    return ok(await this.disbursements.uploadProof(uid(req), id, dto));
+  }
+
+  @Post("disbursements/:id/override")
+  async overrideDisbursement(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: OverrideDisbursementDto,
+  ) {
+    return ok(await this.disbursements.override(uid(req), id, dto));
   }
 }

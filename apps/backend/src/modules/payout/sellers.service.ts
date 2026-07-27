@@ -46,6 +46,7 @@ export class PayoutSellersService {
         contact: dto.contact ?? null,
         loginEmail: dto.loginEmail ?? null,
         bankAccount: dto.bankAccount ?? null,
+        kuotaTokoMaksimal: dto.kuotaTokoMaksimal ?? null,
         ...(dto.defaultRate != null ? { defaultRate: rate(dto.defaultRate) } : {}),
       })
       .returning();
@@ -62,6 +63,9 @@ export class PayoutSellersService {
         ...(dto.loginEmail != null ? { loginEmail: dto.loginEmail } : {}),
         ...(dto.bankAccount != null ? { bankAccount: dto.bankAccount } : {}),
         ...(dto.defaultRate != null ? { defaultRate: rate(dto.defaultRate) } : {}),
+        ...(dto.kuotaTokoMaksimal !== undefined
+          ? { kuotaTokoMaksimal: dto.kuotaTokoMaksimal }
+          : {}),
         ...(dto.status != null ? { status: dto.status } : {}),
         updatedAt: new Date(),
       })
@@ -105,6 +109,7 @@ export class PayoutSellersService {
         contact: dto.contact ?? null,
         loginEmail: dto.loginEmail ?? null,
         bankAccount: dto.bankAccount ?? null,
+        kuotaTokoMaksimal: dto.kuotaTokoMaksimal ?? null,
         ...(dto.defaultRate != null ? { defaultRate: rate(dto.defaultRate) } : {}),
       })
       .returning();
@@ -126,6 +131,9 @@ export class PayoutSellersService {
         ...(dto.loginEmail != null ? { loginEmail: dto.loginEmail } : {}),
         ...(dto.bankAccount != null ? { bankAccount: dto.bankAccount } : {}),
         ...(dto.defaultRate != null ? { defaultRate: rate(dto.defaultRate) } : {}),
+        ...(dto.kuotaTokoMaksimal !== undefined
+          ? { kuotaTokoMaksimal: dto.kuotaTokoMaksimal }
+          : {}),
         ...(dto.status != null ? { status: dto.status } : {}),
         updatedAt: new Date(),
       })
@@ -134,7 +142,7 @@ export class PayoutSellersService {
     return row;
   }
 
-  // --- Shop assignment (requirement 5.3) ---
+  // --- Shop assignment (hierarchy ownership) ---
 
   async assignShop(userId: string, shopId: string, dto: AssignShopDto) {
     const [shop] = await this.db
@@ -153,8 +161,6 @@ export class PayoutSellersService {
         "subSubSellerId requires subSellerId (invalid hierarchy)",
       );
     }
-    // Referenced entities must belong to this tenant, and the sub-sub-seller must
-    // sit under the given sub-seller.
     if (subSellerId) await this.getSubSellerOrThrow(userId, subSellerId);
     if (subSubSellerId) {
       const [ss] = await this.db
@@ -219,11 +225,13 @@ export class PayoutSellersService {
         effectiveSubSellerRate: effSubSeller,
         effectiveSubSubSellerRate: effSubSub,
         scenario: shop.subSubSellerId ? "C" : shop.subSellerId ? "B" : "A",
+        addedByType: shop.addedByType,
+        addedById: shop.addedById,
       };
     });
   }
 
-  // --- Payout settings (requirement 5.4) — one row per tenant, lazily created ---
+  // --- Payout settings — one row per tenant, lazily created ---
 
   async getSettings(userId: string) {
     const [row] = await this.db

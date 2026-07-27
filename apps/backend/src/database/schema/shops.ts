@@ -9,7 +9,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { subSellers, subSubSellers } from "./payout";
-import { marketplaceEnum, shopStatusEnum } from "./enums";
+import { marketplaceEnum, shopStatusEnum, shopAddedByTypeEnum } from "./enums";
 
 // PRD Bagian 9.1 — marketplace shops per user. Tokens stored AES-256 encrypted
 // (encryption handled in the app layer; columns are opaque text).
@@ -36,11 +36,10 @@ export const shops = pgTable(
     connectedAt: timestamp("connected_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 
-    // --- Payout module (PAYOUT_MODULE_REQUIREMENT.md 5.3) ---
-    // Ownership of the shop within the tenant's hierarchy. Both nullable: a shop
-    // is created first by the existing OMS flow, then assigned. Business rule
-    // enforced in the service layer: subSubSellerId must be null when
-    // subSellerId is null.
+    // --- Payout module: ownership within the hierarchy (FLOW_PENCAIRAN_V2_FINAL.md 3a) ---
+    // A shop is created first by the existing OMS/OAuth flow, then assigned.
+    // Business rule enforced in the service layer: subSubSellerId must be null
+    // when subSellerId is null.
     subSellerId: uuid("sub_seller_id").references(() => subSellers.id, {
       onDelete: "set null",
     }),
@@ -53,6 +52,13 @@ export const shops = pgTable(
       precision: 5,
       scale: 4,
     }),
+
+    // --- Self-service connect (MAPPING_DAN_SELFSERVICE_TOKO.md) ---
+    // WHO PERFORMED THE OAUTH CONNECT — distinct from subSellerId/subSubSellerId
+    // above (who OWNS the split): a Seller can connect a shop and later
+    // reassign its ownership to a sub-seller, so these can diverge.
+    addedByType: shopAddedByTypeEnum("added_by_type").notNull().default("seller"),
+    addedById: uuid("added_by_id"), // sub_sellers.id or sub_sub_sellers.id, per addedByType
   },
   (t) => ({
     userIdx: index("shops_user_idx").on(t.userId),

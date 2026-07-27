@@ -64,4 +64,22 @@ export class UploadsService {
     if (!existsSync(path)) throw new NotFoundException("Not found");
     return { buffer: await fs.readFile(path), contentType: EXT_MIME[ext] ?? "application/octet-stream" };
   }
+
+  /**
+   * Read an image by its stored URL path (e.g. "/api/uploads/<uuid>.jpg"),
+   * for server-side consumers like OCR that never go over HTTP for a file we
+   * already have on local disk. Returns null for anything not one of ours
+   * (e.g. an external URL) rather than throwing — callers treat that as
+   * "nothing to read".
+   */
+  async readByUrl(url: string): Promise<Buffer | null> {
+    const marker = "/api/uploads/";
+    const idx = url.indexOf(marker);
+    if (idx === -1) return null;
+    const name = url.slice(idx + marker.length);
+    if (!NAME_RE.test(name)) return null;
+    const path = join(this.dir, name);
+    if (!existsSync(path)) return null;
+    return fs.readFile(path);
+  }
 }

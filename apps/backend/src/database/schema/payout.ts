@@ -4,6 +4,7 @@ import {
   varchar,
   text,
   numeric,
+  integer,
   date,
   jsonb,
   timestamp,
@@ -17,10 +18,14 @@ import {
   payoutBatchStatusEnum,
   payoutMutationStatusEnum,
   payoutForwardStatusEnum,
+  payoutDisbursementRecipientTypeEnum,
+  payoutDisbursementValidationStatusEnum,
 } from "./enums";
 
 /**
- * Payout / Pencairan Dana (PAYOUT_MODULE_REQUIREMENT.md).
+ * Payout / Pencairan Dana (FLOW_PENCAIRAN_V2_FINAL.md — supersedes the v1 flow
+ * that had an Owner-approval stage; that stage is gone, replaced by per-recipient
+ * disbursements the input staff transfers and proves directly).
  *
  * Tenancy note: this project has no separate tenant table — the tenant IS a row
  * in `users` (see shops.userId / wallets.userId). Every table here therefore
@@ -41,13 +46,16 @@ export const subSellers = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 255 }).notNull(),
     contact: varchar("contact", { length: 64 }),
-    // Reserved for the read-only sub-seller portal (deferred to a later phase).
+    // Reserved for the sub-seller passwordless login portal.
     loginEmail: varchar("login_email", { length: 255 }),
     bankAccount: varchar("bank_account", { length: 255 }),
     // Share of the remainder after sedekah, e.g. 0.2000 = 20%.
     defaultRate: numeric("default_rate", { precision: 5, scale: 4 })
       .notNull()
       .default("0.2000"),
+    // Max shops this sub-seller may self-connect. Null = unlimited
+    // (MAPPING_DAN_SELFSERVICE_TOKO.md 2.2).
+    kuotaTokoMaksimal: integer("kuota_toko_maksimal"),
     status: subSellerStatusEnum("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -77,6 +85,7 @@ export const subSubSellers = pgTable(
     defaultRate: numeric("default_rate", { precision: 5, scale: 4 })
       .notNull()
       .default("0.5000"),
+    kuotaTokoMaksimal: integer("kuota_toko_maksimal"),
     status: subSellerStatusEnum("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -87,7 +96,7 @@ export const subSubSellers = pgTable(
   }),
 );
 
-// Per-tenant payout configuration (requirement 5.4). One row per tenant.
+// Per-tenant payout configuration (Bagian 3). One row per tenant.
 export const payoutSettings = pgTable("payout_settings", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
@@ -103,7 +112,17 @@ export const payoutSettings = pgTable("payout_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// A batch groups mutations into one unit of work (requirement 6.1).
+// A batch groups per-shop pencairan records into one unit of work (Bagian 1).
+// v2 lifecycle: berjalan (input open, any number of shops) -> siap_distribusi
+// (input locked, payout_disbursements generated) -> selesai (every disbursement
+// validated/overridden). No Owner-approval stage in between.
+//
+// closedAt/totalTransferToAdmin/transferProofUrl/transferredAt are v1-only
+// fields from the removed Owner-approval stage. They are kept (not dropped —
+// avoids an enum/column-rename migration ambiguity for no real benefit) but no
+// longer written by v2 code; `closedAt` is repurposed to mean "input stage
+// closed" (semantically the closest v1 field), and a NEW `completedAt` marks
+// when "Tutup Batch" fully settles the batch.
 export const payoutBatches = pgTable(
   "payout_batches",
   {
@@ -114,14 +133,19 @@ export const payoutBatches = pgTable(
     createdByUserId: uuid("created_by_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
-    status: payoutBatchStatusEnum("status").notNull().default("running"),
+    // No DB default: Postgres cannot reference a brand-new enum value (e.g.
+    // "berjalan") in a DEFAULT clause within the same migration transaction
+    // that adds it. The service layer always sets this explicitly on insert.
+    status: payoutBatchStatusEnum("status").notNull(),
     closedAt: timestamp("closed_at", { withTimezone: true }),
-    // Sum of the shares the tenant must forward on (sub-seller + sub-sub-seller).
+    // v1-only, unused by v2 — see note above.
     totalTransferToAdmin: numeric("total_transfer_to_admin", { precision: 15, scale: 2 })
       .notNull()
       .default("0"),
     transferProofUrl: text("transfer_proof_url"),
     transferredAt: timestamp("transferred_at", { withTimezone: true }),
+    // When "Tutup Batch" was clicked (all disbursements settled) — new in v2.
+    completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -130,7 +154,12 @@ export const payoutBatches = pgTable(
   }),
 );
 
-// One settlement payout from one shop, already split across the hierarchy.
+// One pencairan record per shop within a batch (Tahap 1). Split shares are
+// computed at input time (for the real-time preview) and read back verbatim
+// when the batch closes its input stage to generate payout_disbursements —
+// v2 does not recompute the split with different logic at close time, it only
+// changes what happens AFTER the split is known (direct per-recipient transfer
+// instead of a gathered Owner transfer).
 export const payoutMutations = pgTable(
   "payout_mutations",
   {
@@ -147,14 +176,16 @@ export const payoutMutations = pgTable(
 
     payoutDate: date("payout_date").notNull(),
     // What the marketplace proof screenshot says vs what we actually split on.
-    // They may differ; the UI warns but does not block (requirement 6.3).
+    // They may differ; the UI warns but does not block (Bagian 3, validasi selisih).
     marketplaceProofAmount: numeric("marketplace_proof_amount", { precision: 15, scale: 2 }),
     creditAmount: numeric("credit_amount", { precision: 15, scale: 2 }).notNull(),
     receivingAccount: varchar("receiving_account", { length: 255 }),
     marketplaceProofUrl: text("marketplace_proof_url"),
+    // Raw OCR read of the pencairan proof (Titik 1) — audit trail, never the
+    // sole source of truth; staff can always override the extracted fields.
+    ocrRawResult: jsonb("ocr_raw_result"),
 
-    // Rate snapshots — later rate edits must never alter historical records
-    // (requirement 4.1).
+    // Rate snapshots — later rate edits must never alter historical records.
     sedekahRateUsed: numeric("sedekah_rate_used", { precision: 5, scale: 4 }).notNull(),
     sedekahBasisUsed: sedekahBasisEnum("sedekah_basis_used").notNull(),
     subSellerRateUsed: numeric("sub_seller_rate_used", { precision: 5, scale: 4 }),
@@ -175,18 +206,21 @@ export const payoutMutations = pgTable(
     subSellerAmount: numeric("sub_seller_amount", { precision: 15, scale: 2 }),
     subSubSellerAmount: numeric("sub_sub_seller_amount", { precision: 15, scale: 2 }),
 
+    // v1-only, unused by v2 (superseded by payout_disbursements) — kept, not
+    // dropped, to avoid a migration rename ambiguity for no real benefit.
     sedekahTransferProofUrl: text("sedekah_transfer_proof_url"),
     sellerTransferProofUrl: text("seller_transfer_proof_url"),
     subSellerTransferProofUrl: text("sub_seller_transfer_proof_url"),
     subSubSellerTransferProofUrl: text("sub_sub_seller_transfer_proof_url"),
-
-    // OMS level-1 integration: an audit trail only, never used to derive amounts
-    // (requirement 8).
-    orderRefIds: jsonb("order_ref_ids"),
-
-    status: payoutMutationStatusEnum("status").notNull().default("draft"),
     subSellerForwardStatus: payoutForwardStatusEnum("sub_seller_forward_status"),
     subSubSellerForwardStatus: payoutForwardStatusEnum("sub_sub_seller_forward_status"),
+
+    // OMS level-1 integration: an audit trail only, never used to derive amounts.
+    orderRefIds: jsonb("order_ref_ids"),
+
+    // "completed" = locked because the batch's input stage closed (set in bulk
+    // by closeInput, not by a per-mutation manual action).
+    status: payoutMutationStatusEnum("status").notNull().default("draft"),
 
     note: text("note"),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, {
@@ -202,8 +236,56 @@ export const payoutMutations = pgTable(
   }),
 );
 
-// Corrections to a completed mutation — the original row is never edited
-// (requirement 6.2).
+// One outgoing transfer from the holding account to ONE recipient, for ONE
+// pencairan mutation (Bagian 4, replaces the old per-mutation forward-status +
+// gathered proof columns). Generated when the batch's input stage closes:
+// one row per recipient with a share > 0 (sedekah always; sub_seller /
+// sub_sub_seller only for shops owned that way).
+export const payoutDisbursements = pgTable(
+  "payout_disbursements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    payoutMutationId: uuid("payout_mutation_id")
+      .notNull()
+      .references(() => payoutMutations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recipientType: payoutDisbursementRecipientTypeEnum("recipient_type").notNull(),
+    recipientSubSellerId: uuid("recipient_sub_seller_id").references(() => subSellers.id, {
+      onDelete: "set null",
+    }),
+    recipientSubSubSellerId: uuid("recipient_sub_sub_seller_id").references(
+      () => subSubSellers.id,
+      { onDelete: "set null" },
+    ),
+    expectedAmount: numeric("expected_amount", { precision: 15, scale: 2 }).notNull(),
+    // Snapshot of the recipient's bank account AT GENERATION TIME, so a later
+    // change to the entity's master bank account doesn't retroactively alter
+    // historical disbursement records.
+    recordedAccount: varchar("recorded_account", { length: 255 }),
+
+    proofUrl: text("proof_url"),
+    ocrAmount: numeric("ocr_amount", { precision: 15, scale: 2 }),
+    ocrAccount: varchar("ocr_account", { length: 255 }),
+    ocrRawResult: jsonb("ocr_raw_result"),
+
+    validationStatus: payoutDisbursementValidationStatusEnum("validation_status")
+      .notNull()
+      .default("belum_upload"),
+    // Required by the service layer when validationStatus = override_manual.
+    overrideReason: text("override_reason"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    mutationIdx: index("payout_disbursements_mutation_idx").on(t.payoutMutationId),
+    userIdx: index("payout_disbursements_user_idx").on(t.userId),
+  }),
+);
+
+// Corrections to a locked mutation — the original row is never edited.
 export const payoutAdjustments = pgTable(
   "payout_adjustments",
   {

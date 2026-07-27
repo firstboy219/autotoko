@@ -6,15 +6,16 @@ import {
   IsUUID,
   IsArray,
   IsDateString,
+  IsInt,
   MaxLength,
   Min,
   Max,
 } from "class-validator";
 
 /**
- * DTOs for the Payout module. Rates are fractions in [0,1] (0.20 = 20%) end to
- * end — API, calc, and DB share one unit to avoid conversion bugs. Money fields
- * are rupiah numbers; the service converts to integer cents for the split.
+ * DTOs for the Payout module (FLOW_PENCAIRAN_V2_FINAL.md). Rates are fractions
+ * in [0,1] (0.20 = 20%) end to end — API, calc, and DB share one unit. Money
+ * fields are rupiah numbers; the service converts to integer cents for the split.
  */
 
 const SEDEKAH_BASES = ["total_credit", "after_subseller_split"] as const;
@@ -27,6 +28,8 @@ export class CreateSubSellerDto {
   @IsOptional() @IsString() @MaxLength(255) loginEmail?: string;
   @IsOptional() @IsString() @MaxLength(255) bankAccount?: string;
   @IsOptional() @IsNumber() @Min(0) @Max(1) defaultRate?: number;
+  // Null/omitted = unlimited (MAPPING_DAN_SELFSERVICE_TOKO.md 2.2).
+  @IsOptional() @IsInt() @Min(0) kuotaTokoMaksimal?: number;
 }
 
 export class UpdateSubSellerDto {
@@ -35,6 +38,7 @@ export class UpdateSubSellerDto {
   @IsOptional() @IsString() @MaxLength(255) loginEmail?: string;
   @IsOptional() @IsString() @MaxLength(255) bankAccount?: string;
   @IsOptional() @IsNumber() @Min(0) @Max(1) defaultRate?: number;
+  @IsOptional() @IsInt() @Min(0) kuotaTokoMaksimal?: number;
   @IsOptional() @IsIn(["active", "inactive"]) status?: "active" | "inactive";
 }
 
@@ -44,7 +48,7 @@ export class CreateSubSubSellerDto extends CreateSubSellerDto {
 
 export class UpdateSubSubSellerDto extends UpdateSubSellerDto {}
 
-// --- Shop assignment (requirement 5.3) ---
+// --- Shop assignment (hierarchy ownership) ---
 
 export class AssignShopDto {
   // null clears the assignment. subSubSellerId requires subSellerId (checked in service).
@@ -54,7 +58,7 @@ export class AssignShopDto {
   @IsOptional() @IsNumber() @Min(0) @Max(1) rateOverrideSubSubSeller?: number | null;
 }
 
-// --- Payout settings (requirement 5.4) ---
+// --- Payout settings ---
 
 export class UpdatePayoutSettingsDto {
   @IsOptional() @IsNumber() @Min(0) @Max(1) sedekahRate?: number;
@@ -62,15 +66,7 @@ export class UpdatePayoutSettingsDto {
   @IsOptional() @IsString() @MaxLength(255) sedekahBankAccount?: string;
 }
 
-// --- Batch (requirement 6.1) ---
-
-export class MarkBatchTransferredDto {
-  // Proof URL (uploaded to R2 by the client, then passed here). Required to
-  // move the batch to "transferred".
-  @IsString() @MaxLength(1024) transferProofUrl!: string;
-}
-
-// --- Mutation (requirement 5.6 / 6.2) ---
+// --- Mutation (Tahap 1 — one record per shop's pencairan) ---
 
 export class CreateMutationDto {
   @IsUUID() batchId!: string;
@@ -94,15 +90,6 @@ export class UpdateMutationDto {
   @IsOptional() @IsString() note?: string;
 }
 
-/** Proof URLs supplied when completing a mutation (validated per scenario). */
-export class CompleteMutationDto {
-  @IsOptional() @IsString() @MaxLength(1024) marketplaceProofUrl?: string;
-  @IsOptional() @IsString() @MaxLength(1024) sedekahTransferProofUrl?: string;
-  @IsOptional() @IsString() @MaxLength(1024) sellerTransferProofUrl?: string;
-  @IsOptional() @IsString() @MaxLength(1024) subSellerTransferProofUrl?: string;
-  @IsOptional() @IsString() @MaxLength(1024) subSubSellerTransferProofUrl?: string;
-}
-
 export class ListMutationQueryDto {
   @IsOptional() @IsUUID() batchId?: string;
   @IsOptional() @IsUUID() shopId?: string;
@@ -111,10 +98,26 @@ export class ListMutationQueryDto {
   @IsOptional() @IsDateString() to?: string;
 }
 
-// --- Adjustment (requirement 5.7 / 6.2) ---
+// --- Disbursements (Tahap 3 — one row per outgoing transfer) ---
+
+export class UploadDisbursementProofDto {
+  @IsString() @MaxLength(1024) proofUrl!: string;
+}
+
+export class OverrideDisbursementDto {
+  @IsString() reason!: string;
+}
+
+// --- Adjustment (correction against a locked mutation) ---
 
 export class CreateAdjustmentDto {
   @IsUUID() mutationId!: string;
   @IsNumber() amount!: number; // signed
   @IsString() reason!: string;
+}
+
+// --- OCR (Tahap 1, Titik 1 — pencairan proof pre-fill preview) ---
+
+export class OcrExtractDto {
+  @IsString() @MaxLength(1024) imageUrl!: string;
 }

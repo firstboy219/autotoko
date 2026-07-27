@@ -95,9 +95,9 @@ export const fulfillmentStatusEnum = pgEnum("fulfillment_status", [
   "dibatalkan",
 ]);
 
-// --- Payout / Pencairan Dana module (PAYOUT_MODULE_REQUIREMENT.md) ---
+// --- Payout / Pencairan Dana module (FLOW_PENCAIRAN_V2_FINAL.md) ---
 
-// Which figure the sedekah percentage is taken from (requirement 4.2).
+// Which figure the sedekah percentage is taken from (Bagian 3).
 export const sedekahBasisEnum = pgEnum("sedekah_basis", [
   "total_credit",
   "after_subseller_split",
@@ -108,19 +108,60 @@ export const subSellerStatusEnum = pgEnum("sub_seller_status", [
   "inactive",
 ]);
 
+// v1 labels (running/awaiting_transfer/transferred/completed) are legacy and no
+// longer produced by the app — the Owner-approval stage they represented was
+// removed in v2. Postgres cannot drop enum labels, so they stay defined but
+// unused; v2 flow uses only berjalan/siap_distribusi/selesai (Bagian 4).
 export const payoutBatchStatusEnum = pgEnum("payout_batch_status", [
   "running",
   "awaiting_transfer",
   "transferred",
   "completed",
+  "berjalan",
+  "siap_distribusi",
+  "selesai",
 ]);
 
+// "completed" now means "locked because the batch's input stage closed"
+// (Bagian 4), set automatically — there is no more per-mutation manual
+// complete action.
 export const payoutMutationStatusEnum = pgEnum("payout_mutation_status", [
   "draft",
   "completed",
 ]);
 
+// v1-only, no columns reference this anymore (superseded by
+// payout_disbursements.validationStatus below) — kept defined, not deleted, so
+// drizzle-kit doesn't mistake the new enums below for a rename of this one.
 export const payoutForwardStatusEnum = pgEnum("payout_forward_status", [
   "pending",
   "forwarded",
+]);
+
+// Per-disbursement transfer validation (payout_disbursements.validationStatus).
+// Replaces the old per-mutation forward-status concept entirely.
+export const payoutDisbursementRecipientTypeEnum = pgEnum(
+  "payout_disbursement_recipient_type",
+  ["sedekah", "sub_seller", "sub_sub_seller"],
+);
+
+export const payoutDisbursementValidationStatusEnum = pgEnum(
+  "payout_disbursement_validation_status",
+  [
+    "belum_upload",
+    "cocok_otomatis",
+    // Proof uploaded, OCR ran, but amount/account didn't match — staff must
+    // either re-upload or override (Bagian 3, Tahap 3).
+    "tidak_cocok",
+    "override_manual",
+  ],
+);
+
+// Who connected a shop (MAPPING_DAN_SELFSERVICE_TOKO.md Bagian 3) — distinct
+// from who OWNS the split (shops.subSellerId/subSubSellerId): a Seller can
+// connect a shop via OAuth and later reassign its ownership to a sub-seller.
+export const shopAddedByTypeEnum = pgEnum("shop_added_by_type", [
+  "seller",
+  "sub_seller",
+  "sub_sub_seller",
 ]);
