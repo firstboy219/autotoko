@@ -27,24 +27,38 @@ interface Mutation {
   payoutDate: string;
   creditAmount: string;
   marketplaceProofAmount: string | null;
+  marketplaceProofUrl: string | null;
   sedekahAmount: string;
   sellerAmount: string;
   subSellerAmount: string | null;
   subSubSellerAmount: string | null;
-  status: "draft" | "completed";
-  subSellerForwardStatus: "pending" | "forwarded" | null;
-  subSubSellerForwardStatus: "pending" | "forwarded" | null;
-  marketplaceProofUrl: string | null;
+}
+type ValidationStatus = "belum_upload" | "cocok_otomatis" | "tidak_cocok" | "override_manual";
+interface Disbursement {
+  id: string;
+  payoutMutationId: string;
+  shopName: string;
+  marketplace: string;
+  recipientType: "sedekah" | "sub_seller" | "sub_sub_seller";
+  recipientName: string;
+  recipientChain: string | null;
+  expectedAmount: string;
+  recordedAccount: string | null;
+  proofUrl: string | null;
+  ocrAmount: string | null;
+  ocrAccount: string | null;
+  validationStatus: ValidationStatus;
+  overrideReason: string | null;
 }
 interface BatchDetail {
   id: string;
-  status: "running" | "awaiting_transfer" | "transferred" | "completed";
-  totalTransferToAdmin: string;
-  transferProofUrl: string | null;
+  status: "berjalan" | "siap_distribusi" | "selesai";
   mutations: Mutation[];
+  disbursements: Disbursement[];
 }
 
 const cents = (rupiahVal: number) => Math.round(rupiahVal * 100);
+const READY: ValidationStatus[] = ["cocok_otomatis", "override_manual"];
 
 export function PencairanBatch() {
   const { id } = useParams<{ id: string }>();
@@ -59,58 +73,62 @@ export function PencairanBatch() {
         <div className="text-slate-400 text-sm mt-4">Memuat…</div>
       ) : (
         <div className="mt-3 space-y-4">
-          <BatchActions batch={batch} onDone={reload} />
-          {batch.status === "running" && shops && settings && (
-            <MutationForm batchId={batch.id} shops={shops} settings={settings} onCreated={reload} />
+          <BatchHeader batch={batch} onDone={reload} />
+          {batch.status === "berjalan" && shops && settings && (
+            <>
+              <MutationForm batchId={batch.id} shops={shops} settings={settings} onCreated={reload} />
+              <MutationList batch={batch} shops={shops} onChange={reload} />
+            </>
           )}
-          <MutationList batch={batch} shops={shops ?? []} onChange={reload} />
+          {batch.status !== "berjalan" && <DisbursementRekap batch={batch} onChange={reload} />}
         </div>
       )}
     </Layout>
   );
 }
 
-function BatchActions({ batch, onDone }: { batch: BatchDetail; onDone: () => void }) {
+function BatchHeader({ batch, onDone }: { batch: BatchDetail; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [proof, setProof] = useState("");
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true); setErr(null);
     try { await fn(); onDone(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
 
+  const notReady = batch.disbursements.filter((d) => !READY.includes(d.validationStatus));
+
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-slate-400">Total perlu diteruskan ke sub-seller</div>
-          <div className="text-2xl font-extrabold">{rupiah(batch.totalTransferToAdmin)}</div>
+          <div className="text-[10px] uppercase tracking-wide text-slate-400">Status Batch</div>
+          <div className="text-lg font-extrabold">
+            {batch.status === "berjalan" && "Berjalan — input pencairan per toko"}
+            {batch.status === "siap_distribusi" && "Siap Distribusi — transfer & upload bukti per penerima"}
+            {batch.status === "selesai" && "✓ Selesai"}
+          </div>
         </div>
-        <div>
-          {batch.status === "running" && (
-            <button onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close`))} disabled={busy}
-              className="px-3 py-2 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-50">
-              Tutup & Lapor ke Owner
-            </button>
-          )}
-          {batch.status === "awaiting_transfer" && (
-            <div className="flex gap-3 items-end">
-              <FileUpload label="Bukti transfer ke Admin" value={proof} onChange={setProof} />
-              <button onClick={() => run(() => api.post(`/payout/batches/${batch.id}/transferred`, { transferProofUrl: proof }))}
-                disabled={busy || !proof}
-                className="px-3 py-2 rounded-md bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold disabled:opacity-50">
-                Tandai Sudah Ditransfer
-              </button>
-            </div>
-          )}
-          {batch.status === "transferred" && (
-            <span className="text-xs text-violet-700 font-semibold">Tandai tiap mutasi "Diteruskan" di bawah.</span>
-          )}
-          {batch.status === "completed" && (
-            <span className="text-xs text-green-700 font-semibold">✓ Batch selesai</span>
-          )}
-        </div>
+        {batch.status === "berjalan" && (
+          <button
+            onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close-input`))}
+            disabled={busy || batch.mutations.length === 0}
+            title={batch.mutations.length === 0 ? "Rekam minimal satu toko dulu" : ""}
+            className="px-3 py-2 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-50"
+          >
+            Selesai Pencairan Semua Toko →
+          </button>
+        )}
+        {batch.status === "siap_distribusi" && (
+          <button
+            onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close`))}
+            disabled={busy || notReady.length > 0}
+            title={notReady.length > 0 ? `${notReady.length} transfer belum tervalidasi/di-override` : ""}
+            className="px-3 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white text-sm font-semibold disabled:opacity-50"
+          >
+            {notReady.length > 0 ? `Tutup Batch (${notReady.length} belum siap)` : "Tutup Batch"}
+          </button>
+        )}
       </div>
       {err && <div className="text-red-500 text-xs mt-2">{err}</div>}
     </div>
@@ -127,6 +145,8 @@ function MutationForm({
   const [receiving, setReceiving] = useState("");
   const [proofUrl, setProofUrl] = useState("");
   const [note, setNote] = useState("");
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrNote, setOcrNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -148,6 +168,34 @@ function MutationForm({
 
   const proofDiff = proofAmount !== "" && Number(proofAmount) !== creditNum;
 
+  // Titik 1 OCR: after the pencairan screenshot is uploaded, ask the server to
+  // read it and suggest values — staff can still edit anything before submit.
+  async function onProofUploaded(url: string) {
+    setProofUrl(url);
+    setOcrBusy(true);
+    setOcrNote(null);
+    try {
+      const result = await api.post<{ amount: number | null; account: string | null }>(
+        "/payout/ocr/extract-pencairan",
+        { imageUrl: url },
+      );
+      if (result.amount != null) {
+        setProofAmount(String(result.amount));
+        if (!credit) setCredit(String(result.amount));
+      }
+      if (result.account != null) setReceiving(result.account);
+      setOcrNote(
+        result.amount != null || result.account != null
+          ? "Terisi otomatis dari OCR — periksa dan koreksi jika perlu."
+          : "OCR tidak berhasil membaca nominal/rekening — isi manual.",
+      );
+    } catch {
+      setOcrNote("OCR gagal diproses — isi manual.");
+    } finally {
+      setOcrBusy(false);
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true); setErr(null);
@@ -159,14 +207,15 @@ function MutationForm({
         ...(proofUrl ? { marketplaceProofUrl: proofUrl } : {}),
         ...(note ? { note } : {}),
       });
-      setShopId(""); setCredit(""); setProofAmount(""); setReceiving(""); setProofUrl(""); setNote("");
+      setShopId(""); setCredit(""); setProofAmount(""); setReceiving("");
+      setProofUrl(""); setNote(""); setOcrNote(null);
       onCreated();
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
 
   return (
     <form onSubmit={submit} className="bg-white rounded-xl border border-slate-200 p-4">
-      <div className="font-bold text-sm mb-3">Input Mutasi Pencairan</div>
+      <div className="font-bold text-sm mb-3">Rekam Pencairan Toko</div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <label className="text-xs font-semibold text-slate-600">
           Toko
@@ -187,6 +236,13 @@ function MutationForm({
           <input type="date" value={payoutDate} onChange={(e) => setPayoutDate(e.target.value)} required
             className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
         </label>
+
+        <div className="md:col-span-2">
+          <FileUpload label="Bukti Pencairan Marketplace (unggah dulu — nominal & rekening akan dicoba dibaca otomatis)" value={proofUrl} onChange={onProofUploaded} />
+          {ocrBusy && <div className="text-[11px] text-slate-400 mt-1">Membaca gambar…</div>}
+          {ocrNote && <div className="text-[11px] text-brand mt-1">{ocrNote}</div>}
+        </div>
+
         <label className="text-xs font-semibold text-slate-600">
           Nominal Kredit (dasar kalkulasi)
           <input inputMode="numeric" value={credit ? Number(credit).toLocaleString("id-ID") : ""}
@@ -194,19 +250,21 @@ function MutationForm({
             className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
         </label>
         <label className="text-xs font-semibold text-slate-600">
-          Nominal Bukti Marketplace (opsional)
+          Nominal Bukti Marketplace
           <input inputMode="numeric" value={proofAmount ? Number(proofAmount).toLocaleString("id-ID") : ""}
             onChange={(e) => setProofAmount(e.target.value.replace(/\D/g, ""))} placeholder="samakan dengan kredit"
             className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
         </label>
         <label className="text-xs font-semibold text-slate-600">
-          Rekening Penampung (opsional)
+          Rekening Penampung
           <input value={receiving} onChange={(e) => setReceiving(e.target.value)}
             className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
         </label>
-        <div className="md:col-span-2">
-          <FileUpload label="Bukti Pencairan Marketplace (opsional saat draft)" value={proofUrl} onChange={setProofUrl} />
-        </div>
+        <label className="text-xs font-semibold text-slate-600">
+          Catatan (opsional)
+          <input value={note} onChange={(e) => setNote(e.target.value)}
+            className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
+        </label>
       </div>
 
       {proofDiff && (
@@ -227,9 +285,6 @@ function MutationForm({
             {split.subSellerCents > 0 && <SplitCell label={`Sub-seller${shop.subSellerName ? ` (${shop.subSellerName})` : ""}`} value={split.subSellerCents} />}
             {split.subSubSellerCents > 0 && <SplitCell label={`Sub-sub-seller${shop.subSubSellerName ? ` (${shop.subSubSellerName})` : ""}`} value={split.subSubSellerCents} />}
           </div>
-          <div className="text-[11px] text-slate-400 mt-2">
-            Total split {rupiah((split.sedekahCents + split.sellerCents + split.subSellerCents + split.subSubSellerCents) / 100)} = kredit {rupiah(creditNum)}
-          </div>
         </div>
       )}
 
@@ -237,8 +292,9 @@ function MutationForm({
       <div className="mt-3">
         <button disabled={busy || !shopId || creditNum <= 0}
           className="px-4 py-2 rounded-md bg-brand hover:bg-brand-dark text-white text-sm font-semibold disabled:opacity-50">
-          {busy ? "…" : "Simpan sebagai Draft"}
+          {busy ? "…" : "Simpan Pencairan Toko Ini"}
         </button>
+        <span className="text-[11px] text-slate-400 ml-3">Ulangi untuk toko lain sesuai kebutuhan — tidak wajib semua toko.</span>
       </div>
     </form>
   );
@@ -255,15 +311,34 @@ function SplitCell({ label, value }: { label: string; value: number }) {
 
 function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: ShopOpt[]; onChange: () => void }) {
   const shopName = (id: string) => shops.find((s) => s.id === id)?.shopName ?? id.slice(0, 8);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function remove(id: string) {
+    setBusyId(id);
+    try { await api.del(`/payout/mutations/${id}`); onChange(); } finally { setBusyId(null); }
+  }
+
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm">Mutasi dalam Batch ({batch.mutations.length})</div>
+      <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm">
+        Toko Sudah Direkam ({batch.mutations.length})
+      </div>
       {!batch.mutations.length ? (
-        <div className="px-4 py-6 text-center text-slate-400 text-sm">Belum ada mutasi. Tambahkan lewat form di atas.</div>
+        <div className="px-4 py-6 text-center text-slate-400 text-sm">Belum ada. Rekam lewat form di atas.</div>
       ) : (
         <div className="divide-y divide-slate-100">
           {batch.mutations.map((m) => (
-            <MutationRow key={m.id} m={m} shopName={shopName(m.shopId)} batchStatus={batch.status} onChange={onChange} />
+            <div key={m.id} className="px-4 py-2 flex items-center justify-between">
+              <div>
+                <span className="font-semibold text-sm">{shopName(m.shopId)}</span>
+                <span className="text-xs text-slate-400 ml-2">{dateShort(m.payoutDate)}</span>
+                <span className="text-xs text-slate-500 ml-2">{rupiah(m.creditAmount)}</span>
+              </div>
+              <button onClick={() => remove(m.id)} disabled={busyId === m.id}
+                className="text-xs px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 font-semibold disabled:opacity-50">
+                Hapus
+              </button>
+            </div>
           ))}
         </div>
       )}
@@ -271,92 +346,131 @@ function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: S
   );
 }
 
-function MutationRow({
-  m, shopName, batchStatus, onChange,
-}: { m: Mutation; shopName: string; batchStatus: BatchDetail["status"]; onChange: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [completing, setCompleting] = useState(false);
-  const [proofs, setProofs] = useState({
-    marketplaceProofUrl: m.marketplaceProofUrl ?? "",
-    sedekahTransferProofUrl: "",
-    subSellerTransferProofUrl: "",
-    subSubSellerTransferProofUrl: "",
-  });
+// --- Tahap 2/3: rekap transfer per penerima, grouped by shop/mutation ---
 
-  async function run(fn: () => Promise<unknown>) {
-    setBusy(true); setErr(null);
-    try { await fn(); onChange(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
-  }
-
-  const needSub = Number(m.subSellerAmount ?? 0) > 0;
-  const needSubSub = Number(m.subSubSellerAmount ?? 0) > 0;
+function DisbursementRekap({ batch, onChange }: { batch: BatchDetail; onChange: () => void }) {
+  const groups = useMemo(() => {
+    const byMutation = new Map<string, Disbursement[]>();
+    for (const d of batch.disbursements) {
+      const arr = byMutation.get(d.payoutMutationId) ?? [];
+      arr.push(d);
+      byMutation.set(d.payoutMutationId, arr);
+    }
+    return [...byMutation.entries()];
+  }, [batch.disbursements]);
 
   return (
-    <div className="px-4 py-3">
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm">
+        Rekap Transfer per Toko ({groups.length} toko, {batch.disbursements.length} transfer)
+      </div>
+      {!groups.length ? (
+        <div className="px-4 py-6 text-center text-slate-400 text-sm">Tidak ada transfer yang perlu dilakukan.</div>
+      ) : (
+        <div className="divide-y divide-slate-100">
+          {groups.map(([mutationId, rows]) => (
+            <div key={mutationId} className="px-4 py-3">
+              <div className="font-semibold text-sm mb-2">{rows[0]!.shopName} <span className="text-xs text-slate-400 font-normal">({rows[0]!.marketplace})</span></div>
+              <div className="space-y-2">
+                {rows.map((d) => <DisbursementRow key={d.id} d={d} onChange={onChange} />)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const RECIPIENT_LABEL: Record<Disbursement["recipientType"], string> = {
+  sedekah: "Sedekah",
+  sub_seller: "Sub-seller",
+  sub_sub_seller: "Sub-sub-seller",
+};
+const VALIDATION_BADGE: Record<ValidationStatus, string> = {
+  belum_upload: "bg-slate-100 text-slate-500",
+  cocok_otomatis: "bg-green-100 text-green-700",
+  tidak_cocok: "bg-red-100 text-red-700",
+  override_manual: "bg-violet-100 text-violet-700",
+};
+const VALIDATION_LABEL: Record<ValidationStatus, string> = {
+  belum_upload: "Belum Upload",
+  cocok_otomatis: "✓ Cocok Otomatis",
+  tidak_cocok: "✗ Tidak Cocok",
+  override_manual: "✓ Override Manual",
+};
+
+function DisbursementRow({ d, onChange }: { d: Disbursement; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [showOverride, setShowOverride] = useState(false);
+  const [reason, setReason] = useState("");
+
+  async function uploadProof(url: string) {
+    setBusy(true); setErr(null);
+    try {
+      await api.post(`/payout/disbursements/${d.id}/proof`, { proofUrl: url });
+      onChange();
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  }
+
+  async function override() {
+    setBusy(true); setErr(null);
+    try {
+      await api.post(`/payout/disbursements/${d.id}/override`, { reason });
+      setShowOverride(false); setReason("");
+      onChange();
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <span className="font-semibold text-sm">{shopName}</span>
-          <span className="text-xs text-slate-400 ml-2">{dateShort(m.payoutDate)}</span>
-          <span className={`ml-2 text-[10px] font-semibold px-2 py-0.5 rounded ${m.status === "completed" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"}`}>
-            {m.status === "completed" ? "Selesai" : "Draft"}
+          <span className="text-xs font-bold">{RECIPIENT_LABEL[d.recipientType]}</span>
+          {d.recipientChain && <span className="text-xs text-slate-500 ml-1">({d.recipientChain})</span>}
+          {!d.recipientChain && d.recipientType !== "sedekah" && <span className="text-xs text-slate-500 ml-1">({d.recipientName})</span>}
+          <span className={`ml-2 text-[10px] font-semibold px-2 py-0.5 rounded ${VALIDATION_BADGE[d.validationStatus]}`}>
+            {VALIDATION_LABEL[d.validationStatus]}
           </span>
-          {m.subSellerForwardStatus === "forwarded" && (
-            <span className="ml-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-green-100 text-green-700">Diteruskan</span>
-          )}
         </div>
-        <div className="text-sm font-bold">{rupiah(m.creditAmount)}</div>
+        <div className="text-sm font-bold">{rupiah(d.expectedAmount)}</div>
+      </div>
+      <div className="text-xs text-slate-500 mt-1">
+        Rekening tujuan: <span className="font-mono">{d.recordedAccount ?? "-"}</span>
       </div>
 
-      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-slate-500">
-        <span>Sedekah {rupiah(m.sedekahAmount)}</span>
-        <span>Seller {rupiah(m.sellerAmount)}</span>
-        {m.subSellerAmount != null && <span>Sub-seller {rupiah(m.subSellerAmount)}</span>}
-        {m.subSubSellerAmount != null && <span>Sub-sub-seller {rupiah(m.subSubSellerAmount)}</span>}
-      </div>
-
-      {/* actions */}
-      <div className="mt-2 flex flex-wrap gap-2">
-        {m.status === "draft" && batchStatus === "running" && (
-          <>
-            <button onClick={() => setCompleting((v) => !v)} className="text-xs px-2 py-1 rounded bg-green-600 hover:bg-green-700 text-white font-semibold">
-              {completing ? "Batal" : "Selesaikan"}
-            </button>
-            <button onClick={() => run(() => api.del(`/payout/mutations/${m.id}`))} disabled={busy}
-              className="text-xs px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 font-semibold">
-              Hapus
-            </button>
-          </>
-        )}
-        {m.status === "completed" && batchStatus === "transferred" && needSub && m.subSellerForwardStatus !== "forwarded" && (
-          <button onClick={() => run(() => api.post(`/payout/mutations/${m.id}/forward`))} disabled={busy}
-            className="text-xs px-2 py-1 rounded bg-violet-600 hover:bg-violet-700 text-white font-semibold">
-            Tandai Diteruskan
+      <div className="mt-2 flex flex-wrap items-end gap-3">
+        <FileUpload label="Bukti Transfer" value={d.proofUrl ?? ""} onChange={uploadProof} />
+        {d.validationStatus === "tidak_cocok" && !showOverride && (
+          <button onClick={() => setShowOverride(true)}
+            className="text-xs px-3 py-1.5 rounded bg-violet-600 hover:bg-violet-700 text-white font-semibold">
+            Override Manual
           </button>
         )}
       </div>
 
-      {completing && (
-        <div className="mt-2 rounded-lg bg-slate-50 border border-slate-200 p-3 space-y-2">
-          <FileUpload label="Bukti Pencairan Marketplace (wajib)" value={proofs.marketplaceProofUrl}
-            onChange={(v) => setProofs((p) => ({ ...p, marketplaceProofUrl: v }))} />
-          <FileUpload label="Bukti Transfer Sedekah (wajib jika > 0)" value={proofs.sedekahTransferProofUrl}
-            onChange={(v) => setProofs((p) => ({ ...p, sedekahTransferProofUrl: v }))} />
-          {needSub && (
-            <FileUpload label="Bukti Transfer Sub-seller (wajib)" value={proofs.subSellerTransferProofUrl}
-              onChange={(v) => setProofs((p) => ({ ...p, subSellerTransferProofUrl: v }))} />
-          )}
-          {needSubSub && (
-            <FileUpload label="Bukti Transfer Sub-sub-seller (wajib)" value={proofs.subSubSellerTransferProofUrl}
-              onChange={(v) => setProofs((p) => ({ ...p, subSubSellerTransferProofUrl: v }))} />
-          )}
-          <button onClick={() => run(() => api.post(`/payout/mutations/${m.id}/complete`, proofs))} disabled={busy}
-            className="text-xs px-3 py-1.5 rounded bg-green-600 hover:bg-green-700 text-white font-semibold disabled:opacity-50">
-            {busy ? "…" : "Konfirmasi Selesai (terkunci)"}
+      {d.validationStatus === "tidak_cocok" && (
+        <div className="mt-2 text-[11px] bg-red-50 border border-red-200 text-red-700 rounded-md px-2 py-1.5">
+          OCR tidak cocok — hasil baca: {d.ocrAmount ? rupiah(d.ocrAmount) : "(nominal tak terbaca)"}
+          {" · "}{d.ocrAccount ?? "(rekening tak terbaca)"}. Seharusnya {rupiah(d.expectedAmount)} ke {d.recordedAccount ?? "-"}.
+        </div>
+      )}
+      {d.validationStatus === "override_manual" && d.overrideReason && (
+        <div className="mt-2 text-[11px] text-violet-700">Alasan override: {d.overrideReason}</div>
+      )}
+
+      {showOverride && (
+        <div className="mt-2 flex gap-2 items-center">
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Alasan override (wajib)"
+            className="flex-1 px-2 py-1.5 rounded-md border border-slate-300 text-xs" />
+          <button onClick={override} disabled={busy || !reason.trim()}
+            className="text-xs px-3 py-1.5 rounded bg-violet-600 hover:bg-violet-700 text-white font-semibold disabled:opacity-50">
+            Konfirmasi
           </button>
         </div>
       )}
-      {err && <div className="text-red-500 text-xs mt-1">{err}</div>}
+      {err && <div className="text-red-500 text-[11px] mt-1">{err}</div>}
     </div>
   );
 }

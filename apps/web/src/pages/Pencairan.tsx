@@ -3,14 +3,13 @@ import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
-import { rupiah, dateShort } from "../lib/fmt";
+import { dateShort } from "../lib/fmt";
 
 interface Batch {
   id: string;
-  status: "running" | "awaiting_transfer" | "transferred" | "completed";
-  totalTransferToAdmin: string;
+  status: "berjalan" | "siap_distribusi" | "selesai";
   closedAt: string | null;
-  transferredAt: string | null;
+  completedAt: string | null;
   createdAt: string;
 }
 interface Settings {
@@ -20,16 +19,14 @@ interface Settings {
 }
 
 const STATUS_LABEL: Record<Batch["status"], string> = {
-  running: "Berjalan",
-  awaiting_transfer: "Menunggu Transfer",
-  transferred: "Sudah Ditransfer",
-  completed: "Selesai",
+  berjalan: "Berjalan",
+  siap_distribusi: "Siap Distribusi",
+  selesai: "Selesai",
 };
 const STATUS_BADGE: Record<Batch["status"], string> = {
-  running: "bg-blue-100 text-blue-700",
-  awaiting_transfer: "bg-amber-100 text-amber-700",
-  transferred: "bg-violet-100 text-violet-700",
-  completed: "bg-green-100 text-green-700",
+  berjalan: "bg-blue-100 text-blue-700",
+  siap_distribusi: "bg-amber-100 text-amber-700",
+  selesai: "bg-green-100 text-green-700",
 };
 const BASIS_LABEL: Record<Settings["sedekahBasis"], string> = {
   total_credit: "Total Kredit Awal",
@@ -55,7 +52,7 @@ export function Pencairan() {
     }
   }
 
-  const hasRunning = batches?.some((b) => b.status === "running");
+  const hasOpen = batches?.some((b) => b.status === "berjalan");
 
   return (
     <Layout title="Pencairan Dana">
@@ -79,17 +76,24 @@ export function Pencairan() {
             Buka manajemen →
           </Link>
         </div>
+        <div className="flex-1 min-w-[220px] bg-white rounded-xl border border-slate-200 p-4">
+          <div className="text-[10px] uppercase tracking-wide text-slate-400">Mapping Toko</div>
+          <div className="text-sm text-slate-600 mt-1">Lihat kepemilikan tiap toko dan rekening tujuannya.</div>
+          <Link to="/pencairan/mapping" className="text-xs text-brand font-semibold hover:underline mt-2 inline-block">
+            Buka mapping →
+          </Link>
+        </div>
         <div className="flex-1 min-w-[220px] bg-gradient-to-br from-navy to-[#252558] rounded-xl p-4 text-white flex flex-col justify-between">
           <div>
             <div className="text-[10px] uppercase tracking-wide text-white/40">Batch Pencairan</div>
             <div className="text-sm text-white/70 mt-1">
-              {hasRunning ? "Ada batch berjalan." : "Mulai batch baru untuk input mutasi."}
+              {hasOpen ? "Ada batch berjalan." : "Mulai batch baru untuk input pencairan."}
             </div>
           </div>
           <button
             onClick={startBatch}
-            disabled={busy || hasRunning}
-            title={hasRunning ? "Sudah ada batch berjalan — selesaikan dulu." : ""}
+            disabled={busy || hasOpen}
+            title={hasOpen ? "Sudah ada batch berjalan — selesaikan dulu." : ""}
             className="mt-3 px-3 py-2 rounded-md bg-brand hover:bg-brand-dark text-white text-sm font-semibold disabled:opacity-50"
           >
             {busy ? "…" : "+ Mulai Batch Baru"}
@@ -110,8 +114,8 @@ export function Pencairan() {
             <tr className="bg-slate-50 text-[10px] uppercase text-slate-500">
               <th className="text-left px-3 py-2">Dibuat</th>
               <th className="text-left px-3 py-2">Status</th>
-              <th className="text-right px-3 py-2">Perlu Diteruskan</th>
-              <th className="text-left px-3 py-2">Ditutup</th>
+              <th className="text-left px-3 py-2">Input Ditutup</th>
+              <th className="text-left px-3 py-2">Batch Selesai</th>
               <th className="px-3 py-2"></th>
             </tr>
           </thead>
@@ -129,8 +133,8 @@ export function Pencairan() {
                       {STATUS_LABEL[b.status]}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-right font-semibold">{rupiah(b.totalTransferToAdmin)}</td>
                   <td className="px-3 py-2 text-slate-500">{b.closedAt ? dateShort(b.closedAt) : "-"}</td>
+                  <td className="px-3 py-2 text-slate-500">{b.completedAt ? dateShort(b.completedAt) : "-"}</td>
                   <td className="px-3 py-2 text-right">
                     <Link to={`/pencairan/batch/${b.id}`} className="text-xs text-brand font-semibold hover:underline">
                       Detail →
