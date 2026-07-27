@@ -231,6 +231,60 @@ export class PayoutSellersService {
     });
   }
 
+  /**
+   * Full Mapping Toko↔Owner view (MAPPING_DAN_SELFSERVICE_TOKO.md Bagian 1) —
+   * Owner/Admin only (enforced by @TenantOwnerOnly on the controller, which
+   * blocks portal tokens entirely). Every shop with its full ownership chain,
+   * active receiving account, effective rates, and who connected it.
+   */
+  async listMappingRows(userId: string) {
+    const [shopRows, subs, subsubs] = await Promise.all([
+      this.db.select().from(shops).where(eq(shops.userId, userId)),
+      this.db.select().from(subSellers).where(eq(subSellers.userId, userId)),
+      this.db.select().from(subSubSellers).where(eq(subSubSellers.userId, userId)),
+    ]);
+    const subById = new Map(subs.map((s) => [s.id, s]));
+    const subsubById = new Map(subsubs.map((s) => [s.id, s]));
+    const num = (v: string | null) => (v == null ? null : Number(v));
+
+    return shopRows.map((shop) => {
+      const sub = shop.subSellerId ? subById.get(shop.subSellerId) : null;
+      const subsub = shop.subSubSellerId ? subsubById.get(shop.subSubSellerId) : null;
+      const scenario: "A" | "B" | "C" = subsub ? "C" : sub ? "B" : "A";
+      // Active receiving account = the bottom-most entity in the chain (the
+      // one whose bank account is the destination for their share).
+      const activeAccount = subsub?.bankAccount ?? sub?.bankAccount ?? null;
+
+      let addedByName: string;
+      if (shop.addedByType === "seller") {
+        addedByName = "Seller (manual)";
+      } else if (shop.addedByType === "sub_seller") {
+        addedByName = (shop.addedById ? subById.get(shop.addedById)?.name : null) ?? "-";
+      } else {
+        addedByName = (shop.addedById ? subsubById.get(shop.addedById)?.name : null) ?? "-";
+      }
+
+      return {
+        id: shop.id,
+        shopName: shop.shopName ?? shop.shopId,
+        marketplace: shop.marketplace,
+        scenario,
+        subSellerId: shop.subSellerId,
+        subSellerName: sub?.name ?? null,
+        subSubSellerName: subsub?.name ?? null,
+        activeAccount,
+        effectiveSubSellerRate: sub
+          ? (num(shop.rateOverrideSubSeller) ?? Number(sub.defaultRate))
+          : null,
+        effectiveSubSubSellerRate: subsub
+          ? (num(shop.rateOverrideSubSubSeller) ?? Number(subsub.defaultRate))
+          : null,
+        addedByType: shop.addedByType,
+        addedByName,
+      };
+    });
+  }
+
   // --- Payout settings — one row per tenant, lazily created ---
 
   async getSettings(userId: string) {

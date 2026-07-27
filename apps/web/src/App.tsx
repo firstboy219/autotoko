@@ -27,6 +27,7 @@ import { PencairanBatch } from "./pages/PencairanBatch";
 import { PencairanSubSeller } from "./pages/PencairanSubSeller";
 import { PencairanSettings } from "./pages/PencairanSettings";
 import { PencairanMutasi } from "./pages/PencairanMutasi";
+import { PencairanMapping } from "./pages/PencairanMapping";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const authed = useAuth((s) => s.authenticated);
@@ -61,6 +62,7 @@ export function App() {
         <Route path="/pencairan/sub-seller" element={<Protected><PencairanSubSeller /></Protected>} />
         <Route path="/pencairan/pengaturan" element={<Protected><PencairanSettings /></Protected>} />
         <Route path="/pencairan/mutasi" element={<Protected><PencairanMutasi /></Protected>} />
+        <Route path="/pencairan/mapping" element={<Protected><PencairanMapping /></Protected>} />
         <Route path="/portal/login" element={<PortalLogin />} />
         <Route path="/portal" element={<PortalDashboard />} />
         <Route path="*" element={<NotFound />} />

@@ -97,10 +97,16 @@ export class PayoutController {
     return ok(await this.sellers.updateSubSubSeller(uid(req), id, dto));
   }
 
-  // --- Shops (with resolved payout rates, for the mutation form + mapping page) ---
+  // --- Shops (with resolved payout rates, for the mutation form) ---
   @Get("shops")
   async listShops(@Req() req: FastifyRequest) {
     return ok(await this.sellers.listShopsForPayout(uid(req)));
+  }
+
+  /** Mapping Toko↔Owner (Owner/Admin only — @TenantOwnerOnly at class level already blocks portal tokens). */
+  @Get("mapping")
+  async mapping(@Req() req: FastifyRequest) {
+    return ok(await this.sellers.listMappingRows(uid(req)));
   }
 
   @Post("shops/:shopId/assign")
