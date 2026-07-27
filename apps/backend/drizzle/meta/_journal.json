@@ -50,6 +50,13 @@
       "when": 1784906275030,
       "tag": "0006_payout_disbursement_tidak_cocok",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785159071183,
+      "tag": "0007_payout_login_email_unique",
+      "breakpoints": true
     }
   ]
 }

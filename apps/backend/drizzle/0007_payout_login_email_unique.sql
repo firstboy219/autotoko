@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "sub_sellers_login_email_uidx" ON "sub_sellers" USING btree ("login_email") WHERE "sub_sellers"."login_email" is not null;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "sub_sub_sellers_login_email_uidx" ON "sub_sub_sellers" USING btree ("login_email") WHERE "sub_sub_sellers"."login_email" is not null;

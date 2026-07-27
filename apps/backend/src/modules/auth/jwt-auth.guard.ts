@@ -15,11 +15,31 @@ export interface JwtPayload {
   role: "user" | "admin";
   wa?: string;
   email?: string;
+  // Present only for a sub-seller/sub-sub-seller PORTAL login (Bagian 5,
+  // FLOW_PENCAIRAN_V2_FINAL.md). `sub` is STILL the underlying tenant's
+  // users.id even for a portal token — every existing RLS/app.user_id query
+  // keeps working unchanged; principalType/principalId is what the app layer
+  // uses to restrict a portal caller to their own shops/history only.
+  principalType?: "sub_seller" | "sub_sub_seller";
+  principalId?: string;
 }
 
 /** Mark a route/controller as admin-only. */
 export const ADMIN_ONLY = "admin_only";
 export const AdminOnly = () => SetMetadata(ADMIN_ONLY, true);
+
+/**
+ * Mark a route/controller as OFF LIMITS to sub-seller/sub-sub-seller portal
+ * tokens — required on every regular tenant endpoint, since a portal token's
+ * `sub` still resolves to the real tenant id (by design, for RLS) and would
+ * otherwise see the tenant's full data, defeating the portal's restricted view.
+ */
+export const TENANT_OWNER_ONLY = "tenant_owner_only";
+export const TenantOwnerOnly = () => SetMetadata(TENANT_OWNER_ONLY, true);
+
+/** Mark a route/controller as reachable ONLY by a sub-seller/sub-sub-seller portal token. */
+export const PORTAL_ONLY = "portal_only";
+export const PortalOnly = () => SetMetadata(PORTAL_ONLY, true);
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -50,6 +70,23 @@ export class JwtAuthGuard implements CanActivate {
     if (adminOnly && payload.role !== "admin") {
       throw new ForbiddenException("Admin access required");
     }
+
+    const tenantOwnerOnly = this.reflector.getAllAndOverride<boolean>(TENANT_OWNER_ONLY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (tenantOwnerOnly && payload.principalType) {
+      throw new ForbiddenException("Not available to sub-seller/sub-sub-seller portal logins");
+    }
+
+    const portalOnly = this.reflector.getAllAndOverride<boolean>(PORTAL_ONLY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (portalOnly && !payload.principalType) {
+      throw new ForbiddenException("Portal access only");
+    }
+
     return true;
   }
 }

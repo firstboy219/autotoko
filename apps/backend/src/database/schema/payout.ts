@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   uuid,
@@ -9,6 +10,7 @@ import {
   jsonb,
   timestamp,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { shops } from "./shops";
@@ -62,6 +64,11 @@ export const subSellers = pgTable(
   },
   (t) => ({
     userIdx: index("sub_sellers_user_idx").on(t.userId),
+    // Login lookup is global (across tenants), like users.email — must be
+    // unique so a portal login attempt resolves to exactly one entity.
+    loginEmailIdx: uniqueIndex("sub_sellers_login_email_uidx")
+      .on(t.loginEmail)
+      .where(sql`${t.loginEmail} is not null`),
   }),
 );
 
@@ -93,6 +100,9 @@ export const subSubSellers = pgTable(
   (t) => ({
     parentIdx: index("sub_sub_sellers_parent_idx").on(t.subSellerId),
     userIdx: index("sub_sub_sellers_user_idx").on(t.userId),
+    loginEmailIdx: uniqueIndex("sub_sub_sellers_login_email_uidx")
+      .on(t.loginEmail)
+      .where(sql`${t.loginEmail} is not null`),
   }),
 );
 

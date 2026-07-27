@@ -20,6 +20,8 @@ import { Signup } from "./pages/Signup";
 import { Terms } from "./pages/Terms";
 import { Privacy } from "./pages/Privacy";
 import { NotFound } from "./pages/NotFound";
+import { PortalLogin } from "./pages/PortalLogin";
+import { PortalDashboard } from "./pages/PortalDashboard";
 import { Pencairan } from "./pages/Pencairan";
 import { PencairanBatch } from "./pages/PencairanBatch";
 import { PencairanSubSeller } from "./pages/PencairanSubSeller";
@@ -59,6 +61,8 @@ export function App() {
         <Route path="/pencairan/sub-seller" element={<Protected><PencairanSubSeller /></Protected>} />
         <Route path="/pencairan/pengaturan" element={<Protected><PencairanSettings /></Protected>} />
         <Route path="/pencairan/mutasi" element={<Protected><PencairanMutasi /></Protected>} />
+        <Route path="/portal/login" element={<PortalLogin />} />
+        <Route path="/portal" element={<PortalDashboard />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>

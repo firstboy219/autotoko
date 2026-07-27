@@ -12,7 +12,7 @@ import {
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
-import { JwtAuthGuard, type JwtPayload } from "../auth/jwt-auth.guard.js";
+import { JwtAuthGuard, TenantOwnerOnly, type JwtPayload } from "../auth/jwt-auth.guard.js";
 import { PayoutSellersService } from "./sellers.service.js";
 import { PayoutBatchService } from "./batch.service.js";
 import { PayoutMutationService } from "./mutation.service.js";
@@ -40,8 +40,11 @@ function uid(req: FastifyRequest): string {
 
 const ok = <T>(data: T): ApiResponse<T> => ({ success: true, data });
 
+// Blocks every route below from sub-seller/sub-sub-seller portal tokens — see
+// TenantOwnerOnly's doc comment. The portal has its own restricted controller.
 @Controller("payout")
 @UseGuards(JwtAuthGuard)
+@TenantOwnerOnly()
 export class PayoutController {
   constructor(
     private readonly sellers: PayoutSellersService,
