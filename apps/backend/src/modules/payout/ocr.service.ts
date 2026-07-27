@@ -107,8 +107,12 @@ export class OcrService {
     } catch (err) {
       // Covers: worker crash (any exit code), timeout, malformed JSON. Always
       // degrade to "no result" — never let an OCR failure reach the caller as
-      // an exception.
-      this.logger.warn(`OCR worker failed for ${imageUrl}: ${(err as Error).message}`);
+      // an exception. execFile's rejection carries the child's stderr, which
+      // is where ocr-worker-script.js logs the real cause before exiting.
+      const stderr = (err as { stderr?: string }).stderr;
+      this.logger.warn(
+        `OCR worker failed for ${imageUrl}: ${(err as Error).message}${stderr ? ` | stderr: ${stderr.trim()}` : ""}`,
+      );
       return empty;
     } finally {
       await unlink(tempPath).catch(() => {});

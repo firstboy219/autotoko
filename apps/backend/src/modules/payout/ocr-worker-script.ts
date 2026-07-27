@@ -18,8 +18,17 @@ import { readFileSync } from "node:fs";
 // exactly one OCR attempt and nothing else, so converting an otherwise-fatal
 // internal tesseract.js error into a clean non-zero exit is exactly the
 // isolation this script is for.
-process.on("uncaughtException", () => process.exit(1));
-process.on("unhandledRejection", () => process.exit(1));
+// Log to stderr before exiting — the parent (OcrService) captures this into
+// its warning log, so a real failure is still diagnosable even though it never
+// propagates as a crash.
+process.on("uncaughtException", (err) => {
+  process.stderr.write(`ocr-worker uncaughtException: ${err?.stack ?? err}\n`);
+  process.exit(1);
+});
+process.on("unhandledRejection", (err) => {
+  process.stderr.write(`ocr-worker unhandledRejection: ${err}\n`);
+  process.exit(1);
+});
 
 async function main() {
   const imagePath = process.argv[2];
@@ -28,6 +37,11 @@ async function main() {
     return;
   }
   const buffer = readFileSync(imagePath);
+  // No explicit langPath: tesseract.js downloads the ind+eng trained data
+  // (~7MB) once and caches it relative to this process's cwd, reusing it on
+  // every subsequent call — verified empirically (a custom langPath expects a
+  // different, .gz-compressed file layout than what actually gets cached, so
+  // pointing it at a hand-managed directory broke recognition entirely).
   const worker = await createWorker("ind+eng");
   try {
     const { data } = await worker.recognize(buffer);
@@ -38,4 +52,7 @@ async function main() {
   }
 }
 
-void main().catch(() => process.exit(1));
+void main().catch((err) => {
+  process.stderr.write(`ocr-worker failed: ${err?.stack ?? err}\n`);
+  process.exit(1);
+});
