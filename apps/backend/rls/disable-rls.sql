@@ -8,7 +8,8 @@ BEGIN
     'users','wallets','shops','master_products','orders','affiliates',
     'platform_invoices','autopilot_activity','notifications',
     'sub_sellers','sub_sub_sellers','payout_settings',
-    'payout_batches','payout_mutations','payout_adjustments'
+    'payout_batches','payout_mutations','payout_adjustments',
+    'payout_disbursements'
   ] LOOP
     EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', t);
     EXECUTE format('ALTER TABLE %I NO FORCE ROW LEVEL SECURITY', t);
