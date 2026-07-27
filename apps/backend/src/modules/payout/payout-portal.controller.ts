@@ -1,10 +1,19 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Post, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
-import type { ApiResponse } from "@autotoko/shared";
+import type { ApiResponse, Marketplace } from "@autotoko/shared";
 import { JwtAuthGuard, PortalOnly, type JwtPayload } from "../auth/jwt-auth.guard.js";
+import { ShopsService } from "../shops/shops.service.js";
 import { PayoutPortalAuthService } from "./portal-auth.service.js";
 import { PortalDataService } from "./portal-data.service.js";
 import { PortalEmailStartDto, PortalEmailVerifyDto } from "./portal.dto.js";
+
+const SUPPORTED: Marketplace[] = ["tiktok", "shopee"];
+function assertMarketplace(mp: string): Marketplace {
+  if (!SUPPORTED.includes(mp as Marketplace)) {
+    throw new BadRequestException(`Unsupported marketplace: ${mp}`);
+  }
+  return mp as Marketplace;
+}
 
 function principal(req: FastifyRequest) {
   const p = (req as FastifyRequest & { user: JwtPayload }).user;
@@ -24,6 +33,7 @@ export class PayoutPortalController {
   constructor(
     private readonly auth: PayoutPortalAuthService,
     private readonly data: PortalDataService,
+    private readonly shopsService: ShopsService,
   ) {}
 
   @Post("auth/start")
@@ -58,5 +68,20 @@ export class PayoutPortalController {
   async history(@Req() req: FastifyRequest) {
     const p = principal(req);
     return ok(await this.data.listMyHistory(p.userId, p.type, p.id));
+  }
+
+  /**
+   * "Tambah Toko" (MAPPING_DAN_SELFSERVICE_TOKO.md 2.1) — reuses the EXACT
+   * same OAuth mechanism as the Seller's own connect flow (getConnectUrl),
+   * just with this principal's identity embedded in the signed state so the
+   * callback can auto-assign ownership without trusting any client input.
+   */
+  @Get("shops/connect/:marketplace")
+  @UseGuards(JwtAuthGuard)
+  @PortalOnly()
+  async connectShop(@Req() req: FastifyRequest, @Param("marketplace") marketplace: string) {
+    const p = principal(req);
+    const mp = assertMarketplace(marketplace);
+    return ok(await this.shopsService.getConnectUrl(p.userId, mp, { type: p.type, id: p.id }));
   }
 }

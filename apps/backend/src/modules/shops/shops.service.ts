@@ -9,13 +9,20 @@ import { JwtService } from "@nestjs/jwt";
 import { and, eq, lt } from "drizzle-orm";
 import type { ConnectResult, Marketplace } from "@autotoko/shared";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { shops } from "../../database/schema/index.js";
+import { shops, subSellers, subSubSellers } from "../../database/schema/index.js";
 import { CryptoService } from "../../common/crypto/crypto.service.js";
 import { MarketplaceService } from "../../marketplace/marketplace.service.js";
 
+type PrincipalType = "sub_seller" | "sub_sub_seller";
+
 interface StatePayload {
-  sub: string; // userId
+  sub: string; // userId (tenant)
   mp: Marketplace;
+  // Present only for a self-service connect initiated from the sub-seller/
+  // sub-sub-seller portal (MAPPING_DAN_SELFSERVICE_TOKO.md) — reuses this
+  // EXACT same OAuth flow, just carries who's connecting in the signed state.
+  principalType?: PrincipalType;
+  principalId?: string;
 }
 
 @Injectable()
@@ -29,12 +36,26 @@ export class ShopsService {
     private readonly jwt: JwtService,
   ) {}
 
-  /** Build the marketplace authorize URL; `state` is a short-lived signed JWT. */
-  async getConnectUrl(userId: string, mp: Marketplace): Promise<{ authUrl: string }> {
+  /**
+   * Build the marketplace authorize URL; `state` is a short-lived signed JWT.
+   * `principal` is set only for a self-service connect from the portal — the
+   * backend (not the request) decides ownership at callback time from this
+   * signed value, so a sub-seller can never claim a shop on someone else's behalf.
+   */
+  async getConnectUrl(
+    userId: string,
+    mp: Marketplace,
+    principal?: { type: PrincipalType; id: string },
+  ): Promise<{ authUrl: string }> {
     const adapter = this.marketplace.getAuthAdapter(mp);
-    const state = this.jwt.sign({ sub: userId, mp } satisfies StatePayload, {
-      expiresIn: "10m",
-    });
+    const state = this.jwt.sign(
+      {
+        sub: userId,
+        mp,
+        ...(principal ? { principalType: principal.type, principalId: principal.id } : {}),
+      } satisfies StatePayload,
+      { expiresIn: "10m" },
+    );
     return { authUrl: await adapter.getAuthUrl(state) };
   }
 
@@ -55,16 +76,37 @@ export class ShopsService {
     if (payload.mp !== mp) throw new BadRequestException("State marketplace mismatch");
 
     const adapter = this.marketplace.getAuthAdapter(mp);
+    // The marketplace-side authorization always completes here (auth_code is
+    // single-use and short-lived) — a quota rejection below only affects
+    // whether WE persist the shop, per MAPPING_DAN_SELFSERVICE_TOKO.md 2.2
+    // ("proses OAuth tetap boleh jalan sampai selesai... sistem tolak
+    // penyimpanan toko baru tersebut").
     const result = await adapter.exchangeToken(params.code, params.shopId);
+
+    if (payload.principalType && payload.principalId) {
+      await this.assertQuotaAvailable(payload.sub, payload.principalType, payload.principalId);
+    }
+
     await this.saveShop(payload.sub, mp, result);
+
+    if (payload.principalType && payload.principalId) {
+      await this.assignSelfServiceOwnership(
+        payload.sub,
+        mp,
+        result.shopId,
+        payload.principalType,
+        payload.principalId,
+      );
+    }
+
     return { shopId: result.shopId, shopName: result.shopName };
   }
 
   /**
-   * Exchange an auth_code → tokens → persist, WITHOUT the signed-state step.
-   * For admin/sandbox connections started outside our normal flow (e.g. a
-   * sandbox shop authorised from Partner Center). Caller must be trusted (the
-   * controller guards this with JwtAuthGuard + AdminOnly).
+   * Manual token exchange. Use when an authorization was started outside our
+   * normal flow (e.g. a sandbox shop authorised from Partner Center), so no
+   * AutoToko `state` JWT exists. Caller must be trusted (the controller guards
+   * this with JwtAuthGuard + AdminOnly).
    */
   async connectManual(
     userId: string,
@@ -127,10 +169,78 @@ export class ShopsService {
     }
   }
 
+  /**
+   * Enforced BEFORE saveShop() persists anything, so an over-quota self-service
+   * connect never creates a shop row at all (MAPPING_DAN_SELFSERVICE_TOKO.md 2.2).
+   * null kuota = unlimited.
+   */
+  private async assertQuotaAvailable(
+    userId: string,
+    type: PrincipalType,
+    id: string,
+  ): Promise<void> {
+    if (type === "sub_seller") {
+      const [row] = await this.db
+        .select({ kuota: subSellers.kuotaTokoMaksimal })
+        .from(subSellers)
+        .where(and(eq(subSellers.id, id), eq(subSellers.userId, userId)))
+        .limit(1);
+      if (!row) throw new NotFoundException("Sub-seller not found");
+      if (row.kuota == null) return;
+      const owned = await this.db
+        .select({ id: shops.id })
+        .from(shops)
+        .where(and(eq(shops.userId, userId), eq(shops.subSellerId, id)));
+      if (owned.length >= row.kuota) {
+        throw new BadRequestException(
+          "Kuota toko Anda sudah penuh, hubungi Seller untuk menambah kuota",
+        );
+      }
+      return;
+    }
+    const [row] = await this.db
+      .select({ kuota: subSubSellers.kuotaTokoMaksimal })
+      .from(subSubSellers)
+      .where(and(eq(subSubSellers.id, id), eq(subSubSellers.userId, userId)))
+      .limit(1);
+    if (!row) throw new NotFoundException("Sub-sub-seller not found");
+    if (row.kuota == null) return;
+    const owned = await this.db
+      .select({ id: shops.id })
+      .from(shops)
+      .where(and(eq(shops.userId, userId), eq(shops.subSubSellerId, id)));
+    if (owned.length >= row.kuota) {
+      throw new BadRequestException(
+        "Kuota toko Anda sudah penuh, hubungi Seller untuk menambah kuota",
+      );
+    }
+  }
+
+  /**
+   * Self-assigns the newly-connected shop to whichever principal initiated the
+   * OAuth flow — taken from the signed state (never client input), so a
+   * sub-seller/sub-sub-seller can only ever claim a shop as their own.
+   */
+  private async assignSelfServiceOwnership(
+    userId: string,
+    mp: Marketplace,
+    shopId: string,
+    type: PrincipalType,
+    id: string,
+  ): Promise<void> {
+    await this.db
+      .update(shops)
+      .set({
+        subSellerId: type === "sub_seller" ? id : null,
+        subSubSellerId: type === "sub_sub_seller" ? id : null,
+        addedByType: type,
+        addedById: id,
+      })
+      .where(and(eq(shops.userId, userId), eq(shops.marketplace, mp), eq(shops.shopId, shopId)));
+  }
+
   /** Refresh tokens nearing expiry (PRD Bagian 5.5): Shopee 4h, TikTok 7d. */
   async refreshExpiring(): Promise<{ refreshed: number; failed: number }> {
-    // Shopee: refresh within 1h of expiry; TikTok: within 24h. Use the wider
-    // window and let each row decide.
     const threshold = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const candidates = await this.db
       .select()

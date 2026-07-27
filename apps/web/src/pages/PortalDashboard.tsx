@@ -31,6 +31,18 @@ export function PortalDashboard() {
   const [shops, setShops] = useState<Shop[] | null>(null);
   const [history, setHistory] = useState<HistoryRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState<string | null>(null);
+
+  async function connectShop(mp: "tiktok" | "shopee") {
+    setConnecting(mp);
+    try {
+      const { authUrl } = await portalApi.get<{ authUrl: string }>(`/payout/portal/shops/connect/${mp}`);
+      window.location.href = authUrl;
+    } catch (e) {
+      setErr((e as Error).message);
+      setConnecting(null);
+    }
+  }
 
   useEffect(() => {
     if (!getPortalToken()) { navigate("/portal/login"); return; }
@@ -70,7 +82,20 @@ export function PortalDashboard() {
         </div>
 
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm">Toko Anda ({shops?.length ?? 0})</div>
+          <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm flex items-center justify-between">
+            <span>Toko Anda ({shops?.length ?? 0})</span>
+            <div className="flex gap-2">
+              <button onClick={() => connectShop("tiktok")} disabled={!!connecting}
+                className="text-xs px-2.5 py-1 rounded bg-black text-white font-semibold disabled:opacity-50">
+                {connecting === "tiktok" ? "…" : "+ TikTok Shop"}
+              </button>
+              <button onClick={() => connectShop("shopee")} disabled={!!connecting}
+                className="text-xs px-2.5 py-1 rounded bg-orange-500 hover:bg-orange-600 text-white font-semibold disabled:opacity-50">
+                {connecting === "shopee" ? "…" : "+ Shopee"}
+              </button>
+            </div>
+          </div>
+          {err && <div className="px-4 py-2 text-red-500 text-xs border-b border-slate-100">{err}</div>}
           {!shops?.length ? (
             <div className="px-4 py-4 text-center text-slate-400 text-sm">Belum ada toko terhubung.</div>
           ) : (

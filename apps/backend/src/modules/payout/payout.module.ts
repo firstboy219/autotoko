@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module.js";
 import { UploadsModule } from "../uploads/uploads.module.js";
+import { ShopsModule } from "../shops/shops.module.js";
 import { PayoutController } from "./payout.controller.js";
 import { PayoutPortalController } from "./payout-portal.controller.js";
 import { PayoutSellersService } from "./sellers.service.js";
@@ -12,7 +13,7 @@ import { PayoutPortalAuthService } from "./portal-auth.service.js";
 import { PortalDataService } from "./portal-data.service.js";
 
 @Module({
-  imports: [AuthModule, UploadsModule], // JwtAuthGuard + OcrService reads local upload files
+  imports: [AuthModule, UploadsModule, ShopsModule], // JwtAuthGuard, OcrService's local file reads, ShopsService for self-service connect
   controllers: [PayoutController, PayoutPortalController],
   providers: [
     PayoutSellersService,

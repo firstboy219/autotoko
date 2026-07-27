@@ -6,7 +6,7 @@ import { api } from "../lib/api";
 
 interface SubSeller {
   id: string; name: string; contact: string | null; bankAccount: string | null;
-  defaultRate: string; status: "active" | "inactive";
+  defaultRate: string; status: "active" | "inactive"; kuotaTokoMaksimal: number | null;
 }
 interface SubSubSeller extends SubSeller { subSellerId: string; }
 interface ShopOpt {
@@ -15,6 +15,7 @@ interface ShopOpt {
 }
 
 const pct = (r: string) => `${(Number(r) * 100).toFixed(1)}%`;
+const kuotaLabel = (k: number | null) => (k == null ? "Tanpa batas" : `${k} toko`);
 
 export function PencairanSubSeller() {
   const subs = useFetch<SubSeller[]>("/payout/sub-sellers");
@@ -40,6 +41,7 @@ function CreateSubSeller({ onDone }: { onDone: () => void }) {
   const [contact, setContact] = useState("");
   const [bank, setBank] = useState("");
   const [rate, setRate] = useState("20");
+  const [kuota, setKuota] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -50,15 +52,16 @@ function CreateSubSeller({ onDone }: { onDone: () => void }) {
       await api.post("/payout/sub-sellers", {
         name, contact: contact || undefined, bankAccount: bank || undefined,
         defaultRate: Number(rate) / 100,
+        ...(kuota !== "" ? { kuotaTokoMaksimal: Number(kuota) } : {}),
       });
-      setName(""); setContact(""); setBank(""); setRate("20"); onDone();
+      setName(""); setContact(""); setBank(""); setRate("20"); setKuota(""); onDone();
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
 
   return (
     <form onSubmit={submit} className="bg-white rounded-xl border border-slate-200 p-4">
       <div className="font-bold text-sm mb-3">Tambah Sub-seller</div>
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama" required
           className="px-2 py-2 rounded-md border border-slate-300 text-sm" />
         <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Kontak (HP/email)"
@@ -67,8 +70,13 @@ function CreateSubSeller({ onDone }: { onDone: () => void }) {
           className="px-2 py-2 rounded-md border border-slate-300 text-sm" />
         <div className="flex items-center gap-1">
           <input inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value.replace(/[^\d.]/g, ""))}
-            className="px-2 py-2 rounded-md border border-slate-300 text-sm w-20" />
+            className="px-2 py-2 rounded-md border border-slate-300 text-sm w-16" />
           <span className="text-sm text-slate-500">% rate</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <input inputMode="numeric" value={kuota} onChange={(e) => setKuota(e.target.value.replace(/\D/g, ""))}
+            placeholder="∞" className="px-2 py-2 rounded-md border border-slate-300 text-sm w-16" />
+          <span className="text-xs text-slate-500">kuota toko</span>
         </div>
       </div>
       {err && <div className="text-red-500 text-xs mt-2">{err}</div>}
@@ -92,7 +100,7 @@ function SubSellerTable({
         const children = subsubs.filter((ss) => ss.subSellerId === s.id);
         return (
           <div key={s.id} className="border-t border-slate-100">
-            <div className="px-4 py-2 flex items-center justify-between">
+            <div className="px-4 py-2 flex items-center justify-between flex-wrap gap-2">
               <div>
                 <span className="font-semibold text-sm">{s.name}</span>
                 <span className="text-xs text-slate-400 ml-2">{pct(s.defaultRate)}</span>
@@ -101,17 +109,23 @@ function SubSellerTable({
                   {s.status === "active" ? "Aktif" : "Nonaktif"}
                 </span>
               </div>
-              <button onClick={() => setOpenId(openId === s.id ? null : s.id)} className="text-xs text-brand font-semibold hover:underline">
-                {children.length} sub-sub · {openId === s.id ? "tutup" : "kelola"}
-              </button>
+              <div className="flex items-center gap-3">
+                <KuotaEditor endpoint={`/payout/sub-sellers/${s.id}`} current={s.kuotaTokoMaksimal} onDone={onChange} />
+                <button onClick={() => setOpenId(openId === s.id ? null : s.id)} className="text-xs text-brand font-semibold hover:underline">
+                  {children.length} sub-sub · {openId === s.id ? "tutup" : "kelola"}
+                </button>
+              </div>
             </div>
             {openId === s.id && (
               <div className="px-4 pb-3 bg-slate-50">
                 <CreateSubSubSeller subSellerId={s.id} onDone={onChange} />
                 {children.map((c) => (
-                  <div key={c.id} className="text-xs py-1 flex justify-between border-t border-slate-100">
+                  <div key={c.id} className="text-xs py-1 flex justify-between items-center border-t border-slate-100">
                     <span>↳ {c.name} · {pct(c.defaultRate)}{c.contact ? ` · ${c.contact}` : ""}</span>
-                    <span className={c.status === "active" ? "text-green-600" : "text-slate-400"}>{c.status === "active" ? "aktif" : "nonaktif"}</span>
+                    <div className="flex items-center gap-2">
+                      <span className={c.status === "active" ? "text-green-600" : "text-slate-400"}>{c.status === "active" ? "aktif" : "nonaktif"}</span>
+                      <KuotaEditor endpoint={`/payout/sub-sub-sellers/${c.id}`} current={c.kuotaTokoMaksimal} onDone={onChange} small />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -123,17 +137,54 @@ function SubSellerTable({
   );
 }
 
+function KuotaEditor({
+  endpoint, current, onDone, small,
+}: { endpoint: string; current: number | null; onDone: () => void; small?: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(current == null ? "" : String(current));
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api.patch(endpoint, { kuotaTokoMaksimal: val === "" ? null : Number(val) });
+      setEditing(false); onDone();
+    } finally { setBusy(false); }
+  }
+
+  if (!editing) {
+    return (
+      <button onClick={() => setEditing(true)}
+        className={`${small ? "text-[10px]" : "text-xs"} text-slate-400 hover:text-brand hover:underline`}>
+        Kuota toko: {kuotaLabel(current)}
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1">
+      <input inputMode="numeric" value={val} onChange={(e) => setVal(e.target.value.replace(/\D/g, ""))}
+        placeholder="∞" className="w-14 px-1.5 py-1 rounded border border-slate-300 text-xs" autoFocus />
+      <button onClick={save} disabled={busy} className="text-[10px] px-2 py-1 rounded bg-brand text-white font-semibold disabled:opacity-50">✓</button>
+      <button onClick={() => setEditing(false)} className="text-[10px] text-slate-400">✕</button>
+    </div>
+  );
+}
+
 function CreateSubSubSeller({ subSellerId, onDone }: { subSellerId: string; onDone: () => void }) {
   const [name, setName] = useState("");
   const [rate, setRate] = useState("50");
+  const [kuota, setKuota] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true); setErr(null);
     try {
-      await api.post("/payout/sub-sub-sellers", { subSellerId, name, defaultRate: Number(rate) / 100 });
-      setName(""); setRate("50"); onDone();
+      await api.post("/payout/sub-sub-sellers", {
+        subSellerId, name, defaultRate: Number(rate) / 100,
+        ...(kuota !== "" ? { kuotaTokoMaksimal: Number(kuota) } : {}),
+      });
+      setName(""); setRate("50"); setKuota(""); onDone();
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
   return (
@@ -144,6 +195,11 @@ function CreateSubSubSeller({ subSellerId, onDone }: { subSellerId: string; onDo
         <input inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value.replace(/[^\d.]/g, ""))}
           className="px-2 py-1.5 rounded-md border border-slate-300 text-sm w-16" />
         <span className="text-xs text-slate-500">% dari jatah sub-seller</span>
+      </div>
+      <div className="flex items-center gap-1">
+        <input inputMode="numeric" value={kuota} onChange={(e) => setKuota(e.target.value.replace(/\D/g, ""))}
+          placeholder="∞" className="px-2 py-1.5 rounded-md border border-slate-300 text-sm w-14" />
+        <span className="text-xs text-slate-500">kuota toko</span>
       </div>
       <button disabled={busy || !name} className="text-xs px-3 py-1.5 rounded bg-brand hover:bg-brand-dark text-white font-semibold disabled:opacity-50">
         + Tambah
