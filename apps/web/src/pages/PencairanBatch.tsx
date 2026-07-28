@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+﻿import { useMemo, useState } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { calculatePayoutSplit, type SedekahBasis } from "@autotoko/shared";
 import { Layout } from "../components/Layout";
 import { FileUpload } from "../components/FileUpload";
@@ -88,12 +88,22 @@ export function PencairanBatch() {
 }
 
 function BatchHeader({ batch, onDone }: { batch: BatchDetail; onDone: () => void }) {
+  const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true); setErr(null);
     try { await fn(); onDone(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  }
+
+  async function cancelBatch() {
+    if (!confirm("Batalkan batch ini? Semua mutasi & rekap transfer di dalamnya akan terhapus permanen dan tidak bisa dikembalikan.")) return;
+    setBusy(true); setErr(null);
+    try {
+      await api.del(`/payout/batches/${batch.id}`);
+      navigate("/pencairan");
+    } catch (e) { setErr((e as Error).message); setBusy(false); }
   }
 
   const notReady = batch.disbursements.filter((d) => !READY.includes(d.validationStatus));
@@ -109,26 +119,37 @@ function BatchHeader({ batch, onDone }: { batch: BatchDetail; onDone: () => void
             {batch.status === "selesai" && "✓ Selesai"}
           </div>
         </div>
-        {batch.status === "berjalan" && (
-          <button
-            onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close-input`))}
-            disabled={busy || batch.mutations.length === 0}
-            title={batch.mutations.length === 0 ? "Rekam minimal satu toko dulu" : ""}
-            className="px-3 py-2 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-50"
-          >
-            Selesai Pencairan Semua Toko →
-          </button>
-        )}
-        {batch.status === "siap_distribusi" && (
-          <button
-            onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close`))}
-            disabled={busy || notReady.length > 0}
-            title={notReady.length > 0 ? `${notReady.length} transfer belum tervalidasi/di-override` : ""}
-            className="px-3 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white text-sm font-semibold disabled:opacity-50"
-          >
-            {notReady.length > 0 ? `Tutup Batch (${notReady.length} belum siap)` : "Tutup Batch"}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {batch.status === "berjalan" && (
+            <button
+              onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close-input`))}
+              disabled={busy || batch.mutations.length === 0}
+              title={batch.mutations.length === 0 ? "Rekam minimal satu toko dulu" : ""}
+              className="px-3 py-2 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-50"
+            >
+              Selesai Pencairan Semua Toko →
+            </button>
+          )}
+          {batch.status === "siap_distribusi" && (
+            <button
+              onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close`))}
+              disabled={busy || notReady.length > 0}
+              title={notReady.length > 0 ? `${notReady.length} transfer belum tervalidasi/di-override` : ""}
+              className="px-3 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white text-sm font-semibold disabled:opacity-50"
+            >
+              {notReady.length > 0 ? `Tutup Batch (${notReady.length} belum siap)` : "Tutup Batch"}
+            </button>
+          )}
+          {batch.status !== "selesai" && (
+            <button
+              onClick={cancelBatch}
+              disabled={busy}
+              className="px-3 py-2 rounded-md border border-red-300 text-red-600 hover:bg-red-50 text-sm font-semibold disabled:opacity-50"
+            >
+              Batalkan Batch
+            </button>
+          )}
+        </div>
       </div>
       {err && <div className="text-red-500 text-xs mt-2">{err}</div>}
     </div>

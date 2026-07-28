@@ -105,11 +105,13 @@ function SubSellerTable({
                 <span className="font-semibold text-sm">{s.name}</span>
                 <span className="text-xs text-slate-400 ml-2">{pct(s.defaultRate)}</span>
                 {s.contact && <span className="text-xs text-slate-400 ml-2">· {s.contact}</span>}
+                <span className="text-xs text-slate-400 ml-2">· {s.bankAccount || "rekening belum diisi"}</span>
                 <span className={`ml-2 text-[10px] font-semibold px-2 py-0.5 rounded ${s.status === "active" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
                   {s.status === "active" ? "Aktif" : "Nonaktif"}
                 </span>
               </div>
               <div className="flex items-center gap-3">
+                <NameBankEditor endpoint={`/payout/sub-sellers/${s.id}`} currentName={s.name} currentBank={s.bankAccount} onDone={onChange} />
                 <KuotaEditor endpoint={`/payout/sub-sellers/${s.id}`} current={s.kuotaTokoMaksimal} onDone={onChange} />
                 <button onClick={() => setOpenId(openId === s.id ? null : s.id)} className="text-xs text-brand font-semibold hover:underline">
                   {children.length} sub-sub · {openId === s.id ? "tutup" : "kelola"}
@@ -121,9 +123,10 @@ function SubSellerTable({
                 <CreateSubSubSeller subSellerId={s.id} onDone={onChange} />
                 {children.map((c) => (
                   <div key={c.id} className="text-xs py-1 flex justify-between items-center border-t border-slate-100">
-                    <span>↳ {c.name} · {pct(c.defaultRate)}{c.contact ? ` · ${c.contact}` : ""}</span>
+                    <span>↳ {c.name} · {pct(c.defaultRate)}{c.contact ? ` · ${c.contact}` : ""} · {c.bankAccount || "rekening belum diisi"}</span>
                     <div className="flex items-center gap-2">
                       <span className={c.status === "active" ? "text-green-600" : "text-slate-400"}>{c.status === "active" ? "aktif" : "nonaktif"}</span>
+                      <NameBankEditor endpoint={`/payout/sub-sub-sellers/${c.id}`} currentName={c.name} currentBank={c.bankAccount} onDone={onChange} small />
                       <KuotaEditor endpoint={`/payout/sub-sub-sellers/${c.id}`} current={c.kuotaTokoMaksimal} onDone={onChange} small />
                     </div>
                   </div>
@@ -133,6 +136,47 @@ function SubSellerTable({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function NameBankEditor({
+  endpoint, currentName, currentBank, onDone, small,
+}: { endpoint: string; currentName: string; currentBank: string | null; onDone: () => void; small?: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(currentName);
+  const [bank, setBank] = useState(currentBank ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    if (!name.trim()) return;
+    setBusy(true); setErr(null);
+    try {
+      await api.patch(endpoint, { name, bankAccount: bank || null });
+      setEditing(false); onDone();
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  }
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => { setName(currentName); setBank(currentBank ?? ""); setEditing(true); }}
+        className={`${small ? "text-[10px]" : "text-xs"} text-slate-400 hover:text-brand hover:underline`}
+      >
+        ✎ Edit
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama"
+        className={`${small ? "w-24 text-[10px]" : "w-28 text-xs"} px-1.5 py-1 rounded border border-slate-300`} autoFocus />
+      <input value={bank} onChange={(e) => setBank(e.target.value)} placeholder="Rekening"
+        className={`${small ? "w-28 text-[10px]" : "w-32 text-xs"} px-1.5 py-1 rounded border border-slate-300`} />
+      <button onClick={save} disabled={busy || !name.trim()} className="text-[10px] px-2 py-1 rounded bg-brand text-white font-semibold disabled:opacity-50">✓</button>
+      <button onClick={() => setEditing(false)} className="text-[10px] text-slate-400">✕</button>
+      {err && <span className="text-red-500 text-[10px]">{err}</span>}
     </div>
   );
 }

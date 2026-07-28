@@ -37,6 +37,7 @@ export function Pencairan() {
   const { data: batches, loading, reload } = useFetch<Batch[]>("/payout/batches");
   const { data: settings } = useFetch<Settings>("/payout/settings");
   const [busy, setBusy] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   async function startBatch() {
@@ -49,6 +50,20 @@ export function Pencairan() {
       setErr((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function cancelBatch(id: string) {
+    if (!confirm("Batalkan batch ini? Semua mutasi & rekap transfer di dalamnya akan terhapus permanen dan tidak bisa dikembalikan.")) return;
+    setBusyId(id);
+    setErr(null);
+    try {
+      await api.del(`/payout/batches/${id}`);
+      reload();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -136,9 +151,20 @@ export function Pencairan() {
                   <td className="px-3 py-2 text-slate-500">{b.closedAt ? dateShort(b.closedAt) : "-"}</td>
                   <td className="px-3 py-2 text-slate-500">{b.completedAt ? dateShort(b.completedAt) : "-"}</td>
                   <td className="px-3 py-2 text-right">
-                    <Link to={`/pencairan/batch/${b.id}`} className="text-xs text-brand font-semibold hover:underline">
-                      Detail →
-                    </Link>
+                    <div className="flex items-center justify-end gap-3">
+                      <Link to={`/pencairan/batch/${b.id}`} className="text-xs text-brand font-semibold hover:underline">
+                        Detail →
+                      </Link>
+                      {b.status !== "selesai" && (
+                        <button
+                          onClick={() => cancelBatch(b.id)}
+                          disabled={busyId === b.id}
+                          className="text-xs text-red-600 font-semibold hover:underline disabled:opacity-50"
+                        >
+                          {busyId === b.id ? "…" : "Batalkan"}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))

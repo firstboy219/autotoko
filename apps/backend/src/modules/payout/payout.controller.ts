@@ -165,6 +165,12 @@ export class PayoutController {
     return ok(await this.batches.closeBatch(uid(req), id));
   }
 
+  /** Cancel/delete a batch that has not been closed yet ("selesai") — hard-deletes it and everything in it. */
+  @Delete("batches/:id")
+  async cancelBatch(@Req() req: FastifyRequest, @Param("id") id: string) {
+    return ok(await this.batches.cancel(uid(req), id));
+  }
+
   // --- Mutations (Tahap 1) ---
   @Get("mutations")
   async listMutations(@Req() req: FastifyRequest, @Query() q: ListMutationQueryDto) {
