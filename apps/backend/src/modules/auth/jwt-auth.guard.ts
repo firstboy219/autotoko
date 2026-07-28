@@ -13,6 +13,7 @@ import { JwtService } from "@nestjs/jwt";
 import type { FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
+import { TenantService } from "../../database/tenant.service.js";
 import { users } from "../../database/schema/index.js";
 
 export interface JwtPayload {
@@ -76,6 +77,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly jwt: JwtService,
     private readonly reflector: Reflector,
     @Inject(DRIZZLE) private readonly db: Database,
+    private readonly tenant: TenantService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -135,13 +137,23 @@ export class JwtAuthGuard implements CanActivate {
     if (cached && cached.expiresAt > now) return cached.blocked;
 
     try {
-      const [row] = await this.db
-        .select({ isActive: users.isActive, isSuspended: users.isSuspended })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-      // A vanished (deleted) user row is also blocked.
-      const blocked = !row || !row.isActive || row.isSuspended;
+      // users has RLS FORCED, keyed on its own id (app.user_id = id, or
+      // app.bypass=on) — this check runs BEFORE any request-scoped
+      // app.user_id is established (it IS the thing establishing who the
+      // caller is), and it legitimately needs to look up an arbitrary
+      // caller's row regardless of tenant context, so it goes through the
+      // same runBypass() path as cron/webhook/admin reads. Without this,
+      // RLS silently returns zero rows here and every real user gets
+      // treated as "blocked" (a vanished row looks identical to a
+      // suspended one) — caught by a live smoke test before this shipped.
+      const blocked = await this.tenant.runBypass(async () => {
+        const [row] = await this.db
+          .select({ isActive: users.isActive, isSuspended: users.isSuspended })
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+        return !row || !row.isActive || row.isSuspended;
+      });
       suspensionCache.set(userId, { blocked, expiresAt: now + SUSPENSION_CACHE_TTL_MS });
       return blocked;
     } catch (e) {

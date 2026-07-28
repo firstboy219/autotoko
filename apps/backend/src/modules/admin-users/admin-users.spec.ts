@@ -8,6 +8,7 @@ import { Reflector } from "@nestjs/core";
 import * as schema from "../../database/schema/index.js";
 import { AdminUsersService } from "./admin-users.service.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
+import { TenantService } from "../../database/tenant.service.js";
 
 const DB_URL = process.env.E2E_DATABASE_URL;
 
@@ -17,7 +18,15 @@ const DB_URL = process.env.E2E_DATABASE_URL;
   const USER = "00000000-0000-4000-8000-0000000000e6";
   const service = new AdminUsersService(db);
   const jwt = new JwtService({ secret: "test-secret" });
-  const guard = new JwtAuthGuard(jwt, new Reflector(), db);
+  // RLS_ENABLED unset here -> TenantService.runBypass()/runAsUser() are pure
+  // no-op passthroughs (see tenant.service.ts), so this exercises the guard's
+  // suspension LOGIC directly against `db`, same as every other e2e spec in
+  // this suite. The runBypass() call itself — needed because `users` has RLS
+  // FORCED in production and this check runs before any request-scoped
+  // app.user_id/app.bypass is set — is verified live against production
+  // instead, where RLS_ENABLED is actually "true".
+  const tenantService = new TenantService(db, { get: () => undefined } as never);
+  const guard = new JwtAuthGuard(jwt, new Reflector(), db, tenantService);
 
   beforeAll(async () => {
     await (db as ReturnType<typeof drizzle>).execute(sql`select set_config('app.user_id', ${USER}, false)`);
@@ -92,7 +101,7 @@ const DB_URL = process.env.E2E_DATABASE_URL;
 
   it("JwtAuthGuard blocks a deleted user's token (row vanished)", async () => {
     const ghostId = "00000000-0000-4000-8000-0000000000e7";
-    const freshGuard = new JwtAuthGuard(jwt, new Reflector(), db);
+    const freshGuard = new JwtAuthGuard(jwt, new Reflector(), db, tenantService);
     const blocked = await (freshGuard as unknown as { isBlocked(id: string): Promise<boolean> }).isBlocked(ghostId);
     expect(blocked).toBe(true);
   });
