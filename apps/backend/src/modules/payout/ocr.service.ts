@@ -42,18 +42,31 @@ function findAmountCandidates(text: string): number[] {
 }
 
 /**
- * Finds plausible bank account numbers: runs of 8-20 digits, allowing spaces
- * or dashes within the run (common in screenshots), stripped to digits only.
+ * Finds plausible bank account numbers. Banking/marketplace UIs almost always
+ * MASK the account number for privacy, showing only the last few digits
+ * behind a run of asterisks — e.g. "********8214" — so that pattern is the
+ * realistic common case and is tried FIRST. A bare, fully-visible digit run
+ * is kept as a lower-priority fallback for the rarer screenshot that doesn't
+ * mask it; results are returned masked-first since a bare digit run is more
+ * likely to be some OTHER number on the receipt (order id, date, phone) than
+ * an actual account number.
  */
 function findAccountCandidates(text: string): string[] {
-  const re = /\b\d[\d\s-]{6,24}\d\b/g;
-  const candidates: string[] = [];
+  const masked: string[] = [];
+  const maskedRe = /\*{3,}\s?\d{3,8}/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
-    const digits = m[0].replace(/\D/g, "");
-    if (digits.length >= 8 && digits.length <= 20) candidates.push(digits);
+  while ((m = maskedRe.exec(text))) {
+    masked.push(m[0].replace(/\s/g, ""));
   }
-  return candidates;
+
+  const bare: string[] = [];
+  const bareRe = /\b\d[\d\s-]{6,24}\d\b/g;
+  while ((m = bareRe.exec(text))) {
+    const digits = m[0].replace(/\D/g, "");
+    if (digits.length >= 8 && digits.length <= 20) bare.push(digits);
+  }
+
+  return [...masked, ...bare];
 }
 
 // ocr-worker-script.js sits next to this compiled file in dist/modules/payout/

@@ -63,7 +63,9 @@ export class PayoutMutationService {
 
     const settings = await this.ensureSettings(userId);
     const rates = await this.resolveRates(userId, shop);
-    const creditCents = toCents(dto.creditAmount);
+    // The split basis IS the marketplace proof amount now (no more separate
+    // "Nominal Kredit" input — the user merged the two, per their own request).
+    const creditCents = toCents(dto.marketplaceProofAmount);
 
     const split = calculatePayoutSplit({
       creditCents,
@@ -80,9 +82,13 @@ export class PayoutMutationService {
         userId,
         shopId: dto.shopId,
         payoutDate: dto.payoutDate,
-        creditAmount: dto.creditAmount.toFixed(2),
-        marketplaceProofAmount:
-          dto.marketplaceProofAmount != null ? dto.marketplaceProofAmount.toFixed(2) : null,
+        creditAmount: dto.marketplaceProofAmount.toFixed(2),
+        marketplaceProofAmount: dto.marketplaceProofAmount.toFixed(2),
+        // Snapshot of what OCR originally suggested — comparing this against
+        // the final marketplaceProofAmount above (set once, here, never on
+        // update) is the OCR-correction signal for future tuning.
+        ocrSuggestedAmount:
+          dto.ocrSuggestedAmount != null ? dto.ocrSuggestedAmount.toFixed(2) : null,
         receivingAccount: dto.receivingAccount ?? null,
         marketplaceProofUrl: dto.marketplaceProofUrl ?? null,
         // Snapshots — later rate edits must not change this record.
@@ -111,11 +117,13 @@ export class PayoutMutationService {
     const mut = await this.getOrThrow(userId, id);
     await this.requireOpenBatch(userId, mut.batchId);
 
-    // Recompute the split from the SNAPSHOT rates when the credit changes, so a
+    // Recompute the split from the SNAPSHOT rates when the amount changes, so a
     // draft edit stays internally consistent without re-reading current settings.
-    const creditAmount = dto.creditAmount ?? Number(mut.creditAmount);
+    // marketplaceProofAmount is now the sole basis; ocrSuggestedAmount is a
+    // create()-time-only snapshot and is never touched here.
+    const proofAmount = dto.marketplaceProofAmount ?? Number(mut.marketplaceProofAmount);
     const split = calculatePayoutSplit({
-      creditCents: toCents(creditAmount),
+      creditCents: toCents(proofAmount),
       sedekahRate: Number(mut.sedekahRateUsed),
       sedekahBasis: mut.sedekahBasisUsed as SedekahBasis,
       subSellerRate: mut.subSellerRateUsed != null ? Number(mut.subSellerRateUsed) : null,
@@ -127,10 +135,8 @@ export class PayoutMutationService {
       .update(payoutMutations)
       .set({
         ...(dto.payoutDate != null ? { payoutDate: dto.payoutDate } : {}),
-        creditAmount: creditAmount.toFixed(2),
-        ...(dto.marketplaceProofAmount != null
-          ? { marketplaceProofAmount: dto.marketplaceProofAmount.toFixed(2) }
-          : {}),
+        creditAmount: proofAmount.toFixed(2),
+        marketplaceProofAmount: proofAmount.toFixed(2),
         ...(dto.receivingAccount != null ? { receivingAccount: dto.receivingAccount } : {}),
         ...(dto.marketplaceProofUrl != null
           ? { marketplaceProofUrl: dto.marketplaceProofUrl }

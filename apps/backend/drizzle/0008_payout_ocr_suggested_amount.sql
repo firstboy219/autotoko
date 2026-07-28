@@ -1,0 +1,1 @@
+ALTER TABLE "payout_mutations" ADD COLUMN "ocr_suggested_amount" numeric(15, 2);

@@ -72,9 +72,9 @@ class FakeOcr {
     const batch = await batches.start(USER, USER);
     expect(batch!.status).toBe("berjalan");
 
-    const mA = await mutations.create(USER, USER, { batchId: batch!.id, shopId: shopA, payoutDate: "2026-07-01", creditAmount: 1_000_000 });
-    const mB = await mutations.create(USER, USER, { batchId: batch!.id, shopId: shopB, payoutDate: "2026-07-01", creditAmount: 1_000_000 });
-    const mC = await mutations.create(USER, USER, { batchId: batch!.id, shopId: shopC, payoutDate: "2026-07-01", creditAmount: 1_000_000 });
+    const mA = await mutations.create(USER, USER, { batchId: batch!.id, shopId: shopA, payoutDate: "2026-07-01", marketplaceProofAmount: 1_000_000 });
+    const mB = await mutations.create(USER, USER, { batchId: batch!.id, shopId: shopB, payoutDate: "2026-07-01", marketplaceProofAmount: 1_000_000 });
+    const mC = await mutations.create(USER, USER, { batchId: batch!.id, shopId: shopC, payoutDate: "2026-07-01", marketplaceProofAmount: 1_000_000 });
     expect(Number(mC!.sedekahAmount)).toBe(50_000);
     expect(Number(mC!.sellerAmount)).toBe(760_000);
     expect(Number(mC!.subSellerAmount)).toBe(95_000);
@@ -102,7 +102,7 @@ class FakeOcr {
     expect(Number(subSubRowC.expectedAmount)).toBe(95_000);
 
     // Mutations are now locked.
-    await expect(mutations.update(USER, mA!.id, { creditAmount: 1 })).rejects.toThrow();
+    await expect(mutations.update(USER, mA!.id, { marketplaceProofAmount: 1 })).rejects.toThrow();
 
     // --- Tutup Batch must fail — nothing validated yet ---
     await expect(batches.closeBatch(USER, batch!.id)).rejects.toThrow(/belum tervalidasi/);

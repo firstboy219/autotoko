@@ -72,8 +72,15 @@ export class CreateMutationDto {
   @IsUUID() batchId!: string;
   @IsUUID() shopId!: string;
   @IsDateString() payoutDate!: string;
-  @IsNumber() @Min(0) creditAmount!: number;
-  @IsOptional() @IsNumber() @Min(0) marketplaceProofAmount?: number;
+  // The split calculation basis AND the marketplace proof figure are now one
+  // and the same field (no more separate "Nominal Kredit" input) — this IS
+  // marketplaceProofAmount, required.
+  @IsNumber() @Min(0) marketplaceProofAmount!: number;
+  // What Titik 1 OCR originally suggested, if the client ran OCR before
+  // submitting. If this differs from marketplaceProofAmount above, the
+  // service records it as an OCR correction signal. Omit if OCR wasn't used
+  // or found nothing.
+  @IsOptional() @IsNumber() @Min(0) ocrSuggestedAmount?: number;
   @IsOptional() @IsString() @MaxLength(255) receivingAccount?: string;
   @IsOptional() @IsString() @MaxLength(1024) marketplaceProofUrl?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) orderRefIds?: string[];
@@ -82,7 +89,6 @@ export class CreateMutationDto {
 
 export class UpdateMutationDto {
   @IsOptional() @IsDateString() payoutDate?: string;
-  @IsOptional() @IsNumber() @Min(0) creditAmount?: number;
   @IsOptional() @IsNumber() @Min(0) marketplaceProofAmount?: number;
   @IsOptional() @IsString() @MaxLength(255) receivingAccount?: string;
   @IsOptional() @IsString() @MaxLength(1024) marketplaceProofUrl?: string;

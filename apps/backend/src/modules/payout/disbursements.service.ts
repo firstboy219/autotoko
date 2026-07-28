@@ -22,6 +22,23 @@ const toCents = (v: string | number | null) => Math.round(Number(v ?? 0) * 100);
 // (spaces, dashes) — compare only the digits.
 const digitsOnly = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
 
+/**
+ * Banking/marketplace UIs almost always MASK the account number, so an OCR
+ * read is typically just the last few digits (e.g. "8214" from
+ * "********8214") — it can never equal the FULL recorded account number
+ * digit-for-digit. Match if the recorded account ENDS WITH whatever digits
+ * OCR found (covers both a masked partial read and, via the same check, a
+ * rarer fully-visible exact read).
+ */
+function accountDigitsMatch(ocrAccount: string | null, recordedAccount: string | null): boolean {
+  if (!recordedAccount) return true; // nothing to compare against — don't block on it
+  if (!ocrAccount) return false;
+  const ocrDigits = digitsOnly(ocrAccount);
+  const recordedDigits = digitsOnly(recordedAccount);
+  if (!ocrDigits) return false;
+  return recordedDigits.endsWith(ocrDigits);
+}
+
 @Injectable()
 export class DisbursementsService {
   constructor(
@@ -90,9 +107,7 @@ export class DisbursementsService {
 
     const amountMatches =
       ocr.amount != null && toCents(ocr.amount) === toCents(row.expectedAmount);
-    const accountMatches =
-      !row.recordedAccount || // nothing to compare against — don't block on it
-      (ocr.account != null && digitsOnly(ocr.account) === digitsOnly(row.recordedAccount));
+    const accountMatches = accountDigitsMatch(ocr.account, row.recordedAccount);
     const matched = ocr.amount != null && amountMatches && accountMatches;
 
     const [updated] = await this.db

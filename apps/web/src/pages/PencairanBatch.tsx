@@ -140,8 +140,14 @@ function MutationForm({
 }: { batchId: string; shops: ShopOpt[]; settings: Settings; onCreated: () => void }) {
   const [shopId, setShopId] = useState("");
   const [payoutDate, setPayoutDate] = useState(new Date().toISOString().slice(0, 10));
-  const [credit, setCredit] = useState("");
+  // The single amount field — both the split basis AND the marketplace proof
+  // figure (no more separate "Nominal Kredit" input).
   const [proofAmount, setProofAmount] = useState("");
+  // What OCR originally suggested for this amount, captured once at upload
+  // time and never touched afterward — comparing it to the final proofAmount
+  // at submit is how the backend detects "staff corrected an OCR misread"
+  // (a null/unchanged value means OCR was right, or wasn't used).
+  const [ocrSuggestedAmount, setOcrSuggestedAmount] = useState<number | null>(null);
   const [receiving, setReceiving] = useState("");
   const [proofUrl, setProofUrl] = useState("");
   const [note, setNote] = useState("");
@@ -151,22 +157,20 @@ function MutationForm({
   const [err, setErr] = useState<string | null>(null);
 
   const shop = shops.find((s) => s.id === shopId);
-  const creditNum = Number(credit) || 0;
+  const amountNum = Number(proofAmount) || 0;
 
   const split = useMemo(() => {
-    if (!shop || creditNum <= 0) return null;
+    if (!shop || amountNum <= 0) return null;
     try {
       return calculatePayoutSplit({
-        creditCents: cents(creditNum),
+        creditCents: cents(amountNum),
         sedekahRate: Number(settings.sedekahRate),
         sedekahBasis: settings.sedekahBasis,
         subSellerRate: shop.effectiveSubSellerRate,
         subSubSellerRate: shop.effectiveSubSubSellerRate,
       });
     } catch { return null; }
-  }, [shop, creditNum, settings]);
-
-  const proofDiff = proofAmount !== "" && Number(proofAmount) !== creditNum;
+  }, [shop, amountNum, settings]);
 
   // Titik 1 OCR: after the pencairan screenshot is uploaded, ask the server to
   // read it and suggest values — staff can still edit anything before submit.
@@ -181,7 +185,7 @@ function MutationForm({
       );
       if (result.amount != null) {
         setProofAmount(String(result.amount));
-        if (!credit) setCredit(String(result.amount));
+        setOcrSuggestedAmount(result.amount);
       }
       if (result.account != null) setReceiving(result.account);
       setOcrNote(
@@ -201,13 +205,14 @@ function MutationForm({
     setBusy(true); setErr(null);
     try {
       await api.post("/payout/mutations", {
-        batchId, shopId, payoutDate, creditAmount: creditNum,
-        ...(proofAmount !== "" ? { marketplaceProofAmount: Number(proofAmount) } : {}),
+        batchId, shopId, payoutDate,
+        marketplaceProofAmount: amountNum,
+        ...(ocrSuggestedAmount != null ? { ocrSuggestedAmount } : {}),
         ...(receiving ? { receivingAccount: receiving } : {}),
         ...(proofUrl ? { marketplaceProofUrl: proofUrl } : {}),
         ...(note ? { note } : {}),
       });
-      setShopId(""); setCredit(""); setProofAmount(""); setReceiving("");
+      setShopId(""); setProofAmount(""); setOcrSuggestedAmount(null); setReceiving("");
       setProofUrl(""); setNote(""); setOcrNote(null);
       onCreated();
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
@@ -244,16 +249,15 @@ function MutationForm({
         </div>
 
         <label className="text-xs font-semibold text-slate-600">
-          Nominal Kredit (dasar kalkulasi)
-          <input inputMode="numeric" value={credit ? Number(credit).toLocaleString("id-ID") : ""}
-            onChange={(e) => setCredit(e.target.value.replace(/\D/g, ""))} placeholder="0" required
-            className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
-        </label>
-        <label className="text-xs font-semibold text-slate-600">
-          Nominal Bukti Marketplace
+          Nominal Bukti Marketplace (dasar kalkulasi)
           <input inputMode="numeric" value={proofAmount ? Number(proofAmount).toLocaleString("id-ID") : ""}
-            onChange={(e) => setProofAmount(e.target.value.replace(/\D/g, ""))} placeholder="samakan dengan kredit"
+            onChange={(e) => setProofAmount(e.target.value.replace(/\D/g, ""))} placeholder="0" required
             className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
+          {ocrSuggestedAmount != null && Number(proofAmount) !== ocrSuggestedAmount && (
+            <span className="block text-[11px] text-amber-600 font-normal mt-0.5">
+              Dikoreksi dari hasil OCR ({rupiah(ocrSuggestedAmount)})
+            </span>
+          )}
         </label>
         <label className="text-xs font-semibold text-slate-600">
           Rekening Penampung
@@ -266,13 +270,6 @@ function MutationForm({
             className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
         </label>
       </div>
-
-      {proofDiff && (
-        <div className="mt-3 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-md px-3 py-2">
-          ⚠️ Nominal bukti marketplace ({rupiah(Number(proofAmount))}) berbeda dari nominal kredit ({rupiah(creditNum)}).
-          Selisih {rupiah(Math.abs(Number(proofAmount) - creditNum))}. Tetap bisa disimpan.
-        </div>
-      )}
 
       {split && shop && (
         <div className="mt-3 rounded-lg bg-slate-50 border border-slate-200 p-3">
@@ -290,7 +287,7 @@ function MutationForm({
 
       {err && <div className="text-red-500 text-xs mt-2">{err}</div>}
       <div className="mt-3">
-        <button disabled={busy || !shopId || creditNum <= 0}
+        <button disabled={busy || !shopId || amountNum <= 0}
           className="px-4 py-2 rounded-md bg-brand hover:bg-brand-dark text-white text-sm font-semibold disabled:opacity-50">
           {busy ? "…" : "Simpan Pencairan Toko Ini"}
         </button>

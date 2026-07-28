@@ -185,10 +185,19 @@ export const payoutMutations = pgTable(
       .references(() => shops.id, { onDelete: "restrict" }),
 
     payoutDate: date("payout_date").notNull(),
-    // What the marketplace proof screenshot says vs what we actually split on.
-    // They may differ; the UI warns but does not block (Bagian 3, validasi selisih).
+    // The split calculation basis — since the UX merge, this IS
+    // marketplaceProofAmount (no more separate "Nominal Kredit" input); kept
+    // as its own column so historical rows and the split-invariant math don't
+    // need to change, but the two are now always written together, equal.
     marketplaceProofAmount: numeric("marketplace_proof_amount", { precision: 15, scale: 2 }),
     creditAmount: numeric("credit_amount", { precision: 15, scale: 2 }).notNull(),
+    // What Titik 1 OCR originally suggested for marketplaceProofAmount, BEFORE
+    // any manual correction — a snapshot taken once at create() time, never
+    // touched by update(). If this differs from the final marketplaceProofAmount
+    // that was saved, the staff corrected an OCR misread; comparing the two
+    // (ocrSuggestedAmount vs marketplaceProofAmount) is exactly the training
+    // signal for future OCR tuning. Null = OCR found nothing / wasn't used.
+    ocrSuggestedAmount: numeric("ocr_suggested_amount", { precision: 15, scale: 2 }),
     receivingAccount: varchar("receiving_account", { length: 255 }),
     marketplaceProofUrl: text("marketplace_proof_url"),
     // Raw OCR read of the pencairan proof (Titik 1) — audit trail, never the
