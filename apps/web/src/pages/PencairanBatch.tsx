@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+﻿import { useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { calculatePayoutSplit, type SedekahBasis } from "@autotoko/shared";
 import { Layout } from "../components/Layout";
@@ -59,6 +59,20 @@ interface BatchDetail {
 
 const cents = (rupiahVal: number) => Math.round(rupiahVal * 100);
 const READY: ValidationStatus[] = ["cocok_otomatis", "override_manual"];
+
+function csvEscape(v: string | number): string {
+  const s = String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export function PencairanBatch() {
   const { id } = useParams<{ id: string }>();
@@ -330,6 +344,10 @@ function SplitCell({ label, value }: { label: string; value: number }) {
 function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: ShopOpt[]; onChange: () => void }) {
   const shopName = (id: string) => shops.find((s) => s.id === id)?.shopName ?? id.slice(0, 8);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pngBusy, setPngBusy] = useState(false);
+  // Only the ringkasan + shop-row list gets captured for the PNG export —
+  // not the header/button bar above it.
+  const captureRef = useRef<HTMLDivElement>(null);
 
   // Sum of what each recipient bucket is owed across every shop recorded so
   // far in this batch — lets staff sanity-check the total before closing
@@ -353,74 +371,151 @@ function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: S
     try { await api.del(`/payout/mutations/${id}`); onChange(); } finally { setBusyId(null); }
   }
 
+  function downloadExcel() {
+    const header = [
+      "Toko", "Tanggal", "Total Kredit", "Sedekah", "Seller",
+      "Sub-seller", "Nama Sub-seller", "Sub-sub-seller", "Nama Sub-sub-seller", "Link Bukti",
+    ];
+    const rows = batch.mutations.map((m) => {
+      const shop = shops.find((s) => s.id === m.shopId);
+      return [
+        shopName(m.shopId), m.payoutDate, Number(m.creditAmount) || 0, Number(m.sedekahAmount) || 0,
+        Number(m.sellerAmount) || 0, Number(m.subSellerAmount) || 0, shop?.subSellerName ?? "",
+        Number(m.subSubSellerAmount) || 0, shop?.subSubSellerName ?? "", m.marketplaceProofUrl ?? "",
+      ];
+    });
+    const totalRow = [
+      "TOTAL", "", totals.credit, totals.sedekah, totals.seller,
+      totals.subSeller, "", totals.subSubSeller, "", "",
+    ];
+    const csv = [header, ...rows, totalRow].map((r) => r.map(csvEscape).join(",")).join("\r\n");
+    // Leading BOM so Excel opens the UTF-8 file (rupiah symbols etc.) correctly.
+    downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), `rekap-pencairan-${batch.id.slice(0, 8)}.csv`);
+  }
+
+  async function downloadPng() {
+    if (!captureRef.current) return;
+    setPngBusy(true);
+    try {
+      const { default: html2canvas } = await import("html2canvas");
+      const canvas = await html2canvas(captureRef.current, { backgroundColor: "#ffffff", scale: 2 });
+      await new Promise<void>((resolve) => {
+        canvas.toBlob((blob) => {
+          if (blob) downloadBlob(blob, `rekap-pencairan-${batch.id.slice(0, 8)}.png`);
+          resolve();
+        });
+      });
+    } finally {
+      setPngBusy(false);
+    }
+  }
+
+  function shareWhatsApp() {
+    const lines = [
+      `*Rekap Pencairan* (${batch.mutations.length} toko)`,
+      `Total Kredit: ${rupiah(totals.credit)}`,
+      `Sedekah: ${rupiah(totals.sedekah)}`,
+      `Seller: ${rupiah(totals.seller)}`,
+    ];
+    if (totals.subSeller > 0) lines.push(`Sub-seller: ${rupiah(totals.subSeller)}`);
+    if (totals.subSubSeller > 0) lines.push(`Sub-sub-seller: ${rupiah(totals.subSubSeller)}`);
+    lines.push("", "Detail Toko:");
+    batch.mutations.forEach((m, i) => {
+      const shop = shops.find((s) => s.id === m.shopId);
+      const subAmt = Number(m.subSellerAmount) || 0;
+      let line = `${i + 1}. ${shopName(m.shopId)} - ${rupiah(m.creditAmount)}`;
+      if (subAmt > 0) line += ` (Sub-seller${shop?.subSellerName ? ` ${shop.subSellerName}` : ""}: ${rupiah(subAmt)})`;
+      lines.push(line);
+    });
+    window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
+  }
+
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm">
-        Toko Sudah Direkam ({batch.mutations.length})
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+        <span className="font-bold text-sm">Toko Sudah Direkam ({batch.mutations.length})</span>
+        {batch.mutations.length > 0 && (
+          <div className="flex items-center gap-2">
+            <button onClick={downloadExcel}
+              className="text-xs px-2.5 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-600 font-semibold">
+              ⬇ Excel
+            </button>
+            <button onClick={downloadPng} disabled={pngBusy}
+              className="text-xs px-2.5 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-600 font-semibold disabled:opacity-50">
+              {pngBusy ? "…" : "⬇ PNG"}
+            </button>
+            <button onClick={shareWhatsApp}
+              className="text-xs px-2.5 py-1.5 rounded-md bg-green-600 hover:bg-green-700 text-white font-semibold">
+              Share WhatsApp
+            </button>
+          </div>
+        )}
       </div>
-      {batch.mutations.length > 0 && (
-        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
-          <div className="text-[10px] uppercase tracking-wide text-slate-400 mb-2">
-            Ringkasan Total ({batch.mutations.length} toko)
+      <div ref={captureRef}>
+        {batch.mutations.length > 0 && (
+          <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+            <div className="text-[10px] uppercase tracking-wide text-slate-400 mb-2">
+              Ringkasan Total ({batch.mutations.length} toko)
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
+              <SplitCell label="Total Kredit" value={cents(totals.credit)} />
+              <SplitCell label="Sedekah" value={cents(totals.sedekah)} />
+              <SplitCell label="Seller" value={cents(totals.seller)} />
+              {totals.subSeller > 0 && <SplitCell label="Sub-seller" value={cents(totals.subSeller)} />}
+              {totals.subSubSeller > 0 && <SplitCell label="Sub-sub-seller" value={cents(totals.subSubSeller)} />}
+            </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
-            <SplitCell label="Total Kredit" value={cents(totals.credit)} />
-            <SplitCell label="Sedekah" value={cents(totals.sedekah)} />
-            <SplitCell label="Seller" value={cents(totals.seller)} />
-            {totals.subSeller > 0 && <SplitCell label="Sub-seller" value={cents(totals.subSeller)} />}
-            {totals.subSubSeller > 0 && <SplitCell label="Sub-sub-seller" value={cents(totals.subSubSeller)} />}
-          </div>
-        </div>
-      )}
-      {!batch.mutations.length ? (
-        <div className="px-4 py-6 text-center text-slate-400 text-sm">Belum ada. Rekam lewat form di atas.</div>
-      ) : (
-        <div className="divide-y divide-slate-100">
-          {batch.mutations.map((m) => {
-            const shop = shops.find((s) => s.id === m.shopId);
-            const subSellerAmt = Number(m.subSellerAmount) || 0;
-            const subSubSellerAmt = Number(m.subSubSellerAmount) || 0;
-            return (
-              <div key={m.id} className="px-4 py-2 flex items-center justify-between flex-wrap gap-y-1">
-                <div>
+        )}
+        {!batch.mutations.length ? (
+          <div className="px-4 py-6 text-center text-slate-400 text-sm">Belum ada. Rekam lewat form di atas.</div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {batch.mutations.map((m) => {
+              const shop = shops.find((s) => s.id === m.shopId);
+              const subSellerAmt = Number(m.subSellerAmount) || 0;
+              const subSubSellerAmt = Number(m.subSubSellerAmount) || 0;
+              return (
+                <div key={m.id} className="px-4 py-2 flex items-center justify-between flex-wrap gap-y-1">
                   <div>
-                    <span className="font-semibold text-sm">{shopName(m.shopId)}</span>
-                    <span className="text-xs text-slate-400 ml-2">{dateShort(m.payoutDate)}</span>
-                    <span className="text-xs text-slate-500 ml-2">{rupiah(m.creditAmount)}</span>
+                    <div>
+                      <span className="font-semibold text-sm">{shopName(m.shopId)}</span>
+                      <span className="text-xs text-slate-400 ml-2">{dateShort(m.payoutDate)}</span>
+                      <span className="text-xs text-slate-500 ml-2">{rupiah(m.creditAmount)}</span>
+                    </div>
                     {m.marketplaceProofUrl && (
                       <a href={m.marketplaceProofUrl} target="_blank" rel="noreferrer"
-                        className="text-xs text-brand font-semibold ml-2 hover:underline">
-                        Lihat bukti →
+                        className="text-[11px] text-brand hover:underline break-all">
+                        {m.marketplaceProofUrl}
                       </a>
                     )}
+                    {(subSellerAmt > 0 || subSubSellerAmt > 0) && (
+                      <div className="text-[11px] text-violet-600 mt-0.5">
+                        {subSellerAmt > 0 && (
+                          <span>
+                            Sub-seller{shop?.subSellerName ? ` (${shop.subSellerName})` : ""}
+                            {shop?.effectiveSubSellerRate != null ? ` · ${(shop.effectiveSubSellerRate * 100).toFixed(1)}%` : ""}: {rupiah(subSellerAmt)}
+                          </span>
+                        )}
+                        {subSellerAmt > 0 && subSubSellerAmt > 0 && <span className="mx-1.5">·</span>}
+                        {subSubSellerAmt > 0 && (
+                          <span>
+                            Sub-sub-seller{shop?.subSubSellerName ? ` (${shop.subSubSellerName})` : ""}
+                            {shop?.effectiveSubSubSellerRate != null ? ` · ${(shop.effectiveSubSubSellerRate * 100).toFixed(1)}%` : ""}: {rupiah(subSubSellerAmt)}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  {(subSellerAmt > 0 || subSubSellerAmt > 0) && (
-                    <div className="text-[11px] text-violet-600 mt-0.5">
-                      {subSellerAmt > 0 && (
-                        <span>
-                          Sub-seller{shop?.subSellerName ? ` (${shop.subSellerName})` : ""}
-                          {shop?.effectiveSubSellerRate != null ? ` · ${(shop.effectiveSubSellerRate * 100).toFixed(1)}%` : ""}: {rupiah(subSellerAmt)}
-                        </span>
-                      )}
-                      {subSellerAmt > 0 && subSubSellerAmt > 0 && <span className="mx-1.5">·</span>}
-                      {subSubSellerAmt > 0 && (
-                        <span>
-                          Sub-sub-seller{shop?.subSubSellerName ? ` (${shop.subSubSellerName})` : ""}
-                          {shop?.effectiveSubSubSellerRate != null ? ` · ${(shop.effectiveSubSubSellerRate * 100).toFixed(1)}%` : ""}: {rupiah(subSubSellerAmt)}
-                        </span>
-                      )}
-                    </div>
-                  )}
+                  <button onClick={() => remove(m.id)} disabled={busyId === m.id}
+                    className="text-xs px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 font-semibold disabled:opacity-50">
+                    Hapus
+                  </button>
                 </div>
-                <button onClick={() => remove(m.id)} disabled={busyId === m.id}
-                  className="text-xs px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 font-semibold disabled:opacity-50">
-                  Hapus
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
