@@ -426,6 +426,7 @@ function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: S
       let line = `${i + 1}. ${shopName(m.shopId)} - ${rupiah(m.creditAmount)}`;
       if (subAmt > 0) line += ` (Sub-seller${shop?.subSellerName ? ` ${shop.subSellerName}` : ""}: ${rupiah(subAmt)})`;
       lines.push(line);
+      if (m.marketplaceProofUrl) lines.push(m.marketplaceProofUrl);
     });
     window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
   }
