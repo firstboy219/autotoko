@@ -1,4 +1,4 @@
-import {
+﻿import {
   Inject,
   Injectable,
   NotFoundException,
@@ -60,9 +60,11 @@ export class PayoutBatchService {
 
   /**
    * "Selesai Pencairan Semua Toko" (Tahap 2): locks input for every recorded
-   * shop and generates one payout_disbursements row per recipient with a
-   * share > 0 (sedekah always; sub-seller/sub-sub-seller only for shops owned
-   * that way). Does NOT require every active shop to have been recorded —
+   * shop and generates the disbursement rekap — one row per
+   * sub-seller/sub-sub-seller recipient PER MUTATION (shops owned that way),
+   * plus exactly ONE consolidated sedekah row for the whole batch (summing
+   * every mutation's sedekah share) since sedekah is transferred once, not
+   * once per shop. Does NOT require every active shop to have been recorded —
    * staff may process a subset per batch (Bagian 1, explicit).
    */
   async closeInput(userId: string, id: string) {
@@ -99,16 +101,9 @@ export class PayoutBatchService {
     const subSubById = new Map(subsubs.map((s) => [s.id, s]));
 
     const toInsert: (typeof payoutDisbursements.$inferInsert)[] = [];
+    let sedekahTotalCents = 0;
     for (const m of mutations) {
-      if (toCents(m.sedekahAmount) > 0) {
-        toInsert.push({
-          payoutMutationId: m.id,
-          userId,
-          recipientType: "sedekah",
-          expectedAmount: m.sedekahAmount,
-          recordedAccount: settings?.sedekahBankAccount ?? null,
-        });
-      }
+      sedekahTotalCents += toCents(m.sedekahAmount);
       if (m.subSellerId && toCents(m.subSellerAmount) > 0) {
         toInsert.push({
           payoutMutationId: m.id,
@@ -129,6 +124,18 @@ export class PayoutBatchService {
           recordedAccount: subSubById.get(m.subSubSellerId)?.bankAccount ?? null,
         });
       }
+    }
+
+    // One consolidated transfer for the whole batch's sedekah — not tied to
+    // any single mutation, so recordedAccount/expectedAmount reflect the sum.
+    if (sedekahTotalCents > 0) {
+      toInsert.push({
+        batchId: id,
+        userId,
+        recipientType: "sedekah",
+        expectedAmount: (sedekahTotalCents / 100).toFixed(2),
+        recordedAccount: settings?.sedekahBankAccount ?? null,
+      });
     }
 
     if (toInsert.length) {

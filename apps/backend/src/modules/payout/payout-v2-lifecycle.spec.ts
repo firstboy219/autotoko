@@ -1,4 +1,4 @@
-import "reflect-metadata";
+﻿import "reflect-metadata";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -90,8 +90,15 @@ class FakeOcr {
     expect(closed!.status).toBe("siap_distribusi");
 
     const rows = await disbursements.listForBatch(USER, batch!.id);
-    // A: sedekah only. B: sedekah + sub_seller. C: sedekah + sub_seller + sub_sub_seller.
-    expect(rows.length).toBe(1 + 2 + 3);
+    // Sedekah is ONE consolidated row for the whole batch, not one per shop.
+    // Per-shop: A none, B sub_seller, C sub_seller + sub_sub_seller.
+    const sedekahRows = rows.filter((r) => r.recipientType === "sedekah");
+    expect(sedekahRows.length).toBe(1);
+    expect(sedekahRows[0]!.payoutMutationId).toBeNull();
+    expect(sedekahRows[0]!.shopName).toBeNull();
+    // 50_000 (A) + 50_000 (B) + 50_000 (C) = 150_000 total sedekah across all three shops.
+    expect(Number(sedekahRows[0]!.expectedAmount)).toBe(150_000);
+    expect(rows.length).toBe(1 + 1 + 2);
     const forC = rows.filter((r) => r.payoutMutationId === mC!.id);
     const subSellerRowC = forC.find((r) => r.recipientType === "sub_seller")!;
     const subSubRowC = forC.find((r) => r.recipientType === "sub_sub_seller")!;
@@ -107,7 +114,7 @@ class FakeOcr {
     // --- Tutup Batch must fail — nothing validated yet ---
     await expect(batches.closeBatch(USER, batch!.id)).rejects.toThrow(/belum tervalidasi/);
 
-    // --- Tahap 3: upload proofs. Rig OCR to MATCH for the sedekah rows ---
+    // --- Tahap 3: upload proofs. Rig OCR to MATCH for the (single, consolidated) sedekah row ---
     for (const r of rows.filter((x) => x.recipientType === "sedekah")) {
       ocr.next = { amount: Number(r.expectedAmount), account: r.recordedAccount, raw: null };
       const updated = await disbursements.uploadProof(USER, r.id, { proofUrl: "https://x/sedekah.jpg" });

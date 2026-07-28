@@ -1,10 +1,10 @@
-import {
+﻿import {
   Inject,
   Injectable,
   NotFoundException,
   BadRequestException,
 } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   payoutDisbursements,
@@ -49,7 +49,10 @@ export class DisbursementsService {
   /**
    * The Tahap 2 / Tahap 3 rekap: one row per outgoing transfer, joined with
    * shop + ownership-chain names so staff never has to look up an account
-   * number on another page (Bagian 2).
+   * number on another page (Bagian 2). The consolidated sedekah row has no
+   * mutation/shop (it covers the whole batch) — LEFT JOINed and matched via
+   * disbursement.batchId instead, so shopName/marketplace come back null for
+   * that row specifically; every sub_seller/sub_sub_seller row still has one.
    */
   async listForBatch(userId: string, batchId: string) {
     const [batch] = await this.db
@@ -68,17 +71,22 @@ export class DisbursementsService {
         subSubSeller: subSubSellers,
       })
       .from(payoutDisbursements)
-      .innerJoin(payoutMutations, eq(payoutDisbursements.payoutMutationId, payoutMutations.id))
-      .innerJoin(shops, eq(payoutMutations.shopId, shops.id))
+      .leftJoin(payoutMutations, eq(payoutDisbursements.payoutMutationId, payoutMutations.id))
+      .leftJoin(shops, eq(payoutMutations.shopId, shops.id))
       .leftJoin(subSellers, eq(payoutDisbursements.recipientSubSellerId, subSellers.id))
       .leftJoin(subSubSellers, eq(payoutDisbursements.recipientSubSubSellerId, subSubSellers.id))
-      .where(and(eq(payoutMutations.batchId, batchId), eq(payoutDisbursements.userId, userId)));
+      .where(
+        and(
+          eq(payoutDisbursements.userId, userId),
+          or(eq(payoutMutations.batchId, batchId), eq(payoutDisbursements.batchId, batchId)),
+        ),
+      );
 
     return rows.map((r) => ({
       id: r.disbursement.id,
       payoutMutationId: r.disbursement.payoutMutationId,
-      shopName: r.shop.shopName ?? r.shop.shopId,
-      marketplace: r.shop.marketplace,
+      shopName: r.shop ? (r.shop.shopName ?? r.shop.shopId) : null,
+      marketplace: r.shop?.marketplace ?? null,
       recipientType: r.disbursement.recipientType,
       recipientName:
         r.disbursement.recipientType === "sedekah"

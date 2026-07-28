@@ -64,6 +64,13 @@
       "when": 1785201878688,
       "tag": "0008_payout_ocr_suggested_amount",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785207969908,
+      "tag": "0009_payout_sedekah_consolidated",
+      "breakpoints": true
     }
   ]
 }

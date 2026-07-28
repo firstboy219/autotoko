@@ -36,9 +36,11 @@ interface Mutation {
 type ValidationStatus = "belum_upload" | "cocok_otomatis" | "tidak_cocok" | "override_manual";
 interface Disbursement {
   id: string;
-  payoutMutationId: string;
-  shopName: string;
-  marketplace: string;
+  // Null for the one consolidated sedekah row per batch — it isn't tied to a
+  // single shop/mutation, see DisbursementRekap below.
+  payoutMutationId: string | null;
+  shopName: string | null;
+  marketplace: string | null;
   recipientType: "sedekah" | "sub_seller" | "sub_sub_seller";
   recipientName: string;
   recipientChain: string | null;
@@ -533,37 +535,69 @@ function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: S
 }
 
 // --- Tahap 2/3: rekap transfer per penerima, grouped by shop/mutation ---
+//
+// Sedekah is transferred ONCE per batch (a single consolidated row, not one
+// per shop) — that row has payoutMutationId null and is rendered as its own
+// card, separate from the per-shop groups below. Batches closed BEFORE this
+// change still have their old per-mutation sedekah rows in the database
+// (each with a payoutMutationId) — those are left exactly where they were,
+// grouped alongside that shop's other transfers, so historical batches don't
+// lose data from view. "Consolidated" is detected as exactly one sedekah row
+// with no mutation link; anything else falls back to the old per-shop path.
 
 function DisbursementRekap({ batch, onChange }: { batch: BatchDetail; onChange: () => void }) {
+  const sedekahRows = useMemo(
+    () => batch.disbursements.filter((d) => d.recipientType === "sedekah"),
+    [batch.disbursements],
+  );
+  const consolidatedSedekah =
+    sedekahRows.length === 1 && sedekahRows[0]!.payoutMutationId == null ? sedekahRows[0]! : null;
+
   const groups = useMemo(() => {
     const byMutation = new Map<string, Disbursement[]>();
     for (const d of batch.disbursements) {
+      if (consolidatedSedekah && d.id === consolidatedSedekah.id) continue;
+      if (!d.payoutMutationId) continue;
       const arr = byMutation.get(d.payoutMutationId) ?? [];
       arr.push(d);
       byMutation.set(d.payoutMutationId, arr);
     }
     return [...byMutation.entries()];
-  }, [batch.disbursements]);
+  }, [batch.disbursements, consolidatedSedekah]);
+
+  const shopTransferCount = groups.reduce((n, [, rows]) => n + rows.length, 0);
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm">
-        Rekap Transfer per Toko ({groups.length} toko, {batch.disbursements.length} transfer)
-      </div>
-      {!groups.length ? (
-        <div className="px-4 py-6 text-center text-slate-400 text-sm">Tidak ada transfer yang perlu dilakukan.</div>
-      ) : (
-        <div className="divide-y divide-slate-100">
-          {groups.map(([mutationId, rows]) => (
-            <div key={mutationId} className="px-4 py-3">
-              <div className="font-semibold text-sm mb-2">{rows[0]!.shopName} <span className="text-xs text-slate-400 font-normal">({rows[0]!.marketplace})</span></div>
-              <div className="space-y-2">
-                {rows.map((d) => <DisbursementRow key={d.id} d={d} onChange={onChange} />)}
-              </div>
-            </div>
-          ))}
+    <div className="space-y-4">
+      {consolidatedSedekah && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm">
+            Sedekah (Gabungan {batch.mutations.length} toko — 1 transfer)
+          </div>
+          <div className="p-3">
+            <DisbursementRow d={consolidatedSedekah} onChange={onChange} />
+          </div>
         </div>
       )}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm">
+          Rekap Transfer per Toko ({groups.length} toko, {shopTransferCount} transfer)
+        </div>
+        {!groups.length ? (
+          <div className="px-4 py-6 text-center text-slate-400 text-sm">Tidak ada transfer sub-seller yang perlu dilakukan.</div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {groups.map(([mutationId, rows]) => (
+              <div key={mutationId} className="px-4 py-3">
+                <div className="font-semibold text-sm mb-2">{rows[0]!.shopName} <span className="text-xs text-slate-400 font-normal">({rows[0]!.marketplace})</span></div>
+                <div className="space-y-2">
+                  {rows.map((d) => <DisbursementRow key={d.id} d={d} onChange={onChange} />)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
