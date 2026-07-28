@@ -58,8 +58,7 @@ const fakeMarketplace = { getAuthAdapter: () => fakeAdapter };
 
     // Shop 1: connect succeeds and is auto-assigned to this sub-seller.
     const { authUrl: url1 } = await shopsService.getConnectUrl(USER, "tiktok", {
-      type: "sub_seller",
-      id: sub!.id,
+      principal: { type: "sub_seller", id: sub!.id },
     });
     const state1 = new URL(url1).searchParams.get("state")!;
     const r1 = await shopsService.handleCallback("tiktok", { state: state1, code: "c1" });
@@ -74,16 +73,14 @@ const fakeMarketplace = { getAuthAdapter: () => fakeAdapter };
 
     // Shop 2: also succeeds (kuota = 2).
     const { authUrl: url2 } = await shopsService.getConnectUrl(USER, "tiktok", {
-      type: "sub_seller",
-      id: sub!.id,
+      principal: { type: "sub_seller", id: sub!.id },
     });
     const state2 = new URL(url2).searchParams.get("state")!;
     await shopsService.handleCallback("tiktok", { state: state2, code: "c2" });
 
     // Shop 3: kuota is now full — must be rejected, and NOT persisted at all.
     const { authUrl: url3 } = await shopsService.getConnectUrl(USER, "tiktok", {
-      type: "sub_seller",
-      id: sub!.id,
+      principal: { type: "sub_seller", id: sub!.id },
     });
     const state3 = new URL(url3).searchParams.get("state")!;
     const beforeCount = shopCounter;

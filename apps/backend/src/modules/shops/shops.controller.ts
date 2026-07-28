@@ -13,7 +13,7 @@ import {
   UseGuards,
   BadRequestException,
 } from "@nestjs/common";
-import { IsOptional, IsString, IsUUID } from "class-validator";
+import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
 import { ConfigService } from "@nestjs/config";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { ApiResponse, Marketplace } from "@autotoko/shared";
@@ -47,6 +47,11 @@ class ManualConnectDto {
   userId?: string;
 }
 
+class AddManualShopDto {
+  @IsIn(SUPPORTED) marketplace!: Marketplace;
+  @IsString() @MaxLength(255) shopName!: string;
+}
+
 @Controller("shops")
 export class ShopsController {
   private readonly logger = new Logger(ShopsController.name);
@@ -60,6 +65,21 @@ export class ShopsController {
   @UseGuards(JwtAuthGuard)
   async list(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.shops.listShops(uid(req)) };
+  }
+
+  /**
+   * "Tambah Toko Manual First" — a placeholder shop not yet linked to any real
+   * marketplace account, so payout hierarchy/mapping can be set up in advance.
+   * Identified by connectedAt IS NULL in the returned list; finished later via
+   * GET connect/:marketplace?placeholderId=<id>.
+   */
+  @Post("manual")
+  @UseGuards(JwtAuthGuard)
+  async addManual(
+    @Body() dto: AddManualShopDto,
+    @Req() req: FastifyRequest,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.shops.addManualShop(uid(req), dto.marketplace, dto.shopName) };
   }
 
   @Post(":id/refresh")
@@ -83,11 +103,14 @@ export class ShopsController {
   // Requires a valid JWT (401 otherwise) — the connecting user's id is taken
   // from the token, never a fallback. Admins may pass ?userId=<uuid> to generate
   // a connect URL on behalf of a specific user (state.sub bound to that user).
+  // ?placeholderId=<uuid> finishes an existing "manual first" placeholder shop
+  // (owned by the connecting user) instead of creating a new row.
   @Get("connect/:marketplace")
   @UseGuards(JwtAuthGuard)
   async connect(
     @Param("marketplace") marketplace: string,
     @Query("userId") userIdOverride: string | undefined,
+    @Query("placeholderId") placeholderId: string | undefined,
     @Req() req: FastifyRequest,
   ): Promise<ApiResponse<{ authUrl: string }>> {
     const mp = assertMarketplace(marketplace);
@@ -102,7 +125,14 @@ export class ShopsController {
       }
       targetUser = userIdOverride;
     }
-    return { success: true, data: await this.shops.getConnectUrl(targetUser, mp) };
+    return {
+      success: true,
+      data: await this.shops.getConnectUrl(
+        targetUser,
+        mp,
+        placeholderId ? { placeholderShopId: placeholderId } : undefined,
+      ),
+    };
   }
 
   /**

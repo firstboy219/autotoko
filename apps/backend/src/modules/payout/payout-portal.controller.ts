@@ -82,6 +82,6 @@ export class PayoutPortalController {
   async connectShop(@Req() req: FastifyRequest, @Param("marketplace") marketplace: string) {
     const p = principal(req);
     const mp = assertMarketplace(marketplace);
-    return ok(await this.shopsService.getConnectUrl(p.userId, mp, { type: p.type, id: p.id }));
+    return ok(await this.shopsService.getConnectUrl(p.userId, mp, { principal: { type: p.type, id: p.id } }));
   }
 }
