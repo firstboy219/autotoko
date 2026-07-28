@@ -4,23 +4,62 @@
 
 :root {
   color-scheme: light;
-  /* Default branding — highlight green + dark navy (Superbank-style).
-     Channels are "R G B"; overridden at runtime from /api/branding. */
+  /* Brand — admin-configurable at runtime from /api/branding.
+     Channels are "R G B" so Tailwind opacity utilities (bg-brand/10) work. */
   --c-brand: 163 224 11;        /* #A3E00B highlight green */
   --c-brand-dark: 132 184 0;    /* #84B800 */
   --c-brand-light: 240 250 219; /* #F0FADB */
-  --c-navy: 11 27 46;           /* #0B1B2E dark navy */
-  --c-onbrand: 11 27 46;        /* text on the (light) green brand surfaces */
+  --c-navy: 11 27 46;           /* #0B1B2E */
+  --c-onbrand: 11 27 46;        /* text on the (light) brand surface */
+  /* Readable brand-as-text colour — the raw brand green fails contrast on
+     white, so tonal/text buttons and links use this darker variant. */
+  --c-brand-ink: 90 126 0;
+
+  /* Neutrals (Google Workspace palette) */
+  --c-canvas: 248 249 250;      /* #f8f9fa page background */
+  --c-line: 224 227 231;        /* #e0e3e7 hairline border */
+  --c-ink: 32 33 36;            /* #202124 primary text */
+  --c-ink-2: 95 99 104;         /* #5f6368 secondary text */
+  --c-ink-3: 128 134 139;       /* #80868b tertiary text */
+}
+
+html,
+body,
+#root {
+  height: 100%;
 }
 
 body {
   margin: 0;
-  background: #f0f4f8;
+  background: rgb(var(--c-canvas));
+  color: rgb(var(--c-ink));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* The highlight-green brand is light, so text on bg-brand surfaces (buttons,
-   active nav, logo) must be the dark on-brand color — this overrides any
-   text-white on those elements without editing every button. */
+/* Thin, unobtrusive scrollbars (Workspace-like). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-line)) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--c-line));
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(var(--c-ink-3) / 0.5);
+  background-clip: content-box;
+}
+
+/* The brand green is light, so anything sitting on a solid brand surface
+   needs the dark on-brand ink. Keeps buttons legible without touching every
+   call site. */
 .bg-brand {
   color: rgb(var(--c-onbrand));
 }

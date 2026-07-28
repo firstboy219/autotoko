@@ -4,23 +4,40 @@ import { useAuth } from "../lib/auth";
 import { useAccount } from "../lib/account";
 import { useBranding } from "../lib/branding";
 import { useRealtime, useConnectionStatus } from "../lib/realtime";
+import { Icon, type IconName } from "./Icon";
+import { ToastHost } from "./ui";
 
-const NAV = [
-  { to: "/", label: "Dashboard", icon: "📊", end: true },
-  { to: "/toko", label: "Toko Saya", icon: "🏪" },
-  { to: "/produk", label: "Master Produk", icon: "📦" },
-  { to: "/katalog", label: "Kesehatan Katalog", icon: "🩺" },
-  { to: "/orders", label: "Orders", icon: "🛒" },
-  { to: "/autopilot", label: "Autopilot", icon: "🤖" },
-  { to: "/affiliate", label: "Affiliate", icon: "🤝" },
-  { to: "/laporan", label: "Laporan", icon: "📈" },
-  { to: "/bom", label: "BOM / Bahan", icon: "🧪" },
-  { to: "/wallet", label: "Wallet", icon: "💳" },
-  { to: "/pencairan", label: "Pencairan Dana", icon: "💸" },
-  { to: "/notifikasi", label: "Notifikasi", icon: "🔔" },
+const NAV: { to: string; label: string; icon: IconName; end?: boolean }[] = [
+  { to: "/", label: "Dashboard", icon: "dashboard", end: true },
+  { to: "/toko", label: "Toko Saya", icon: "store" },
+  { to: "/produk", label: "Master Produk", icon: "package" },
+  { to: "/katalog", label: "Kesehatan Katalog", icon: "activity" },
+  { to: "/orders", label: "Orders", icon: "cart" },
+  { to: "/autopilot", label: "Autopilot", icon: "bot" },
+  { to: "/affiliate", label: "Affiliate", icon: "users" },
+  { to: "/laporan", label: "Laporan", icon: "trending" },
+  { to: "/bom", label: "BOM / Bahan", icon: "beaker" },
+  { to: "/wallet", label: "Wallet", icon: "wallet" },
+  { to: "/pencairan", label: "Pencairan Dana", icon: "banknote" },
+  { to: "/notifikasi", label: "Notifikasi", icon: "bell" },
 ];
 
-export function Layout({ children, title }: { children: React.ReactNode; title: string }) {
+/** Gmail-style nav pill: full-round, tonal when active, no heavy weight. */
+function navClass({ isActive }: { isActive: boolean }) {
+  return `flex items-center gap-3 mx-2 my-0.5 pl-4 pr-3 py-2 rounded-full text-sm transition ${
+    isActive
+      ? "bg-brand/20 text-ink font-medium"
+      : "text-ink-2 hover:bg-canvas hover:text-ink"
+  }`;
+}
+
+export function Layout({
+  children,
+  title,
+}: {
+  children: React.ReactNode;
+  title: string;
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   const logout = useAuth((s) => s.logout);
@@ -29,18 +46,26 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
   const brandName = brand?.name ?? "AutoToko";
   const connected = useConnectionStatus();
   const [toast, setToast] = useState<string | null>(null);
+  const [navOpen, setNavOpen] = useState(false);
 
   // Load profile once; route brand-new (un-onboarded) users to onboarding.
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
   useEffect(() => {
     if (me && !me.onboarded && location.pathname !== "/onboarding") {
       navigate("/onboarding", { replace: true });
     }
   }, [me, location.pathname, navigate]);
 
+  // Close the mobile drawer whenever the route changes.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
+
   useRealtime(
     useCallback((type) => {
-      if (type === "new_order") setToast("🛒 Pesanan baru masuk!");
+      if (type === "new_order") setToast("Pesanan baru masuk");
     }, []),
   );
   useEffect(() => {
@@ -49,61 +74,34 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
     return () => clearTimeout(t);
   }, [toast]);
 
-  return (
-    <div className="flex h-screen overflow-hidden font-sans text-slate-800">
-      {toast && (
-        <div
-          onClick={() => navigate("/orders")}
-          className="fixed top-4 right-4 z-50 cursor-pointer rounded-lg bg-brand text-white text-sm font-semibold px-4 py-3 shadow-lg animate-pulse"
-        >
-          {toast} <span className="underline ml-1">Lihat →</span>
-        </div>
-      )}
-      {/* Sidebar */}
-      <aside className="w-56 bg-navy flex flex-col flex-shrink-0">
-        <div className="flex items-center gap-2 px-4 py-3.5 border-b border-white/10">
-          {brand?.logoUrl ? (
-            <img src={brand.logoUrl} alt={brandName} className="w-8 h-8 rounded-lg object-contain" />
-          ) : (
-            <div className="w-8 h-8 rounded-lg bg-brand font-extrabold flex items-center justify-center">
-              {brandName.charAt(0).toUpperCase()}
-            </div>
-          )}
-          <div>
-            <div className="text-white font-extrabold leading-none">{brandName}</div>
-            <div className="text-[9px] uppercase tracking-wider text-white/30">
-              Autopilot Seller
-            </div>
+  const sidebar = (
+    <>
+      <div className="flex items-center gap-2.5 px-4 h-16 shrink-0">
+        {brand?.logoUrl ? (
+          <img src={brand.logoUrl} alt={brandName} className="w-8 h-8 rounded-lg object-contain" />
+        ) : (
+          <div className="w-8 h-8 rounded-lg bg-brand text-onbrand font-medium flex items-center justify-center">
+            {brandName.charAt(0).toUpperCase()}
           </div>
+        )}
+        <div className="min-w-0">
+          <div className="text-ink font-medium leading-tight truncate">{brandName}</div>
+          <div className="text-xs text-ink-3 leading-tight">Autopilot Seller</div>
         </div>
-        <nav className="flex-1 py-2">
-          {NAV.map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              end={n.end}
-              className={({ isActive }) =>
-                `flex items-center gap-2.5 mx-2 my-0.5 px-3 py-2 rounded-md text-[12.5px] font-medium transition ${
-                  isActive
-                    ? "bg-brand text-white"
-                    : "text-white/50 hover:bg-white/5 hover:text-white/90"
-                }`
-              }
-            >
-              <span className="w-4 text-center">{n.icon}</span>
-              {n.label}
-            </NavLink>
-          ))}
-        </nav>
-        <NavLink
-          to="/akun"
-          className={({ isActive }) =>
-            `flex items-center gap-2.5 mx-2 mb-1 px-3 py-2 rounded-md text-[12.5px] font-medium transition ${
-              isActive ? "bg-brand text-white" : "text-white/50 hover:bg-white/5 hover:text-white/90"
-            }`
-          }
-        >
-          <span className="w-4 text-center">👤</span>
+      </div>
+
+      <nav className="flex-1 overflow-y-auto pb-2">
+        {NAV.map((n) => (
+          <NavLink key={n.to} to={n.to} end={n.end} className={navClass}>
+            <Icon name={n.icon} size={18} />
+            <span className="truncate">{n.label}</span>
+          </NavLink>
+        ))}
+      </nav>
+
+      <div className="shrink-0 border-t border-line py-2">
+        <NavLink to="/akun" className={navClass}>
+          <Icon name="user" size={18} />
           <span className="truncate">{me?.fullName ?? "Akun Saya"}</span>
         </NavLink>
         <button
@@ -111,26 +109,78 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
             logout();
             navigate("/login");
           }}
-          className="m-3 mt-0 px-3 py-2 rounded-md text-[12px] text-white/60 hover:bg-white/5 text-left"
+          className="w-[calc(100%-1rem)] flex items-center gap-3 mx-2 pl-4 pr-3 py-2 rounded-full text-sm text-ink-2 hover:bg-canvas hover:text-ink transition"
         >
-          ⎋ Keluar
+          <Icon name="logout" size={18} />
+          Keluar
         </button>
-      </aside>
-
-      {/* Main */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-12 bg-white border-b border-slate-200 flex items-center justify-between px-4">
-          <div className="font-bold">{title}</div>
-          <div
-            title={connected ? "Terhubung realtime — notifikasi order baru muncul otomatis." : "Koneksi realtime terputus. Coba refresh halaman."}
-            className={`flex items-center gap-1.5 text-[11px] font-semibold cursor-help ${connected ? "text-green-600" : "text-red-500"}`}
-          >
-            <span className={`inline-block w-2 h-2 rounded-full ${connected ? "bg-green-500" : "bg-red-400"}`} />
-            {connected ? "Live" : "Offline"}
-          </div>
-        </header>
-        <main className="flex-1 overflow-y-auto p-4 bg-[#F0F4F8]">{children}</main>
       </div>
-    </div>
+    </>
+  );
+
+  return (
+    <ToastHost>
+      <div className="flex h-screen overflow-hidden font-sans text-ink bg-canvas">
+        {/* Desktop sidebar */}
+        <aside className="hidden lg:flex w-64 bg-white border-r border-line flex-col shrink-0">
+          {sidebar}
+        </aside>
+
+        {/* Mobile drawer */}
+        {navOpen && (
+          <div className="lg:hidden fixed inset-0 z-40 flex">
+            <div className="absolute inset-0 bg-slate-900/30" onClick={() => setNavOpen(false)} />
+            <aside className="relative w-64 bg-white border-r border-line flex flex-col shadow-e2">
+              {sidebar}
+            </aside>
+          </div>
+        )}
+
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+          <header className="h-16 bg-white border-b border-line flex items-center gap-3 px-4 sm:px-6 shrink-0">
+            <button
+              onClick={() => setNavOpen(true)}
+              aria-label="Buka menu"
+              className="lg:hidden p-2 -ml-2 rounded-full text-ink-2 hover:bg-canvas"
+            >
+              <Icon name="menu" size={20} />
+            </button>
+            <div className="text-lg text-ink truncate">{title}</div>
+            <div className="ml-auto flex items-center gap-3">
+              <span
+                title={
+                  connected
+                    ? "Terhubung realtime — notifikasi order baru muncul otomatis."
+                    : "Koneksi realtime terputus. Coba refresh halaman."
+                }
+                className={`hidden sm:inline-flex items-center gap-1.5 text-xs font-medium ${
+                  connected ? "text-emerald-600" : "text-ink-3"
+                }`}
+              >
+                <span
+                  className={`inline-block w-1.5 h-1.5 rounded-full ${
+                    connected ? "bg-emerald-500" : "bg-slate-300"
+                  }`}
+                />
+                {connected ? "Live" : "Offline"}
+              </span>
+            </div>
+          </header>
+
+          {toast && (
+            <button
+              onClick={() => navigate("/orders")}
+              className="mx-4 sm:mx-6 mt-4 flex items-center gap-2 rounded-lg border border-brand/40 bg-brand/10 px-4 py-2.5 text-sm text-ink text-left hover:bg-brand/20 transition"
+            >
+              <Icon name="cart" size={16} />
+              {toast}
+              <span className="ml-auto text-brand-ink font-medium">Lihat</span>
+            </button>
+          )}
+
+          <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-5">{children}</main>
+        </div>
+      </div>
+    </ToastHost>
   );
 }
