@@ -376,19 +376,49 @@ function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: S
         <div className="px-4 py-6 text-center text-slate-400 text-sm">Belum ada. Rekam lewat form di atas.</div>
       ) : (
         <div className="divide-y divide-slate-100">
-          {batch.mutations.map((m) => (
-            <div key={m.id} className="px-4 py-2 flex items-center justify-between">
-              <div>
-                <span className="font-semibold text-sm">{shopName(m.shopId)}</span>
-                <span className="text-xs text-slate-400 ml-2">{dateShort(m.payoutDate)}</span>
-                <span className="text-xs text-slate-500 ml-2">{rupiah(m.creditAmount)}</span>
+          {batch.mutations.map((m) => {
+            const shop = shops.find((s) => s.id === m.shopId);
+            const subSellerAmt = Number(m.subSellerAmount) || 0;
+            const subSubSellerAmt = Number(m.subSubSellerAmount) || 0;
+            return (
+              <div key={m.id} className="px-4 py-2 flex items-center justify-between flex-wrap gap-y-1">
+                <div>
+                  <div>
+                    <span className="font-semibold text-sm">{shopName(m.shopId)}</span>
+                    <span className="text-xs text-slate-400 ml-2">{dateShort(m.payoutDate)}</span>
+                    <span className="text-xs text-slate-500 ml-2">{rupiah(m.creditAmount)}</span>
+                    {m.marketplaceProofUrl && (
+                      <a href={m.marketplaceProofUrl} target="_blank" rel="noreferrer"
+                        className="text-xs text-brand font-semibold ml-2 hover:underline">
+                        Lihat bukti →
+                      </a>
+                    )}
+                  </div>
+                  {(subSellerAmt > 0 || subSubSellerAmt > 0) && (
+                    <div className="text-[11px] text-violet-600 mt-0.5">
+                      {subSellerAmt > 0 && (
+                        <span>
+                          Sub-seller{shop?.subSellerName ? ` (${shop.subSellerName})` : ""}
+                          {shop?.effectiveSubSellerRate != null ? ` · ${(shop.effectiveSubSellerRate * 100).toFixed(1)}%` : ""}: {rupiah(subSellerAmt)}
+                        </span>
+                      )}
+                      {subSellerAmt > 0 && subSubSellerAmt > 0 && <span className="mx-1.5">·</span>}
+                      {subSubSellerAmt > 0 && (
+                        <span>
+                          Sub-sub-seller{shop?.subSubSellerName ? ` (${shop.subSubSellerName})` : ""}
+                          {shop?.effectiveSubSubSellerRate != null ? ` · ${(shop.effectiveSubSubSellerRate * 100).toFixed(1)}%` : ""}: {rupiah(subSubSellerAmt)}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => remove(m.id)} disabled={busyId === m.id}
+                  className="text-xs px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 font-semibold disabled:opacity-50">
+                  Hapus
+                </button>
               </div>
-              <button onClick={() => remove(m.id)} disabled={busyId === m.id}
-                className="text-xs px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 font-semibold disabled:opacity-50">
-                Hapus
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
