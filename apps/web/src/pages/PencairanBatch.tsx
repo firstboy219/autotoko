@@ -60,6 +60,16 @@ interface BatchDetail {
 const cents = (rupiahVal: number) => Math.round(rupiahVal * 100);
 const READY: ValidationStatus[] = ["cocok_otomatis", "override_manual"];
 
+// Upload URLs are stored/returned as a same-origin relative path
+// ("/api/uploads/<uuid>.jpg") since the app is served from the same domain
+// as the API. That resolves fine for an in-app <a href>, but a relative path
+// is meaningless once copied into a WhatsApp message, CSV, or PNG shared
+// outside the app — so anywhere the link leaves this page, it needs the
+// domain prefixed on.
+function absoluteUrl(url: string): string {
+  return /^https?:\/\//i.test(url) ? url : `${window.location.origin}${url}`;
+}
+
 function csvEscape(v: string | number): string {
   const s = String(v);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -381,7 +391,8 @@ function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: S
       return [
         shopName(m.shopId), m.payoutDate, Number(m.creditAmount) || 0, Number(m.sedekahAmount) || 0,
         Number(m.sellerAmount) || 0, Number(m.subSellerAmount) || 0, shop?.subSellerName ?? "",
-        Number(m.subSubSellerAmount) || 0, shop?.subSubSellerName ?? "", m.marketplaceProofUrl ?? "",
+        Number(m.subSubSellerAmount) || 0, shop?.subSubSellerName ?? "",
+        m.marketplaceProofUrl ? absoluteUrl(m.marketplaceProofUrl) : "",
       ];
     });
     const totalRow = [
@@ -426,7 +437,7 @@ function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: S
       let line = `${i + 1}. ${shopName(m.shopId)} - ${rupiah(m.creditAmount)}`;
       if (subAmt > 0) line += ` (Sub-seller${shop?.subSellerName ? ` ${shop.subSellerName}` : ""}: ${rupiah(subAmt)})`;
       lines.push(line);
-      if (m.marketplaceProofUrl) lines.push(m.marketplaceProofUrl);
+      if (m.marketplaceProofUrl) lines.push(absoluteUrl(m.marketplaceProofUrl));
     });
     window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
   }
@@ -484,9 +495,9 @@ function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: S
                       <span className="text-xs text-slate-500 ml-2">{rupiah(m.creditAmount)}</span>
                     </div>
                     {m.marketplaceProofUrl && (
-                      <a href={m.marketplaceProofUrl} target="_blank" rel="noreferrer"
+                      <a href={absoluteUrl(m.marketplaceProofUrl)} target="_blank" rel="noreferrer"
                         className="text-[11px] text-brand hover:underline break-all">
-                        {m.marketplaceProofUrl}
+                        {absoluteUrl(m.marketplaceProofUrl)}
                       </a>
                     )}
                     {(subSellerAmt > 0 || subSubSellerAmt > 0) && (
