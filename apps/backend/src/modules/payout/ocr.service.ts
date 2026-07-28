@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+﻿import { Injectable, Logger } from "@nestjs/common";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { writeFile, unlink } from "node:fs/promises";
@@ -41,32 +41,63 @@ function findAmountCandidates(text: string): number[] {
   return [...withRp, ...bare];
 }
 
+// Labels Indonesian bank/marketplace transfer receipts use for the
+// destination account — "Rekening (Tujuan)", "No. Rekening", "Penerima".
+const ACCOUNT_LABEL_RE = /\b(no\.?\s*rekening|rekening|rek\.?|tujuan|penerima|account|destination)\b/i;
+const MASKED_RE = /\*{3,}\s?\d{3,8}/;
+const BARE_RE = /\b\d[\d\s-]{6,24}\d\b/;
+
+function extractAccountFromSegment(segment: string): string | null {
+  const masked = segment.match(MASKED_RE);
+  if (masked) return masked[0].replace(/\s/g, "");
+  const bare = segment.match(BARE_RE);
+  if (bare) {
+    const digits = bare[0].replace(/\D/g, "");
+    if (digits.length >= 8 && digits.length <= 20) return digits;
+  }
+  return null;
+}
+
 /**
- * Finds plausible bank account numbers. Banking/marketplace UIs almost always
- * MASK the account number for privacy, showing only the last few digits
- * behind a run of asterisks — e.g. "********8214" — so that pattern is the
- * realistic common case and is tried FIRST. A bare, fully-visible digit run
- * is kept as a lower-priority fallback for the rarer screenshot that doesn't
- * mask it; results are returned masked-first since a bare digit run is more
- * likely to be some OTHER number on the receipt (order id, date, phone) than
- * an actual account number.
+ * Finds plausible bank account numbers. A transfer receipt is full of digit
+ * runs that are NOT the account number — order id, reference number, phone,
+ * date/time — so pattern-matching alone (even masked-first) kept grabbing
+ * the wrong one. The reliable signal is PROXIMITY to a label the receipt
+ * uses for the destination account ("Rekening", "No. Rekening", "Tujuan",
+ * "Penerima"): scan line-by-line for one of those labels, then look for a
+ * digit pattern on that SAME line or the next one (label and value are
+ * often on separate lines in these layouts) — masked (e.g. "********8214")
+ * still wins over a bare run when both are present on the same line/label.
+ *
+ * Label-anchored hits are returned first. A whole-text scan (same
+ * masked-first, bare-second heuristic as before) is kept as a fallback for
+ * receipts that don't carry a recognized label at all, so those still get a
+ * best-effort answer instead of nothing.
  */
 function findAccountCandidates(text: string): string[] {
-  const masked: string[] = [];
-  const maskedRe = /\*{3,}\s?\d{3,8}/g;
-  let m: RegExpExecArray | null;
-  while ((m = maskedRe.exec(text))) {
-    masked.push(m[0].replace(/\s/g, ""));
+  const lines = text.split(/\r?\n/);
+  const anchored: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!ACCOUNT_LABEL_RE.test(lines[i]!)) continue;
+    const candidate =
+      extractAccountFromSegment(lines[i]!) ??
+      (lines[i + 1] ? extractAccountFromSegment(lines[i + 1]!) : null);
+    if (candidate) anchored.push(candidate);
   }
 
+  const masked: string[] = [];
+  let m: RegExpExecArray | null;
+  const maskedGlobal = /\*{3,}\s?\d{3,8}/g;
+  while ((m = maskedGlobal.exec(text))) masked.push(m[0].replace(/\s/g, ""));
+
   const bare: string[] = [];
-  const bareRe = /\b\d[\d\s-]{6,24}\d\b/g;
-  while ((m = bareRe.exec(text))) {
+  const bareGlobal = /\b\d[\d\s-]{6,24}\d\b/g;
+  while ((m = bareGlobal.exec(text))) {
     const digits = m[0].replace(/\D/g, "");
     if (digits.length >= 8 && digits.length <= 20) bare.push(digits);
   }
 
-  return [...masked, ...bare];
+  return [...anchored, ...masked, ...bare];
 }
 
 // ocr-worker-script.js sits next to this compiled file in dist/modules/payout/
