@@ -331,6 +331,23 @@ function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: S
   const shopName = (id: string) => shops.find((s) => s.id === id)?.shopName ?? id.slice(0, 8);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // Sum of what each recipient bucket is owed across every shop recorded so
+  // far in this batch — lets staff sanity-check the total before closing
+  // input, without adding up the per-shop rows by hand.
+  const totals = useMemo(() => {
+    return batch.mutations.reduce(
+      (acc, m) => {
+        acc.credit += Number(m.creditAmount) || 0;
+        acc.sedekah += Number(m.sedekahAmount) || 0;
+        acc.seller += Number(m.sellerAmount) || 0;
+        acc.subSeller += Number(m.subSellerAmount) || 0;
+        acc.subSubSeller += Number(m.subSubSellerAmount) || 0;
+        return acc;
+      },
+      { credit: 0, sedekah: 0, seller: 0, subSeller: 0, subSubSeller: 0 },
+    );
+  }, [batch.mutations]);
+
   async function remove(id: string) {
     setBusyId(id);
     try { await api.del(`/payout/mutations/${id}`); onChange(); } finally { setBusyId(null); }
@@ -341,6 +358,20 @@ function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: S
       <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm">
         Toko Sudah Direkam ({batch.mutations.length})
       </div>
+      {batch.mutations.length > 0 && (
+        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+          <div className="text-[10px] uppercase tracking-wide text-slate-400 mb-2">
+            Ringkasan Total ({batch.mutations.length} toko)
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
+            <SplitCell label="Total Kredit" value={cents(totals.credit)} />
+            <SplitCell label="Sedekah" value={cents(totals.sedekah)} />
+            <SplitCell label="Seller" value={cents(totals.seller)} />
+            {totals.subSeller > 0 && <SplitCell label="Sub-seller" value={cents(totals.subSeller)} />}
+            {totals.subSubSeller > 0 && <SplitCell label="Sub-sub-seller" value={cents(totals.subSubSeller)} />}
+          </div>
+        </div>
+      )}
       {!batch.mutations.length ? (
         <div className="px-4 py-6 text-center text-slate-400 text-sm">Belum ada. Rekam lewat form di atas.</div>
       ) : (
