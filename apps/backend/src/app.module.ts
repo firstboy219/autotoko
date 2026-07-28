@@ -10,6 +10,7 @@ import { MailModule } from "./common/mail/mail.module.js";
 import { EventsModule } from "./modules/events/events.module.js";
 import { AuthModule } from "./modules/auth/auth.module.js";
 import { AdminSettingsModule } from "./modules/admin-settings/admin-settings.module.js";
+import { AdminUsersModule } from "./modules/admin-users/admin-users.module.js";
 import { ShopsModule } from "./modules/shops/shops.module.js";
 import { ProductsModule } from "./modules/products/products.module.js";
 import { BillingModule } from "./modules/billing/billing.module.js";
@@ -44,6 +45,7 @@ import { UploadsModule } from "./modules/uploads/uploads.module.js";
     EventsModule,
     AuthModule,
     AdminSettingsModule,
+    AdminUsersModule,
     ShopsModule,
     ProductsModule,
     BillingModule,

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./lib/auth";
 import { Login } from "./pages/Login";
+import { Users } from "./pages/Users";
 import { Settings } from "./pages/Settings";
 import { Pricing } from "./pages/Pricing";
 import { AiAutopilot } from "./pages/AiAutopilot";
@@ -16,6 +17,7 @@ export function App() {
     <BrowserRouter basename="/admin">
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/users" element={<Protected><Users /></Protected>} />
         <Route path="/settings" element={<Protected><Settings /></Protected>} />
         <Route path="/pricing" element={<Protected><Pricing /></Protected>} />
         <Route path="/ai" element={<Protected><AiAutopilot /></Protected>} />

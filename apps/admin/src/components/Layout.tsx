@@ -3,6 +3,7 @@ import { useAuth } from "../lib/auth";
 import { useBranding } from "../lib/branding";
 
 const NAV = [
+  { to: "/users", label: "Manajemen User", icon: "👥" },
   { to: "/settings", label: "Kredensial & Config", icon: "🔑" },
   { to: "/pricing", label: "Pricing", icon: "💰" },
   { to: "/ai", label: "AI Autopilot", icon: "🤖" },
