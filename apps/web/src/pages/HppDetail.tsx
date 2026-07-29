@@ -10,6 +10,7 @@ import {
   Button,
   Card,
   CardHeader,
+  ConfirmModal,
   EmptyState,
   Field,
   InlineAlert,
@@ -118,6 +119,7 @@ function HppSection({
   const toast = useToast();
   const [service, setService] = useState(String(data.costing.serviceCostPerPcs));
   const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     setService(String(data.costing.serviceCostPerPcs));
@@ -142,37 +144,57 @@ function HppSection({
         title="1 · Harga Pokok Produksi"
         subtitle="Takaran bahan baku untuk 1 pcs produk, dikali harga satuannya."
         action={
-          <Link
-            to="/bom"
-            className="inline-flex items-center gap-1 text-sm text-brand-ink hover:underline"
-          >
-            Kelola bahan <Icon name="arrowRight" size={14} />
-          </Link>
+          <div className="flex items-center gap-3">
+            {!adding && data.materials.length > 0 && (
+              <Button size="sm" variant="tonal" icon="plus" onClick={() => setAdding(true)}>
+                Tambah Bahan
+              </Button>
+            )}
+            <Link
+              to="/bom"
+              className="inline-flex items-center gap-1 text-sm text-ink-2 hover:text-ink"
+              title="Atur supplier, stok, dan restock di modul BOM"
+            >
+              Kelola stok & supplier <Icon name="arrowRight" size={14} />
+            </Link>
+          </div>
         }
       />
 
+      {adding && (
+        <AddMaterialForm
+          productId={productId}
+          onDone={() => {
+            setAdding(false);
+            onChange();
+          }}
+          onCancel={() => setAdding(false)}
+        />
+      )}
+
       {!data.materials.length ? (
-        <EmptyState
-          icon="beaker"
-          title="Belum ada bahan baku"
-          description="Tambahkan bahan baku beserta takarannya di menu BOM / Bahan, lalu isi harga satuannya di sini."
-          action={
-            <Link to="/bom">
-              <Button variant="filled" icon="plus">
+        !adding && (
+          <EmptyState
+            icon="beaker"
+            title="Belum ada bahan baku"
+            description="Tambahkan bahan beserta takarannya untuk 1 pcs produk, lalu isi harga satuannya."
+            action={
+              <Button variant="filled" icon="plus" onClick={() => setAdding(true)}>
                 Tambah Bahan Baku
               </Button>
-            </Link>
-          }
-        />
+            }
+          />
+        )
       ) : (
         <TableWrap>
-          <Table className="min-w-[720px]">
+          <Table className="min-w-[780px]">
             <THead>
               <TR className="border-t-0">
                 <TH>Bahan Baku</TH>
                 <TH align="right">Takaran / pcs</TH>
                 <TH align="right">Harga Satuan</TH>
                 <TH align="right">Subtotal</TH>
+                <TH align="right" />
               </TR>
             </THead>
             <tbody>
@@ -186,6 +208,7 @@ function HppSection({
                 <TD align="right" className="text-ink font-medium tabular-nums">
                   {rupiah(data.hpp.materialCost)}
                 </TD>
+                <TD />
               </TR>
             </tbody>
           </Table>
@@ -238,11 +261,113 @@ function HppSection({
   );
 }
 
+function AddMaterialForm({
+  productId,
+  onDone,
+  onCancel,
+}: {
+  productId: string;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState("");
+  const [qty, setQty] = useState("");
+  const [unit, setUnit] = useState("");
+  const [cost, setCost] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const valid = name.trim() !== "" && Number(qty) > 0;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!valid) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.post(`/costing/${productId}/materials`, {
+        materialName: name.trim(),
+        quantity: Number(qty),
+        unit: unit.trim() || undefined,
+        unitCost: Number(cost) || 0,
+      });
+      toast(`${name.trim()} ditambahkan`, "success");
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="border-b border-line bg-canvas p-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <Field label="Nama Bahan" required>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="mis. Biji Kopi Arabika"
+            autoFocus
+          />
+        </Field>
+        <Field label="Takaran / pcs" required hint="Untuk 1 pcs produk">
+          <Input
+            inputMode="decimal"
+            value={qty}
+            onChange={(e) => setQty(e.target.value.replace(/[^\d.]/g, ""))}
+            placeholder="0"
+            className="tabular-nums"
+          />
+        </Field>
+        <Field label="Satuan" hint="kg, gram, meter, pcs…">
+          <Input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="kg" />
+        </Field>
+        <Field label="Harga Satuan" hint="Harga per 1 satuan di atas">
+          <Input
+            inputMode="numeric"
+            value={cost ? Number(cost).toLocaleString("id-ID") : ""}
+            onChange={(e) => setCost(e.target.value.replace(/\D/g, ""))}
+            placeholder="0"
+            className="tabular-nums"
+          />
+        </Field>
+      </div>
+
+      {Number(qty) > 0 && Number(cost) > 0 && (
+        <div className="text-xs text-ink-2 mt-3">
+          Subtotal untuk 1 pcs:{" "}
+          <span className="text-ink tabular-nums">
+            {rupiah(Number(qty) * Number(cost))}
+          </span>
+        </div>
+      )}
+
+      {err && (
+        <div className="mt-3">
+          <InlineAlert tone="danger">{err}</InlineAlert>
+        </div>
+      )}
+
+      <div className="flex gap-2 mt-4">
+        <Button variant="filled" icon="check" loading={busy} disabled={!valid}>
+          Tambah Bahan
+        </Button>
+        <Button type="button" variant="text" onClick={onCancel} disabled={busy}>
+          Batal
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 function MaterialRow({ m, onChange }: { m: MaterialLine; onChange: () => void }) {
   const toast = useToast();
   const [qty, setQty] = useState(String(m.quantity));
   const [cost, setCost] = useState(String(m.unitCost));
   const [busy, setBusy] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
 
   useEffect(() => {
     setQty(String(m.quantity));
@@ -263,6 +388,18 @@ function MaterialRow({ m, onChange }: { m: MaterialLine; onChange: () => void })
       onChange();
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    try {
+      await api.del(`/costing/materials/${m.id}`);
+      toast(`${m.materialName} dihapus`, "success");
+      onChange();
+    } finally {
+      setBusy(false);
+      setConfirmDel(false);
     }
   }
 
@@ -302,6 +439,24 @@ function MaterialRow({ m, onChange }: { m: MaterialLine; onChange: () => void })
             </Button>
           )}
         </div>
+      </TD>
+      <TD align="right">
+        <button
+          onClick={() => setConfirmDel(true)}
+          disabled={busy}
+          aria-label={`Hapus ${m.materialName}`}
+          className="p-1.5 rounded-full text-ink-3 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-50"
+        >
+          <Icon name="trash" size={16} />
+        </button>
+        <ConfirmModal
+          open={confirmDel}
+          onClose={() => setConfirmDel(false)}
+          onConfirm={remove}
+          loading={busy}
+          title="Hapus bahan baku ini?"
+          description={`"${m.materialName}" akan dihapus dari resep produk ini dan HPP dihitung ulang.`}
+        />
       </TD>
     </TR>
   );

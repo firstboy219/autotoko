@@ -1,4 +1,13 @@
-import { IsIn, IsNumber, IsOptional, Max, Min } from "class-validator";
+import {
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+} from "class-validator";
 
 const RATE = { min: 0, max: 1 };
 
@@ -20,6 +29,23 @@ export class UpdateCostingDto {
  *  restock, stock levels) stays in the BOM module. */
 export class UpdateMaterialCostDto {
   @IsOptional() @IsNumber() @Min(0) quantity?: number;
+  @IsOptional() @IsNumber() @Min(0) unitCost?: number;
+}
+
+/**
+ * Adds a recipe line straight from the costing page. Deliberately only the
+ * costing-relevant fields — supplier, restock method and stock levels keep
+ * their column defaults and are configured in the BOM module if needed.
+ */
+export class CreateMaterialDto {
+  // \S guards against both "" and whitespace-only — plain @IsString/@MaxLength
+  // accepted an empty name, which produced a nameless row in the recipe.
+  @IsString()
+  @MaxLength(255)
+  @Matches(/\S/, { message: "Nama bahan baku tidak boleh kosong" })
+  materialName!: string;
+  @IsNumber() @Min(0) quantity!: number;
+  @IsOptional() @IsString() @MaxLength(32) unit?: string;
   @IsOptional() @IsNumber() @Min(0) unitCost?: number;
 }
 

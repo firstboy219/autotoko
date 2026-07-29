@@ -1,9 +1,24 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, TenantOwnerOnly, type JwtPayload } from "../auth/jwt-auth.guard.js";
 import { CostingService } from "./costing.service.js";
-import { SuggestPriceDto, UpdateCostingDto, UpdateMaterialCostDto } from "./dto/costing.dto.js";
+import {
+  CreateMaterialDto,
+  SuggestPriceDto,
+  UpdateCostingDto,
+  UpdateMaterialCostDto,
+} from "./dto/costing.dto.js";
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
@@ -35,6 +50,15 @@ export class CostingController {
     return ok(await this.costing.updateCosting(uid(req), productId, dto));
   }
 
+  @Post(":productId/materials")
+  async addMaterial(
+    @Req() req: FastifyRequest,
+    @Param("productId") productId: string,
+    @Body() dto: CreateMaterialDto,
+  ) {
+    return ok(await this.costing.addMaterial(uid(req), productId, dto));
+  }
+
   @Patch("materials/:bomItemId")
   async updateMaterial(
     @Req() req: FastifyRequest,
@@ -42,6 +66,11 @@ export class CostingController {
     @Body() dto: UpdateMaterialCostDto,
   ) {
     return ok(await this.costing.updateMaterial(uid(req), bomItemId, dto));
+  }
+
+  @Delete("materials/:bomItemId")
+  async removeMaterial(@Req() req: FastifyRequest, @Param("bomItemId") bomItemId: string) {
+    return ok(await this.costing.removeMaterial(uid(req), bomItemId));
   }
 
   @Post(":productId/suggest-price")

@@ -13,7 +13,12 @@ import {
   payoutSettings,
   productCosting,
 } from "../../database/schema/index.js";
-import type { SuggestPriceDto, UpdateCostingDto, UpdateMaterialCostDto } from "./dto/costing.dto.js";
+import type {
+  CreateMaterialDto,
+  SuggestPriceDto,
+  UpdateCostingDto,
+  UpdateMaterialCostDto,
+} from "./dto/costing.dto.js";
 
 const num = (v: string | number | null | undefined) => Number(v ?? 0);
 const rupiah = (cents: number) => cents / 100;
@@ -157,15 +162,32 @@ export class CostingService {
     return this.detail(userId, productId);
   }
 
+  /**
+   * Adds a recipe line without leaving the costing page. Supplier/restock
+   * columns keep their defaults — those are BOM-module concerns.
+   */
+  async addMaterial(userId: string, productId: string, dto: CreateMaterialDto) {
+    await this.getProductOrThrow(userId, productId);
+    await this.db.insert(bomItems).values({
+      masterProductId: productId,
+      materialName: dto.materialName.trim(),
+      quantity: dto.quantity.toFixed(3),
+      unit: dto.unit?.trim() || null,
+      unitCost: (dto.unitCost ?? 0).toFixed(2),
+    });
+    return this.detail(userId, productId);
+  }
+
+  /** Removes a recipe line. Ownership is proven by joining through the product. */
+  async removeMaterial(userId: string, bomItemId: string) {
+    const productId = await this.getMaterialProductOrThrow(userId, bomItemId);
+    await this.db.delete(bomItems).where(eq(bomItems.id, bomItemId));
+    return this.detail(userId, productId);
+  }
+
   /** Quantity + unit cost only; the rest of a material lives in the BOM module. */
   async updateMaterial(userId: string, bomItemId: string, dto: UpdateMaterialCostDto) {
-    const [row] = await this.db
-      .select({ id: bomItems.id, productId: bomItems.masterProductId })
-      .from(bomItems)
-      .innerJoin(masterProducts, eq(bomItems.masterProductId, masterProducts.id))
-      .where(and(eq(bomItems.id, bomItemId), eq(masterProducts.userId, userId)))
-      .limit(1);
-    if (!row) throw new NotFoundException("Bahan baku tidak ditemukan");
+    const productId = await this.getMaterialProductOrThrow(userId, bomItemId);
 
     const set: Record<string, unknown> = {};
     if (dto.quantity != null) set.quantity = dto.quantity.toFixed(3);
@@ -173,7 +195,7 @@ export class CostingService {
     if (Object.keys(set).length) {
       await this.db.update(bomItems).set(set).where(eq(bomItems.id, bomItemId));
     }
-    return this.detail(userId, row.productId);
+    return this.detail(userId, productId);
   }
 
   /** Suggests the publish price that would hit a target margin or profit. */
@@ -273,6 +295,22 @@ export class CostingService {
       netProfit: rupiah(p.netProfitCents),
       netMarginRate: p.netMarginRate,
     };
+  }
+
+  /**
+   * bom_items has no user_id of its own (it is keyed by product), so tenant
+   * ownership is proven by joining through master_products — this is the only
+   * thing standing between one tenant and another's recipe lines.
+   */
+  private async getMaterialProductOrThrow(userId: string, bomItemId: string): Promise<string> {
+    const [row] = await this.db
+      .select({ productId: bomItems.masterProductId })
+      .from(bomItems)
+      .innerJoin(masterProducts, eq(bomItems.masterProductId, masterProducts.id))
+      .where(and(eq(bomItems.id, bomItemId), eq(masterProducts.userId, userId)))
+      .limit(1);
+    if (!row) throw new NotFoundException("Bahan baku tidak ditemukan");
+    return row.productId;
   }
 
   private async getProductOrThrow(userId: string, productId: string) {
