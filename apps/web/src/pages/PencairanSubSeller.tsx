@@ -3,6 +3,22 @@ import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
+import { Icon } from "../components/Icon";
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  EmptyState,
+  Field,
+  InlineAlert,
+  Input,
+  Modal,
+  PageHeader,
+  Select,
+  Skeleton,
+  useToast,
+} from "../components/ui";
 
 interface SubSeller {
   id: string; name: string; contact: string | null; bankAccount: string | null;
@@ -21,22 +37,67 @@ export function PencairanSubSeller() {
   const subs = useFetch<SubSeller[]>("/payout/sub-sellers");
   const subsubs = useFetch<SubSubSeller[]>("/payout/sub-sub-sellers");
   const shops = useFetch<ShopOpt[]>("/payout/shops");
+  const [showCreate, setShowCreate] = useState(false);
+
+  const reloadAll = () => {
+    subs.reload();
+    subsubs.reload();
+  };
 
   return (
     <Layout title="Manajemen Sub-seller">
-      <Link to="/pencairan" className="text-xs text-brand font-semibold hover:underline">← Kembali</Link>
-      <div className="mt-3 space-y-4">
-        <CreateSubSeller onDone={subs.reload} />
-        <SubSellerTable subs={subs.data ?? []} subsubs={subsubs.data ?? []}
-          onChange={() => { subs.reload(); subsubs.reload(); }} />
-        <ShopAssignTable shops={shops.data ?? []} subs={subs.data ?? []} subsubs={subsubs.data ?? []}
-          onChange={shops.reload} />
+      <PageHeader
+        title="Manajemen Sub-seller"
+        subtitle="Kelola sub-seller, sub-sub-seller, dan penugasan toko."
+        back={
+          <Link
+            to="/pencairan"
+            className="inline-flex items-center gap-1 text-sm text-ink-2 hover:text-ink mb-3"
+          >
+            <Icon name="arrowLeft" size={16} /> Kembali
+          </Link>
+        }
+        actions={
+          !showCreate && (
+            <Button variant="filled" icon="plus" onClick={() => setShowCreate(true)}>
+              Tambah Sub-seller
+            </Button>
+          )
+        }
+      />
+
+      <div className="space-y-4">
+        {showCreate && (
+          <CreateSubSeller
+            onDone={() => { setShowCreate(false); subs.reload(); }}
+            onCancel={() => setShowCreate(false)}
+          />
+        )}
+
+        <SubSellerList
+          loading={subs.loading}
+          subs={subs.data ?? []}
+          subsubs={subsubs.data ?? []}
+          onChange={reloadAll}
+          onAdd={() => setShowCreate(true)}
+        />
+
+        <ShopAssignList
+          loading={shops.loading}
+          shops={shops.data ?? []}
+          subs={subs.data ?? []}
+          subsubs={subsubs.data ?? []}
+          onChange={shops.reload}
+        />
       </div>
     </Layout>
   );
 }
 
-function CreateSubSeller({ onDone }: { onDone: () => void }) {
+/* ------------------------------------------------------------- create */
+
+function CreateSubSeller({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+  const toast = useToast();
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [bank, setBank] = useState("");
@@ -47,271 +108,492 @@ function CreateSubSeller({ onDone }: { onDone: () => void }) {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true); setErr(null);
+    setBusy(true);
+    setErr(null);
     try {
       await api.post("/payout/sub-sellers", {
-        name, contact: contact || undefined, bankAccount: bank || undefined,
+        name,
+        contact: contact || undefined,
+        bankAccount: bank || undefined,
         defaultRate: Number(rate) / 100,
         ...(kuota !== "" ? { kuotaTokoMaksimal: Number(kuota) } : {}),
       });
-      setName(""); setContact(""); setBank(""); setRate("20"); setKuota(""); onDone();
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+      toast("Sub-seller ditambahkan", "success");
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <form onSubmit={submit} className="bg-white rounded-xl border border-slate-200 p-4">
-      <div className="font-bold text-sm mb-3">Tambah Sub-seller</div>
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama" required
-          className="px-2 py-2 rounded-md border border-slate-300 text-sm" />
-        <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Kontak (HP/email)"
-          className="px-2 py-2 rounded-md border border-slate-300 text-sm" />
-        <input value={bank} onChange={(e) => setBank(e.target.value)} placeholder="Rekening tujuan"
-          className="px-2 py-2 rounded-md border border-slate-300 text-sm" />
-        <div className="flex items-center gap-1">
-          <input inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value.replace(/[^\d.]/g, ""))}
-            className="px-2 py-2 rounded-md border border-slate-300 text-sm w-16" />
-          <span className="text-sm text-slate-500">% rate</span>
+    <Card padded={false}>
+      <CardHeader
+        title="Tambah Sub-seller"
+        action={
+          <Button variant="text" size="sm" onClick={onCancel}>
+            Tutup
+          </Button>
+        }
+      />
+      <form onSubmit={submit} className="p-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <Field label="Nama" required>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama sub-seller" required />
+          </Field>
+          <Field label="Kontak" hint="HP atau email">
+            <Input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="08…" />
+          </Field>
+          <Field label="Rekening Tujuan">
+            <Input value={bank} onChange={(e) => setBank(e.target.value)} placeholder="Nomor rekening" className="font-mono" />
+          </Field>
+          <Field label="Rate (%)" hint="Bagian dari sisa setelah sedekah">
+            <Input
+              inputMode="decimal"
+              value={rate}
+              onChange={(e) => setRate(e.target.value.replace(/[^\d.]/g, ""))}
+              className="tabular-nums"
+            />
+          </Field>
+          <Field label="Kuota Toko" hint="Kosongkan = tanpa batas">
+            <Input
+              inputMode="numeric"
+              value={kuota}
+              onChange={(e) => setKuota(e.target.value.replace(/\D/g, ""))}
+              placeholder="∞"
+              className="tabular-nums"
+            />
+          </Field>
         </div>
-        <div className="flex items-center gap-1">
-          <input inputMode="numeric" value={kuota} onChange={(e) => setKuota(e.target.value.replace(/\D/g, ""))}
-            placeholder="∞" className="px-2 py-2 rounded-md border border-slate-300 text-sm w-16" />
-          <span className="text-xs text-slate-500">kuota toko</span>
+        {err && (
+          <div className="mt-4">
+            <InlineAlert tone="danger">{err}</InlineAlert>
+          </div>
+        )}
+        <div className="mt-4">
+          <Button variant="filled" icon="check" loading={busy} disabled={!name}>
+            Tambah Sub-seller
+          </Button>
         </div>
-      </div>
-      {err && <div className="text-red-500 text-xs mt-2">{err}</div>}
-      <button disabled={busy || !name} className="mt-3 px-4 py-2 rounded-md bg-brand hover:bg-brand-dark text-white text-sm font-semibold disabled:opacity-50">
-        {busy ? "…" : "Tambah"}
-      </button>
-    </form>
+      </form>
+    </Card>
   );
 }
 
-function SubSellerTable({
-  subs, subsubs, onChange,
-}: { subs: SubSeller[]; subsubs: SubSubSeller[]; onChange: () => void }) {
+/* --------------------------------------------------------- sub-seller list */
+
+function SubSellerList({
+  loading,
+  subs,
+  subsubs,
+  onChange,
+  onAdd,
+}: {
+  loading: boolean;
+  subs: SubSeller[];
+  subsubs: SubSubSeller[];
+  onChange: () => void;
+  onAdd: () => void;
+}) {
   const [openId, setOpenId] = useState<string | null>(null);
+
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm">Sub-seller ({subs.length})</div>
-      {!subs.length ? (
-        <div className="px-4 py-6 text-center text-slate-400 text-sm">Belum ada sub-seller.</div>
-      ) : subs.map((s) => {
-        const children = subsubs.filter((ss) => ss.subSellerId === s.id);
-        return (
-          <div key={s.id} className="border-t border-slate-100">
-            <div className="px-4 py-2 flex items-center justify-between flex-wrap gap-2">
-              <div>
-                <span className="font-semibold text-sm">{s.name}</span>
-                <span className="text-xs text-slate-400 ml-2">{pct(s.defaultRate)}</span>
-                {s.contact && <span className="text-xs text-slate-400 ml-2">· {s.contact}</span>}
-                <span className="text-xs text-slate-400 ml-2">· {s.bankAccount || "rekening belum diisi"}</span>
-                <span className={`ml-2 text-[10px] font-semibold px-2 py-0.5 rounded ${s.status === "active" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
-                  {s.status === "active" ? "Aktif" : "Nonaktif"}
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
-                <NameBankEditor endpoint={`/payout/sub-sellers/${s.id}`} currentName={s.name} currentBank={s.bankAccount} onDone={onChange} />
-                <KuotaEditor endpoint={`/payout/sub-sellers/${s.id}`} current={s.kuotaTokoMaksimal} onDone={onChange} />
-                <button onClick={() => setOpenId(openId === s.id ? null : s.id)} className="text-xs text-brand font-semibold hover:underline">
-                  {children.length} sub-sub · {openId === s.id ? "tutup" : "kelola"}
-                </button>
-              </div>
-            </div>
-            {openId === s.id && (
-              <div className="px-4 pb-3 bg-slate-50">
-                <CreateSubSubSeller subSellerId={s.id} onDone={onChange} />
-                {children.map((c) => (
-                  <div key={c.id} className="text-xs py-1 flex justify-between items-center border-t border-slate-100">
-                    <span>↳ {c.name} · {pct(c.defaultRate)}{c.contact ? ` · ${c.contact}` : ""} · {c.bankAccount || "rekening belum diisi"}</span>
-                    <div className="flex items-center gap-2">
-                      <span className={c.status === "active" ? "text-green-600" : "text-slate-400"}>{c.status === "active" ? "aktif" : "nonaktif"}</span>
-                      <NameBankEditor endpoint={`/payout/sub-sub-sellers/${c.id}`} currentName={c.name} currentBank={c.bankAccount} onDone={onChange} small />
-                      <KuotaEditor endpoint={`/payout/sub-sub-sellers/${c.id}`} current={c.kuotaTokoMaksimal} onDone={onChange} small />
+    <Card padded={false}>
+      <CardHeader title={`Sub-seller (${subs.length})`} />
+      {loading ? (
+        <div className="p-5 space-y-3">
+          <Skeleton className="h-5 w-48" />
+          <Skeleton className="h-5 w-64" />
+        </div>
+      ) : !subs.length ? (
+        <EmptyState
+          icon="users"
+          title="Belum ada sub-seller"
+          description="Tambahkan sub-seller untuk membagi hasil pencairan tiap toko."
+          action={
+            <Button variant="filled" icon="plus" onClick={onAdd}>
+              Tambah Sub-seller
+            </Button>
+          }
+        />
+      ) : (
+        <ul className="divide-y divide-line">
+          {subs.map((s) => {
+            const children = subsubs.filter((ss) => ss.subSellerId === s.id);
+            const open = openId === s.id;
+            return (
+              <li key={s.id}>
+                <div className="px-5 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium text-ink">{s.name}</span>
+                        <Badge tone={s.status === "active" ? "success" : "neutral"}>
+                          {s.status === "active" ? "Aktif" : "Nonaktif"}
+                        </Badge>
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-ink-2">
+                        <span>Rate {pct(s.defaultRate)}</span>
+                        {s.contact && <span>{s.contact}</span>}
+                        <span className="font-mono">{s.bankAccount || "rekening belum diisi"}</span>
+                        <span>Kuota: {kuotaLabel(s.kuotaTokoMaksimal)}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <EditSubSeller
+                        endpoint={`/payout/sub-sellers/${s.id}`}
+                        current={s}
+                        onDone={onChange}
+                      />
+                      <Button
+                        size="sm"
+                        variant="text"
+                        iconRight={open ? "chevronDown" : "chevronRight"}
+                        onClick={() => setOpenId(open ? null : s.id)}
+                      >
+                        {children.length} sub-sub
+                      </Button>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
+                </div>
+
+                {open && (
+                  <div className="bg-canvas border-t border-line px-5 py-4">
+                    <CreateSubSubSeller subSellerId={s.id} onDone={onChange} />
+                    {children.length > 0 && (
+                      <ul className="mt-3 space-y-2">
+                        {children.map((c) => (
+                          <li
+                            key={c.id}
+                            className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-line bg-white px-3.5 py-3"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm text-ink">{c.name}</span>
+                                <Badge tone={c.status === "active" ? "success" : "neutral"}>
+                                  {c.status === "active" ? "Aktif" : "Nonaktif"}
+                                </Badge>
+                              </div>
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-ink-2">
+                                <span>Rate {pct(c.defaultRate)}</span>
+                                {c.contact && <span>{c.contact}</span>}
+                                <span className="font-mono">{c.bankAccount || "rekening belum diisi"}</span>
+                                <span>Kuota: {kuotaLabel(c.kuotaTokoMaksimal)}</span>
+                              </div>
+                            </div>
+                            <EditSubSeller
+                              endpoint={`/payout/sub-sub-sellers/${c.id}`}
+                              current={c}
+                              onDone={onChange}
+                            />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
   );
 }
 
-function NameBankEditor({
-  endpoint, currentName, currentBank, onDone, small,
-}: { endpoint: string; currentName: string; currentBank: string | null; onDone: () => void; small?: boolean }) {
+/* ----------------------------------------------------------- inline edit */
+
+/** Edits name / bank account / quota in one place — previously these were two
+ *  separate inline editors sitting next to each other. */
+function EditSubSeller({
+  endpoint,
+  current,
+  onDone,
+}: {
+  endpoint: string;
+  current: SubSeller;
+  onDone: () => void;
+}) {
+  const toast = useToast();
   const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(currentName);
-  const [bank, setBank] = useState(currentBank ?? "");
+  const [name, setName] = useState(current.name);
+  const [bank, setBank] = useState(current.bankAccount ?? "");
+  const [kuota, setKuota] = useState(current.kuotaTokoMaksimal == null ? "" : String(current.kuotaTokoMaksimal));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  function open() {
+    setName(current.name);
+    setBank(current.bankAccount ?? "");
+    setKuota(current.kuotaTokoMaksimal == null ? "" : String(current.kuotaTokoMaksimal));
+    setErr(null);
+    setEditing(true);
+  }
+
   async function save() {
     if (!name.trim()) return;
-    setBusy(true); setErr(null);
-    try {
-      await api.patch(endpoint, { name, bankAccount: bank || null });
-      setEditing(false); onDone();
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
-  }
-
-  if (!editing) {
-    return (
-      <button
-        onClick={() => { setName(currentName); setBank(currentBank ?? ""); setEditing(true); }}
-        className={`${small ? "text-[10px]" : "text-xs"} text-slate-400 hover:text-brand hover:underline`}
-      >
-        ✎ Edit
-      </button>
-    );
-  }
-  return (
-    <div className="flex items-center gap-1 flex-wrap">
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama"
-        className={`${small ? "w-24 text-[10px]" : "w-28 text-xs"} px-1.5 py-1 rounded border border-slate-300`} autoFocus />
-      <input value={bank} onChange={(e) => setBank(e.target.value)} placeholder="Rekening"
-        className={`${small ? "w-28 text-[10px]" : "w-32 text-xs"} px-1.5 py-1 rounded border border-slate-300`} />
-      <button onClick={save} disabled={busy || !name.trim()} className="text-[10px] px-2 py-1 rounded bg-brand text-white font-semibold disabled:opacity-50">✓</button>
-      <button onClick={() => setEditing(false)} className="text-[10px] text-slate-400">✕</button>
-      {err && <span className="text-red-500 text-[10px]">{err}</span>}
-    </div>
-  );
-}
-
-function KuotaEditor({
-  endpoint, current, onDone, small,
-}: { endpoint: string; current: number | null; onDone: () => void; small?: boolean }) {
-  const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(current == null ? "" : String(current));
-  const [busy, setBusy] = useState(false);
-
-  async function save() {
     setBusy(true);
+    setErr(null);
     try {
-      await api.patch(endpoint, { kuotaTokoMaksimal: val === "" ? null : Number(val) });
-      setEditing(false); onDone();
-    } finally { setBusy(false); }
+      await api.patch(endpoint, {
+        name,
+        bankAccount: bank || null,
+        kuotaTokoMaksimal: kuota === "" ? null : Number(kuota),
+      });
+      toast("Perubahan tersimpan", "success");
+      setEditing(false);
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  if (!editing) {
-    return (
-      <button onClick={() => setEditing(true)}
-        className={`${small ? "text-[10px]" : "text-xs"} text-slate-400 hover:text-brand hover:underline`}>
-        Kuota toko: {kuotaLabel(current)}
-      </button>
-    );
-  }
   return (
-    <div className="flex items-center gap-1">
-      <input inputMode="numeric" value={val} onChange={(e) => setVal(e.target.value.replace(/\D/g, ""))}
-        placeholder="∞" className="w-14 px-1.5 py-1 rounded border border-slate-300 text-xs" autoFocus />
-      <button onClick={save} disabled={busy} className="text-[10px] px-2 py-1 rounded bg-brand text-white font-semibold disabled:opacity-50">✓</button>
-      <button onClick={() => setEditing(false)} className="text-[10px] text-slate-400">✕</button>
-    </div>
+    <>
+      <Button size="sm" variant="text" icon="pencil" onClick={open}>
+        Edit
+      </Button>
+      <Modal
+        open={editing}
+        onClose={() => setEditing(false)}
+        title={`Edit ${current.name}`}
+        footer={
+          <>
+            <Button variant="text" onClick={() => setEditing(false)} disabled={busy}>
+              Batal
+            </Button>
+            <Button variant="filled" loading={busy} disabled={!name.trim()} onClick={save}>
+              Simpan
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Field label="Nama" required>
+            <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          </Field>
+          <Field label="Rekening tujuan">
+            <Input value={bank} onChange={(e) => setBank(e.target.value)} className="font-mono" />
+          </Field>
+          <Field label="Kuota toko" hint="Kosongkan untuk tanpa batas">
+            <Input
+              inputMode="numeric"
+              value={kuota}
+              onChange={(e) => setKuota(e.target.value.replace(/\D/g, ""))}
+              placeholder="∞"
+              className="tabular-nums"
+            />
+          </Field>
+          {err && <InlineAlert tone="danger">{err}</InlineAlert>}
+        </div>
+      </Modal>
+    </>
   );
 }
+
+/* ------------------------------------------------------ create sub-sub */
 
 function CreateSubSubSeller({ subSellerId, onDone }: { subSellerId: string; onDone: () => void }) {
+  const toast = useToast();
   const [name, setName] = useState("");
   const [rate, setRate] = useState("50");
   const [kuota, setKuota] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true); setErr(null);
+    setBusy(true);
+    setErr(null);
     try {
       await api.post("/payout/sub-sub-sellers", {
-        subSellerId, name, defaultRate: Number(rate) / 100,
+        subSellerId,
+        name,
+        defaultRate: Number(rate) / 100,
         ...(kuota !== "" ? { kuotaTokoMaksimal: Number(kuota) } : {}),
       });
-      setName(""); setRate("50"); setKuota(""); onDone();
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+      setName("");
+      setRate("50");
+      setKuota("");
+      toast("Sub-sub-seller ditambahkan", "success");
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
+
   return (
-    <form onSubmit={submit} className="flex flex-wrap gap-2 items-center py-2">
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama sub-sub-seller" required
-        className="px-2 py-1.5 rounded-md border border-slate-300 text-sm" />
-      <div className="flex items-center gap-1">
-        <input inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value.replace(/[^\d.]/g, ""))}
-          className="px-2 py-1.5 rounded-md border border-slate-300 text-sm w-16" />
-        <span className="text-xs text-slate-500">% dari jatah sub-seller</span>
+    <form onSubmit={submit}>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Field label="Nama sub-sub-seller" required>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama" required />
+        </Field>
+        <Field label="Rate (%)" hint="Dari jatah sub-seller">
+          <Input
+            inputMode="decimal"
+            value={rate}
+            onChange={(e) => setRate(e.target.value.replace(/[^\d.]/g, ""))}
+            className="tabular-nums"
+          />
+        </Field>
+        <Field label="Kuota toko" hint="Kosong = tanpa batas">
+          <Input
+            inputMode="numeric"
+            value={kuota}
+            onChange={(e) => setKuota(e.target.value.replace(/\D/g, ""))}
+            placeholder="∞"
+            className="tabular-nums"
+          />
+        </Field>
       </div>
-      <div className="flex items-center gap-1">
-        <input inputMode="numeric" value={kuota} onChange={(e) => setKuota(e.target.value.replace(/\D/g, ""))}
-          placeholder="∞" className="px-2 py-1.5 rounded-md border border-slate-300 text-sm w-14" />
-        <span className="text-xs text-slate-500">kuota toko</span>
+      {err && (
+        <div className="mt-3">
+          <InlineAlert tone="danger">{err}</InlineAlert>
+        </div>
+      )}
+      <div className="mt-3">
+        <Button size="sm" variant="tonal" icon="plus" loading={busy} disabled={!name}>
+          Tambah Sub-sub-seller
+        </Button>
       </div>
-      <button disabled={busy || !name} className="text-xs px-3 py-1.5 rounded bg-brand hover:bg-brand-dark text-white font-semibold disabled:opacity-50">
-        + Tambah
-      </button>
-      {err && <span className="text-red-500 text-xs">{err}</span>}
     </form>
   );
 }
 
-function ShopAssignTable({
-  shops, subs, subsubs, onChange,
-}: { shops: ShopOpt[]; subs: SubSeller[]; subsubs: SubSubSeller[]; onChange: () => void }) {
+/* ------------------------------------------------------ shop assignment */
+
+function ShopAssignList({
+  loading,
+  shops,
+  subs,
+  subsubs,
+  onChange,
+}: {
+  loading: boolean;
+  shops: ShopOpt[];
+  subs: SubSeller[];
+  subsubs: SubSubSeller[];
+  onChange: () => void;
+}) {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm">Penugasan Toko</div>
-      {!shops.length ? (
-        <div className="px-4 py-6 text-center text-slate-400 text-sm">Belum ada toko terhubung.</div>
+    <Card padded={false}>
+      <CardHeader
+        title="Penugasan Toko"
+        subtitle="Tentukan siapa pemilik tiap toko — menentukan ke mana hasil pencairannya dibagi."
+      />
+      {loading ? (
+        <div className="p-5 space-y-3">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+        </div>
+      ) : !shops.length ? (
+        <EmptyState
+          icon="store"
+          title="Belum ada toko"
+          description="Hubungkan toko lewat menu Toko Saya terlebih dahulu."
+        />
       ) : (
-        <div className="divide-y divide-slate-100">
+        <ul className="divide-y divide-line">
           {shops.map((sh) => (
             <ShopAssignRow key={sh.id} shop={sh} subs={subs} subsubs={subsubs} onChange={onChange} />
           ))}
-        </div>
+        </ul>
       )}
-    </div>
+    </Card>
   );
 }
 
 function ShopAssignRow({
-  shop, subs, subsubs, onChange,
-}: { shop: ShopOpt; subs: SubSeller[]; subsubs: SubSubSeller[]; onChange: () => void }) {
+  shop,
+  subs,
+  subsubs,
+  onChange,
+}: {
+  shop: ShopOpt;
+  subs: SubSeller[];
+  subsubs: SubSubSeller[];
+  onChange: () => void;
+}) {
+  const toast = useToast();
   const [subSellerId, setSubSellerId] = useState(shop.subSellerId ?? "");
   const [subSubSellerId, setSubSubSellerId] = useState(shop.subSubSellerId ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const children = subsubs.filter((ss) => ss.subSellerId === subSellerId);
 
+  const dirty =
+    subSellerId !== (shop.subSellerId ?? "") || subSubSellerId !== (shop.subSubSellerId ?? "");
+
   async function save() {
-    setBusy(true); setErr(null);
+    setBusy(true);
+    setErr(null);
     try {
       await api.post(`/payout/shops/${shop.id}/assign`, {
         subSellerId: subSellerId || null,
-        subSubSellerId: subSellerId ? (subSubSellerId || null) : null,
+        subSubSellerId: subSellerId ? subSubSellerId || null : null,
       });
+      toast("Penugasan toko disimpan", "success");
       onChange();
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <div className="px-4 py-2 flex flex-wrap items-center gap-2">
-      <div className="min-w-[160px]">
-        <span className="font-semibold text-sm">{shop.shopName}</span>
-        <span className="text-xs text-slate-400 ml-1">({shop.marketplace})</span>
+    <li className="px-5 py-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-[160px] flex-1">
+          <div className="text-sm font-medium text-ink">{shop.shopName}</div>
+          <div className="text-xs text-ink-3 mt-0.5 capitalize">
+            {shop.marketplace} · Skenario {shop.scenario}
+          </div>
+        </div>
+
+        <Field label="Sub-seller" className="w-full sm:w-52">
+          <Select
+            value={subSellerId}
+            onChange={(e) => {
+              setSubSellerId(e.target.value);
+              setSubSubSellerId("");
+            }}
+          >
+            <option value="">— milik Seller —</option>
+            {subs.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </Select>
+        </Field>
+
+        <Field label="Sub-sub-seller" className="w-full sm:w-52">
+          <Select
+            value={subSubSellerId}
+            onChange={(e) => setSubSubSellerId(e.target.value)}
+            disabled={!subSellerId}
+          >
+            <option value="">— tanpa sub-sub —</option>
+            {children.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </Select>
+        </Field>
+
+        <Button variant={dirty ? "filled" : "outline"} loading={busy} disabled={!dirty} onClick={save}>
+          Simpan
+        </Button>
       </div>
-      <select value={subSellerId} onChange={(e) => { setSubSellerId(e.target.value); setSubSubSellerId(""); }}
-        className="px-2 py-1.5 rounded-md border border-slate-300 text-sm">
-        <option value="">— milik Seller —</option>
-        {subs.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-      </select>
-      <select value={subSubSellerId} onChange={(e) => setSubSubSellerId(e.target.value)} disabled={!subSellerId}
-        className="px-2 py-1.5 rounded-md border border-slate-300 text-sm disabled:bg-slate-100">
-        <option value="">— tanpa sub-sub —</option>
-        {children.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-      </select>
-      <button onClick={save} disabled={busy} className="text-xs px-3 py-1.5 rounded bg-brand hover:bg-brand-dark text-white font-semibold disabled:opacity-50">
-        Simpan
-      </button>
-      {err && <span className="text-red-500 text-xs">{err}</span>}
-    </div>
+      {err && (
+        <div className="mt-3">
+          <InlineAlert tone="danger">{err}</InlineAlert>
+        </div>
+      )}
+    </li>
   );
 }

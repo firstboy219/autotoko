@@ -2,6 +2,22 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
+import { Icon } from "../components/Icon";
+import {
+  Badge,
+  Card,
+  CardHeader,
+  EmptyState,
+  PageHeader,
+  Select,
+  SkeletonRows,
+  Table,
+  TableWrap,
+  TD,
+  TH,
+  THead,
+  TR,
+} from "../components/ui";
 
 interface MappingRow {
   id: string;
@@ -23,12 +39,12 @@ const SCENARIO_LABEL: Record<MappingRow["scenario"], string> = {
   B: "B — Milik Sub-seller",
   C: "C — Milik Sub-sub-seller",
 };
-const SCENARIO_BADGE: Record<MappingRow["scenario"], string> = {
-  A: "bg-slate-100 text-slate-600",
-  B: "bg-blue-100 text-blue-700",
-  C: "bg-violet-100 text-violet-700",
+const SCENARIO_TONE: Record<MappingRow["scenario"], "neutral" | "info" | "brand"> = {
+  A: "neutral",
+  B: "info",
+  C: "brand",
 };
-const pct = (r: number | null) => (r == null ? "-" : `${(r * 100).toFixed(1)}%`);
+const pct = (r: number | null) => (r == null ? "—" : `${(r * 100).toFixed(1)}%`);
 
 export function PencairanMapping() {
   const { data, loading } = useFetch<MappingRow[]>("/payout/mapping");
@@ -36,7 +52,9 @@ export function PencairanMapping() {
 
   const subOptions = useMemo(() => {
     const map = new Map<string, string>();
-    (data ?? []).forEach((r) => { if (r.subSellerId && r.subSellerName) map.set(r.subSellerId, r.subSellerName); });
+    (data ?? []).forEach((r) => {
+      if (r.subSellerId && r.subSellerName) map.set(r.subSellerId, r.subSellerName);
+    });
     return [...map.entries()];
   }, [data]);
 
@@ -45,61 +63,118 @@ export function PencairanMapping() {
     return (data ?? []).filter((r) => r.subSellerId === filterSub);
   }, [data, filterSub]);
 
+  // Scenario mix — a quick read of how the portfolio is owned, without
+  // counting rows by eye.
+  const counts = useMemo(() => {
+    const c = { A: 0, B: 0, C: 0 };
+    (data ?? []).forEach((r) => { c[r.scenario] += 1; });
+    return c;
+  }, [data]);
+
   return (
     <Layout title="Mapping Toko ↔ Owner">
-      <div className="flex items-center justify-between mb-3">
-        <Link to="/pencairan" className="text-xs text-brand font-semibold hover:underline">← Kembali</Link>
-        <select value={filterSub} onChange={(e) => setFilterSub(e.target.value)}
-          className="px-2 py-1.5 rounded-md border border-slate-300 text-sm">
-          <option value="">Semua Sub-seller</option>
-          {subOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-        </select>
-      </div>
-
-      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
-        <table className="w-full text-sm min-w-[880px]">
-          <thead>
-            <tr className="bg-slate-50 text-[10px] uppercase text-slate-500">
-              <th className="text-left px-3 py-2">Nama Toko</th>
-              <th className="text-left px-3 py-2">Marketplace</th>
-              <th className="text-left px-3 py-2">Skenario</th>
-              <th className="text-left px-3 py-2">Rantai Kepemilikan</th>
-              <th className="text-left px-3 py-2">Rekening Tujuan Aktif</th>
-              <th className="text-left px-3 py-2">Rate Berlaku</th>
-              <th className="text-left px-3 py-2">Ditambahkan Oleh</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-400">Memuat…</td></tr>
-            ) : !rows.length ? (
-              <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-400">Belum ada toko.</td></tr>
-            ) : rows.map((r) => (
-              <tr key={r.id} className="border-t border-slate-100">
-                <td className="px-3 py-2 font-medium">{r.shopName}</td>
-                <td className="px-3 py-2 text-slate-500">{r.marketplace}</td>
-                <td className="px-3 py-2">
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${SCENARIO_BADGE[r.scenario]}`}>
-                    {SCENARIO_LABEL[r.scenario]}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-slate-600">
-                  {r.scenario === "A" && "—"}
-                  {r.scenario === "B" && r.subSellerName}
-                  {r.scenario === "C" && `${r.subSubSellerName} › ${r.subSellerName}`}
-                </td>
-                <td className="px-3 py-2 font-mono text-xs">{r.activeAccount ?? "-"}</td>
-                <td className="px-3 py-2 text-slate-500 text-xs">
-                  {r.scenario !== "A" && <div>Sub-seller: {pct(r.effectiveSubSellerRate)}</div>}
-                  {r.scenario === "C" && <div>Sub-sub-seller: {pct(r.effectiveSubSubSellerRate)}</div>}
-                  {r.scenario === "A" && "-"}
-                </td>
-                <td className="px-3 py-2 text-slate-600">{r.addedByName}</td>
-              </tr>
+      <PageHeader
+        title="Mapping Toko ↔ Owner"
+        subtitle="Kepemilikan tiap toko, rekening tujuan aktif, dan rate yang berlaku."
+        back={
+          <Link
+            to="/pencairan"
+            className="inline-flex items-center gap-1 text-sm text-ink-2 hover:text-ink mb-3"
+          >
+            <Icon name="arrowLeft" size={16} /> Kembali
+          </Link>
+        }
+        actions={
+          <Select
+            value={filterSub}
+            onChange={(e) => setFilterSub(e.target.value)}
+            className="w-auto min-w-[180px]"
+          >
+            <option value="">Semua Sub-seller</option>
+            {subOptions.map(([id, name]) => (
+              <option key={id} value={id}>{name}</option>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </Select>
+        }
+      />
+
+      {!loading && (data?.length ?? 0) > 0 && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          <Badge tone="neutral">Skenario A · {counts.A} toko</Badge>
+          <Badge tone="info">Skenario B · {counts.B} toko</Badge>
+          <Badge tone="brand">Skenario C · {counts.C} toko</Badge>
+        </div>
+      )}
+
+      <Card padded={false}>
+        <CardHeader
+          title={loading ? "Memuat…" : `${rows.length} toko`}
+          subtitle={filterSub ? "Difilter berdasarkan sub-seller" : undefined}
+        />
+        <TableWrap>
+          <Table className="min-w-[900px]">
+            <THead>
+              <TR className="border-t-0">
+                <TH>Nama Toko</TH>
+                <TH>Marketplace</TH>
+                <TH>Skenario</TH>
+                <TH>Rantai Kepemilikan</TH>
+                <TH>Rekening Tujuan Aktif</TH>
+                <TH>Rate Berlaku</TH>
+                <TH>Ditambahkan Oleh</TH>
+              </TR>
+            </THead>
+            <tbody>
+              {loading ? (
+                <SkeletonRows n={5} cols={7} />
+              ) : !rows.length ? (
+                <TR>
+                  <TD colSpan={7} className="p-0">
+                    <EmptyState
+                      icon="store"
+                      title={filterSub ? "Tidak ada toko untuk sub-seller ini" : "Belum ada toko"}
+                      description={
+                        filterSub
+                          ? "Coba ubah filter sub-seller."
+                          : "Hubungkan toko lewat menu Toko Saya, lalu tugaskan kepemilikannya di halaman Sub-seller."
+                      }
+                    />
+                  </TD>
+                </TR>
+              ) : (
+                rows.map((r) => (
+                  <TR key={r.id}>
+                    <TD className="text-ink font-medium">{r.shopName}</TD>
+                    <TD className="text-ink-2 capitalize">{r.marketplace}</TD>
+                    <TD>
+                      <Badge tone={SCENARIO_TONE[r.scenario]}>{SCENARIO_LABEL[r.scenario]}</Badge>
+                    </TD>
+                    <TD className="text-ink-2">
+                      {r.scenario === "A" && "—"}
+                      {r.scenario === "B" && r.subSellerName}
+                      {r.scenario === "C" && `${r.subSubSellerName} › ${r.subSellerName}`}
+                    </TD>
+                    <TD className="font-mono text-xs text-ink">{r.activeAccount ?? "—"}</TD>
+                    <TD className="text-xs text-ink-2">
+                      {r.scenario === "A" ? (
+                        "—"
+                      ) : (
+                        <>
+                          <div>Sub-seller: {pct(r.effectiveSubSellerRate)}</div>
+                          {r.scenario === "C" && (
+                            <div>Sub-sub-seller: {pct(r.effectiveSubSubSellerRate)}</div>
+                          )}
+                        </>
+                      )}
+                    </TD>
+                    <TD className="text-ink-2">{r.addedByName}</TD>
+                  </TR>
+                ))
+              )}
+            </tbody>
+          </Table>
+        </TableWrap>
+      </Card>
     </Layout>
   );
 }

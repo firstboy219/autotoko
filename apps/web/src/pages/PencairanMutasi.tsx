@@ -3,6 +3,22 @@ import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { rupiah, dateShort } from "../lib/fmt";
+import { Icon } from "../components/Icon";
+import {
+  Badge,
+  Card,
+  CardHeader,
+  EmptyState,
+  PageHeader,
+  Select,
+  SkeletonRows,
+  Table,
+  TableWrap,
+  TD,
+  TH,
+  THead,
+  TR,
+} from "../components/ui";
 
 interface Mutation {
   id: string; batchId: string; shopId: string; payoutDate: string;
@@ -19,59 +35,138 @@ export function PencairanMutasi() {
   const { data: shops } = useFetch<ShopOpt[]>("/payout/shops");
   const shopName = (id: string) => shops?.find((s) => s.id === id)?.shopName ?? id.slice(0, 8);
 
+  // Column totals — the point of an "all mutations" view is the aggregate,
+  // which previously had to be added up by hand.
+  const totals = useMemo(
+    () =>
+      (data ?? []).reduce(
+        (a, m) => {
+          a.credit += Number(m.creditAmount) || 0;
+          a.sedekah += Number(m.sedekahAmount) || 0;
+          a.seller += Number(m.sellerAmount) || 0;
+          a.sub += Number(m.subSellerAmount) || 0;
+          a.subSub += Number(m.subSubSellerAmount) || 0;
+          return a;
+        },
+        { credit: 0, sedekah: 0, seller: 0, sub: 0, subSub: 0 },
+      ),
+    [data],
+  );
+
   return (
     <Layout title="Semua Mutasi Pencairan">
-      <div className="flex items-center justify-between mb-3">
-        <Link to="/pencairan" className="text-xs text-brand font-semibold hover:underline">← Kembali</Link>
-        <select value={status} onChange={(e) => setStatus(e.target.value)}
-          className="px-2 py-1.5 rounded-md border border-slate-300 text-sm">
-          <option value="">Semua status</option>
-          <option value="draft">Draft</option>
-          <option value="completed">Selesai</option>
-        </select>
-      </div>
-      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
-        <table className="w-full text-sm min-w-[720px]">
-          <thead>
-            <tr className="bg-slate-50 text-[10px] uppercase text-slate-500">
-              <th className="text-left px-3 py-2">Tanggal</th>
-              <th className="text-left px-3 py-2">Toko</th>
-              <th className="text-right px-3 py-2">Kredit</th>
-              <th className="text-right px-3 py-2">Sedekah</th>
-              <th className="text-right px-3 py-2">Seller</th>
-              <th className="text-right px-3 py-2">Sub-seller</th>
-              <th className="text-right px-3 py-2">Sub-sub</th>
-              <th className="text-left px-3 py-2">Status</th>
-              <th className="px-3 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={9} className="px-3 py-6 text-center text-slate-400">Memuat…</td></tr>
-            ) : !data?.length ? (
-              <tr><td colSpan={9} className="px-3 py-6 text-center text-slate-400">Tidak ada mutasi.</td></tr>
-            ) : data.map((m) => (
-              <tr key={m.id} className="border-t border-slate-100">
-                <td className="px-3 py-2 text-slate-500">{dateShort(m.payoutDate)}</td>
-                <td className="px-3 py-2">{shopName(m.shopId)}</td>
-                <td className="px-3 py-2 text-right font-semibold">{rupiah(m.creditAmount)}</td>
-                <td className="px-3 py-2 text-right text-slate-500">{rupiah(m.sedekahAmount)}</td>
-                <td className="px-3 py-2 text-right text-slate-500">{rupiah(m.sellerAmount)}</td>
-                <td className="px-3 py-2 text-right text-slate-500">{m.subSellerAmount ? rupiah(m.subSellerAmount) : "-"}</td>
-                <td className="px-3 py-2 text-right text-slate-500">{m.subSubSellerAmount ? rupiah(m.subSubSellerAmount) : "-"}</td>
-                <td className="px-3 py-2">
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${m.status === "completed" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"}`}>
-                    {m.status === "completed" ? "Selesai" : "Draft"}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <Link to={`/pencairan/batch/${m.batchId}`} className="text-xs text-brand font-semibold hover:underline">Batch →</Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <PageHeader
+        title="Semua Mutasi Pencairan"
+        subtitle="Seluruh pencairan toko dari semua batch."
+        back={
+          <Link
+            to="/pencairan"
+            className="inline-flex items-center gap-1 text-sm text-ink-2 hover:text-ink mb-3"
+          >
+            <Icon name="arrowLeft" size={16} /> Kembali
+          </Link>
+        }
+        actions={
+          <Select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="w-auto min-w-[160px]"
+          >
+            <option value="">Semua status</option>
+            <option value="draft">Draft</option>
+            <option value="completed">Selesai</option>
+          </Select>
+        }
+      />
+
+      <Card padded={false}>
+        <CardHeader
+          title={loading ? "Memuat…" : `${data?.length ?? 0} mutasi`}
+          subtitle={
+            !loading && data?.length
+              ? `Total kredit ${rupiah(totals.credit)}`
+              : undefined
+          }
+        />
+        <TableWrap>
+          <Table className="min-w-[860px]">
+            <THead>
+              <TR className="border-t-0">
+                <TH>Tanggal</TH>
+                <TH>Toko</TH>
+                <TH align="right">Kredit</TH>
+                <TH align="right">Sedekah</TH>
+                <TH align="right">Seller</TH>
+                <TH align="right">Sub-seller</TH>
+                <TH align="right">Sub-sub</TH>
+                <TH>Status</TH>
+                <TH align="right" />
+              </TR>
+            </THead>
+            <tbody>
+              {loading ? (
+                <SkeletonRows n={5} cols={9} />
+              ) : !data?.length ? (
+                <TR>
+                  <TD colSpan={9} className="p-0">
+                    <EmptyState
+                      icon="fileText"
+                      title="Tidak ada mutasi"
+                      description={
+                        status
+                          ? "Tidak ada mutasi dengan status tersebut. Coba ubah filter."
+                          : "Mutasi akan muncul di sini setelah kamu merekam pencairan pada sebuah batch."
+                      }
+                    />
+                  </TD>
+                </TR>
+              ) : (
+                <>
+                  {data.map((m) => (
+                    <TR key={m.id}>
+                      <TD className="text-ink-2 whitespace-nowrap">{dateShort(m.payoutDate)}</TD>
+                      <TD className="text-ink">{shopName(m.shopId)}</TD>
+                      <TD align="right" className="text-ink tabular-nums">{rupiah(m.creditAmount)}</TD>
+                      <TD align="right" className="text-ink-2 tabular-nums">{rupiah(m.sedekahAmount)}</TD>
+                      <TD align="right" className="text-ink-2 tabular-nums">{rupiah(m.sellerAmount)}</TD>
+                      <TD align="right" className="text-ink-2 tabular-nums">
+                        {m.subSellerAmount ? rupiah(m.subSellerAmount) : "—"}
+                      </TD>
+                      <TD align="right" className="text-ink-2 tabular-nums">
+                        {m.subSubSellerAmount ? rupiah(m.subSubSellerAmount) : "—"}
+                      </TD>
+                      <TD>
+                        <Badge tone={m.status === "completed" ? "success" : "neutral"}>
+                          {m.status === "completed" ? "Selesai" : "Draft"}
+                        </Badge>
+                      </TD>
+                      <TD align="right">
+                        <Link
+                          to={`/pencairan/batch/${m.batchId}`}
+                          className="inline-flex items-center gap-1 text-sm text-brand-ink hover:underline whitespace-nowrap"
+                        >
+                          Batch <Icon name="chevronRight" size={14} />
+                        </Link>
+                      </TD>
+                    </TR>
+                  ))}
+                  <TR className="bg-canvas">
+                    <TD className="text-xs font-medium text-ink-2">TOTAL</TD>
+                    <TD />
+                    <TD align="right" className="text-ink font-medium tabular-nums">{rupiah(totals.credit)}</TD>
+                    <TD align="right" className="text-ink-2 tabular-nums">{rupiah(totals.sedekah)}</TD>
+                    <TD align="right" className="text-ink-2 tabular-nums">{rupiah(totals.seller)}</TD>
+                    <TD align="right" className="text-ink-2 tabular-nums">{rupiah(totals.sub)}</TD>
+                    <TD align="right" className="text-ink-2 tabular-nums">{rupiah(totals.subSub)}</TD>
+                    <TD />
+                    <TD />
+                  </TR>
+                </>
+              )}
+            </tbody>
+          </Table>
+        </TableWrap>
+      </Card>
     </Layout>
   );
 }
