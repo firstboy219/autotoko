@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { calculatePublishPricing, requiredPublishPriceCents } from "@autotoko/shared";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
@@ -69,6 +70,7 @@ interface Detail {
   pricing: Pricing | null;
 }
 
+const rp = (cents: number) => cents / 100;
 const pctStr = (r: number) => (r * 100).toFixed(r * 100 % 1 === 0 ? 0 : 1);
 
 export function HppDetail() {
@@ -485,38 +487,85 @@ function PublishSection({
   const toast = useToast();
   const c = data.costing;
   const [price, setPrice] = useState(c.publishPrice != null ? String(c.publishPrice) : "");
-  const [rates, setRates] = useState<Record<string, string>>({});
+  const [rates, setRates] = useState<Record<string, string>>(() =>
+    Object.fromEntries(RATE_FIELDS.map((f) => [f.key, pctStr(Number(c[f.key]) || 0)])),
+  );
   const [adsFixed, setAdsFixed] = useState(String(c.adsFixedPerPcs));
   const [target, setTarget] = useState(String(Math.round(c.targetProfitRate * 100)));
   const [busy, setBusy] = useState(false);
-  const [suggesting, setSuggesting] = useState(false);
-  const [suggestion, setSuggestion] = useState<{ price: number | null; reason: string | null } | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     setPrice(c.publishPrice != null ? String(c.publishPrice) : "");
     setAdsFixed(String(c.adsFixedPerPcs));
-    setRates(
-      Object.fromEntries(RATE_FIELDS.map((f) => [f.key, pctStr(Number(c[f.key]) || 0)])),
-    );
+    setRates(Object.fromEntries(RATE_FIELDS.map((f) => [f.key, pctStr(Number(c[f.key]) || 0)])));
     setTarget(String(Math.round(c.targetProfitRate * 100)));
   }, [c]);
+
+  const hppCents = Math.round(data.hpp.total * 100);
+  const rate = (k: string) => (Number(rates[k]) || 0) / 100;
+
+  /**
+   * The composition inputs feed the same shared calculator the backend uses,
+   * so the waterfall recomputes as you type — no save round-trip needed just
+   * to see the effect of a number.
+   */
+  const costInputs = useMemo(
+    () => ({
+      hppCents,
+      marketplaceFeeRate: rate("marketplaceFeeRate"),
+      eventRate: rate("eventRate"),
+      affiliatorRate: rate("affiliatorRate"),
+      adsRate: rate("adsRate"),
+      adsFixedCents: Math.round((Number(adsFixed) || 0) * 100),
+      sedekahRate: rate("sedekahRate"),
+      resellerRate: rate("resellerRate"),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [hppCents, rates, adsFixed],
+  );
+
+  const priceNum = Number(price) || 0;
+
+  const live = useMemo(
+    () =>
+      priceNum > 0
+        ? calculatePublishPricing({ ...costInputs, publishPriceCents: Math.round(priceNum * 100) })
+        : null,
+    [costInputs, priceNum],
+  );
+
+  /**
+   * Before a price exists there is nothing to show a waterfall for, so offer a
+   * starting point derived from the HPP and the target margin instead of an
+   * empty panel.
+   */
+  const targetRate = (Number(target) || 0) / 100;
+  const suggestedCents = useMemo(
+    () => requiredPublishPriceCents({ ...costInputs, target: { kind: "margin", marginRate: targetRate } }),
+    [costInputs, targetRate],
+  );
+  // Nobody lists Rp 9.259,26 — round up to a whole rupiah.
+  const suggested = suggestedCents == null ? null : Math.ceil(suggestedCents / 100);
+
+  const dirty =
+    priceNum !== (c.publishPrice ?? 0) ||
+    (Number(adsFixed) || 0) !== c.adsFixedPerPcs ||
+    targetRate !== c.targetProfitRate ||
+    RATE_FIELDS.some((f) => rate(f.key) !== Number(c[f.key]));
 
   async function save() {
     setBusy(true);
     setErr(null);
     try {
       const payload: Record<string, number | null> = {
-        publishPrice: price === "" ? null : Number(price),
+        publishPrice: price === "" ? null : priceNum,
         adsFixedPerPcs: Number(adsFixed) || 0,
-        targetProfitRate: (Number(target) || 0) / 100,
+        targetProfitRate: targetRate,
       };
-      for (const f of RATE_FIELDS) {
-        payload[f.key] = (Number(rates[f.key]) || 0) / 100;
-      }
+      for (const f of RATE_FIELDS) payload[f.key] = rate(f.key);
       await api.patch(`/costing/${productId}`, payload);
       toast("Komposisi harga disimpan", "success");
-      setSuggestion(null);
       onChange();
     } catch (e) {
       setErr((e as Error).message);
@@ -525,36 +574,30 @@ function PublishSection({
     }
   }
 
-  async function suggest() {
-    setSuggesting(true);
-    setErr(null);
-    try {
-      const r = await api.post<{ suggestedPrice: number | null; reason: string | null }>(
-        `/costing/${productId}/suggest-price`,
-        { kind: "margin", value: (Number(target) || 0) / 100 },
-      );
-      setSuggestion({ price: r.suggestedPrice, reason: r.reason });
-      if (r.suggestedPrice != null) setPrice(String(r.suggestedPrice));
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setSuggesting(false);
-    }
-  }
-
-  const p = data.pricing;
-
   return (
     <Card padded={false}>
       <CardHeader
         title="2 · Harga Publish & Profit"
         subtitle="Susun komposisi biaya, lalu lihat sisa bersih yang benar-benar diterima seller."
+        action={
+          dirty ? (
+            <Badge tone="warning">Belum disimpan</Badge>
+          ) : (
+            <Badge tone="success" icon="check">
+              Tersimpan
+            </Badge>
+          )
+        }
       />
 
       <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* --- inputs --- */}
         <div>
-          <Field label="Harga Publish" hint="Harga yang tampil di marketplace." className="max-w-xs">
+          <Field
+            label="Harga Publish"
+            hint="Harga yang tampil di marketplace."
+            className="max-w-xs"
+          >
             <Input
               inputMode="numeric"
               value={price ? Number(price).toLocaleString("id-ID") : ""}
@@ -563,6 +606,36 @@ function PublishSection({
               className="tabular-nums"
             />
           </Field>
+
+          {priceNum <= 0 && (
+            <div className="mt-3">
+              {suggested != null ? (
+                <div className="rounded-lg border border-brand/40 bg-brand/10 p-3.5">
+                  <div className="text-sm text-ink">
+                    Saran harga publish:{" "}
+                    <b className="tabular-nums">{rupiah(suggested)}</b>
+                  </div>
+                  <div className="text-xs text-ink-2 mt-0.5">
+                    Dari HPP {rupiah(data.hpp.total)} agar profit bersih ≈ {target}%.
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="filled"
+                    icon="check"
+                    className="mt-2.5"
+                    onClick={() => setPrice(String(suggested))}
+                  >
+                    Pakai harga ini
+                  </Button>
+                </div>
+              ) : (
+                <InlineAlert tone="warning">
+                  Target {target}% tidak tercapai dengan komposisi biaya saat ini — total potongan
+                  sudah menghabiskan harga jual. Turunkan target atau kurangi persentase biaya.
+                </InlineAlert>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3 mt-4">
             {RATE_FIELDS.map((f) => (
@@ -576,7 +649,9 @@ function PublishSection({
                     }
                     className="pr-7 tabular-nums"
                   />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink-3">%</span>
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink-3">
+                    %
+                  </span>
                 </div>
               </Field>
             ))}
@@ -589,6 +664,19 @@ function PublishSection({
                 className="tabular-nums"
               />
             </Field>
+            <Field label="Target Margin" hint="Dipakai untuk saran harga">
+              <div className="relative">
+                <Input
+                  inputMode="decimal"
+                  value={target}
+                  onChange={(e) => setTarget(e.target.value.replace(/[^\d.]/g, ""))}
+                  className="pr-7 tabular-nums"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink-3">
+                  %
+                </span>
+              </div>
+            </Field>
           </div>
 
           {err && (
@@ -597,71 +685,55 @@ function PublishSection({
             </div>
           )}
 
-          <div className="mt-4">
-            <Button variant="filled" icon="check" loading={busy} onClick={save}>
+          <div className="flex flex-wrap items-center gap-3 mt-4">
+            <Button
+              variant={dirty ? "filled" : "outline"}
+              icon="check"
+              loading={busy}
+              disabled={!dirty}
+              onClick={save}
+            >
               Simpan Komposisi
             </Button>
-          </div>
-
-          <div className="mt-5 pt-4 border-t border-line">
-            <div className="text-sm font-medium text-ink mb-1">Cari harga dari target profit</div>
-            <p className="text-xs text-ink-2 mb-3">
-              Hitung mundur: berapa harga publish supaya profit bersihnya sesuai target.
-            </p>
-            <div className="flex flex-wrap items-end gap-2">
-              <Field label="Target margin" className="w-32">
-                <div className="relative">
-                  <Input
-                    inputMode="decimal"
-                    value={target}
-                    onChange={(e) => setTarget(e.target.value.replace(/[^\d.]/g, ""))}
-                    className="pr-7 tabular-nums"
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink-3">%</span>
-                </div>
-              </Field>
-              <Button variant="tonal" icon="trending" loading={suggesting} onClick={suggest}>
-                Hitung Harga
+            {priceNum > 0 && suggested != null && priceNum !== suggested && (
+              <Button size="sm" variant="text" icon="trending" onClick={() => setPrice(String(suggested))}>
+                Pakai saran {rupiah(suggested)} ({target}%)
               </Button>
-            </div>
-            {suggestion && (
-              <div className="mt-3">
-                {suggestion.price != null ? (
-                  <InlineAlert tone="success">
-                    Harga publish yang disarankan:{" "}
-                    <b className="tabular-nums">{rupiah(suggestion.price)}</b>. Sudah diisikan ke
-                    kolom di atas — klik Simpan Komposisi untuk menyimpan.
-                  </InlineAlert>
-                ) : (
-                  <InlineAlert tone="warning">{suggestion.reason}</InlineAlert>
-                )}
-              </div>
             )}
           </div>
         </div>
 
-        {/* --- waterfall --- */}
+        {/* --- waterfall, recomputed live from the inputs above --- */}
         <div>
-          {!p ? (
+          {!live ? (
             <EmptyState
               icon="banknote"
               title="Isi harga publish dulu"
-              description="Setelah harga publish diisi dan disimpan, rincian potongan sampai profit bersih akan muncul di sini."
+              description="Begitu harga publish diisi, rincian potongan sampai profit bersih langsung muncul di sini."
             />
           ) : (
             <div className="rounded-lg border border-line overflow-hidden">
-              <WaterRow label="Harga Publish" value={p.publishPrice} strong />
-              <WaterRow label={`Biaya Marketplace ${pctStr(c.marketplaceFeeRate)}%`} value={-p.marketplaceFee} />
-              <WaterRow label={`Biaya Event ${pctStr(c.eventRate)}%`} value={-p.event} />
-              <WaterRow label={`Biaya Affiliator ${pctStr(c.affiliatorRate)}%`} value={-p.affiliator} />
-              <WaterRow label="Diterima dari Marketplace" value={p.payout} subtotal />
+              <WaterRow label="Harga Publish" value={rp(live.publishPriceCents)} strong />
+              <WaterRow
+                label={`Biaya Marketplace ${rates.marketplaceFeeRate || 0}%`}
+                value={-rp(live.marketplaceFeeCents)}
+              />
+              <WaterRow label={`Biaya Event ${rates.eventRate || 0}%`} value={-rp(live.eventCents)} />
+              <WaterRow
+                label={`Biaya Affiliator ${rates.affiliatorRate || 0}%`}
+                value={-rp(live.affiliatorCents)}
+              />
+              <WaterRow label="Diterima dari Marketplace" value={rp(live.payoutCents)} subtotal />
 
-              <WaterRow label={`Sedekah ${pctStr(c.sedekahRate)}%`} value={-p.sedekah} />
-              <WaterRow label={`Reseller / Sub-seller ${pctStr(c.resellerRate)}%`} value={-p.reseller} />
-              <WaterRow label="Bagian Seller" value={p.sellerShare} subtotal />
+              <WaterRow label={`Sedekah ${rates.sedekahRate || 0}%`} value={-rp(live.sedekahCents)} />
+              <WaterRow
+                label={`Reseller / Sub-seller ${rates.resellerRate || 0}%`}
+                value={-rp(live.resellerCents)}
+              />
+              <WaterRow label="Bagian Seller" value={rp(live.sellerShareCents)} subtotal />
 
-              <WaterRow label="Harga Pokok Produksi" value={-p.hpp} />
-              {p.ads > 0 && <WaterRow label="Biaya Iklan" value={-p.ads} />}
+              <WaterRow label="Harga Pokok Produksi" value={-rp(live.hppCents)} />
+              {live.adsCents > 0 && <WaterRow label="Biaya Iklan" value={-rp(live.adsCents)} />}
 
               <div className="flex items-center justify-between px-4 py-4 bg-canvas border-t border-line">
                 <div>
@@ -671,29 +743,39 @@ function PublishSection({
                 <div className="text-right">
                   <div
                     className={`text-xl tabular-nums ${
-                      p.netProfit < 0 ? "text-red-600" : "text-ink"
+                      live.netProfitCents < 0 ? "text-red-600" : "text-ink"
                     }`}
                   >
-                    {rupiah(p.netProfit)}
+                    {rupiah(rp(live.netProfitCents))}
                   </div>
                   <div className="mt-1">
                     <Badge
                       tone={
-                        p.netMarginRate < 0 ? "danger" : p.netMarginRate < 0.1 ? "warning" : "success"
+                        live.netMarginRate < 0
+                          ? "danger"
+                          : live.netMarginRate < 0.1
+                            ? "warning"
+                            : "success"
                       }
                     >
-                      margin {(p.netMarginRate * 100).toFixed(1)}%
+                      margin {(live.netMarginRate * 100).toFixed(1)}%
                     </Badge>
                   </div>
                 </div>
               </div>
 
-              {p.netProfit < 0 && (
+              {live.netProfitCents < 0 && (
                 <div className="p-3 border-t border-line">
                   <InlineAlert tone="danger">
                     Harga publish saat ini membuat seller rugi per pcs. Naikkan harga, tekan biaya,
                     atau turunkan HPP.
                   </InlineAlert>
+                </div>
+              )}
+
+              {dirty && (
+                <div className="px-4 py-2.5 bg-amber-50 border-t border-amber-100 text-xs text-amber-800">
+                  Angka di atas dihitung dari input terbaru — klik “Simpan Komposisi” agar tersimpan.
                 </div>
               )}
             </div>
@@ -703,7 +785,6 @@ function PublishSection({
     </Card>
   );
 }
-
 function WaterRow({
   label,
   value,
