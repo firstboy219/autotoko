@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { and, desc, eq, gt, sql } from "drizzle-orm";
@@ -53,19 +54,39 @@ export class EmailOtpService {
 
     const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
     const expiresAt = new Date(Date.now() + CODE_TTL_MIN * 60 * 1000);
-    await this.db.insert(emailOtpSessions).values({
-      email,
-      codeHash: this.hash(email, code),
-      expiresAt,
-    });
+    const [session] = await this.db
+      .insert(emailOtpSessions)
+      .values({
+        email,
+        codeHash: this.hash(email, code),
+        expiresAt,
+      })
+      .returning({ id: emailOtpSessions.id });
 
-    await this.mail.send(
-      email,
-      "Kode masuk AutoToko",
-      `<p>Kode login AutoToko Anda: <b style="font-size:20px;letter-spacing:3px">${code}</b></p>
-       <p>Berlaku ${CODE_TTL_MIN} menit. Abaikan email ini jika Anda tidak meminta.</p>`,
-      `Kode login AutoToko: ${code} (berlaku ${CODE_TTL_MIN} menit)`,
-    );
+    try {
+      await this.mail.send(
+        email,
+        "Kode masuk AutoToko",
+        `<p>Kode login AutoToko Anda: <b style="font-size:20px;letter-spacing:3px">${code}</b></p>
+         <p>Berlaku ${CODE_TTL_MIN} menit. Abaikan email ini jika Anda tidak meminta.</p>`,
+        `Kode login AutoToko: ${code} (berlaku ${CODE_TTL_MIN} menit)`,
+      );
+    } catch (e) {
+      // The code never reached the user, so drop the session. Otherwise a
+      // broken SMTP config silently eats the 3-per-15-minutes quota and the
+      // user stays locked out for 15 minutes even after email is fixed.
+      if (session) {
+        await this.db.delete(emailOtpSessions).where(eq(emailOtpSessions.id, session.id));
+      }
+      this.logger.error(
+        `Email OTP send failed for ${email}: ${(e as Error).message.split("\n")[0]}`,
+      );
+      // 503, not a bare 500 — this is a server-side configuration outage and
+      // the message tells the user there is another way in.
+      throw new ServiceUnavailableException(
+        "Kode OTP gagal dikirim karena konfigurasi email server bermasalah. Silakan masuk lewat WhatsApp, atau hubungi admin.",
+      );
+    }
     if (!this.mail.enabled) this.logger.warn(`[DEV] Email OTP for ${email}: ${code}`);
     return { ok: true };
   }
