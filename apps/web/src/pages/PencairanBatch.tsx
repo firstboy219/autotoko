@@ -398,6 +398,11 @@ function MutationForm({
   // (a null/unchanged value means OCR was right, or wasn't used).
   const [ocrSuggestedAmount, setOcrSuggestedAmount] = useState<number | null>(null);
   const [receiving, setReceiving] = useState("");
+  // Every account number OCR could plausibly find on the receipt, best guess
+  // first. A receipt usually has several digit runs (reference no, phone,
+  // order id) and picking the wrong one silently is worse than asking — so
+  // when there is more than one the operator chooses.
+  const [accountOptions, setAccountOptions] = useState<string[]>([]);
   const [proofUrl, setProofUrl] = useState("");
   const [note, setNote] = useState("");
   const [ocrBusy, setOcrBusy] = useState(false);
@@ -430,15 +435,17 @@ function MutationForm({
     setOcrBusy(true);
     setOcrNote(null);
     try {
-      const result = await api.post<{ amount: number | null; account: string | null }>(
-        "/payout/ocr/extract-pencairan",
-        { imageUrl: url },
-      );
+      const result = await api.post<{
+        amount: number | null;
+        account: string | null;
+        accountCandidates?: string[];
+      }>("/payout/ocr/extract-pencairan", { imageUrl: url });
       if (result.amount != null) {
         setProofAmount(String(result.amount));
         setOcrSuggestedAmount(result.amount);
       }
       if (result.account != null) setReceiving(result.account);
+      setAccountOptions(result.accountCandidates ?? []);
       setOcrNote(
         result.amount != null || result.account != null
           ? "Terisi otomatis dari OCR — periksa dan koreksi jika perlu."
@@ -470,6 +477,7 @@ function MutationForm({
       setProofAmount("");
       setOcrSuggestedAmount(null);
       setReceiving("");
+      setAccountOptions([]);
       setProofUrl("");
       setNote("");
       setOcrNote(null);
@@ -562,8 +570,40 @@ function MutationForm({
             />
           </Field>
 
-          <Field label="Rekening Penampung">
+          <Field
+            label="Rekening Penampung"
+            hint={
+              accountOptions.length > 1
+                ? "OCR menemukan beberapa angka yang mirip nomor rekening — pilih yang benar."
+                : undefined
+            }
+          >
             <Input value={receiving} onChange={(e) => setReceiving(e.target.value)} className="font-mono" />
+            {accountOptions.length > 1 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {accountOptions.map((opt, i) => {
+                  const active = receiving === opt;
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setReceiving(opt)}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-xs transition ${
+                        active
+                          ? "border-brand bg-brand/15 text-ink"
+                          : "border-line bg-white text-ink-2 hover:bg-canvas"
+                      }`}
+                    >
+                      {active && <Icon name="check" size={12} />}
+                      {opt}
+                      {i === 0 && !active && (
+                        <span className="font-sans text-ink-3">· tebakan utama</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </Field>
 
           <Field label="Catatan (opsional)" className="md:col-span-2">

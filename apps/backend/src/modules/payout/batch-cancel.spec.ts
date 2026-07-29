@@ -13,7 +13,7 @@ import type { OcrExtractResult } from "./ocr.service.js";
 const DB_URL = process.env.E2E_DATABASE_URL;
 
 class FakeOcr {
-  next: OcrExtractResult = { amount: null, account: null, raw: null };
+  next: OcrExtractResult = { amount: null, account: null, accountCandidates: [], raw: null };
   async extractProofFields(): Promise<OcrExtractResult> {
     return this.next;
   }
@@ -102,7 +102,7 @@ class FakeOcr {
     await batches.closeInput(USER, batch!.id);
     const rows = await disbursements.listForBatch(USER, batch!.id);
     for (const row of rows) {
-      ocr.next = { amount: Number(row.expectedAmount), account: row.recordedAccount, raw: null };
+      ocr.next = { amount: Number(row.expectedAmount), account: row.recordedAccount, accountCandidates: [], raw: null };
       await disbursements.uploadProof(USER, row.id, { proofUrl: "https://x/proof.jpg" });
     }
     const done = await batches.closeBatch(USER, batch!.id);

@@ -14,9 +14,21 @@ export interface OcrExtractResult {
   amount: number | null;
   /** Extracted bank account number, if confidently found. */
   account: string | null;
+  /**
+   * Every plausible account number found, best-guess first (`account` is
+   * simply this list's head). A receipt often contains several digit runs
+   * that could each be an account — surfaced so the operator can pick the
+   * right one instead of silently getting whichever the heuristic ranked
+   * top. Deduped and capped; empty when nothing matched.
+   */
+  accountCandidates: string[];
   /** Raw OCR text/metadata, kept as an audit trail (Bagian 4, ocr_raw_result). */
   raw: unknown;
 }
+
+/** Max candidates surfaced to the UI — beyond a handful it stops being a
+ *  choice and becomes noise. */
+const MAX_ACCOUNT_CANDIDATES = 5;
 
 /**
  * Finds Indonesian-formatted currency amounts in OCR text, e.g. "Rp1.234.567"
@@ -97,7 +109,10 @@ function findAccountCandidates(text: string): string[] {
     if (digits.length >= 8 && digits.length <= 20) bare.push(digits);
   }
 
-  return [...anchored, ...masked, ...bare];
+  // The same number legitimately turns up in more than one pass (a labelled
+  // masked account is also found by the whole-text masked scan), so dedupe
+  // while preserving the confidence ordering.
+  return [...new Set([...anchored, ...masked, ...bare])];
 }
 
 // ocr-worker-script.js sits next to this compiled file in dist/modules/payout/
@@ -132,7 +147,12 @@ export class OcrService {
   constructor(private readonly uploads: UploadsService) {}
 
   async extractProofFields(imageUrl: string): Promise<OcrExtractResult> {
-    const empty: OcrExtractResult = { amount: null, account: null, raw: null };
+    const empty: OcrExtractResult = {
+      amount: null,
+      account: null,
+      accountCandidates: [],
+      raw: null,
+    };
     const buffer = await this.uploads.readByUrl(imageUrl);
     if (!buffer) {
       this.logger.warn(`OCR: could not read local file for ${imageUrl}`);
@@ -167,6 +187,9 @@ export class OcrService {
     return {
       amount: amounts[0] ?? null,
       account: accounts[0] ?? null,
+      accountCandidates: accounts.slice(0, MAX_ACCOUNT_CANDIDATES),
+      // The raw trail keeps the UNTRUNCATED lists — it is the audit record,
+      // not the picker.
       raw: { text, amountCandidates: amounts, accountCandidates: accounts },
     };
   }

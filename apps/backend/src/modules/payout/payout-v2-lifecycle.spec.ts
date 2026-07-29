@@ -17,7 +17,7 @@ const DB_URL = process.env.E2E_DATABASE_URL;
 // LOGIC around an OCR result (match -> cocok_otomatis, mismatch -> tidak_cocok
 // -> override), which needs a controllable result, not a real image read.
 class FakeOcr {
-  next: OcrExtractResult = { amount: null, account: null, raw: null };
+  next: OcrExtractResult = { amount: null, account: null, accountCandidates: [], raw: null };
   async extractProofFields(): Promise<OcrExtractResult> {
     return this.next;
   }
@@ -116,14 +116,14 @@ class FakeOcr {
 
     // --- Tahap 3: upload proofs. Rig OCR to MATCH for the (single, consolidated) sedekah row ---
     for (const r of rows.filter((x) => x.recipientType === "sedekah")) {
-      ocr.next = { amount: Number(r.expectedAmount), account: r.recordedAccount, raw: null };
+      ocr.next = { amount: Number(r.expectedAmount), account: r.recordedAccount, accountCandidates: [], raw: null };
       const updated = await disbursements.uploadProof(USER, r.id, { proofUrl: "https://x/sedekah.jpg" });
       expect(updated!.validationStatus).toBe("cocok_otomatis");
     }
 
     // sub_seller row on B: rig a MISMATCH, then override.
     const subSellerRowB = rows.find((r) => r.payoutMutationId === mB!.id && r.recipientType === "sub_seller")!;
-    ocr.next = { amount: 1, account: "wrong-account", raw: null }; // deliberately wrong
+    ocr.next = { amount: 1, account: "wrong-account", accountCandidates: [], raw: null }; // deliberately wrong
     const mismatched = await disbursements.uploadProof(USER, subSellerRowB.id, { proofUrl: "https://x/b-sub.jpg" });
     expect(mismatched!.validationStatus).toBe("tidak_cocok");
     await expect(disbursements.override(USER, subSellerRowB.id, { reason: "" })).rejects.toThrow(); // reason required
@@ -131,9 +131,9 @@ class FakeOcr {
     expect(overridden!.validationStatus).toBe("override_manual");
 
     // Remaining C-shop rows (sub_seller, sub_sub_seller): match exactly.
-    ocr.next = { amount: Number(subSellerRowC.expectedAmount), account: subSellerRowC.recordedAccount, raw: null };
+    ocr.next = { amount: Number(subSellerRowC.expectedAmount), account: subSellerRowC.recordedAccount, accountCandidates: [], raw: null };
     await disbursements.uploadProof(USER, subSellerRowC.id, { proofUrl: "https://x/c-sub.jpg" });
-    ocr.next = { amount: Number(subSubRowC.expectedAmount), account: subSubRowC.recordedAccount, raw: null };
+    ocr.next = { amount: Number(subSubRowC.expectedAmount), account: subSubRowC.recordedAccount, accountCandidates: [], raw: null };
     await disbursements.uploadProof(USER, subSubRowC.id, { proofUrl: "https://x/c-subsub.jpg" });
 
     // --- Tutup Batch now succeeds ---
