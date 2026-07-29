@@ -1,9 +1,28 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
 import { dateShort } from "../lib/fmt";
+import { Icon, type IconName } from "../components/Icon";
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  ConfirmModal,
+  EmptyState,
+  InlineAlert,
+  PageHeader,
+  Table,
+  TableWrap,
+  TD,
+  TH,
+  THead,
+  TR,
+  SkeletonRows,
+  useToast,
+} from "../components/ui";
 
 interface Batch {
   id: string;
@@ -23,29 +42,70 @@ const STATUS_LABEL: Record<Batch["status"], string> = {
   siap_distribusi: "Siap Distribusi",
   selesai: "Selesai",
 };
-const STATUS_BADGE: Record<Batch["status"], string> = {
-  berjalan: "bg-blue-100 text-blue-700",
-  siap_distribusi: "bg-amber-100 text-amber-700",
-  selesai: "bg-green-100 text-green-700",
+const STATUS_TONE: Record<Batch["status"], "info" | "warning" | "success"> = {
+  berjalan: "info",
+  siap_distribusi: "warning",
+  selesai: "success",
 };
 const BASIS_LABEL: Record<Settings["sedekahBasis"], string> = {
   total_credit: "Total Kredit Awal",
   after_subseller_split: "Sisa Setelah Split Sub-seller",
 };
 
+/** Compact navigation tile — these are shortcuts, not primary actions, so they
+ *  stay visually quiet compared to "Mulai Batch Baru". */
+function NavTile({
+  to,
+  icon,
+  title,
+  desc,
+}: {
+  to: string;
+  icon: IconName;
+  title: string;
+  desc: string;
+}) {
+  return (
+    <Link
+      to={to}
+      className="group flex items-start gap-3 rounded-lg border border-line bg-white p-4 hover:bg-canvas transition"
+    >
+      <span className="w-9 h-9 rounded-lg bg-canvas border border-line flex items-center justify-center text-ink-2 shrink-0">
+        <Icon name={icon} size={18} />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-ink">{title}</span>
+        <span className="block text-xs text-ink-2 mt-0.5">{desc}</span>
+      </span>
+      <Icon
+        name="chevronRight"
+        size={16}
+        className="ml-auto text-ink-3 group-hover:text-ink-2 shrink-0"
+      />
+    </Link>
+  );
+}
+
 export function Pencairan() {
+  const navigate = useNavigate();
+  const toast = useToast();
   const { data: batches, loading, reload } = useFetch<Batch[]>("/payout/batches");
   const { data: settings } = useFetch<Settings>("/payout/settings");
   const [busy, setBusy] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [cancelId, setCancelId] = useState<string | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const openBatch = batches?.find((b) => b.status === "berjalan");
 
   async function startBatch() {
     setBusy(true);
     setErr(null);
     try {
-      await api.post("/payout/batches");
-      reload();
+      const created = await api.post<{ id: string }>("/payout/batches");
+      toast("Batch baru dimulai", "success");
+      if (created?.id) navigate(`/pencairan/batch/${created.id}`);
+      else reload();
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -54,124 +114,166 @@ export function Pencairan() {
   }
 
   async function cancelBatch(id: string) {
-    if (!confirm("Batalkan batch ini? Semua mutasi & rekap transfer di dalamnya akan terhapus permanen dan tidak bisa dikembalikan.")) return;
-    setBusyId(id);
+    setCancelBusy(true);
     setErr(null);
     try {
       await api.del(`/payout/batches/${id}`);
+      toast("Batch dibatalkan", "success");
       reload();
     } catch (e) {
       setErr((e as Error).message);
     } finally {
-      setBusyId(null);
+      setCancelBusy(false);
+      setCancelId(null);
     }
   }
 
-  const hasOpen = batches?.some((b) => b.status === "berjalan");
-
   return (
     <Layout title="Pencairan Dana">
-      <div className="flex flex-wrap gap-3 mb-4">
-        <div className="flex-1 min-w-[220px] bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-[10px] uppercase tracking-wide text-slate-400">Pengaturan Sedekah</div>
-          <div className="text-lg font-extrabold mt-1">
-            {settings ? `${(Number(settings.sedekahRate) * 100).toFixed(1)}%` : "…"}
-          </div>
-          <div className="text-xs text-slate-500 mt-0.5">
-            Basis: {settings ? BASIS_LABEL[settings.sedekahBasis] : "…"}
-          </div>
-          <Link to="/pencairan/pengaturan" className="text-xs text-brand font-semibold hover:underline mt-2 inline-block">
-            Ubah pengaturan →
-          </Link>
-        </div>
-        <div className="flex-1 min-w-[220px] bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-[10px] uppercase tracking-wide text-slate-400">Sub-seller</div>
-          <div className="text-sm text-slate-600 mt-1">Kelola sub-seller, sub-sub-seller, dan penugasan toko.</div>
-          <Link to="/pencairan/sub-seller" className="text-xs text-brand font-semibold hover:underline mt-2 inline-block">
-            Buka manajemen →
-          </Link>
-        </div>
-        <div className="flex-1 min-w-[220px] bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-[10px] uppercase tracking-wide text-slate-400">Mapping Toko</div>
-          <div className="text-sm text-slate-600 mt-1">Lihat kepemilikan tiap toko dan rekening tujuannya.</div>
-          <Link to="/pencairan/mapping" className="text-xs text-brand font-semibold hover:underline mt-2 inline-block">
-            Buka mapping →
-          </Link>
-        </div>
-        <div className="flex-1 min-w-[220px] bg-gradient-to-br from-navy to-[#252558] rounded-xl p-4 text-white flex flex-col justify-between">
-          <div>
-            <div className="text-[10px] uppercase tracking-wide text-white/40">Batch Pencairan</div>
-            <div className="text-sm text-white/70 mt-1">
-              {hasOpen ? "Ada batch berjalan." : "Mulai batch baru untuk input pencairan."}
-            </div>
-          </div>
-          <button
-            onClick={startBatch}
-            disabled={busy || hasOpen}
-            title={hasOpen ? "Sudah ada batch berjalan — selesaikan dulu." : ""}
-            className="mt-3 px-3 py-2 rounded-md bg-brand hover:bg-brand-dark text-white text-sm font-semibold disabled:opacity-50"
-          >
-            {busy ? "…" : "+ Mulai Batch Baru"}
-          </button>
-        </div>
-      </div>
-      {err && <div className="text-red-500 text-sm mb-3">{err}</div>}
+      <PageHeader
+        title="Pencairan Dana"
+        subtitle="Rekam pencairan tiap toko, lalu distribusikan ke sedekah dan sub-seller."
+        actions={
+          openBatch ? (
+            <Button
+              variant="filled"
+              iconRight="arrowRight"
+              onClick={() => navigate(`/pencairan/batch/${openBatch.id}`)}
+            >
+              Lanjutkan Batch Berjalan
+            </Button>
+          ) : (
+            <Button variant="filled" icon="plus" loading={busy} onClick={startBatch}>
+              Mulai Batch Baru
+            </Button>
+          )
+        }
+      />
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm flex items-center justify-between">
-          <span>Daftar Batch</span>
-          <Link to="/pencairan/mutasi" className="text-xs text-brand font-semibold hover:underline">
-            Lihat semua mutasi →
-          </Link>
+      {err && (
+        <div className="mb-4">
+          <InlineAlert tone="danger">{err}</InlineAlert>
         </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-slate-50 text-[10px] uppercase text-slate-500">
-              <th className="text-left px-3 py-2">Dibuat</th>
-              <th className="text-left px-3 py-2">Status</th>
-              <th className="text-left px-3 py-2">Input Ditutup</th>
-              <th className="text-left px-3 py-2">Batch Selesai</th>
-              <th className="px-3 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-400">Memuat…</td></tr>
-            ) : !batches?.length ? (
-              <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-400">Belum ada batch. Mulai batch baru untuk mencatat pencairan.</td></tr>
-            ) : (
-              batches.map((b) => (
-                <tr key={b.id} className="border-t border-slate-100">
-                  <td className="px-3 py-2 text-slate-500">{dateShort(b.createdAt)}</td>
-                  <td className="px-3 py-2">
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${STATUS_BADGE[b.status]}`}>
-                      {STATUS_LABEL[b.status]}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-slate-500">{b.closedAt ? dateShort(b.closedAt) : "-"}</td>
-                  <td className="px-3 py-2 text-slate-500">{b.completedAt ? dateShort(b.completedAt) : "-"}</td>
-                  <td className="px-3 py-2 text-right">
-                    <div className="flex items-center justify-end gap-3">
-                      <Link to={`/pencairan/batch/${b.id}`} className="text-xs text-brand font-semibold hover:underline">
-                        Detail →
-                      </Link>
-                      {b.status !== "selesai" && (
-                        <button
-                          onClick={() => cancelBatch(b.id)}
-                          disabled={busyId === b.id}
-                          className="text-xs text-red-600 font-semibold hover:underline disabled:opacity-50"
-                        >
-                          {busyId === b.id ? "…" : "Batalkan"}
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      )}
+
+      {openBatch && (
+        <div className="mb-4">
+          <InlineAlert tone="info">
+            Ada batch yang masih berjalan — selesaikan dulu sebelum memulai batch baru.
+          </InlineAlert>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-5">
+        <NavTile
+          to="/pencairan/pengaturan"
+          icon="settings"
+          title="Pengaturan Sedekah"
+          desc={
+            settings
+              ? `${(Number(settings.sedekahRate) * 100).toFixed(1)}% · ${BASIS_LABEL[settings.sedekahBasis]}`
+              : "Memuat…"
+          }
+        />
+        <NavTile
+          to="/pencairan/sub-seller"
+          icon="users"
+          title="Sub-seller"
+          desc="Kelola sub-seller, sub-sub-seller, dan penugasan toko"
+        />
+        <NavTile
+          to="/pencairan/mapping"
+          icon="link"
+          title="Mapping Toko"
+          desc="Kepemilikan tiap toko dan rekening tujuannya"
+        />
       </div>
+
+      <Card padded={false}>
+        <CardHeader
+          title="Daftar Batch"
+          action={
+            <Link
+              to="/pencairan/mutasi"
+              className="inline-flex items-center gap-1 text-sm text-brand-ink hover:underline"
+            >
+              Lihat semua mutasi <Icon name="arrowRight" size={14} />
+            </Link>
+          }
+        />
+        <TableWrap>
+          <Table>
+            <THead>
+              <TR className="border-t-0">
+                <TH>Dibuat</TH>
+                <TH>Status</TH>
+                <TH>Input Ditutup</TH>
+                <TH>Batch Selesai</TH>
+                <TH align="right" />
+              </TR>
+            </THead>
+            <tbody>
+              {loading ? (
+                <SkeletonRows n={3} cols={5} />
+              ) : !batches?.length ? (
+                <TR>
+                  <TD colSpan={5} className="p-0">
+                    <EmptyState
+                      icon="banknote"
+                      title="Belum ada batch"
+                      description="Mulai batch baru untuk mencatat pencairan dari tiap toko."
+                      action={
+                        <Button variant="filled" icon="plus" loading={busy} onClick={startBatch}>
+                          Mulai Batch Baru
+                        </Button>
+                      }
+                    />
+                  </TD>
+                </TR>
+              ) : (
+                batches.map((b) => (
+                  <TR key={b.id}>
+                    <TD className="text-ink">{dateShort(b.createdAt)}</TD>
+                    <TD>
+                      <Badge tone={STATUS_TONE[b.status]}>{STATUS_LABEL[b.status]}</Badge>
+                    </TD>
+                    <TD className="text-ink-2">{b.closedAt ? dateShort(b.closedAt) : "—"}</TD>
+                    <TD className="text-ink-2">{b.completedAt ? dateShort(b.completedAt) : "—"}</TD>
+                    <TD align="right">
+                      <div className="flex items-center justify-end gap-3">
+                        {b.status !== "selesai" && (
+                          <button
+                            onClick={() => setCancelId(b.id)}
+                            className="text-sm text-red-600 hover:underline"
+                          >
+                            Batalkan
+                          </button>
+                        )}
+                        <Link
+                          to={`/pencairan/batch/${b.id}`}
+                          className="inline-flex items-center gap-1 text-sm text-brand-ink hover:underline"
+                        >
+                          Detail <Icon name="chevronRight" size={14} />
+                        </Link>
+                      </div>
+                    </TD>
+                  </TR>
+                ))
+              )}
+            </tbody>
+          </Table>
+        </TableWrap>
+      </Card>
+
+      <ConfirmModal
+        open={cancelId !== null}
+        onClose={() => setCancelId(null)}
+        onConfirm={() => cancelId && cancelBatch(cancelId)}
+        loading={cancelBusy}
+        title="Batalkan batch ini?"
+        confirmLabel="Batalkan Batch"
+        description="Semua mutasi & rekap transfer di dalamnya akan terhapus permanen dan tidak bisa dikembalikan."
+      />
     </Layout>
   );
 }

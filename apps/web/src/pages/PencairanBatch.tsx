@@ -1,4 +1,4 @@
-﻿import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { calculatePayoutSplit, type SedekahBasis } from "@autotoko/shared";
 import { Layout } from "../components/Layout";
@@ -6,6 +6,22 @@ import { FileUpload } from "../components/FileUpload";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
 import { rupiah, dateShort } from "../lib/fmt";
+import { Icon } from "../components/Icon";
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  ConfirmModal,
+  EmptyState,
+  Field,
+  InlineAlert,
+  Input,
+  PageHeader,
+  Select,
+  Skeleton,
+  useToast,
+} from "../components/ui";
 
 interface ShopOpt {
   id: string;
@@ -86,6 +102,8 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+/* ------------------------------------------------------------------ page */
+
 export function PencairanBatch() {
   const { id } = useParams<{ id: string }>();
   const { data: batch, loading, reload } = useFetch<BatchDetail>(id ? `/payout/batches/${id}` : null);
@@ -94,15 +112,35 @@ export function PencairanBatch() {
 
   return (
     <Layout title="Detail Batch Pencairan">
-      <Link to="/pencairan" className="text-xs text-brand font-semibold hover:underline">← Kembali ke daftar batch</Link>
+      <PageHeader
+        title="Detail Batch Pencairan"
+        back={
+          <Link
+            to="/pencairan"
+            className="inline-flex items-center gap-1 text-sm text-ink-2 hover:text-ink mb-3"
+          >
+            <Icon name="arrowLeft" size={16} /> Kembali ke daftar batch
+          </Link>
+        }
+      />
+
       {loading || !batch ? (
-        <div className="text-slate-400 text-sm mt-4">Memuat…</div>
+        <div className="space-y-4">
+          <Skeleton className="h-20 w-full rounded-lg" />
+          <Skeleton className="h-32 w-full rounded-lg" />
+        </div>
       ) : (
-        <div className="mt-3 space-y-4">
-          <BatchHeader batch={batch} onDone={reload} />
+        <div className="space-y-4">
+          <BatchProgress batch={batch} onDone={reload} />
           {batch.status === "berjalan" && shops && settings && (
             <>
-              <MutationForm batchId={batch.id} shops={shops} settings={settings} onCreated={reload} />
+              <MutationForm
+                batchId={batch.id}
+                shops={shops}
+                settings={settings}
+                onCreated={reload}
+                startOpen={batch.mutations.length === 0}
+              />
               <MutationList batch={batch} shops={shops} onChange={reload} />
             </>
           )}
@@ -113,78 +151,242 @@ export function PencairanBatch() {
   );
 }
 
-function BatchHeader({ batch, onDone }: { batch: BatchDetail; onDone: () => void }) {
-  const navigate = useNavigate();
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+/* -------------------------------------------------- stepper + next action */
 
-  async function run(fn: () => Promise<unknown>) {
-    setBusy(true); setErr(null);
-    try { await fn(); onDone(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
-  }
+const STEPS = [
+  { key: "berjalan", label: "Rekam Pencairan", hint: "Input pencairan tiap toko" },
+  { key: "siap_distribusi", label: "Transfer & Bukti", hint: "Transfer ke tiap penerima" },
+  { key: "selesai", label: "Selesai", hint: "Batch ditutup" },
+] as const;
 
-  async function cancelBatch() {
-    if (!confirm("Batalkan batch ini? Semua mutasi & rekap transfer di dalamnya akan terhapus permanen dan tidak bisa dikembalikan.")) return;
-    setBusy(true); setErr(null);
-    try {
-      await api.del(`/payout/batches/${batch.id}`);
-      navigate("/pencairan");
-    } catch (e) { setErr((e as Error).message); setBusy(false); }
-  }
+function stepIndex(status: BatchDetail["status"]): number {
+  return STEPS.findIndex((s) => s.key === status);
+}
 
-  const notReady = batch.disbursements.filter((d) => !READY.includes(d.validationStatus));
-
+function Stepper({ current }: { current: number }) {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <div className="text-[10px] uppercase tracking-wide text-slate-400">Status Batch</div>
-          <div className="text-lg font-extrabold">
-            {batch.status === "berjalan" && "Berjalan — input pencairan per toko"}
-            {batch.status === "siap_distribusi" && "Siap Distribusi — transfer & upload bukti per penerima"}
-            {batch.status === "selesai" && "✓ Selesai"}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {batch.status === "berjalan" && (
-            <button
-              onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close-input`))}
-              disabled={busy || batch.mutations.length === 0}
-              title={batch.mutations.length === 0 ? "Rekam minimal satu toko dulu" : ""}
-              className="px-3 py-2 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-50"
-            >
-              Selesai Pencairan Semua Toko →
-            </button>
-          )}
-          {batch.status === "siap_distribusi" && (
-            <button
-              onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close`))}
-              disabled={busy || notReady.length > 0}
-              title={notReady.length > 0 ? `${notReady.length} transfer belum tervalidasi/di-override` : ""}
-              className="px-3 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white text-sm font-semibold disabled:opacity-50"
-            >
-              {notReady.length > 0 ? `Tutup Batch (${notReady.length} belum siap)` : "Tutup Batch"}
-            </button>
-          )}
-          {batch.status !== "selesai" && (
-            <button
-              onClick={cancelBatch}
-              disabled={busy}
-              className="px-3 py-2 rounded-md border border-red-300 text-red-600 hover:bg-red-50 text-sm font-semibold disabled:opacity-50"
-            >
-              Batalkan Batch
-            </button>
-          )}
-        </div>
-      </div>
-      {err && <div className="text-red-500 text-xs mt-2">{err}</div>}
-    </div>
+    <ol className="flex items-stretch gap-1 sm:gap-2">
+      {STEPS.map((s, i) => {
+        const done = i < current;
+        const active = i === current;
+        return (
+          <li key={s.key} className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span
+                className={`w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-xs font-medium ${
+                  done
+                    ? "bg-emerald-500 text-white"
+                    : active
+                      ? "bg-brand text-onbrand"
+                      : "bg-canvas text-ink-3 border border-line"
+                }`}
+              >
+                {done ? <Icon name="check" size={14} /> : i + 1}
+              </span>
+              <div
+                className={`h-0.5 flex-1 rounded-full ${
+                  i < current ? "bg-emerald-500" : "bg-line"
+                } ${i === STEPS.length - 1 ? "invisible" : ""}`}
+              />
+            </div>
+            <div className="mt-1.5 pr-2">
+              <div
+                className={`text-xs truncate ${
+                  active ? "text-ink font-medium" : done ? "text-ink-2" : "text-ink-3"
+                }`}
+              >
+                {s.label}
+              </div>
+              <div className="text-xs text-ink-3 truncate hidden sm:block">{s.hint}</div>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
+function BatchProgress({ batch, onDone }: { batch: BatchDetail; onDone: () => void }) {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+
+  const notReady = batch.disbursements.filter((d) => !READY.includes(d.validationStatus));
+  const current = stepIndex(batch.status);
+
+  const totals = useMemo(
+    () =>
+      batch.mutations.reduce(
+        (a, m) => {
+          a.credit += Number(m.creditAmount) || 0;
+          a.sedekah += Number(m.sedekahAmount) || 0;
+          a.seller += Number(m.sellerAmount) || 0;
+          a.sub += (Number(m.subSellerAmount) || 0) + (Number(m.subSubSellerAmount) || 0);
+          return a;
+        },
+        { credit: 0, sedekah: 0, seller: 0, sub: 0 },
+      ),
+    [batch.mutations],
+  );
+
+  async function run(fn: () => Promise<unknown>, okMsg: string) {
+    setBusy(true);
+    setErr(null);
+    try {
+      await fn();
+      toast(okMsg, "success");
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelBatch() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.del(`/payout/batches/${batch.id}`);
+      navigate("/pencairan");
+    } catch (e) {
+      setErr((e as Error).message);
+      setBusy(false);
+      setConfirmCancel(false);
+    }
+  }
+
+  // The single most important thing on this page: what do I do next.
+  let nextAction: React.ReactNode = null;
+  let nextHint = "";
+  if (batch.status === "berjalan") {
+    nextHint =
+      batch.mutations.length === 0
+        ? "Rekam pencairan minimal satu toko untuk melanjutkan."
+        : `${batch.mutations.length} toko sudah direkam. Lanjutkan bila semua toko selesai direkam.`;
+    nextAction = (
+      <Button
+        variant="filled"
+        iconRight="arrowRight"
+        disabled={batch.mutations.length === 0}
+        loading={busy}
+        onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close-input`), "Input ditutup — rekap transfer dibuat")}
+      >
+        Selesai Pencairan Semua Toko
+      </Button>
+    );
+  } else if (batch.status === "siap_distribusi") {
+    nextHint =
+      notReady.length > 0
+        ? `${notReady.length} transfer belum tervalidasi. Upload bukti atau override dulu.`
+        : "Semua transfer sudah tervalidasi. Batch siap ditutup.";
+    nextAction = (
+      <Button
+        variant="filled"
+        iconRight="check"
+        disabled={notReady.length > 0}
+        loading={busy}
+        onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close`), "Batch ditutup")}
+      >
+        Tutup Batch
+      </Button>
+    );
+  } else {
+    nextHint = "Batch sudah ditutup. Tidak ada tindakan lagi.";
+  }
+
+  return (
+    <>
+      <Card>
+        <Stepper current={current} />
+
+        <div className="mt-5 pt-4 border-t border-line flex flex-wrap items-end justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                tone={
+                  batch.status === "selesai"
+                    ? "success"
+                    : batch.status === "siap_distribusi"
+                      ? "warning"
+                      : "info"
+                }
+              >
+                {batch.status === "berjalan"
+                  ? "Berjalan"
+                  : batch.status === "siap_distribusi"
+                    ? "Siap Distribusi"
+                    : "Selesai"}
+              </Badge>
+              <span className="text-sm text-ink-2">{nextHint}</span>
+            </div>
+
+            {batch.mutations.length > 0 && (
+              <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
+                {[
+                  ["Total Kredit", totals.credit],
+                  ["Sedekah", totals.sedekah],
+                  ["Seller", totals.seller],
+                  ...(totals.sub > 0 ? ([["Sub-seller", totals.sub]] as [string, number][]) : []),
+                ].map(([label, val]) => (
+                  <div key={label as string}>
+                    <dt className="text-xs text-ink-3">{label}</dt>
+                    <dd className="text-sm text-ink tabular-nums">{rupiah(val as number)}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {batch.status !== "selesai" && (
+              <Button variant="text" onClick={() => setConfirmCancel(true)} disabled={busy}>
+                Batalkan Batch
+              </Button>
+            )}
+            {nextAction}
+          </div>
+        </div>
+
+        {err && (
+          <div className="mt-3">
+            <InlineAlert tone="danger">{err}</InlineAlert>
+          </div>
+        )}
+      </Card>
+
+      <ConfirmModal
+        open={confirmCancel}
+        onClose={() => setConfirmCancel(false)}
+        onConfirm={cancelBatch}
+        loading={busy}
+        title="Batalkan batch ini?"
+        confirmLabel="Batalkan Batch"
+        description="Semua mutasi & rekap transfer di dalamnya akan terhapus permanen dan tidak bisa dikembalikan."
+      />
+    </>
+  );
+}
+
+/* ------------------------------------------------------------- input form */
+
 function MutationForm({
-  batchId, shops, settings, onCreated,
-}: { batchId: string; shops: ShopOpt[]; settings: Settings; onCreated: () => void }) {
+  batchId,
+  shops,
+  settings,
+  onCreated,
+  startOpen,
+}: {
+  batchId: string;
+  shops: ShopOpt[];
+  settings: Settings;
+  onCreated: () => void;
+  startOpen: boolean;
+}) {
+  const toast = useToast();
+  const [open, setOpen] = useState(startOpen);
   const [shopId, setShopId] = useState("");
   const [payoutDate, setPayoutDate] = useState(new Date().toISOString().slice(0, 10));
   // The single amount field — both the split basis AND the marketplace proof
@@ -216,7 +418,9 @@ function MutationForm({
         subSellerRate: shop.effectiveSubSellerRate,
         subSubSellerRate: shop.effectiveSubSubSellerRate,
       });
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }, [shop, amountNum, settings]);
 
   // Titik 1 OCR: after the pencairan screenshot is uploaded, ask the server to
@@ -249,112 +453,187 @@ function MutationForm({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true); setErr(null);
+    setBusy(true);
+    setErr(null);
     try {
       await api.post("/payout/mutations", {
-        batchId, shopId, payoutDate,
+        batchId,
+        shopId,
+        payoutDate,
         marketplaceProofAmount: amountNum,
         ...(ocrSuggestedAmount != null ? { ocrSuggestedAmount } : {}),
         ...(receiving ? { receivingAccount: receiving } : {}),
         ...(proofUrl ? { marketplaceProofUrl: proofUrl } : {}),
         ...(note ? { note } : {}),
       });
-      setShopId(""); setProofAmount(""); setOcrSuggestedAmount(null); setReceiving("");
-      setProofUrl(""); setNote(""); setOcrNote(null);
+      setShopId("");
+      setProofAmount("");
+      setOcrSuggestedAmount(null);
+      setReceiving("");
+      setProofUrl("");
+      setNote("");
+      setOcrNote(null);
+      toast("Pencairan toko tersimpan", "success");
       onCreated();
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <Button variant="tonal" icon="plus" onClick={() => setOpen(true)}>
+        Rekam Pencairan Toko
+      </Button>
+    );
   }
 
   return (
-    <form onSubmit={submit} className="bg-white rounded-xl border border-slate-200 p-4">
-      <div className="font-bold text-sm mb-3">Rekam Pencairan Toko</div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <label className="text-xs font-semibold text-slate-600">
-          Toko
-          <select value={shopId} onChange={(e) => setShopId(e.target.value)} required
-            className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal">
-            <option value="">— pilih toko —</option>
-            {shops.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.shopName} ({s.marketplace}) · Skenario {s.scenario}
-                {s.subSellerName ? ` · ${s.subSellerName}` : ""}
-                {s.subSubSellerName ? ` › ${s.subSubSellerName}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs font-semibold text-slate-600">
-          Tanggal Pencairan
-          <input type="date" value={payoutDate} onChange={(e) => setPayoutDate(e.target.value)} required
-            className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
-        </label>
+    <Card padded={false}>
+      <CardHeader
+        title="Rekam Pencairan Toko"
+        subtitle="Ulangi untuk toko lain sesuai kebutuhan — tidak wajib semua toko."
+        action={
+          <Button variant="text" size="sm" onClick={() => setOpen(false)}>
+            Tutup
+          </Button>
+        }
+      />
+      <form onSubmit={submit} className="p-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field label="Toko" required>
+            <Select value={shopId} onChange={(e) => setShopId(e.target.value)} required>
+              <option value="">— pilih toko —</option>
+              {shops.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.shopName} ({s.marketplace}) · Skenario {s.scenario}
+                  {s.subSellerName ? ` · ${s.subSellerName}` : ""}
+                  {s.subSubSellerName ? ` › ${s.subSubSellerName}` : ""}
+                </option>
+              ))}
+            </Select>
+          </Field>
 
-        <div className="md:col-span-2">
-          <FileUpload label="Bukti Pencairan Marketplace (unggah dulu — nominal & rekening akan dicoba dibaca otomatis)" value={proofUrl} onChange={onProofUploaded} />
-          {ocrBusy && <div className="text-[11px] text-slate-400 mt-1">Membaca gambar…</div>}
-          {ocrNote && <div className="text-[11px] text-brand mt-1">{ocrNote}</div>}
+          <Field label="Tanggal Pencairan" required>
+            <Input
+              type="date"
+              value={payoutDate}
+              onChange={(e) => setPayoutDate(e.target.value)}
+              required
+            />
+          </Field>
+
+          <div className="md:col-span-2">
+            <FileUpload
+              label="Bukti Pencairan Marketplace (unggah dulu — nominal & rekening akan dicoba dibaca otomatis)"
+              value={proofUrl}
+              onChange={onProofUploaded}
+            />
+            {ocrBusy && (
+              <div className="flex items-center gap-1.5 text-xs text-ink-2 mt-1.5">
+                <Icon name="refresh" size={13} className="animate-spin" /> Membaca gambar…
+              </div>
+            )}
+            {ocrNote && !ocrBusy && (
+              <div className="text-xs text-ink-2 mt-1.5">{ocrNote}</div>
+            )}
+          </div>
+
+          <Field
+            label="Nominal Bukti Marketplace (dasar kalkulasi)"
+            required
+            hint={
+              ocrSuggestedAmount != null && Number(proofAmount) !== ocrSuggestedAmount ? (
+                <span className="text-amber-600">
+                  Dikoreksi dari hasil OCR ({rupiah(ocrSuggestedAmount)})
+                </span>
+              ) : undefined
+            }
+          >
+            <Input
+              inputMode="numeric"
+              value={proofAmount ? Number(proofAmount).toLocaleString("id-ID") : ""}
+              onChange={(e) => setProofAmount(e.target.value.replace(/\D/g, ""))}
+              placeholder="0"
+              required
+              className="tabular-nums"
+            />
+          </Field>
+
+          <Field label="Rekening Penampung">
+            <Input value={receiving} onChange={(e) => setReceiving(e.target.value)} className="font-mono" />
+          </Field>
+
+          <Field label="Catatan (opsional)" className="md:col-span-2">
+            <Input value={note} onChange={(e) => setNote(e.target.value)} />
+          </Field>
         </div>
 
-        <label className="text-xs font-semibold text-slate-600">
-          Nominal Bukti Marketplace (dasar kalkulasi)
-          <input inputMode="numeric" value={proofAmount ? Number(proofAmount).toLocaleString("id-ID") : ""}
-            onChange={(e) => setProofAmount(e.target.value.replace(/\D/g, ""))} placeholder="0" required
-            className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
-          {ocrSuggestedAmount != null && Number(proofAmount) !== ocrSuggestedAmount && (
-            <span className="block text-[11px] text-amber-600 font-normal mt-0.5">
-              Dikoreksi dari hasil OCR ({rupiah(ocrSuggestedAmount)})
-            </span>
-          )}
-        </label>
-        <label className="text-xs font-semibold text-slate-600">
-          Rekening Penampung
-          <input value={receiving} onChange={(e) => setReceiving(e.target.value)}
-            className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
-        </label>
-        <label className="text-xs font-semibold text-slate-600">
-          Catatan (opsional)
-          <input value={note} onChange={(e) => setNote(e.target.value)}
-            className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
-        </label>
-      </div>
+        {split && shop && (
+          <div className="mt-4 rounded-lg bg-canvas border border-line p-4">
+            <div className="text-xs font-medium text-ink-2 mb-3">
+              Kalkulasi Split (real-time · Skenario {split.scenario})
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <SplitCell label="Sedekah" value={split.sedekahCents} />
+              <SplitCell label="Seller" value={split.sellerCents} />
+              {split.subSellerCents > 0 && (
+                <SplitCell
+                  label={`Sub-seller${shop.subSellerName ? ` (${shop.subSellerName})` : ""}`}
+                  value={split.subSellerCents}
+                />
+              )}
+              {split.subSubSellerCents > 0 && (
+                <SplitCell
+                  label={`Sub-sub-seller${shop.subSubSellerName ? ` (${shop.subSubSellerName})` : ""}`}
+                  value={split.subSubSellerCents}
+                />
+              )}
+            </div>
+          </div>
+        )}
 
-      {split && shop && (
-        <div className="mt-3 rounded-lg bg-slate-50 border border-slate-200 p-3">
-          <div className="text-[10px] uppercase tracking-wide text-slate-400 mb-2">
-            Kalkulasi Split (real-time · Skenario {split.scenario})
+        {err && (
+          <div className="mt-4">
+            <InlineAlert tone="danger">{err}</InlineAlert>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-            <SplitCell label="Sedekah" value={split.sedekahCents} />
-            <SplitCell label="Seller" value={split.sellerCents} />
-            {split.subSellerCents > 0 && <SplitCell label={`Sub-seller${shop.subSellerName ? ` (${shop.subSellerName})` : ""}`} value={split.subSellerCents} />}
-            {split.subSubSellerCents > 0 && <SplitCell label={`Sub-sub-seller${shop.subSubSellerName ? ` (${shop.subSubSellerName})` : ""}`} value={split.subSubSellerCents} />}
-          </div>
+        )}
+
+        <div className="mt-4">
+          <Button variant="filled" icon="check" loading={busy} disabled={!shopId || amountNum <= 0}>
+            Simpan Pencairan Toko Ini
+          </Button>
         </div>
-      )}
-
-      {err && <div className="text-red-500 text-xs mt-2">{err}</div>}
-      <div className="mt-3">
-        <button disabled={busy || !shopId || amountNum <= 0}
-          className="px-4 py-2 rounded-md bg-brand hover:bg-brand-dark text-white text-sm font-semibold disabled:opacity-50">
-          {busy ? "…" : "Simpan Pencairan Toko Ini"}
-        </button>
-        <span className="text-[11px] text-slate-400 ml-3">Ulangi untuk toko lain sesuai kebutuhan — tidak wajib semua toko.</span>
-      </div>
-    </form>
+      </form>
+    </Card>
   );
 }
 
 function SplitCell({ label, value }: { label: string; value: number }) {
   return (
-    <div className="bg-white rounded-md border border-slate-200 px-3 py-2">
-      <div className="text-[10px] text-slate-400">{label}</div>
-      <div className="font-bold">{rupiah(value / 100)}</div>
+    <div className="bg-white rounded-lg border border-line px-3 py-2.5">
+      <div className="text-xs text-ink-3 truncate">{label}</div>
+      <div className="text-sm text-ink tabular-nums mt-0.5">{rupiah(value / 100)}</div>
     </div>
   );
 }
 
-function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: ShopOpt[]; onChange: () => void }) {
+/* ------------------------------------------------------- recorded list */
+
+function MutationList({
+  batch,
+  shops,
+  onChange,
+}: {
+  batch: BatchDetail;
+  shops: ShopOpt[];
+  onChange: () => void;
+}) {
+  const toast = useToast();
   const shopName = (id: string) => shops.find((s) => s.id === id)?.shopName ?? id.slice(0, 8);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pngBusy, setPngBusy] = useState(false);
   // Only the ringkasan + shop-row list gets captured for the PNG export —
@@ -380,7 +659,14 @@ function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: S
 
   async function remove(id: string) {
     setBusyId(id);
-    try { await api.del(`/payout/mutations/${id}`); onChange(); } finally { setBusyId(null); }
+    try {
+      await api.del(`/payout/mutations/${id}`);
+      toast("Mutasi dihapus", "success");
+      onChange();
+    } finally {
+      setBusyId(null);
+      setConfirmId(null);
+    }
   }
 
   function downloadExcel() {
@@ -444,97 +730,142 @@ function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: S
     window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
   }
 
+  const target = batch.mutations.find((m) => m.id === confirmId);
+
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
-        <span className="font-bold text-sm">Toko Sudah Direkam ({batch.mutations.length})</span>
-        {batch.mutations.length > 0 && (
-          <div className="flex items-center gap-2">
-            <button onClick={downloadExcel}
-              className="text-xs px-2.5 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-600 font-semibold">
-              ⬇ Excel
-            </button>
-            <button onClick={downloadPng} disabled={pngBusy}
-              className="text-xs px-2.5 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-600 font-semibold disabled:opacity-50">
-              {pngBusy ? "…" : "⬇ PNG"}
-            </button>
-            <button onClick={shareWhatsApp}
-              className="text-xs px-2.5 py-1.5 rounded-md bg-green-600 hover:bg-green-700 text-white font-semibold">
-              Share WhatsApp
-            </button>
-          </div>
-        )}
-      </div>
-      <div ref={captureRef}>
-        {batch.mutations.length > 0 && (
-          <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
-            <div className="text-[10px] uppercase tracking-wide text-slate-400 mb-2">
-              Ringkasan Total ({batch.mutations.length} toko)
+    <>
+      <Card padded={false}>
+        <CardHeader
+          title={`Toko Sudah Direkam (${batch.mutations.length})`}
+          action={
+            batch.mutations.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="outline" icon="download" onClick={downloadExcel}>
+                  Excel
+                </Button>
+                <Button size="sm" variant="outline" icon="image" loading={pngBusy} onClick={downloadPng}>
+                  PNG
+                </Button>
+                <Button size="sm" variant="outline" icon="share" onClick={shareWhatsApp}>
+                  WhatsApp
+                </Button>
+              </div>
+            )
+          }
+        />
+
+        <div ref={captureRef}>
+          {batch.mutations.length > 0 && (
+            <div className="px-5 py-4 border-b border-line bg-canvas">
+              <div className="text-xs font-medium text-ink-2 mb-3">
+                Ringkasan Total ({batch.mutations.length} toko)
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <SplitCell label="Total Kredit" value={cents(totals.credit)} />
+                <SplitCell label="Sedekah" value={cents(totals.sedekah)} />
+                <SplitCell label="Seller" value={cents(totals.seller)} />
+                {totals.subSeller > 0 && <SplitCell label="Sub-seller" value={cents(totals.subSeller)} />}
+                {totals.subSubSeller > 0 && (
+                  <SplitCell label="Sub-sub-seller" value={cents(totals.subSubSeller)} />
+                )}
+              </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
-              <SplitCell label="Total Kredit" value={cents(totals.credit)} />
-              <SplitCell label="Sedekah" value={cents(totals.sedekah)} />
-              <SplitCell label="Seller" value={cents(totals.seller)} />
-              {totals.subSeller > 0 && <SplitCell label="Sub-seller" value={cents(totals.subSeller)} />}
-              {totals.subSubSeller > 0 && <SplitCell label="Sub-sub-seller" value={cents(totals.subSubSeller)} />}
-            </div>
-          </div>
-        )}
-        {!batch.mutations.length ? (
-          <div className="px-4 py-6 text-center text-slate-400 text-sm">Belum ada. Rekam lewat form di atas.</div>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {batch.mutations.map((m) => {
-              const shop = shops.find((s) => s.id === m.shopId);
-              const subSellerAmt = Number(m.subSellerAmount) || 0;
-              const subSubSellerAmt = Number(m.subSubSellerAmount) || 0;
-              return (
-                <div key={m.id} className="px-4 py-2 flex items-center justify-between flex-wrap gap-y-1">
-                  <div>
-                    <div>
-                      <span className="font-semibold text-sm">{shopName(m.shopId)}</span>
-                      <span className="text-xs text-slate-400 ml-2">{dateShort(m.payoutDate)}</span>
-                      <span className="text-xs text-slate-500 ml-2">{rupiah(m.creditAmount)}</span>
+          )}
+
+          {!batch.mutations.length ? (
+            <EmptyState
+              icon="inbox"
+              title="Belum ada toko direkam"
+              description="Klik “Rekam Pencairan Toko” di atas untuk menambahkan pencairan toko pertama."
+            />
+          ) : (
+            <ul className="divide-y divide-line">
+              {batch.mutations.map((m) => {
+                const shop = shops.find((s) => s.id === m.shopId);
+                const subSellerAmt = Number(m.subSellerAmount) || 0;
+                const subSubSellerAmt = Number(m.subSubSellerAmount) || 0;
+                return (
+                  <li key={m.id} className="px-5 py-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-ink truncate">
+                          {shopName(m.shopId)}
+                        </div>
+                        <div className="text-xs text-ink-3 mt-0.5">{dateShort(m.payoutDate)}</div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-base text-ink tabular-nums">{rupiah(m.creditAmount)}</div>
+                        <button
+                          onClick={() => setConfirmId(m.id)}
+                          disabled={busyId === m.id}
+                          className="text-xs text-red-600 hover:underline disabled:opacity-50 mt-0.5"
+                        >
+                          Hapus
+                        </button>
+                      </div>
                     </div>
+
+                    {/* Breakdown as discrete chips — previously these piled up
+                        into one dense run-on line that was hard to scan. */}
+                    <div className="flex flex-wrap gap-1.5 mt-2.5">
+                      <Badge tone="neutral">Sedekah {rupiah(m.sedekahAmount)}</Badge>
+                      <Badge tone="neutral">Seller {rupiah(m.sellerAmount)}</Badge>
+                      {subSellerAmt > 0 && (
+                        <Badge tone="brand">
+                          {shop?.subSellerName ?? "Sub-seller"}
+                          {shop?.effectiveSubSellerRate != null
+                            ? ` ${(shop.effectiveSubSellerRate * 100).toFixed(0)}%`
+                            : ""}{" "}
+                          {rupiah(subSellerAmt)}
+                        </Badge>
+                      )}
+                      {subSubSellerAmt > 0 && (
+                        <Badge tone="brand">
+                          {shop?.subSubSellerName ?? "Sub-sub-seller"}
+                          {shop?.effectiveSubSubSellerRate != null
+                            ? ` ${(shop.effectiveSubSubSellerRate * 100).toFixed(0)}%`
+                            : ""}{" "}
+                          {rupiah(subSubSellerAmt)}
+                        </Badge>
+                      )}
+                    </div>
+
                     {m.marketplaceProofUrl && (
-                      <a href={absoluteUrl(m.marketplaceProofUrl)} target="_blank" rel="noreferrer"
-                        className="text-[11px] text-brand hover:underline break-all">
+                      <a
+                        href={absoluteUrl(m.marketplaceProofUrl)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-brand-ink hover:underline mt-2 break-all"
+                      >
+                        <Icon name="image" size={13} />
                         {absoluteUrl(m.marketplaceProofUrl)}
                       </a>
                     )}
-                    {(subSellerAmt > 0 || subSubSellerAmt > 0) && (
-                      <div className="text-[11px] text-violet-600 mt-0.5">
-                        {subSellerAmt > 0 && (
-                          <span>
-                            Sub-seller{shop?.subSellerName ? ` (${shop.subSellerName})` : ""}
-                            {shop?.effectiveSubSellerRate != null ? ` · ${(shop.effectiveSubSellerRate * 100).toFixed(1)}%` : ""}: {rupiah(subSellerAmt)}
-                          </span>
-                        )}
-                        {subSellerAmt > 0 && subSubSellerAmt > 0 && <span className="mx-1.5">·</span>}
-                        {subSubSellerAmt > 0 && (
-                          <span>
-                            Sub-sub-seller{shop?.subSubSellerName ? ` (${shop.subSubSellerName})` : ""}
-                            {shop?.effectiveSubSubSellerRate != null ? ` · ${(shop.effectiveSubSubSellerRate * 100).toFixed(1)}%` : ""}: {rupiah(subSubSellerAmt)}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <button onClick={() => remove(m.id)} disabled={busyId === m.id}
-                    className="text-xs px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 font-semibold disabled:opacity-50">
-                    Hapus
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </Card>
+
+      <ConfirmModal
+        open={confirmId !== null}
+        onClose={() => setConfirmId(null)}
+        onConfirm={() => confirmId && remove(confirmId)}
+        loading={busyId !== null}
+        title="Hapus mutasi ini?"
+        description={
+          target
+            ? `Pencairan ${shopName(target.shopId)} sebesar ${rupiah(target.creditAmount)} akan dihapus dari batch ini.`
+            : ""
+        }
+      />
+    </>
   );
 }
 
-// --- Tahap 2/3: rekap transfer per penerima, grouped by shop/mutation ---
+/* ------------------------------------------------------- transfer rekap */
 //
 // Sedekah is transferred ONCE per batch (a single consolidated row, not one
 // per shop) — that row has payoutMutationId null and is rendered as its own
@@ -546,6 +877,8 @@ function MutationList({ batch, shops, onChange }: { batch: BatchDetail; shops: S
 // with no mutation link; anything else falls back to the old per-shop path.
 
 function DisbursementRekap({ batch, onChange }: { batch: BatchDetail; onChange: () => void }) {
+  const [showDone, setShowDone] = useState(false);
+
   const sedekahRows = useMemo(
     () => batch.disbursements.filter((d) => d.recipientType === "sedekah"),
     [batch.disbursements],
@@ -565,39 +898,132 @@ function DisbursementRekap({ batch, onChange }: { batch: BatchDetail; onChange: 
     return [...byMutation.entries()];
   }, [batch.disbursements, consolidatedSedekah]);
 
-  const shopTransferCount = groups.reduce((n, [, rows]) => n + rows.length, 0);
+  const all = batch.disbursements;
+  const doneCount = all.filter((d) => READY.includes(d.validationStatus)).length;
+  const pct = all.length ? Math.round((doneCount / all.length) * 100) : 0;
+  const totalToTransfer = all.reduce((n, d) => n + (Number(d.expectedAmount) || 0), 0);
+
+  // Split each group into outstanding vs finished so "what still needs doing"
+  // is never buried among rows that are already validated.
+  const isDone = (d: Disbursement) => READY.includes(d.validationStatus);
+  const pendingGroups = groups
+    .map(([id, rows]) => [id, rows.filter((r) => !isDone(r))] as const)
+    .filter(([, rows]) => rows.length > 0);
+  const doneGroups = groups
+    .map(([id, rows]) => [id, rows.filter(isDone)] as const)
+    .filter(([, rows]) => rows.length > 0);
+
+  const sedekahDone = consolidatedSedekah ? isDone(consolidatedSedekah) : true;
 
   return (
     <div className="space-y-4">
-      {consolidatedSedekah && (
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm">
-            Sedekah (Gabungan {batch.mutations.length} toko — 1 transfer)
+      {/* Progress — the answer to "mana yang sudah / belum". */}
+      <Card>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium text-ink">Progres Transfer</div>
+            <div className="text-xs text-ink-2 mt-0.5">
+              {doneCount} dari {all.length} transfer sudah tervalidasi · total{" "}
+              <span className="tabular-nums">{rupiah(totalToTransfer)}</span>
+            </div>
           </div>
-          <div className="p-3">
+          <div className="text-2xl text-ink tabular-nums">{pct}%</div>
+        </div>
+        <div className="mt-3 h-1.5 rounded-full bg-line overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${
+              pct === 100 ? "bg-emerald-500" : "bg-brand"
+            }`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </Card>
+
+      {consolidatedSedekah && (
+        <Card padded={false}>
+          <CardHeader
+            title="Sedekah"
+            subtitle={`Gabungan ${batch.mutations.length} toko — cukup 1 transfer`}
+            action={
+              sedekahDone ? (
+                <Badge tone="success" icon="check">
+                  Selesai
+                </Badge>
+              ) : (
+                <Badge tone="warning">Belum</Badge>
+              )
+            }
+          />
+          <div className="p-4">
             <DisbursementRow d={consolidatedSedekah} onChange={onChange} />
           </div>
-        </div>
+        </Card>
       )}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 font-bold text-sm">
-          Rekap Transfer per Toko ({groups.length} toko, {shopTransferCount} transfer)
-        </div>
-        {!groups.length ? (
-          <div className="px-4 py-6 text-center text-slate-400 text-sm">Tidak ada transfer sub-seller yang perlu dilakukan.</div>
+
+      <Card padded={false}>
+        <CardHeader
+          title="Perlu Ditransfer"
+          subtitle={
+            pendingGroups.length
+              ? `${pendingGroups.reduce((n, [, r]) => n + r.length, 0)} transfer dari ${pendingGroups.length} toko`
+              : undefined
+          }
+        />
+        {!pendingGroups.length ? (
+          <EmptyState
+            icon="checkCircle"
+            title="Semua transfer sudah tervalidasi"
+            description="Tidak ada transfer sub-seller yang tersisa untuk batch ini."
+          />
         ) : (
-          <div className="divide-y divide-slate-100">
-            {groups.map(([mutationId, rows]) => (
-              <div key={mutationId} className="px-4 py-3">
-                <div className="font-semibold text-sm mb-2">{rows[0]!.shopName} <span className="text-xs text-slate-400 font-normal">({rows[0]!.marketplace})</span></div>
-                <div className="space-y-2">
-                  {rows.map((d) => <DisbursementRow key={d.id} d={d} onChange={onChange} />)}
+          <ul className="divide-y divide-line">
+            {pendingGroups.map(([mutationId, rows]) => (
+              <li key={mutationId} className="px-5 py-4">
+                <div className="text-sm font-medium text-ink mb-3">
+                  {rows[0]!.shopName}{" "}
+                  <span className="text-xs text-ink-3 font-normal">({rows[0]!.marketplace})</span>
                 </div>
-              </div>
+                <div className="space-y-3">
+                  {rows.map((d) => (
+                    <DisbursementRow key={d.id} d={d} onChange={onChange} />
+                  ))}
+                </div>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
-      </div>
+      </Card>
+
+      {doneGroups.length > 0 && (
+        <Card padded={false}>
+          <button
+            onClick={() => setShowDone((v) => !v)}
+            className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-canvas transition"
+          >
+            <span className="text-sm font-medium text-ink">
+              Sudah Selesai ({doneGroups.reduce((n, [, r]) => n + r.length, 0)})
+            </span>
+            <Icon name={showDone ? "chevronDown" : "chevronRight"} size={16} className="text-ink-3" />
+          </button>
+          {showDone && (
+            <ul className="divide-y divide-line border-t border-line">
+              {doneGroups.map(([mutationId, rows]) => (
+                <li key={mutationId} className="px-5 py-4">
+                  <div className="text-sm font-medium text-ink mb-3">
+                    {rows[0]!.shopName}{" "}
+                    <span className="text-xs text-ink-3 font-normal">({rows[0]!.marketplace})</span>
+                  </div>
+                  <div className="space-y-3">
+                    {rows.map((d) => (
+                      <DisbursementRow key={d.id} d={d} onChange={onChange} />
+                    ))}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
@@ -607,90 +1033,131 @@ const RECIPIENT_LABEL: Record<Disbursement["recipientType"], string> = {
   sub_seller: "Sub-seller",
   sub_sub_seller: "Sub-sub-seller",
 };
-const VALIDATION_BADGE: Record<ValidationStatus, string> = {
-  belum_upload: "bg-slate-100 text-slate-500",
-  cocok_otomatis: "bg-green-100 text-green-700",
-  tidak_cocok: "bg-red-100 text-red-700",
-  override_manual: "bg-violet-100 text-violet-700",
+const VALIDATION_TONE: Record<ValidationStatus, "neutral" | "success" | "danger" | "info"> = {
+  belum_upload: "neutral",
+  cocok_otomatis: "success",
+  tidak_cocok: "danger",
+  override_manual: "info",
 };
 const VALIDATION_LABEL: Record<ValidationStatus, string> = {
   belum_upload: "Belum Upload",
-  cocok_otomatis: "✓ Cocok Otomatis",
-  tidak_cocok: "✗ Tidak Cocok",
-  override_manual: "✓ Override Manual",
+  cocok_otomatis: "Cocok Otomatis",
+  tidak_cocok: "Tidak Cocok",
+  override_manual: "Override Manual",
 };
 
 function DisbursementRow({ d, onChange }: { d: Disbursement; onChange: () => void }) {
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [showOverride, setShowOverride] = useState(false);
   const [reason, setReason] = useState("");
 
   async function uploadProof(url: string) {
-    setBusy(true); setErr(null);
+    setBusy(true);
+    setErr(null);
     try {
       await api.post(`/payout/disbursements/${d.id}/proof`, { proofUrl: url });
       onChange();
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function override() {
-    setBusy(true); setErr(null);
+    setBusy(true);
+    setErr(null);
     try {
       await api.post(`/payout/disbursements/${d.id}/override`, { reason });
-      setShowOverride(false); setReason("");
+      setShowOverride(false);
+      setReason("");
+      toast("Transfer di-override manual", "success");
       onChange();
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <span className="text-xs font-bold">{RECIPIENT_LABEL[d.recipientType]}</span>
-          {d.recipientChain && <span className="text-xs text-slate-500 ml-1">({d.recipientChain})</span>}
-          {!d.recipientChain && d.recipientType !== "sedekah" && <span className="text-xs text-slate-500 ml-1">({d.recipientName})</span>}
-          <span className={`ml-2 text-[10px] font-semibold px-2 py-0.5 rounded ${VALIDATION_BADGE[d.validationStatus]}`}>
-            {VALIDATION_LABEL[d.validationStatus]}
-          </span>
+    <div className="rounded-lg border border-line p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-ink">{RECIPIENT_LABEL[d.recipientType]}</span>
+            {d.recipientChain && <span className="text-sm text-ink-2">({d.recipientChain})</span>}
+            {!d.recipientChain && d.recipientType !== "sedekah" && (
+              <span className="text-sm text-ink-2">({d.recipientName})</span>
+            )}
+            <Badge
+              tone={VALIDATION_TONE[d.validationStatus]}
+              icon={
+                d.validationStatus === "cocok_otomatis" || d.validationStatus === "override_manual"
+                  ? "check"
+                  : d.validationStatus === "tidak_cocok"
+                    ? "warning"
+                    : undefined
+              }
+            >
+              {VALIDATION_LABEL[d.validationStatus]}
+            </Badge>
+          </div>
+          <div className="text-xs text-ink-2 mt-1.5">
+            Rekening tujuan: <span className="font-mono text-ink">{d.recordedAccount ?? "-"}</span>
+          </div>
         </div>
-        <div className="text-sm font-bold">{rupiah(d.expectedAmount)}</div>
-      </div>
-      <div className="text-xs text-slate-500 mt-1">
-        Rekening tujuan: <span className="font-mono">{d.recordedAccount ?? "-"}</span>
+        <div className="text-base text-ink tabular-nums shrink-0">{rupiah(d.expectedAmount)}</div>
       </div>
 
-      <div className="mt-2 flex flex-wrap items-end gap-3">
+      <div className="mt-3 flex flex-wrap items-end gap-3">
         <FileUpload label="Bukti Transfer" value={d.proofUrl ?? ""} onChange={uploadProof} />
+        {busy && <Icon name="refresh" size={14} className="animate-spin text-ink-3 mb-2" />}
         {d.validationStatus === "tidak_cocok" && !showOverride && (
-          <button onClick={() => setShowOverride(true)}
-            className="text-xs px-3 py-1.5 rounded bg-violet-600 hover:bg-violet-700 text-white font-semibold">
+          <Button size="sm" variant="outline" onClick={() => setShowOverride(true)}>
             Override Manual
-          </button>
+          </Button>
         )}
       </div>
 
       {d.validationStatus === "tidak_cocok" && (
-        <div className="mt-2 text-[11px] bg-red-50 border border-red-200 text-red-700 rounded-md px-2 py-1.5">
-          OCR tidak cocok — hasil baca: {d.ocrAmount ? rupiah(d.ocrAmount) : "(nominal tak terbaca)"}
-          {" · "}{d.ocrAccount ?? "(rekening tak terbaca)"}. Seharusnya {rupiah(d.expectedAmount)} ke {d.recordedAccount ?? "-"}.
+        <div className="mt-3">
+          <InlineAlert tone="danger">
+            OCR tidak cocok — hasil baca: {d.ocrAmount ? rupiah(d.ocrAmount) : "(nominal tak terbaca)"}
+            {" · "}
+            {d.ocrAccount ?? "(rekening tak terbaca)"}. Seharusnya {rupiah(d.expectedAmount)} ke{" "}
+            {d.recordedAccount ?? "-"}.
+          </InlineAlert>
         </div>
       )}
       {d.validationStatus === "override_manual" && d.overrideReason && (
-        <div className="mt-2 text-[11px] text-violet-700">Alasan override: {d.overrideReason}</div>
+        <div className="text-xs text-ink-2 mt-2">Alasan override: {d.overrideReason}</div>
       )}
 
       {showOverride && (
-        <div className="mt-2 flex gap-2 items-center">
-          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Alasan override (wajib)"
-            className="flex-1 px-2 py-1.5 rounded-md border border-slate-300 text-xs" />
-          <button onClick={override} disabled={busy || !reason.trim()}
-            className="text-xs px-3 py-1.5 rounded bg-violet-600 hover:bg-violet-700 text-white font-semibold disabled:opacity-50">
+        <div className="mt-3 flex flex-wrap gap-2 items-center">
+          <Input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Alasan override (wajib)"
+            className="flex-1 min-w-[200px]"
+          />
+          <Button size="sm" variant="filled" loading={busy} disabled={!reason.trim()} onClick={override}>
             Konfirmasi
-          </button>
+          </Button>
+          <Button size="sm" variant="text" onClick={() => setShowOverride(false)}>
+            Batal
+          </Button>
         </div>
       )}
-      {err && <div className="text-red-500 text-[11px] mt-1">{err}</div>}
+
+      {err && (
+        <div className="mt-2">
+          <InlineAlert tone="danger">{err}</InlineAlert>
+        </div>
+      )}
     </div>
   );
 }
