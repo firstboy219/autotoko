@@ -3,6 +3,30 @@ import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
 import { rupiah } from "../lib/fmt";
+import { Icon } from "../components/Icon";
+import {
+  PageHeader,
+  Card,
+  CardHeader,
+  Button,
+  Badge,
+  Field,
+  Input,
+  Select,
+  Table,
+  TableWrap,
+  THead,
+  TR,
+  TH,
+  TD,
+  SkeletonRows,
+  Skeleton,
+  EmptyState,
+  Modal,
+  ConfirmModal,
+  InlineAlert,
+  useToast,
+} from "../components/ui";
 
 interface Master {
   id: string;
@@ -25,18 +49,28 @@ interface Posting {
   status: string;
 }
 
-const MP_BADGE: Record<string, { label: string; cls: string }> = {
-  tiktok: { label: "TikTok Shop", cls: "bg-black text-white" },
-  shopee: { label: "Shopee", cls: "bg-orange-100 text-orange-700" },
-  tokopedia: { label: "Tokopedia", cls: "bg-green-100 text-green-700" },
-  lazada: { label: "Lazada", cls: "bg-blue-100 text-blue-700" },
+type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
+
+const MP_BADGE: Record<string, { label: string; tone: Tone }> = {
+  tiktok: { label: "TikTok Shop", tone: "neutral" },
+  shopee: { label: "Shopee", tone: "warning" },
+  tokopedia: { label: "Tokopedia", tone: "success" },
+  lazada: { label: "Lazada", tone: "info" },
 };
+
+const STATUS_TONE: Record<string, Tone> = {
+  active: "success",
+  inactive: "neutral",
+  draft: "warning",
+};
+
 interface ShopGroup { shopId: string; shopName: string | null; marketplace: string; postings: Posting[]; }
 interface MasterDetail extends Master { shops: ShopGroup[]; }
 interface Shop { id: string; shopName: string | null; marketplace: string; }
 
 export function Produk() {
   const { data, loading, reload } = useFetch<Master[]>("/products");
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [sku, setSku] = useState("");
   const [name, setName] = useState("");
@@ -53,12 +87,18 @@ export function Produk() {
     );
   }, [data, q]);
 
+  function closeCreate() {
+    setOpen(false);
+    setErr(null);
+  }
+
   async function create(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true); setErr(null);
     try {
       await api.post("/products", { sku, name, basePrice: price || undefined, status: "active" });
       setOpen(false); setSku(""); setName(""); setPrice(""); reload();
+      toast("Master produk ditambahkan", "success");
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -68,73 +108,131 @@ export function Produk() {
 
   return (
     <Layout title="Master Produk">
-      <div className="flex justify-between items-center mb-4 gap-3">
-        <input
-          className="flex-1 max-w-xs px-3 py-2 rounded-md border border-slate-200 text-sm"
-          placeholder="Cari nama / SKU…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
+      <PageHeader
+        title="Master Produk"
+        subtitle="Satu master produk menaungi seluruh postingan di tiap marketplace."
+        actions={
+          <Button variant="filled" icon="plus" onClick={() => setOpen(true)}>
+            Produk Baru
+          </Button>
+        }
+      />
+
+      <Card padded={false} className="overflow-hidden">
+        <CardHeader
+          title="Daftar produk"
+          subtitle={loading ? undefined : `${filtered.length} produk`}
+          action={
+            <div className="relative w-full sm:w-64">
+              <Icon
+                name="search"
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none"
+              />
+              <Input
+                className="pl-9"
+                placeholder="Cari nama / SKU…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+            </div>
+          }
         />
-        <button onClick={() => setOpen(!open)} className="px-4 py-2 rounded-md bg-brand hover:bg-brand-dark text-white text-sm font-semibold">
-          + Produk Baru
-        </button>
-      </div>
-
-      {open && (
-        <form onSubmit={create} className="bg-white rounded-xl border border-slate-200 p-4 mb-4 grid grid-cols-3 gap-3 items-end">
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1">SKU</label>
-            <input className="w-full px-3 py-2 rounded-md border border-slate-200 text-sm" value={sku} onChange={(e) => setSku(e.target.value)} required />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1">Nama</label>
-            <input className="w-full px-3 py-2 rounded-md border border-slate-200 text-sm" value={name} onChange={(e) => setName(e.target.value)} required />
-          </div>
-          <div className="flex gap-2">
-            <input className="w-full px-3 py-2 rounded-md border border-slate-200 text-sm" placeholder="Harga" value={price} onChange={(e) => setPrice(e.target.value)} />
-            <button disabled={saving} className="px-4 py-2 rounded-md bg-brand text-white text-sm font-semibold disabled:opacity-60">{saving ? "…" : "Simpan"}</button>
-          </div>
-          {err && <div className="col-span-3 text-red-500 text-xs">{err}</div>}
-        </form>
-      )}
-
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-slate-50 text-[10px] uppercase text-slate-500">
-              <th className="text-left px-3 py-2">Produk / SKU</th>
-              <th className="text-left px-3 py-2">Postingan</th>
-              <th className="text-left px-3 py-2">Stok</th>
-              <th className="text-left px-3 py-2">Harga</th>
-              <th className="text-right px-3 py-2">GMV 7h</th>
-              <th className="text-left px-3 py-2">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400">Memuat…</td></tr>
-            ) : !filtered.length ? (
-              <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400">Belum ada produk.</td></tr>
-            ) : (
-              filtered.map((m) => (
-                <tr key={m.id} className="border-t border-slate-100 cursor-pointer hover:bg-slate-50" onClick={() => setDetailId(m.id)}>
-                  <td className="px-3 py-2">
-                    <div className="font-semibold">{m.name}</div>
-                    <div className="text-[10px] font-mono text-slate-400">SKU: {m.sku}</div>
-                  </td>
-                  <td className="px-3 py-2">{m.postingCount ?? 0}</td>
-                  <td className="px-3 py-2">{m.totalStock ?? 0}</td>
-                  <td className="px-3 py-2">{rupiah(m.basePrice)}</td>
-                  <td className="px-3 py-2 text-right">{rupiah(m.gmv7d)}</td>
-                  <td className="px-3 py-2">
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-600 capitalize">{m.status}</span>
+        <TableWrap>
+          <Table className="min-w-[760px]">
+            <THead>
+              <tr>
+                <TH>Produk / SKU</TH>
+                <TH align="right">Postingan</TH>
+                <TH align="right">Stok</TH>
+                <TH align="right">Harga</TH>
+                <TH align="right">GMV 7h</TH>
+                <TH>Status</TH>
+              </tr>
+            </THead>
+            <tbody>
+              {loading ? (
+                <SkeletonRows n={6} cols={6} />
+              ) : !filtered.length ? (
+                <tr>
+                  <td colSpan={6}>
+                    <EmptyState
+                      icon="package"
+                      title={q.trim() ? "Produk tidak ditemukan" : "Belum ada produk"}
+                      description={
+                        q.trim()
+                          ? "Coba kata kunci lain atau hapus pencarian."
+                          : "Buat master produk untuk mulai menghubungkan postingan marketplace."
+                      }
+                      action={
+                        q.trim() ? (
+                          <Button variant="tonal" icon="close" onClick={() => setQ("")}>
+                            Hapus pencarian
+                          </Button>
+                        ) : (
+                          <Button variant="filled" icon="plus" onClick={() => setOpen(true)}>
+                            Produk Baru
+                          </Button>
+                        )
+                      }
+                    />
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ) : (
+                filtered.map((m) => (
+                  <TR
+                    key={m.id}
+                    className="cursor-pointer hover:bg-canvas"
+                    onClick={() => setDetailId(m.id)}
+                  >
+                    <TD>
+                      <div className="text-ink font-medium">{m.name}</div>
+                      <div className="text-xs font-mono text-ink-3 mt-0.5">SKU: {m.sku}</div>
+                    </TD>
+                    <TD align="right" className="tabular-nums">{m.postingCount ?? 0}</TD>
+                    <TD align="right" className="tabular-nums">{m.totalStock ?? 0}</TD>
+                    <TD align="right" className="tabular-nums whitespace-nowrap">{rupiah(m.basePrice)}</TD>
+                    <TD align="right" className="tabular-nums whitespace-nowrap">{rupiah(m.gmv7d)}</TD>
+                    <TD>
+                      <Badge tone={STATUS_TONE[m.status] ?? "neutral"}>
+                        <span className="capitalize">{m.status}</span>
+                      </Badge>
+                    </TD>
+                  </TR>
+                ))
+              )}
+            </tbody>
+          </Table>
+        </TableWrap>
+      </Card>
+
+      <Modal open={open} onClose={closeCreate} title="Produk Baru">
+        <form onSubmit={create} className="space-y-3.5">
+          {err && <InlineAlert tone="danger">{err}</InlineAlert>}
+          <Field label="SKU" required hint="Kode unik untuk menautkan postingan marketplace.">
+            <Input value={sku} onChange={(e) => setSku(e.target.value)} required />
+          </Field>
+          <Field label="Nama" required>
+            <Input value={name} onChange={(e) => setName(e.target.value)} required />
+          </Field>
+          <Field label="Harga">
+            <Input
+              placeholder="mis. 75000"
+              inputMode="numeric"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+            />
+          </Field>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="text" onClick={closeCreate} disabled={saving}>
+              Batal
+            </Button>
+            <Button type="submit" variant="filled" loading={saving}>
+              Simpan
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       {detailId && (
         <ProductDetail
@@ -150,9 +248,12 @@ export function Produk() {
 function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
   const { data, loading, reload } = useFetch<MasterDetail>(`/products/${id}`);
   const shops = useFetch<Shop[]>("/shops");
+  const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [delPosting, setDelPosting] = useState<Posting | null>(null);
 
   // edit form state
   const [name, setName] = useState("");
@@ -177,14 +278,17 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
     try {
       await api.patch(`/products/${id}`, { name, basePrice: price || undefined, status });
       setEditing(false); reload(); onChanged();
+      toast("Produk diperbarui", "success");
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
 
   async function removeMaster() {
-    if (!confirm("Hapus master produk ini beserta semua postingannya?")) return;
     setBusy(true); setErr(null);
-    try { await api.del(`/products/${id}`); onChanged(); onClose(); }
-    catch (e) { setErr((e as Error).message); setBusy(false); }
+    try {
+      await api.del(`/products/${id}`);
+      toast("Master produk dihapus", "success");
+      onChanged(); onClose();
+    } catch (e) { setErr((e as Error).message); setBusy(false); setConfirmDelete(false); }
   }
 
   async function addPosting(e: React.FormEvent) {
@@ -201,123 +305,222 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
       });
       setShowAdd(false); setPShop(""); setPTitle(""); setPItemId(""); setPPrice(""); setPStock("");
       reload(); onChanged();
+      toast("Postingan ditambahkan", "success");
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
 
   async function removePosting(postingId: string) {
-    if (!confirm("Hapus postingan ini?")) return;
     setBusy(true); setErr(null);
-    try { await api.del(`/products/postings/${postingId}`); reload(); onChanged(); }
-    catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+    try {
+      await api.del(`/products/postings/${postingId}`);
+      toast("Postingan dihapus", "success");
+      reload(); onChanged();
+    }
+    catch (e) { setErr((e as Error).message); } finally { setBusy(false); setDelPosting(null); }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl w-[560px] max-w-full max-h-[88vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-start mb-4">
-          <div className="font-bold">Detail Produk</div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700">✕</button>
-        </div>
-
-        {err && <div className="text-red-500 text-xs mb-3">{err}</div>}
-
-        {loading || !data ? (
-          <div className="text-slate-400 text-sm py-6 text-center">Memuat…</div>
-        ) : (
-          <>
-            {!editing ? (
-              <div className="mb-4">
-                <div className="text-lg font-extrabold">{data.name}</div>
-                <div className="text-[11px] font-mono text-slate-400 mb-2">SKU: {data.sku}</div>
-                <div className="flex gap-4 text-sm">
-                  <span>Harga: <b>{rupiah(data.basePrice)}</b></span>
-                  <span className="capitalize">Status: <b>{data.status}</b></span>
-                </div>
-                <div className="flex gap-2 mt-3">
-                  <button onClick={startEdit} className="px-3 py-1.5 rounded-md border border-slate-200 text-sm font-semibold hover:bg-slate-50">Edit</button>
-                  <button onClick={removeMaster} disabled={busy} className="px-3 py-1.5 rounded-md border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50">Hapus</button>
-                </div>
-              </div>
-            ) : (
-              <form onSubmit={saveEdit} className="mb-4 grid grid-cols-2 gap-3 items-end bg-slate-50 rounded-lg p-3">
-                <div className="col-span-2">
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Nama</label>
-                  <input className="w-full px-3 py-2 rounded-md border border-slate-200 text-sm" value={name} onChange={(e) => setName(e.target.value)} required />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Harga</label>
-                  <input className="w-full px-3 py-2 rounded-md border border-slate-200 text-sm" value={price} onChange={(e) => setPrice(e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Status</label>
-                  <select className="w-full px-3 py-2 rounded-md border border-slate-200 text-sm bg-white" value={status} onChange={(e) => setStatus(e.target.value)}>
-                    <option value="active">active</option>
-                    <option value="inactive">inactive</option>
-                    <option value="draft">draft</option>
-                  </select>
-                </div>
-                <div className="col-span-2 flex gap-2">
-                  <button disabled={busy} className="px-4 py-2 rounded-md bg-brand text-white text-sm font-semibold disabled:opacity-60">Simpan</button>
-                  <button type="button" onClick={() => setEditing(false)} className="px-4 py-2 rounded-md border border-slate-200 text-sm font-semibold">Batal</button>
-                </div>
-              </form>
-            )}
-
-            <div className="flex items-center justify-between mb-2">
-              <div className="font-bold text-sm">Postingan per Toko</div>
-              <button onClick={() => setShowAdd(!showAdd)} className="text-xs text-brand font-semibold">+ Tambah postingan</button>
+    <>
+      <Modal open onClose={onClose} title="Detail Produk" width="max-w-2xl">
+        <div className="max-h-[70vh] overflow-y-auto -mx-1 px-1">
+          {err && (
+            <div className="mb-4">
+              <InlineAlert tone="danger">{err}</InlineAlert>
             </div>
+          )}
 
-            {showAdd && (
-              <form onSubmit={addPosting} className="mb-3 grid grid-cols-2 gap-2 bg-slate-50 rounded-lg p-3">
-                <select className="px-3 py-2 rounded-md border border-slate-200 text-sm bg-white col-span-2" value={pShop} onChange={(e) => setPShop(e.target.value)} required>
-                  <option value="">Pilih toko…</option>
-                  {(shops.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.shopName ?? s.id} ({s.marketplace})</option>)}
-                </select>
-                <input className="px-3 py-2 rounded-md border border-slate-200 text-sm" placeholder="Marketplace item ID" value={pItemId} onChange={(e) => setPItemId(e.target.value)} required />
-                <input className="px-3 py-2 rounded-md border border-slate-200 text-sm" placeholder="Judul postingan" value={pTitle} onChange={(e) => setPTitle(e.target.value)} />
-                <input className="px-3 py-2 rounded-md border border-slate-200 text-sm" placeholder="Harga" value={pPrice} onChange={(e) => setPPrice(e.target.value)} />
-                <input className="px-3 py-2 rounded-md border border-slate-200 text-sm" placeholder="Stok" value={pStock} onChange={(e) => setPStock(e.target.value.replace(/\D/g, ""))} />
-                <div className="col-span-2 text-[11px] text-slate-400">SKU postingan otomatis = <b>{data.sku}</b> (untuk linking).</div>
-                <button disabled={busy} className="col-span-2 px-4 py-2 rounded-md bg-brand text-white text-sm font-semibold disabled:opacity-60">Tambah</button>
-              </form>
-            )}
-
-            {!data.shops.length ? (
-              <div className="text-slate-400 text-sm py-3 text-center">Belum ada postingan terhubung.</div>
-            ) : (
-              data.shops.map((sg) => {
-                const badge = MP_BADGE[sg.marketplace] ?? { label: sg.marketplace, cls: "bg-slate-100 text-slate-600" };
-                return (
-                <div key={sg.shopId} className="mb-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-semibold text-slate-500">{sg.shopName ?? sg.shopId}</span>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${badge.cls}`}>{badge.label}</span>
+          {loading || !data ? (
+            <div className="space-y-3 py-2">
+              <Skeleton className="h-6 w-56" />
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          ) : (
+            <>
+              {!editing ? (
+                <div className="mb-5">
+                  <div className="text-lg font-medium text-ink">{data.name}</div>
+                  <div className="text-xs font-mono text-ink-3 mt-0.5">SKU: {data.sku}</div>
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-2.5 text-sm text-ink-2">
+                    <span>
+                      Harga <span className="text-ink font-medium tabular-nums">{rupiah(data.basePrice)}</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      Status
+                      <Badge tone={STATUS_TONE[data.status] ?? "neutral"}>
+                        <span className="capitalize">{data.status}</span>
+                      </Badge>
+                    </span>
                   </div>
-                  <div className="border border-slate-100 rounded-lg divide-y divide-slate-100">
-                    {sg.postings.map((p) => (
-                      <div key={p.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                        <div>
-                          <div className="font-medium">{p.title ?? p.marketplaceSku ?? p.id}</div>
-                          {p.marketplaceItemId && (
-                            <div className="text-[11px] font-mono text-slate-500">Product ID: {p.marketplaceItemId}</div>
-                          )}
-                          <div className="text-[11px] text-slate-400">{rupiah(p.price)} · stok {p.stock ?? 0} · {p.status}</div>
-                        </div>
-                        <button onClick={() => removePosting(p.id)} className="text-red-500 text-xs hover:underline">Hapus</button>
-                      </div>
-                    ))}
+                  <div className="flex flex-wrap gap-2 mt-3.5">
+                    <Button size="sm" variant="outline" icon="pencil" onClick={startEdit}>
+                      Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      icon="trash"
+                      disabled={busy}
+                      onClick={() => setConfirmDelete(true)}
+                    >
+                      Hapus
+                    </Button>
                   </div>
                 </div>
-                );
-              })
-            )}
+              ) : (
+                <form onSubmit={saveEdit} className="mb-5 rounded-lg border border-line p-4 space-y-3.5">
+                  <Field label="Nama" required>
+                    <Input value={name} onChange={(e) => setName(e.target.value)} required />
+                  </Field>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <Field label="Harga">
+                      <Input inputMode="numeric" value={price} onChange={(e) => setPrice(e.target.value)} />
+                    </Field>
+                    <Field label="Status">
+                      <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+                        <option value="active">active</option>
+                        <option value="inactive">inactive</option>
+                        <option value="draft">draft</option>
+                      </Select>
+                    </Field>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="submit" variant="filled" size="sm" loading={busy}>
+                      Simpan
+                    </Button>
+                    <Button type="button" variant="text" size="sm" onClick={() => setEditing(false)}>
+                      Batal
+                    </Button>
+                  </div>
+                </form>
+              )}
 
-            <MasterBom masterId={id} masterName={data.name} />
+              <div className="flex items-center justify-between gap-2 mb-2.5">
+                <div className="text-sm font-medium text-ink">Postingan per Toko</div>
+                <Button
+                  size="sm"
+                  variant="text"
+                  icon={showAdd ? "close" : "plus"}
+                  onClick={() => setShowAdd(!showAdd)}
+                >
+                  {showAdd ? "Tutup" : "Tambah postingan"}
+                </Button>
+              </div>
+
+              {showAdd && (
+                <form onSubmit={addPosting} className="mb-4 rounded-lg border border-line p-4 space-y-3.5">
+                  <Field label="Toko" required>
+                    <Select value={pShop} onChange={(e) => setPShop(e.target.value)} required>
+                      <option value="">Pilih toko…</option>
+                      {(shops.data ?? []).map((s) => (
+                        <option key={s.id} value={s.id}>{s.shopName ?? s.id} ({s.marketplace})</option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <Field label="Marketplace item ID" required>
+                      <Input value={pItemId} onChange={(e) => setPItemId(e.target.value)} required />
+                    </Field>
+                    <Field label="Judul postingan">
+                      <Input value={pTitle} onChange={(e) => setPTitle(e.target.value)} />
+                    </Field>
+                    <Field label="Harga">
+                      <Input inputMode="numeric" value={pPrice} onChange={(e) => setPPrice(e.target.value)} />
+                    </Field>
+                    <Field label="Stok">
+                      <Input
+                        inputMode="numeric"
+                        value={pStock}
+                        onChange={(e) => setPStock(e.target.value.replace(/\D/g, ""))}
+                      />
+                    </Field>
+                  </div>
+                  <div className="text-xs text-ink-3">
+                    SKU postingan otomatis = <span className="font-mono text-ink-2">{data.sku}</span> (untuk linking).
+                  </div>
+                  <Button type="submit" variant="filled" size="sm" icon="plus" loading={busy}>
+                    Tambah
+                  </Button>
+                </form>
+              )}
+
+              {!data.shops.length ? (
+                <EmptyState
+                  icon="store"
+                  title="Belum ada postingan terhubung"
+                  description="Tambahkan postingan agar stok dan harga tersinkron per marketplace."
+                  className="py-8"
+                />
+              ) : (
+                data.shops.map((sg) => {
+                  const badge = MP_BADGE[sg.marketplace] ?? { label: sg.marketplace, tone: "neutral" as Tone };
+                  return (
+                    <div key={sg.shopId} className="mb-4">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="text-xs font-medium text-ink-2">{sg.shopName ?? sg.shopId}</span>
+                        <Badge tone={badge.tone}>{badge.label}</Badge>
+                      </div>
+                      <div className="border border-line rounded-lg divide-y divide-line">
+                        {sg.postings.map((p) => (
+                          <div key={p.id} className="flex items-start justify-between gap-3 px-3.5 py-2.5">
+                            <div className="min-w-0">
+                              <div className="text-sm text-ink truncate">
+                                {p.title ?? p.marketplaceSku ?? p.id}
+                              </div>
+                              {p.marketplaceItemId && (
+                                <div className="text-xs font-mono text-ink-3 mt-0.5">
+                                  Product ID: {p.marketplaceItemId}
+                                </div>
+                              )}
+                              <div className="text-xs text-ink-2 mt-0.5 tabular-nums">
+                                {rupiah(p.price)} · stok {p.stock ?? 0} · {p.status}
+                              </div>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="text"
+                              icon="trash"
+                              className="text-red-600 hover:bg-red-50 shrink-0"
+                              aria-label="Hapus postingan"
+                              onClick={() => setDelPosting(p)}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+
+              <MasterBom masterId={id} masterName={data.name} />
+            </>
+          )}
+        </div>
+      </Modal>
+
+      <ConfirmModal
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={removeMaster}
+        title="Hapus master produk"
+        description="Master produk ini beserta semua postingannya akan dihapus. Tindakan ini tidak bisa dibatalkan."
+        loading={busy}
+      />
+
+      <ConfirmModal
+        open={delPosting != null}
+        onClose={() => setDelPosting(null)}
+        onConfirm={() => delPosting && removePosting(delPosting.id)}
+        title="Hapus postingan"
+        description={
+          <>
+            Hapus postingan{" "}
+            <b>{delPosting?.title ?? delPosting?.marketplaceSku ?? delPosting?.id}</b>?
           </>
-        )}
-      </div>
-    </div>
+        }
+        loading={busy}
+      />
+    </>
   );
 }
 
@@ -335,6 +538,7 @@ interface BomLite {
 /** BOM materials linked to this master product (read + quick add). */
 function MasterBom({ masterId, masterName }: { masterId: string; masterName: string }) {
   const { data, reload } = useFetch<BomLite[]>("/bom");
+  const toast = useToast();
   const linked = (data ?? []).filter((b) => b.masterProductId === masterId);
   const [show, setShow] = useState(false);
   const [name, setName] = useState("");
@@ -348,32 +552,66 @@ function MasterBom({ masterId, masterName }: { masterId: string; masterName: str
     try {
       await api.post("/bom", { masterProductId: masterId, materialName: name, quantity: qty, unit: unit || undefined });
       setShow(false); setName(""); setQty(""); reload();
+      toast("Bahan baku ditambahkan", "success");
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
 
   return (
-    <div className="mt-4 pt-3 border-t border-slate-100">
-      <div className="flex items-center justify-between mb-2">
-        <div className="font-bold text-sm">Bahan Baku (BOM)</div>
-        <button onClick={() => setShow(!show)} className="text-xs text-brand font-semibold">+ Tambah bahan</button>
+    <div className="mt-5 pt-4 border-t border-line">
+      <div className="flex items-center justify-between gap-2 mb-2.5">
+        <div className="text-sm font-medium text-ink">Bahan Baku (BOM)</div>
+        <Button
+          size="sm"
+          variant="text"
+          icon={show ? "close" : "plus"}
+          onClick={() => setShow(!show)}
+        >
+          {show ? "Tutup" : "Tambah bahan"}
+        </Button>
       </div>
+
       {show && (
-        <form onSubmit={add} className="mb-2 grid grid-cols-4 gap-2 bg-slate-50 rounded-lg p-2">
-          <input className="col-span-2 px-2 py-1.5 rounded-md border border-slate-200 text-sm" placeholder="Nama bahan" value={name} onChange={(e) => setName(e.target.value)} required />
-          <input className="px-2 py-1.5 rounded-md border border-slate-200 text-sm" placeholder="Qty/produk" value={qty} onChange={(e) => setQty(e.target.value)} required />
-          <input className="px-2 py-1.5 rounded-md border border-slate-200 text-sm" placeholder="Satuan" value={unit} onChange={(e) => setUnit(e.target.value)} />
-          <button disabled={busy} className="col-span-4 px-3 py-1.5 rounded-md bg-brand text-white text-xs font-semibold disabled:opacity-60">Tambah ke {masterName}</button>
-          {err && <div className="col-span-4 text-red-500 text-xs">{err}</div>}
+        <form onSubmit={add} className="mb-3 rounded-lg border border-line p-4 space-y-3.5">
+          {err && <InlineAlert tone="danger">{err}</InlineAlert>}
+          <Field label="Nama bahan" required>
+            <Input value={name} onChange={(e) => setName(e.target.value)} required />
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <Field label="Qty/produk" required>
+              <Input placeholder="mis. 2" value={qty} onChange={(e) => setQty(e.target.value)} required />
+            </Field>
+            <Field label="Satuan">
+              <Input placeholder="pcs/gram/m" value={unit} onChange={(e) => setUnit(e.target.value)} />
+            </Field>
+          </div>
+          <Button type="submit" variant="filled" size="sm" icon="plus" loading={busy}>
+            Tambah ke {masterName}
+          </Button>
         </form>
       )}
+
       {!linked.length ? (
-        <div className="text-slate-400 text-xs py-2">Belum ada bahan baku. Tambahkan agar stok auto-deduct saat order masuk.</div>
+        <div className="text-xs text-ink-2 py-2">
+          Belum ada bahan baku. Tambahkan agar stok auto-deduct saat order masuk.
+        </div>
       ) : (
-        <div className="border border-slate-100 rounded-lg divide-y divide-slate-100">
+        <div className="border border-line rounded-lg divide-y divide-line">
           {linked.map((b) => (
-            <div key={b.id} className={`flex items-center justify-between px-3 py-2 text-sm ${b.lowStock ? "bg-red-50" : ""}`}>
-              <div>{b.materialName} <span className="text-[10px] text-slate-400">{b.quantity}{b.unit}/produk</span></div>
-              <div className="text-[11px]">stok <b className={b.lowStock ? "text-red-600" : ""}>{b.currentStock}</b> / min {b.minimumThreshold}</div>
+            <div
+              key={b.id}
+              className={`flex items-center justify-between gap-3 px-3.5 py-2.5 ${b.lowStock ? "bg-red-50/60" : ""}`}
+            >
+              <div className="min-w-0 text-sm text-ink truncate">
+                {b.materialName}{" "}
+                <span className="text-xs text-ink-3">{b.quantity}{b.unit}/produk</span>
+              </div>
+              <div className="text-xs text-ink-2 whitespace-nowrap tabular-nums">
+                stok{" "}
+                <span className={b.lowStock ? "text-red-600 font-medium" : "text-ink font-medium"}>
+                  {b.currentStock}
+                </span>{" "}
+                / min {b.minimumThreshold}
+              </div>
             </div>
           ))}
         </div>
