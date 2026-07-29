@@ -27,6 +27,7 @@ import { DashboardModule } from "./modules/dashboard/dashboard.module.js";
 import { HealthModule } from "./modules/health/health.module.js";
 import { PayoutModule } from "./modules/payout/payout.module.js";
 import { UploadsModule } from "./modules/uploads/uploads.module.js";
+import { CostingModule } from "./modules/costing/costing.module.js";
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { UploadsModule } from "./modules/uploads/uploads.module.js";
     HealthModule,
     PayoutModule,
     UploadsModule,
+    CostingModule,
   ],
   providers: [
     // Global RLS request-context wrapper (no-op unless RLS_ENABLED=true).

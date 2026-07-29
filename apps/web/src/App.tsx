@@ -7,6 +7,8 @@ import { Produk } from "./pages/Produk";
 import { Wallet } from "./pages/Wallet";
 import { Orders } from "./pages/Orders";
 import { Bom } from "./pages/Bom";
+import { Hpp } from "./pages/Hpp";
+import { HppDetail } from "./pages/HppDetail";
 import { Autopilot } from "./pages/Autopilot";
 import { Laporan } from "./pages/Laporan";
 import { Katalog } from "./pages/Katalog";
@@ -52,6 +54,8 @@ export function App() {
         <Route path="/produk" element={<Protected><Produk /></Protected>} />
         <Route path="/orders" element={<Protected><Orders /></Protected>} />
         <Route path="/bom" element={<Protected><Bom /></Protected>} />
+        <Route path="/hpp" element={<Protected><Hpp /></Protected>} />
+        <Route path="/hpp/:id" element={<Protected><HppDetail /></Protected>} />
         <Route path="/autopilot" element={<Protected><Autopilot /></Protected>} />
         <Route path="/laporan" element={<Protected><Laporan /></Protected>} />
         <Route path="/katalog" element={<Protected><Katalog /></Protected>} />

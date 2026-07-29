@@ -71,6 +71,13 @@
       "when": 1785207969908,
       "tag": "0009_payout_sedekah_consolidated",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785335509722,
+      "tag": "0010_product_costing",
+      "breakpoints": true
     }
   ]
 }

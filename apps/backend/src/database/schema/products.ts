@@ -67,6 +67,10 @@ export const bomItems = pgTable("bom_items", {
     .references(() => masterProducts.id, { onDelete: "cascade" }),
   materialName: varchar("material_name", { length: 255 }).notNull(),
   quantity: numeric("quantity", { precision: 10, scale: 3 }).notNull(), // per 1 product
+  // Cost of ONE unit of this material, used to compute Harga Pokok Produksi.
+  // Separate from restockPrice/restockQty below, which describe a supplier
+  // purchase order rather than the costing basis.
+  unitCost: numeric("unit_cost", { precision: 15, scale: 2 }).notNull().default("0"),
   unit: varchar("unit", { length: 32 }), // meter, gram, pcs
   currentStock: numeric("current_stock", { precision: 10, scale: 3 }).notNull().default("0"),
   minimumThreshold: numeric("minimum_threshold", { precision: 10, scale: 3 }).notNull().default("0"),
@@ -116,5 +120,64 @@ export const productPostings = pgTable(
     shopIdx: index("postings_shop_idx").on(t.shopId),
     // SKU matching is the heart of master<->posting linking (PRD Bagian 17.4)
     skuIdx: index("postings_mp_sku_idx").on(t.marketplaceSku),
+  }),
+);
+
+// Harga Pokok Produksi + publish-price composition, one row per master
+// product. Rates are stored per product (not read from payout settings) so a
+// seller can model different marketplace/affiliator terms per item; the
+// sedekah/reseller defaults mirror the tenant's payout settings for
+// convenience but are independently editable.
+export const productCosting = pgTable(
+  "product_costing",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    masterProductId: uuid("master_product_id")
+      .notNull()
+      .references(() => masterProducts.id, { onDelete: "cascade" })
+      .unique(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+    // Biaya jasa produksi per pcs, added on top of the material cost.
+    serviceCostPerPcs: numeric("service_cost_per_pcs", { precision: 15, scale: 2 })
+      .notNull()
+      .default("0"),
+
+    // The price listed on the marketplace. Null until the seller sets one.
+    publishPrice: numeric("publish_price", { precision: 15, scale: 2 }),
+
+    // Withheld by the marketplace, each as a share of the publish price.
+    marketplaceFeeRate: numeric("marketplace_fee_rate", { precision: 5, scale: 4 })
+      .notNull()
+      .default("0.1500"),
+    eventRate: numeric("event_rate", { precision: 5, scale: 4 }).notNull().default("0.0500"),
+    affiliatorRate: numeric("affiliator_rate", { precision: 5, scale: 4 })
+      .notNull()
+      .default("0.0500"),
+
+    // Borne by the seller, not withheld by the marketplace.
+    adsRate: numeric("ads_rate", { precision: 5, scale: 4 }).notNull().default("0"),
+    adsFixedPerPcs: numeric("ads_fixed_per_pcs", { precision: 15, scale: 2 })
+      .notNull()
+      .default("0"),
+
+    // Applied when the seller withdraws the payout (mirrors the Pencairan module).
+    sedekahRate: numeric("sedekah_rate", { precision: 5, scale: 4 }).notNull().default("0.0500"),
+    resellerRate: numeric("reseller_rate", { precision: 5, scale: 4 })
+      .notNull()
+      .default("0.2000"),
+
+    // Used by the "hitung harga publish dari target" helper.
+    targetProfitRate: numeric("target_profit_rate", { precision: 5, scale: 4 })
+      .notNull()
+      .default("0.2000"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("product_costing_user_idx").on(t.userId),
   }),
 );
