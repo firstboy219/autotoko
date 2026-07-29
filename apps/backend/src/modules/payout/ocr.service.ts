@@ -55,7 +55,13 @@ function findAmountCandidates(text: string): number[] {
 
 // Labels Indonesian bank/marketplace transfer receipts use for the
 // destination account — "Rekening (Tujuan)", "No. Rekening", "Penerima".
-const ACCOUNT_LABEL_RE = /\b(no\.?\s*rekening|rekening|rek\.?|tujuan|penerima|account|destination)\b/i;
+// Real TikTok/Shopee payout screenshots often never say "rekening" at all —
+// e.g. Seabank via TikTok renders the destination as
+// `Transfer ke  Transfer bank(********8214)`. Matching only the Indonesian
+// banking vocabulary missed those entirely and the whole-text fallback then
+// grabbed a transaction id instead, so "transfer ke" / "bank" are anchors too.
+const ACCOUNT_LABEL_RE =
+  /\b(no\.?\s*rekening|rekening|rek\.?|tujuan|penerima|transfer\s+ke|bank|account|destination)\b/i;
 const MASKED_RE = /\*{3,}\s?\d{3,8}/;
 const BARE_RE = /\b\d[\d\s-]{6,24}\d\b/;
 
