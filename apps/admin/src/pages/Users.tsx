@@ -276,8 +276,10 @@ function UserDetailPanel({ id, onChange }: { id: string; onChange: () => void })
       const r = await api.post<{ tempPassword: string }>(`/admin/users/${id}/reset-password`);
       setTempPwd(r.tempPassword);
       setCopied(false);
+      // Only refresh THIS panel. Calling onChange() here would reload the
+      // parent list, whose loading branch unmounts this component and discards
+      // the one-time password before it can be read.
       reload();
-      onChange();
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -292,7 +294,6 @@ function UserDetailPanel({ id, onChange }: { id: string; onChange: () => void })
       await api.del(`/admin/users/${id}/password`);
       setTempPwd(null);
       reload();
-      onChange();
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -308,7 +309,7 @@ function UserDetailPanel({ id, onChange }: { id: string; onChange: () => void })
     } catch (e) { setErr((e as Error).message); setBusy(false); }
   }
 
-  if (loading || !u) return <div className="text-slate-400 text-sm">Memuat detail…</div>;
+  if (!u) return <div className="text-slate-400 text-sm">Memuat detail…</div>;
 
   const expectedConfirm = u.email ?? u.whatsapp ?? u.id;
 
