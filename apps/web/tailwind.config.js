@@ -27,16 +27,35 @@ export default {
           2: "rgb(var(--c-ink-2) / <alpha-value>)",
           3: "rgb(var(--c-ink-3) / <alpha-value>)",
         },
+        // MeetNippon's status palette. Each tone is a soft tint for the
+        // background plus a darkened variant for text — the solid colours
+        // (e.g. green #3fa34d) only reach ~3:1 on their own tint, which is
+        // too low for 12px badge text.
+        mn: {
+          teal: { DEFAULT: "#0e6e55", dark: "#0a5443", tint: "#e4f2ed" },
+          amber: { DEFAULT: "#f2a93b", tint: "#fcf1dd", ink: "#8a5a10" },
+          coral: { DEFAULT: "#e4572e", tint: "#fdeae3", ink: "#b3401f" },
+          green: { DEFAULT: "#3fa34d", tint: "#e7f5e9", ink: "#2f7d3a" },
+          red: { DEFAULT: "#d64550", tint: "#fbe7e8", ink: "#a8323c" },
+          stone: "#f0eeea",
+        },
         teal: { DEFAULT: "#00D4AA", light: "#E6FBF7" },
         shopee: "#EE4D2D",
       },
       fontFamily: {
-        sans: ["Roboto", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        sans: ["Inter", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        display: ["Space Grotesk", "Inter", "system-ui", "sans-serif"],
+      },
+      borderRadius: {
+        // Overridden rather than added: every component already uses
+        // rounded-lg, so bumping the key lifts the whole app to MeetNippon's
+        // softer corner in one place.
+        lg: "12px",
+        xl: "16px",
       },
       boxShadow: {
-        // Google elevation ramp.
-        e1: "0 1px 2px 0 rgba(60,64,67,.30), 0 1px 3px 1px rgba(60,64,67,.15)",
-        e2: "0 1px 3px 0 rgba(60,64,67,.30), 0 4px 8px 3px rgba(60,64,67,.15)",
+        e1: "0 1px 2px 0 rgba(32,36,43,.06), 0 1px 3px 1px rgba(32,36,43,.05)",
+        e2: "0 2px 6px 0 rgba(32,36,43,.10), 0 8px 24px 2px rgba(32,36,43,.08)",
       },
     },
   },

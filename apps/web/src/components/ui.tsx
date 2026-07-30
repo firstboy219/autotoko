@@ -25,7 +25,7 @@ export function PageHeader({
       {back}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-[22px] leading-7 text-ink">{title}</h1>
+          <h1 className="font-display text-[22px] font-semibold leading-7 text-ink">{title}</h1>
           {subtitle && <p className="text-sm text-ink-2 mt-1">{subtitle}</p>}
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
@@ -133,13 +133,15 @@ export function Spinner({ size = 16, className = "" }: { size?: number; classNam
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
 
+// MeetNippon's tint palette: soft tinted background + darkened text. The solid
+// status colours only reach ~3:1 on their own tint, too low for 12px text.
 const TONE: Record<Tone, string> = {
-  neutral: "bg-slate-100 text-slate-700",
-  success: "bg-emerald-50 text-emerald-700",
-  warning: "bg-amber-50 text-amber-700",
-  danger: "bg-red-50 text-red-700",
-  info: "bg-blue-50 text-blue-700",
-  brand: "bg-brand/15 text-brand-ink",
+  neutral: "bg-mn-stone text-ink-2",
+  success: "bg-mn-green-tint text-mn-green-ink",
+  warning: "bg-mn-amber-tint text-mn-amber-ink",
+  danger: "bg-mn-red-tint text-mn-red-ink",
+  info: "bg-mn-teal-tint text-mn-teal",
+  brand: "bg-brand/20 text-brand-ink",
 };
 
 export function Badge({
@@ -367,7 +369,9 @@ export function StatTile({
       {loading ? (
         <Skeleton className="h-7 w-24 mt-2" />
       ) : (
-        <div className="text-2xl text-ink mt-1.5 tabular-nums truncate">{value}</div>
+        <div className="font-display text-2xl font-semibold text-ink mt-1.5 tabular-nums truncate">
+          {value}
+        </div>
       )}
       {sub && <div className="text-xs text-ink-3 mt-1 truncate">{sub}</div>}
     </Card>

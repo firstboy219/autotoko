@@ -5,7 +5,9 @@
 :root {
   color-scheme: light;
   /* Brand — admin-configurable at runtime from /api/branding.
-     Channels are "R G B" so Tailwind opacity utilities (bg-brand/10) work. */
+     Channels are "R G B" so Tailwind opacity utilities (bg-brand/10) work.
+     Deliberately kept as AutoToko's own green rather than MeetNippon's teal:
+     this is the tenant's identity and the Branding page edits it live. */
   --c-brand: 163 224 11;        /* #A3E00B highlight green */
   --c-brand-dark: 132 184 0;    /* #84B800 */
   --c-brand-light: 240 250 219; /* #F0FADB */
@@ -15,12 +17,16 @@
      white, so tonal/text buttons and links use this darker variant. */
   --c-brand-ink: 90 126 0;
 
-  /* Neutrals (Google Workspace palette) */
-  --c-canvas: 248 249 250;      /* #f8f9fa page background */
-  --c-line: 224 227 231;        /* #e0e3e7 hairline border */
-  --c-ink: 32 33 36;            /* #202124 primary text */
-  --c-ink-2: 95 99 104;         /* #5f6368 secondary text */
-  --c-ink-3: 128 134 139;       /* #80868b tertiary text */
+  /* Neutrals — MeetNippon's warm scale. The canvas is a cream (#faf9f6) and
+     the hairline is warm (#e7e5df); using cool greys here is what made the
+     previous pass feel colder than MeetNippon. */
+  --c-canvas: 250 249 246;      /* #faf9f6 */
+  --c-line: 231 229 223;        /* #e7e5df */
+  --c-ink: 32 36 43;            /* #20242b */
+  --c-ink-2: 107 113 120;       /* #6b7178 */
+  --c-ink-3: 154 158 164;       /* derived third step — MeetNippon ships only
+                                   ink/ink-soft, but a tertiary is needed for
+                                   placeholders and metadata */
 }
 
 html,
@@ -37,7 +43,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Thin, unobtrusive scrollbars (Workspace-like). */
+/* Thin, unobtrusive scrollbars. */
 * {
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--c-line)) transparent;

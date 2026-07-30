@@ -824,6 +824,14 @@ function MutationList({
                 const shop = shops.find((s) => s.id === m.shopId);
                 const subSellerAmt = Number(m.subSellerAmount) || 0;
                 const subSubSellerAmt = Number(m.subSubSellerAmount) || 0;
+                // What actually has to be transferred out to the reseller side
+                // for this shop — the number staff act on, so it earns the
+                // prominent right-hand slot.
+                const komisi = subSellerAmt + subSubSellerAmt;
+                const komisiPct =
+                  shop?.effectiveSubSellerRate != null
+                    ? `${(shop.effectiveSubSellerRate * 100).toFixed(0)}%`
+                    : null;
                 return (
                   <li key={m.id} className="px-5 py-4">
                     <div className="flex items-start justify-between gap-4">
@@ -834,11 +842,20 @@ function MutationList({
                         <div className="text-xs text-ink-3 mt-0.5">{dateShort(m.payoutDate)}</div>
                       </div>
                       <div className="text-right shrink-0">
-                        <div className="text-base text-ink tabular-nums">{rupiah(m.creditAmount)}</div>
+                        {komisi > 0 ? (
+                          <>
+                            <div className="text-base text-ink tabular-nums">{rupiah(komisi)}</div>
+                            <div className="text-xs text-ink-3">
+                              komisi{komisiPct ? ` ${komisiPct}` : ""}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-sm text-ink-3">tanpa komisi</div>
+                        )}
                         <button
                           onClick={() => setConfirmId(m.id)}
                           disabled={busyId === m.id}
-                          className="text-xs text-red-600 hover:underline disabled:opacity-50 mt-0.5"
+                          className="text-xs text-red-600 hover:underline disabled:opacity-50 mt-1"
                         >
                           Hapus
                         </button>
@@ -848,6 +865,7 @@ function MutationList({
                     {/* Breakdown as discrete chips — previously these piled up
                         into one dense run-on line that was hard to scan. */}
                     <div className="flex flex-wrap gap-1.5 mt-2.5">
+                      <Badge tone="neutral">Total {rupiah(m.creditAmount)}</Badge>
                       <Badge tone="neutral">Sedekah {rupiah(m.sedekahAmount)}</Badge>
                       <Badge tone="neutral">Seller {rupiah(m.sellerAmount)}</Badge>
                       {subSellerAmt > 0 && (
