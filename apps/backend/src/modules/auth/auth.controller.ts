@@ -5,14 +5,26 @@ import {
   Headers,
   Post,
   Query,
+  Req,
   UnauthorizedException,
+  UseGuards,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Throttle } from "@nestjs/throttler";
+import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
 import { AuthService } from "./auth.service.js";
 import { EmailOtpService } from "./email-otp.service.js";
-import { LoginDto, WaVerifyDto, EmailStartDto, EmailVerifyDto } from "./dto/auth.dto.js";
+import { PasswordAuthService } from "./password.service.js";
+import { JwtAuthGuard, type JwtPayload } from "./jwt-auth.guard.js";
+import {
+  LoginDto,
+  WaVerifyDto,
+  EmailStartDto,
+  EmailVerifyDto,
+  PasswordLoginDto,
+  SetPasswordDto,
+} from "./dto/auth.dto.js";
 
 // Tighter limit on auth: max 30 requests/min per IP (brute-force protection
 // without blocking legit retries/OTP).
@@ -22,6 +34,7 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly emailOtp: EmailOtpService,
+    private readonly passwordAuth: PasswordAuthService,
     private readonly config: ConfigService,
   ) {}
 
@@ -72,5 +85,37 @@ export class AuthController {
     @Query("token") token: string,
   ): Promise<ApiResponse<Awaited<ReturnType<AuthService["waStatus"]>>>> {
     return { success: true, data: await this.auth.waStatus(token) };
+  }
+
+  // --- Email + password (offered alongside the passwordless OTP flows) ---
+
+  @Post("password/login")
+  async passwordLogin(
+    @Body() dto: PasswordLoginDto,
+  ): Promise<ApiResponse<{ accessToken: string }>> {
+    return { success: true, data: await this.passwordAuth.login(dto.email, dto.password) };
+  }
+
+  /** Sets/changes the caller's own password — session required. */
+  @Post("password/set")
+  @UseGuards(JwtAuthGuard)
+  async setPassword(
+    @Req() req: FastifyRequest,
+    @Body() dto: SetPasswordDto,
+  ): Promise<ApiResponse<{ ok: true }>> {
+    const user = (req as FastifyRequest & { user: JwtPayload }).user;
+    return {
+      success: true,
+      data: await this.passwordAuth.setPassword(user.sub, dto.newPassword, dto.currentPassword),
+    };
+  }
+
+  @Get("password/status")
+  @UseGuards(JwtAuthGuard)
+  async passwordStatus(
+    @Req() req: FastifyRequest,
+  ): Promise<ApiResponse<{ hasPassword: boolean }>> {
+    const user = (req as FastifyRequest & { user: JwtPayload }).user;
+    return { success: true, data: await this.passwordAuth.status(user.sub) };
   }
 }

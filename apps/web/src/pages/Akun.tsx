@@ -4,6 +4,7 @@ import { Layout } from "../components/Layout";
 import { api } from "../lib/api";
 import { useAccount, type Me } from "../lib/account";
 import { useAuth } from "../lib/auth";
+import { PasswordSettings } from "../components/PasswordSettings";
 
 const PLAN_LABEL: Record<string, string> = { freemium: "Freemium", starter: "Starter", pro: "Pro" };
 
@@ -63,6 +64,9 @@ export function Akun() {
           <button onClick={doLogout} className="text-sm text-red-500 hover:text-red-600 font-semibold">⎋ Keluar dari akun</button>
         </div>
       )}
+      <div className="mt-4">
+        <PasswordSettings />
+      </div>
     </Layout>
   );
 }

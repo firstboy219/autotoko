@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MinLength } from "class-validator";
+import { IsEmail, IsOptional, IsString, MinLength } from "class-validator";
 
 export class LoginDto {
   @IsString()
@@ -42,4 +42,24 @@ export class WaStatusQuery {
   @IsString()
   @IsOptional()
   token?: string;
+}
+
+export class PasswordLoginDto {
+  @IsEmail()
+  email!: string;
+
+  @IsString()
+  @MinLength(1)
+  password!: string;
+}
+
+export class SetPasswordDto {
+  @IsString()
+  @MinLength(8, { message: "Password minimal 8 karakter." })
+  newPassword!: string;
+
+  /** Required only when replacing an existing password. */
+  @IsOptional()
+  @IsString()
+  currentPassword?: string;
 }

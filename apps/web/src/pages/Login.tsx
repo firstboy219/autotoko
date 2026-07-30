@@ -3,8 +3,17 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useBranding } from "../lib/branding";
 import { WaLogin, EmailLogin } from "../components/AuthForms";
+import { PasswordLogin } from "../components/PasswordLogin";
+import { Icon, type IconName } from "../components/Icon";
+import { Button } from "../components/ui";
 
-type Tab = "wa" | "email";
+type Tab = "wa" | "email" | "password";
+
+const TABS: { key: Tab; label: string; icon: IconName }[] = [
+  { key: "wa", label: "WhatsApp", icon: "whatsapp" },
+  { key: "email", label: "Email OTP", icon: "mail" },
+  { key: "password", label: "Password", icon: "lock" },
+];
 
 export function Login() {
   const navigate = useNavigate();
@@ -15,77 +24,93 @@ export function Login() {
   const brandName = brand?.name ?? "AutoToko";
   const [tab, setTab] = useState<Tab>("wa");
 
+  const done = (t: string) => {
+    applyToken(t);
+    navigate("/");
+  };
+
   async function reviewerDemo() {
     if (await demoLogin()) navigate("/");
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center font-sans bg-gradient-to-br from-[#F0F4F8] via-[#EEF2FF] to-[#F0F4F8] p-4">
-      <div className="w-full max-w-[400px]">
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-8 shadow-xl shadow-slate-200/50">
-          <div className="flex items-center gap-2.5 mb-7">
+    <div className="min-h-screen flex items-center justify-center font-sans bg-canvas p-4">
+      <div className="w-full max-w-[420px]">
+        <div className="bg-white rounded-xl border border-line p-7">
+          <div className="flex items-center gap-2.5 mb-6">
             {brand?.logoUrl ? (
-              <img src={brand.logoUrl} alt={brandName} className="w-10 h-10 rounded-xl object-contain shadow-sm" />
+              <img
+                src={brand.logoUrl}
+                alt={brandName}
+                className="w-10 h-10 rounded-lg object-contain"
+              />
             ) : (
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand to-brand-dark text-white font-extrabold flex items-center justify-center shadow-sm">
+              <div className="w-10 h-10 rounded-lg bg-brand text-onbrand font-display font-semibold flex items-center justify-center">
                 {brandName.charAt(0).toUpperCase()}
               </div>
             )}
             <div>
-              <div className="font-extrabold text-lg leading-none text-slate-800">{brandName}</div>
-              <div className="text-[10px] uppercase tracking-wide text-slate-400 mt-1">
-                Autopilot Seller
+              <div className="font-display font-semibold text-lg leading-none text-ink">
+                {brandName}
               </div>
+              <div className="text-xs text-ink-3 mt-1">Autopilot Seller</div>
             </div>
           </div>
 
-          <h1 className="text-xl font-bold text-slate-800 mb-1">Selamat datang kembali</h1>
-          <p className="text-[13px] text-slate-500 mb-5">Masuk ke dashboard AutoToko kamu.</p>
+          <h1 className="font-display text-xl font-semibold text-ink mb-1">
+            Selamat datang kembali
+          </h1>
+          <p className="text-sm text-ink-2 mb-5">Pilih cara masuk yang kamu pakai.</p>
 
-          <div className="relative flex mb-5 rounded-lg bg-slate-100 p-1 text-sm font-semibold">
-            <div
-              className="absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-md shadow-sm transition-transform duration-200 ease-out"
-              style={{ transform: tab === "wa" ? "translateX(0)" : "translateX(calc(100% + 8px))" }}
-            />
-            <button
-              onClick={() => setTab("wa")}
-              className={`relative z-10 flex-1 py-1.5 rounded-md transition-colors flex items-center justify-center gap-1.5 ${tab === "wa" ? "text-brand" : "text-slate-500"}`}
-            >
-              <span>💬</span> WhatsApp
-            </button>
-            <button
-              onClick={() => setTab("email")}
-              className={`relative z-10 flex-1 py-1.5 rounded-md transition-colors flex items-center justify-center gap-1.5 ${tab === "email" ? "text-brand" : "text-slate-500"}`}
-            >
-              <span>✉</span> Email
-            </button>
+          <div className="flex gap-1 mb-5 rounded-lg bg-canvas border border-line p-1 text-sm">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md transition ${
+                  tab === t.key
+                    ? "bg-white text-ink font-medium shadow-e1"
+                    : "text-ink-2 hover:text-ink"
+                }`}
+              >
+                <Icon name={t.icon} size={15} />
+                <span className="truncate">{t.label}</span>
+              </button>
+            ))}
           </div>
 
-          {tab === "wa" ? (
-            <WaLogin onDone={(t) => { applyToken(t); navigate("/"); }} />
-          ) : (
-            <EmailLogin onDone={(t) => { applyToken(t); navigate("/"); }} />
-          )}
+          {tab === "wa" && <WaLogin onDone={done} />}
+          {tab === "email" && <EmailLogin onDone={done} />}
+          {tab === "password" && <PasswordLogin onDone={done} />}
 
-          <p className="text-[12px] text-slate-500 text-center mt-5">
+          <p className="text-sm text-ink-2 text-center mt-5">
             Belum punya akun?{" "}
-            <Link to="/signup" className="text-brand font-semibold hover:underline">Daftar di sini</Link>
+            <Link to="/signup" className="text-brand-ink font-medium hover:underline">
+              Daftar di sini
+            </Link>
           </p>
 
-          <div className="mt-5 pt-4 border-t border-slate-100 text-center">
-            <p className="text-[11px] text-slate-400 mb-2">Untuk TikTok App Reviewer:</p>
-            <button
+          <div className="mt-5 pt-4 border-t border-line text-center">
+            <p className="text-xs text-ink-3 mb-2">Untuk TikTok App Reviewer:</p>
+            <Button
+              variant="outline"
+              icon="search"
+              loading={demoLoading}
               onClick={reviewerDemo}
-              disabled={demoLoading}
-              className="w-full py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold disabled:opacity-60 transition"
+              className="w-full"
             >
-              {demoLoading ? "Masuk…" : "🔍 Masuk sebagai Demo Reviewer"}
-            </button>
+              Masuk sebagai Demo Reviewer
+            </Button>
           </div>
 
-          <div className="text-center mt-4 text-[10px] text-slate-400">
-            <Link to="/terms" className="hover:underline">Ketentuan</Link> ·{" "}
-            <Link to="/privacy" className="hover:underline">Privasi</Link>
+          <div className="text-center mt-4 text-xs text-ink-3">
+            <Link to="/terms" className="hover:underline">
+              Ketentuan
+            </Link>{" "}
+            ·{" "}
+            <Link to="/privacy" className="hover:underline">
+              Privasi
+            </Link>
           </div>
 
           <DevLogin />
@@ -95,7 +120,8 @@ export function Login() {
   );
 }
 
-/** Username/password login — only works in non-production (backend rejects in prod). */
+/** Username/password login against ADMIN_/DEV_ env creds — distinct from the
+ *  per-user password login above, which authenticates a real seller account. */
 function DevLogin() {
   const { login, loading, error } = useAuth();
   const navigate = useNavigate();
@@ -112,32 +138,29 @@ function DevLogin() {
     <div className="mt-3">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="text-[11px] text-slate-400 hover:text-slate-600"
+        className="flex items-center gap-1 text-xs text-ink-3 hover:text-ink-2"
       >
-        {open ? "▾" : "▸"} Login developer
+        <Icon name={open ? "chevronDown" : "chevronRight"} size={12} /> Login developer
       </button>
       {open && (
-        <form onSubmit={submit} className="mt-2">
+        <form onSubmit={submit} className="mt-2 space-y-2">
           <input
-            className="w-full mb-2 px-3 py-1.5 rounded-md border border-slate-200 text-sm"
+            className="w-full h-9 px-3 rounded-lg border border-line text-sm"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="username"
           />
           <input
             type="password"
-            className="w-full mb-2 px-3 py-1.5 rounded-md border border-slate-200 text-sm"
+            className="w-full h-9 px-3 rounded-lg border border-line text-sm"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="password"
           />
-          {error && <div className="text-red-500 text-xs mb-2">{error}</div>}
-          <button
-            disabled={loading}
-            className="w-full py-1.5 rounded-md bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold disabled:opacity-60"
-          >
-            {loading ? "Masuk…" : "Masuk (dev)"}
-          </button>
+          {error && <div className="text-xs text-mn-red-ink">{error}</div>}
+          <Button variant="outline" size="sm" loading={loading} className="w-full">
+            Masuk (dev)
+          </Button>
         </form>
       )}
     </div>

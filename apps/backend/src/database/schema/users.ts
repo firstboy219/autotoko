@@ -15,6 +15,9 @@ export const users = pgTable("users", {
   email: varchar("email", { length: 255 }).unique(),
   whatsapp: varchar("whatsapp", { length: 32 }).unique(),
   fullName: varchar("full_name", { length: 255 }),
+  // Optional: set by the user themselves once signed in. Null means this
+  // account is passwordless (OTP-only), which stays the default.
+  passwordHash: varchar("password_hash", { length: 255 }),
   planType: planTypeEnum("plan_type").notNull().default("freemium"),
   planStartedAt: timestamp("plan_started_at", { withTimezone: true }),
   planExpiredAt: timestamp("plan_expired_at", { withTimezone: true }),
