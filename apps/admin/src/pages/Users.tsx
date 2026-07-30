@@ -36,6 +36,7 @@ interface SubSellerNode extends SubSubSellerNode {
 }
 interface UserDetail extends UserRow {
   planStartedAt: string | null;
+  hasPassword: boolean;
   hierarchy: SubSellerNode[];
 }
 
@@ -232,6 +233,11 @@ function UserDetailPanel({ id, onChange }: { id: string; onChange: () => void })
   const [editing, setEditing] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // Held in memory only, and only until the panel is closed — the server
+  // stores just the hash and cannot show this value again.
+  const [tempPwd, setTempPwd] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [pwdBusy, setPwdBusy] = useState(false);
 
   function startEdit() {
     if (!u) return;
@@ -261,6 +267,37 @@ function UserDetailPanel({ id, onChange }: { id: string; onChange: () => void })
       await api.post(`/admin/users/${id}/${u.isSuspended ? "unsuspend" : "suspend"}`);
       reload(); onChange();
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  }
+
+  async function resetPassword() {
+    setPwdBusy(true);
+    setErr(null);
+    try {
+      const r = await api.post<{ tempPassword: string }>(`/admin/users/${id}/reset-password`);
+      setTempPwd(r.tempPassword);
+      setCopied(false);
+      reload();
+      onChange();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setPwdBusy(false);
+    }
+  }
+
+  async function clearPassword() {
+    setPwdBusy(true);
+    setErr(null);
+    try {
+      await api.del(`/admin/users/${id}/password`);
+      setTempPwd(null);
+      reload();
+      onChange();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setPwdBusy(false);
+    }
   }
 
   async function doDelete() {
@@ -342,6 +379,62 @@ function UserDetailPanel({ id, onChange }: { id: string; onChange: () => void })
               ? "Akun ditangguhkan — akses diblokir pada request berikutnya."
               : "Menangguhkan langsung memblokir akses akun ini, termasuk sesi yang sedang berjalan."}
           </p>
+
+          <div className="mt-3 pt-3 border-t border-white/10">
+            <div className="text-[10px] uppercase text-slate-500 mb-1.5">Password</div>
+            <div className="text-xs text-slate-400 mb-2">
+              {u.hasPassword ? (
+                <span className="text-emerald-400">Sudah diatur</span>
+              ) : (
+                <>Belum diatur — akun ini masuk lewat WhatsApp / Email OTP.</>
+              )}
+            </div>
+
+            {tempPwd ? (
+              <div className="rounded-md border border-emerald-800/60 bg-emerald-900/20 p-2.5">
+                <div className="text-[10px] text-emerald-300 mb-1">
+                  Password sementara — hanya ditampilkan sekali:
+                </div>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 font-mono text-sm text-emerald-200 break-all">
+                    {tempPwd}
+                  </code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard?.writeText(tempPwd);
+                      setCopied(true);
+                    }}
+                    className="text-[10px] px-2 py-1 rounded bg-emerald-700/40 text-emerald-200 hover:bg-emerald-700/60 shrink-0"
+                  >
+                    {copied ? "Tersalin" : "Salin"}
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
+                  Kirimkan ke seller lewat WhatsApp, lalu minta mereka menggantinya sendiri di
+                  halaman Akun. Setelah panel ini ditutup, nilainya tidak bisa dilihat lagi.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={resetPassword}
+                  disabled={pwdBusy}
+                  className="text-xs px-3 py-1.5 rounded bg-brand/20 text-brand hover:bg-brand/30 font-semibold disabled:opacity-50"
+                >
+                  {pwdBusy ? "…" : u.hasPassword ? "Reset Password" : "Buatkan Password"}
+                </button>
+                {u.hasPassword && (
+                  <button
+                    onClick={clearPassword}
+                    disabled={pwdBusy}
+                    className="text-xs px-3 py-1.5 rounded border border-white/10 text-slate-300 hover:bg-white/5 disabled:opacity-50"
+                  >
+                    Hapus Password
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="bg-[#0f172a] rounded-lg border border-red-900/40 p-3">

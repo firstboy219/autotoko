@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { and, count, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
@@ -10,6 +10,8 @@ import {
 } from "../../database/schema/index.js";
 import type { ListUsersQueryDto, UpdateUserDto } from "./dto/admin-users.dto.js";
 import { invalidateSuspensionCache } from "../auth/jwt-auth.guard.js";
+import { hashPassword } from "../auth/password.util.js";
+import { randomInt } from "node:crypto";
 
 /**
  * Admin-only management of SELLER accounts (the `users` table — the top of
@@ -23,6 +25,7 @@ import { invalidateSuspensionCache } from "../auth/jwt-auth.guard.js";
  */
 @Injectable()
 export class AdminUsersService {
+  private readonly logger = new Logger(AdminUsersService.name);
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
   async list(q: ListUsersQueryDto) {
@@ -142,6 +145,8 @@ export class AdminUsersService {
       isActive: u.isActive,
       isSuspended: u.isSuspended,
       createdAt: u.createdAt,
+      // Never the hash itself — the admin only needs to know whether one exists.
+      hasPassword: Boolean(u.passwordHash),
       walletBalance: wallet?.balance ?? "0",
       shopCount: Number(shopCount),
       hierarchy: subs.map((s) => ({
@@ -206,9 +211,54 @@ export class AdminUsersService {
     return { id, deleted: true };
   }
 
+
+  /**
+   * Issues a fresh temporary password for a seller who is locked out.
+   *
+   * The generated value is returned to the admin EXACTLY ONCE and only the
+   * scrypt hash is stored — there is no way to read it back afterwards. It is
+   * meant to be relayed out-of-band (WhatsApp) and then changed by the seller
+   * from their Akun page.
+   *
+   * This exists because the usual self-service recovery path is email OTP, and
+   * that is unusable while the Gmail credentials are rejected.
+   */
+  async resetPassword(id: string): Promise<{ tempPassword: string }> {
+    await this.getOrThrow(id);
+    const tempPassword = generateTempPassword();
+    await this.db
+      .update(users)
+      .set({ passwordHash: await hashPassword(tempPassword), updatedAt: new Date() })
+      .where(eq(users.id, id));
+    this.logger.warn(`Admin reset the password for user ${id}`);
+    return { tempPassword };
+  }
+
+  /** Removes the password entirely, returning the account to OTP-only sign-in. */
+  async clearPassword(id: string) {
+    await this.getOrThrow(id);
+    await this.db
+      .update(users)
+      .set({ passwordHash: null, updatedAt: new Date() })
+      .where(eq(users.id, id));
+    this.logger.warn(`Admin cleared the password for user ${id}`);
+    return { id, cleared: true };
+  }
+
   private async getOrThrow(id: string) {
     const [row] = await this.db.select({ id: users.id }).from(users).where(eq(users.id, id)).limit(1);
     if (!row) throw new NotFoundException("User not found");
     return row;
   }
+}
+
+/**
+ * 14 chars from an unambiguous alphabet (no O/0, I/l/1) so it survives being
+ * dictated over the phone or retyped from a WhatsApp message.
+ */
+function generateTempPassword(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  let out = "";
+  for (let i = 0; i < 14; i++) out += alphabet[randomInt(0, alphabet.length)];
+  return out;
 }

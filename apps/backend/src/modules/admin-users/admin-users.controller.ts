@@ -41,4 +41,16 @@ export class AdminUsersController {
   async remove(@Param("id") id: string) {
     return ok(await this.service.remove(id));
   }
+
+  /** Returns a one-time temporary password; only its hash is stored. */
+  @Post(":id/reset-password")
+  async resetPassword(@Param("id") id: string) {
+    return ok(await this.service.resetPassword(id));
+  }
+
+  /** Reverts the account to OTP-only sign-in. */
+  @Delete(":id/password")
+  async clearPassword(@Param("id") id: string) {
+    return ok(await this.service.clearPassword(id));
+  }
 }
