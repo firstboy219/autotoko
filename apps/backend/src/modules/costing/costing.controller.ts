@@ -81,4 +81,10 @@ export class CostingController {
   ) {
     return ok(await this.costing.suggestPrice(uid(req), productId, dto));
   }
+
+  /** Average units per shipment, derived from real order history. */
+  @Get("meta/avg-units-per-order")
+  async avgUnits(@Req() req: FastifyRequest) {
+    return ok(await this.costing.suggestAvgUnitsPerOrder(uid(req)));
+  }
 }

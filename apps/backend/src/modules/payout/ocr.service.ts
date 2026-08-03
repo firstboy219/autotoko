@@ -152,6 +152,38 @@ export class OcrService {
 
   constructor(private readonly uploads: UploadsService) {}
 
+  /**
+   * Raw OCR text for an uploaded image, or "" when it cannot be read.
+   *
+   * Split out of extractProofFields so other features (e.g. recapping a
+   * material purchase receipt) can run their own parsing over the same
+   * crash-isolated worker without inheriting the payout-specific heuristics.
+   */
+  async readText(imageUrl: string): Promise<string> {
+    const buffer = await this.uploads.readByUrl(imageUrl);
+    if (!buffer) {
+      this.logger.warn(`OCR: could not read local file for ${imageUrl}`);
+      return "";
+    }
+    const tempPath = join(tmpdir(), `ocr-${randomUUID()}`);
+    try {
+      await writeFile(tempPath, buffer);
+      const { stdout } = await execFileAsync("node", [WORKER_SCRIPT, tempPath], {
+        timeout: 25_000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      return (JSON.parse(stdout) as { text: string }).text;
+    } catch (err) {
+      const stderr = (err as { stderr?: string }).stderr;
+      this.logger.warn(
+        `OCR worker failed for ${imageUrl}: ${(err as Error).message}${stderr ? ` | stderr: ${stderr.trim()}` : ""}`,
+      );
+      return "";
+    } finally {
+      await unlink(tempPath).catch(() => {});
+    }
+  }
+
   async extractProofFields(imageUrl: string): Promise<OcrExtractResult> {
     const empty: OcrExtractResult = {
       amount: null,

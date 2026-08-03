@@ -13,6 +13,9 @@ const RATE = { min: 0, max: 1 };
 
 export class UpdateCostingDto {
   @IsOptional() @IsNumber() @Min(0) serviceCostPerPcs?: number;
+  @IsOptional() @IsNumber() @Min(0) packingCostPerOrder?: number;
+  /** Must stay > 0 — it is a divisor. */
+  @IsOptional() @IsNumber() @Min(0.01) avgUnitsPerOrder?: number;
   @IsOptional() @IsNumber() @Min(0) publishPrice?: number | null;
 
   @IsOptional() @IsNumber() @Min(RATE.min) @Max(RATE.max) marketplaceFeeRate?: number;

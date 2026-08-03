@@ -9,6 +9,8 @@ import {
   timestamp,
   index,
   unique,
+  date,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { shops } from "./shops";
@@ -59,12 +61,111 @@ export const masterProductVariants = pgTable("master_product_variants", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+
+/**
+ * Shared material catalog — ONE row per physical material per tenant.
+ *
+ * bom_items is keyed per product, so the same material used by two products
+ * produced two rows each with their own currentStock. Buying stock then had no
+ * correct answer: adding to both double-counts, adding to one leaves the other
+ * stale. This table is the single source of truth for stock and cost; bom_items
+ * keeps only the per-product recipe quantity (takaran).
+ */
+export const materials = pgTable(
+  "materials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    // Lowercased/collapsed name used for matching OCR text and preventing
+    // near-duplicates like "Biji Kopi " vs "biji kopi".
+    normalizedName: varchar("normalized_name", { length: 255 }).notNull(),
+    unit: varchar("unit", { length: 32 }),
+    currentStock: numeric("current_stock", { precision: 14, scale: 3 }).notNull().default("0"),
+    // Weighted-average cost, recomputed on every purchase so HPP reflects what
+    // the stock on hand actually cost rather than only the latest price.
+    unitCost: numeric("unit_cost", { precision: 15, scale: 2 }).notNull().default("0"),
+    minimumThreshold: numeric("minimum_threshold", { precision: 14, scale: 3 })
+      .notNull()
+      .default("0"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("materials_user_idx").on(t.userId),
+    userNameUnique: unique("materials_user_normalized_unique").on(t.userId, t.normalizedName),
+  }),
+);
+
+/** One recorded stock purchase (usually one uploaded receipt screenshot). */
+export const materialPurchases = pgTable(
+  "material_purchases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    purchasedAt: date("purchased_at").notNull(),
+    supplierName: varchar("supplier_name", { length: 255 }),
+    note: text("note"),
+    /** The screenshot this was recapped from, kept as the audit trail. */
+    receiptUrl: text("receipt_url"),
+    /** Raw OCR text + parsed candidates, for correcting the parser later. */
+    ocrRawResult: jsonb("ocr_raw_result"),
+    totalCost: numeric("total_cost", { precision: 15, scale: 2 }).notNull().default("0"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("material_purchases_user_idx").on(t.userId),
+  }),
+);
+
+/**
+ * A line on a purchase. Stock movements are derived from these rows, so a
+ * mis-typed purchase can be traced and reversed rather than silently baked
+ * into a running total.
+ */
+export const materialPurchaseItems = pgTable(
+  "material_purchase_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    purchaseId: uuid("purchase_id")
+      .notNull()
+      .references(() => materialPurchases.id, { onDelete: "cascade" }),
+    // Denormalised so the user_id-keyed RLS policy covers this table too —
+    // same approach payout_disbursements already uses.
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    materialId: uuid("material_id")
+      .notNull()
+      .references(() => materials.id, { onDelete: "cascade" }),
+    quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+    /** Total paid for this line; unitCost is derived as total / quantity. */
+    totalCost: numeric("total_cost", { precision: 15, scale: 2 }).notNull().default("0"),
+    unitCost: numeric("unit_cost", { precision: 15, scale: 2 }).notNull().default("0"),
+    /** True when this line created the material rather than topping one up. */
+    createdMaterial: boolean("created_material").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    purchaseIdx: index("material_purchase_items_purchase_idx").on(t.purchaseId),
+    materialIdx: index("material_purchase_items_material_idx").on(t.materialId),
+  }),
+);
+
 // PRD Bagian 8.6 — Bill of Materials with full restock config.
 export const bomItems = pgTable("bom_items", {
   id: uuid("id").primaryKey().defaultRandom(),
   masterProductId: uuid("master_product_id")
     .notNull()
     .references(() => masterProducts.id, { onDelete: "cascade" }),
+  // Links this recipe line to the shared material catalog, which owns the
+  // STOCK and COST. Nullable so pre-catalog rows keep working; when set it
+  // wins over the legacy per-row currentStock/unitCost below.
+  materialId: uuid("material_id").references(() => materials.id, { onDelete: "set null" }),
   materialName: varchar("material_name", { length: 255 }).notNull(),
   quantity: numeric("quantity", { precision: 10, scale: 3 }).notNull(), // per 1 product
   // Cost of ONE unit of this material, used to compute Harga Pokok Produksi.
@@ -144,6 +245,15 @@ export const productCosting = pgTable(
     serviceCostPerPcs: numeric("service_cost_per_pcs", { precision: 15, scale: 2 })
       .notNull()
       .default("0"),
+    // Packing/handling paid once per shipment (per resi). HPP is per product,
+    // so this is divided by avgUnitsPerOrder to get the per-unit share.
+    packingCostPerOrder: numeric("packing_cost_per_order", { precision: 15, scale: 2 })
+      .notNull()
+      .default("0"),
+    // Average units shipped per resi. 1 = every order ships a single unit.
+    avgUnitsPerOrder: numeric("avg_units_per_order", { precision: 10, scale: 2 })
+      .notNull()
+      .default("1"),
 
     // The price listed on the marketplace. Null until the seller sets one.
     publishPrice: numeric("publish_price", { precision: 15, scale: 2 }),

@@ -24,6 +24,6 @@ import { PortalDataService } from "./portal-data.service.js";
     PayoutPortalAuthService,
     PortalDataService,
   ],
-  exports: [PayoutSellersService, PayoutBatchService, PayoutMutationService, DisbursementsService],
+  exports: [PayoutSellersService, PayoutBatchService, PayoutMutationService, DisbursementsService, OcrService],
 })
 export class PayoutModule {}

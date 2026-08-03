@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
   calculateHpp,
   calculatePublishPricing,
@@ -10,6 +10,7 @@ import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   bomItems,
   masterProducts,
+  orders,
   payoutSettings,
   productCosting,
 } from "../../database/schema/index.js";
@@ -66,6 +67,8 @@ export class CostingService {
       const hpp = calculateHpp({
         materials: mats.map((m) => ({ quantity: num(m.quantity), unitCost: num(m.unitCost) })),
         serviceCostPerPcs: num(cfg?.serviceCostPerPcs),
+        packingCostPerOrder: num(cfg?.packingCostPerOrder),
+        avgUnitsPerOrder: cfg ? num(cfg.avgUnitsPerOrder) : 1,
       });
       const publishPrice = cfg?.publishPrice != null ? num(cfg.publishPrice) : null;
       const pricing =
@@ -111,6 +114,8 @@ export class CostingService {
     const hpp = calculateHpp({
       materials: lines.map((l) => ({ quantity: l.quantity, unitCost: l.unitCost })),
       serviceCostPerPcs: num(cfg.serviceCostPerPcs),
+      packingCostPerOrder: num(cfg.packingCostPerOrder),
+      avgUnitsPerOrder: num(cfg.avgUnitsPerOrder),
     });
 
     const publishPrice = cfg.publishPrice != null ? num(cfg.publishPrice) : null;
@@ -126,6 +131,7 @@ export class CostingService {
       hpp: {
         materialCost: rupiah(hpp.materialCostCents),
         serviceCost: rupiah(hpp.serviceCostCents),
+        packingCost: rupiah(hpp.packingCostCents),
         total: rupiah(hpp.hppCents),
       },
       pricing: pricing ? this.serialisePricing(pricing) : null,
@@ -141,6 +147,8 @@ export class CostingService {
     const money = (v: number) => v.toFixed(2);
 
     if (dto.serviceCostPerPcs != null) set.serviceCostPerPcs = money(dto.serviceCostPerPcs);
+    if (dto.packingCostPerOrder != null) set.packingCostPerOrder = money(dto.packingCostPerOrder);
+    if (dto.avgUnitsPerOrder != null) set.avgUnitsPerOrder = dto.avgUnitsPerOrder.toFixed(2);
     // publishPrice is explicitly nullable — null clears it back to "not set".
     if (dto.publishPrice !== undefined) {
       set.publishPrice = dto.publishPrice == null ? null : money(dto.publishPrice);
@@ -210,6 +218,8 @@ export class CostingService {
     const hpp = calculateHpp({
       materials: materials.map((m) => ({ quantity: num(m.quantity), unitCost: num(m.unitCost) })),
       serviceCostPerPcs: num(cfg.serviceCostPerPcs),
+      packingCostPerOrder: num(cfg.packingCostPerOrder),
+      avgUnitsPerOrder: num(cfg.avgUnitsPerOrder),
     });
 
     const target: PublishPriceTarget =
@@ -248,6 +258,41 @@ export class CostingService {
     return { suggestedPrice: rupiah(cents), reason: null, preview: this.serialisePricing(preview) };
   }
 
+
+  /**
+   * Suggests avgUnitsPerOrder from the tenant's actual order history.
+   *
+   * orders.items is a JSON array of {quantity, seller_sku, ...}; the average is
+   * total units shipped / number of orders. Returns null when there is no data
+   * rather than a made-up figure, so the UI can say so instead of showing a
+   * confident-looking default.
+   */
+  async suggestAvgUnitsPerOrder(userId: string) {
+    const rows = await this.db
+      .select({ items: orders.items })
+      .from(orders)
+      .where(eq(orders.userId, userId))
+      .orderBy(desc(orders.createdAt))
+      .limit(200);
+
+    let totalUnits = 0;
+    let counted = 0;
+    for (const r of rows) {
+      const items = r.items as { quantity?: number | string }[] | null;
+      if (!Array.isArray(items) || !items.length) continue;
+      const units = items.reduce((n, it) => n + (Number(it?.quantity) || 0), 0);
+      if (units <= 0) continue;
+      totalUnits += units;
+      counted += 1;
+    }
+
+    if (!counted) return { suggested: null as number | null, basedOnOrders: 0 };
+    return {
+      suggested: Number((totalUnits / counted).toFixed(2)),
+      basedOnOrders: counted,
+    };
+  }
+
   /* ------------------------------------------------------------ helpers */
 
   private pricingInput(cfg: CostingRow, publishPrice: number, hppCents: number) {
@@ -267,6 +312,8 @@ export class CostingService {
   private serialiseCosting(c: CostingRow) {
     return {
       serviceCostPerPcs: num(c.serviceCostPerPcs),
+      packingCostPerOrder: num(c.packingCostPerOrder),
+      avgUnitsPerOrder: num(c.avgUnitsPerOrder),
       publishPrice: c.publishPrice != null ? num(c.publishPrice) : null,
       marketplaceFeeRate: num(c.marketplaceFeeRate),
       eventRate: num(c.eventRate),

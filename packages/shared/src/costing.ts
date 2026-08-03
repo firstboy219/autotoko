@@ -28,11 +28,25 @@ export interface HppInput {
   materials: MaterialLine[];
   /** Biaya jasa produksi per pcs, in rupiah. */
   serviceCostPerPcs: number;
+  /**
+   * Packing cost is incurred once per shipment (per resi), but HPP is per
+   * product — so it has to be spread across the units that ship together.
+   * Divided by avgUnitsPerOrder below.
+   */
+  packingCostPerOrder?: number;
+  /**
+   * Average units per shipment. Defaults to 1 (every order ships a single
+   * unit), which is the conservative reading: it charges the full packing cost
+   * to each product rather than quietly understating HPP.
+   */
+  avgUnitsPerOrder?: number;
 }
 
 export interface HppResult {
   materialCostCents: number;
   serviceCostCents: number;
+  /** The per-shipment packing cost apportioned down to one unit. */
+  packingCostCents: number;
   hppCents: number;
 }
 
@@ -51,10 +65,19 @@ export function calculateHpp(input: HppInput): HppResult {
   }
   const materialCostCents = Math.round(material * 100);
   const serviceCostCents = Math.round((Number(input.serviceCostPerPcs) || 0) * 100);
+
+  // Guard the divide: a zero/blank average would send the per-unit share to
+  // Infinity, so fall back to 1 unit per shipment.
+  const perOrder = Number(input.packingCostPerOrder) || 0;
+  const units = Number(input.avgUnitsPerOrder);
+  const safeUnits = Number.isFinite(units) && units > 0 ? units : 1;
+  const packingCostCents = Math.round((perOrder / safeUnits) * 100);
+
   return {
     materialCostCents,
     serviceCostCents,
-    hppCents: materialCostCents + serviceCostCents,
+    packingCostCents,
+    hppCents: materialCostCents + serviceCostCents + packingCostCents,
   };
 }
 

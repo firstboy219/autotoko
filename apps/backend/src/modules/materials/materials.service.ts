@@ -1,0 +1,390 @@
+import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { DRIZZLE, type Database } from "../../database/database.module.js";
+import {
+  bomItems,
+  materialPurchaseItems,
+  materialPurchases,
+  materials,
+} from "../../database/schema/index.js";
+import { UploadsService } from "../uploads/uploads.service.js";
+import { OcrService } from "../payout/ocr.service.js";
+import type { CreatePurchaseDto, UpdateMaterialDto } from "./dto/materials.dto.js";
+
+const num = (v: string | number | null | undefined) => Number(v ?? 0);
+
+/** Matching key: case- and whitespace-insensitive, mirroring the DB backfill. */
+export function normalizeName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+@Injectable()
+export class MaterialsService {
+  private readonly logger = new Logger(MaterialsService.name);
+
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly uploads: UploadsService,
+    private readonly ocr: OcrService,
+  ) {}
+
+  /* ------------------------------------------------------------ catalog */
+
+  async list(userId: string) {
+    const rows = await this.db
+      .select()
+      .from(materials)
+      .where(eq(materials.userId, userId))
+      .orderBy(materials.name);
+
+    // Which products consume each material — the recipe side stays per-product.
+    const ids = rows.map((r) => r.id);
+    const links = ids.length
+      ? await this.db
+          .select({ materialId: bomItems.materialId, productId: bomItems.masterProductId })
+          .from(bomItems)
+          .where(inArray(bomItems.materialId, ids))
+      : [];
+    const usedBy = new Map<string, number>();
+    for (const l of links) {
+      if (!l.materialId) continue;
+      usedBy.set(l.materialId, (usedBy.get(l.materialId) ?? 0) + 1);
+    }
+
+    return rows.map((m) => ({
+      id: m.id,
+      name: m.name,
+      unit: m.unit,
+      currentStock: num(m.currentStock),
+      unitCost: num(m.unitCost),
+      minimumThreshold: num(m.minimumThreshold),
+      stockValue: num(m.currentStock) * num(m.unitCost),
+      usedByProducts: usedBy.get(m.id) ?? 0,
+      isLow: num(m.currentStock) <= num(m.minimumThreshold),
+    }));
+  }
+
+  async updateMaterial(userId: string, id: string, dto: UpdateMaterialDto) {
+    await this.getOrThrow(userId, id);
+    const set: Record<string, unknown> = { updatedAt: new Date() };
+    if (dto.name != null) {
+      set.name = dto.name.trim();
+      set.normalizedName = normalizeName(dto.name);
+    }
+    if (dto.unit !== undefined) set.unit = dto.unit?.trim() || null;
+    if (dto.minimumThreshold != null) set.minimumThreshold = dto.minimumThreshold.toFixed(3);
+    // Deliberately NOT settable here: currentStock and unitCost are derived
+    // from purchases and order deductions, so letting them be typed over would
+    // silently break the weighted-average cost that HPP depends on.
+    await this.db.update(materials).set(set).where(eq(materials.id, id));
+    return this.list(userId);
+  }
+
+  /* ------------------------------------------------------------- OCR */
+
+  /**
+   * Best-effort parse of a purchase receipt screenshot into line items.
+   *
+   * OCR of a table is unreliable by nature, so this NEVER writes anything — it
+   * only proposes rows for the admin to correct and confirm. Each candidate is
+   * matched against the existing catalog so the UI can show "top up" vs "new".
+   */
+  async parseReceipt(userId: string, imageUrl: string) {
+    const text = await this.ocr.readText(imageUrl);
+    const lines = parsePurchaseLines(text);
+
+    const existing = await this.db
+      .select({ id: materials.id, name: materials.name, normalizedName: materials.normalizedName, unit: materials.unit })
+      .from(materials)
+      .where(eq(materials.userId, userId));
+    const byName = new Map(existing.map((m) => [m.normalizedName, m]));
+
+    return {
+      raw: text,
+      items: lines.map((l) => {
+        const match = byName.get(normalizeName(l.name));
+        return {
+          materialName: l.name,
+          quantity: l.quantity,
+          unit: l.unit ?? match?.unit ?? null,
+          totalCost: l.totalCost,
+          matchedMaterialId: match?.id ?? null,
+          matchedMaterialName: match?.name ?? null,
+        };
+      }),
+    };
+  }
+
+  /* --------------------------------------------------------- purchases */
+
+  /**
+   * Commits a purchase: tops up stock and recomputes the weighted-average unit
+   * cost for every line, creating materials that do not exist yet.
+   *
+   * Weighted average (not "latest price") because HPP should reflect what the
+   * stock actually on hand cost — buying 1 unit at a spike price should not
+   * reprice 500 units already in the warehouse.
+   */
+  async createPurchase(userId: string, dto: CreatePurchaseDto) {
+    const [purchase] = await this.db
+      .insert(materialPurchases)
+      .values({
+        userId,
+        purchasedAt: dto.purchasedAt,
+        supplierName: dto.supplierName?.trim() || null,
+        note: dto.note?.trim() || null,
+        receiptUrl: dto.receiptUrl || null,
+        ocrRawResult: dto.ocrRaw ?? null,
+        totalCost: "0",
+      })
+      .returning();
+
+    let grandTotal = 0;
+
+    for (const line of dto.items) {
+      const qty = Number(line.quantity);
+      const lineTotal = Number(line.totalCost) || 0;
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      const lineUnitCost = lineTotal / qty;
+
+      let materialId = line.materialId ?? null;
+      let created = false;
+
+      if (!materialId) {
+        // Match by normalized name before creating, so a slightly different
+        // spelling from OCR doesn't fork the catalog.
+        const normalized = normalizeName(line.materialName ?? "");
+        if (!normalized) continue;
+        const [found] = await this.db
+          .select({ id: materials.id })
+          .from(materials)
+          .where(and(eq(materials.userId, userId), eq(materials.normalizedName, normalized)))
+          .limit(1);
+        if (found) {
+          materialId = found.id;
+        } else {
+          const [made] = await this.db
+            .insert(materials)
+            .values({
+              userId,
+              name: (line.materialName ?? "").trim(),
+              normalizedName: normalized,
+              unit: line.unit?.trim() || null,
+              currentStock: "0",
+              unitCost: "0",
+            })
+            .returning({ id: materials.id });
+          materialId = made!.id;
+          created = true;
+        }
+      }
+
+      const [current] = await this.db
+        .select({ stock: materials.currentStock, cost: materials.unitCost })
+        .from(materials)
+        .where(and(eq(materials.id, materialId!), eq(materials.userId, userId)))
+        .limit(1);
+      if (!current) continue;
+
+      const oldStock = num(current.stock);
+      const oldCost = num(current.cost);
+      const newStock = oldStock + qty;
+      // Guard the divide: a zero/negative prior stock means there is nothing to
+      // average against, so the purchase price simply becomes the cost.
+      const newCost =
+        newStock > 0 && oldStock > 0
+          ? (oldStock * oldCost + qty * lineUnitCost) / newStock
+          : lineUnitCost;
+
+      await this.db
+        .update(materials)
+        .set({
+          currentStock: newStock.toFixed(3),
+          unitCost: newCost.toFixed(2),
+          ...(line.unit?.trim() ? { unit: line.unit.trim() } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(materials.id, materialId!));
+
+      await this.db.insert(materialPurchaseItems).values({
+        purchaseId: purchase!.id,
+        userId,
+        materialId: materialId!,
+        quantity: qty.toFixed(3),
+        totalCost: lineTotal.toFixed(2),
+        unitCost: lineUnitCost.toFixed(2),
+        createdMaterial: created,
+      });
+
+      grandTotal += lineTotal;
+    }
+
+    await this.db
+      .update(materialPurchases)
+      .set({ totalCost: grandTotal.toFixed(2) })
+      .where(eq(materialPurchases.id, purchase!.id));
+
+    this.logger.log(`Purchase ${purchase!.id} recorded for user ${userId} (${dto.items.length} lines)`);
+    return this.getPurchase(userId, purchase!.id);
+  }
+
+  async listPurchases(userId: string) {
+    const rows = await this.db
+      .select()
+      .from(materialPurchases)
+      .where(eq(materialPurchases.userId, userId))
+      .orderBy(desc(materialPurchases.purchasedAt), desc(materialPurchases.createdAt))
+      .limit(100);
+
+    const ids = rows.map((r) => r.id);
+    const counts = ids.length
+      ? await this.db
+          .select({ purchaseId: materialPurchaseItems.purchaseId, n: sql<number>`count(*)::int` })
+          .from(materialPurchaseItems)
+          .where(inArray(materialPurchaseItems.purchaseId, ids))
+          .groupBy(materialPurchaseItems.purchaseId)
+      : [];
+    const byId = new Map(counts.map((c) => [c.purchaseId, Number(c.n)]));
+
+    return rows.map((p) => ({
+      id: p.id,
+      purchasedAt: p.purchasedAt,
+      supplierName: p.supplierName,
+      note: p.note,
+      receiptUrl: p.receiptUrl,
+      totalCost: num(p.totalCost),
+      itemCount: byId.get(p.id) ?? 0,
+    }));
+  }
+
+  async getPurchase(userId: string, id: string) {
+    const [p] = await this.db
+      .select()
+      .from(materialPurchases)
+      .where(and(eq(materialPurchases.id, id), eq(materialPurchases.userId, userId)))
+      .limit(1);
+    if (!p) throw new NotFoundException("Pembelian tidak ditemukan");
+
+    const items = await this.db
+      .select({
+        id: materialPurchaseItems.id,
+        materialId: materialPurchaseItems.materialId,
+        materialName: materials.name,
+        unit: materials.unit,
+        quantity: materialPurchaseItems.quantity,
+        totalCost: materialPurchaseItems.totalCost,
+        unitCost: materialPurchaseItems.unitCost,
+        createdMaterial: materialPurchaseItems.createdMaterial,
+      })
+      .from(materialPurchaseItems)
+      .innerJoin(materials, eq(materialPurchaseItems.materialId, materials.id))
+      .where(eq(materialPurchaseItems.purchaseId, id));
+
+    return {
+      id: p.id,
+      purchasedAt: p.purchasedAt,
+      supplierName: p.supplierName,
+      note: p.note,
+      receiptUrl: p.receiptUrl,
+      totalCost: num(p.totalCost),
+      items: items.map((i) => ({
+        ...i,
+        quantity: num(i.quantity),
+        totalCost: num(i.totalCost),
+        unitCost: num(i.unitCost),
+      })),
+    };
+  }
+
+  private async getOrThrow(userId: string, id: string) {
+    const [row] = await this.db
+      .select()
+      .from(materials)
+      .where(and(eq(materials.id, id), eq(materials.userId, userId)))
+      .limit(1);
+    if (!row) throw new NotFoundException("Bahan baku tidak ditemukan");
+    return row;
+  }
+}
+
+/* --------------------------------------------------------------- parsing */
+
+export interface ParsedLine {
+  name: string;
+  quantity: number;
+  unit: string | null;
+  totalCost: number;
+}
+
+const UNIT_WORDS =
+  "pcs|pc|buah|bh|lusin|box|dus|pack|pak|sachet|roll|meter|mtr|m|cm|kg|gr|gram|g|ml|liter|ltr|l|lembar|label|set";
+
+/**
+ * Pulls {name, qty, unit, total} out of OCR'd receipt text, one line at a time.
+ *
+ * Handles the two layouts these screenshots usually take:
+ *   "Biji Kopi Arabika   2 kg   Rp240.000"
+ *   "2x Tabung                  Rp13.000"
+ *
+ * Lines without both a quantity and an amount are skipped — a receipt is full
+ * of headers, addresses and totals, and inventing rows from them would be
+ * worse than missing one the admin can add by hand.
+ */
+export function parsePurchaseLines(text: string): ParsedLine[] {
+  const out: ParsedLine[] = [];
+  const moneyRe = /(?:Rp\.?\s*)?(\d{1,3}(?:\.\d{3})+|\d{4,})(?:,\d{2})?/g;
+  const leadingQtyRe = new RegExp(`^\\s*(\\d+(?:[.,]\\d+)?)\\s*(?:x|×)?\\s*(${UNIT_WORDS})?\\b`, "i");
+  // Global: a line like "Kemasan Kraft 200gr  100 pcs  Rp150.000" contains a
+  // size inside the NAME as well as the real quantity. In a table layout the
+  // quantity column sits to the right of the name, so the RIGHTMOST match is
+  // the quantity — taking the first one read 200 instead of 100.
+  const trailingQtyRe = new RegExp(`\\b(\\d+(?:[.,]\\d+)?)\\s*(${UNIT_WORDS})\\b`, "gi");
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.length < 3) continue;
+    // Skip obvious summary rows so they don't become phantom materials.
+    if (/^(total|subtotal|ongkir|ongkos|diskon|voucher|biaya|pajak|ppn|grand)/i.test(line)) continue;
+
+    const amounts = [...line.matchAll(moneyRe)].map((m) => Number(m[1]!.replace(/\./g, "")));
+    const money = amounts.filter((n) => n >= 100);
+    if (!money.length) continue;
+    // The largest figure on the line is the line total; a unit price, if
+    // printed too, is smaller.
+    const totalCost = Math.max(...money);
+
+    let quantity = 0;
+    let unit: string | null = null;
+    let name = line;
+
+    const lead = line.match(leadingQtyRe);
+    trailingQtyRe.lastIndex = 0;
+    const trailAll = [...line.matchAll(trailingQtyRe)];
+    const trail = trailAll.length ? trailAll[trailAll.length - 1]! : null;
+    if (lead && Number(lead[1]!.replace(",", ".")) > 0) {
+      quantity = Number(lead[1]!.replace(",", "."));
+      unit = lead[2] ?? null;
+      name = line.slice(lead[0].length);
+    } else if (trail) {
+      quantity = Number(trail[1]!.replace(",", "."));
+      unit = trail[2] ?? null;
+      // Remove only that occurrence, so a size baked into the name survives.
+      name = line.slice(0, trail.index) + " " + line.slice(trail.index! + trail[0].length);
+    } else {
+      continue; // no quantity — not a line item
+    }
+
+    // Strip every money token and leftover separators from the name.
+    name = name
+      .replace(moneyRe, " ")
+      .replace(/Rp\.?/gi, " ")
+      .replace(/[|·•,;:]+/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .replace(/^[\s\-–—x×]+|[\s\-–—]+$/g, "")
+      .trim();
+
+    if (name.length < 2 || quantity <= 0) continue;
+    out.push({ name, quantity, unit, totalCost });
+  }
+  return out;
+}

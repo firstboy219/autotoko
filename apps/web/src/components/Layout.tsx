@@ -17,6 +17,7 @@ const NAV: { to: string; label: string; icon: IconName; end?: boolean }[] = [
   { to: "/affiliate", label: "Affiliate", icon: "users" },
   { to: "/laporan", label: "Laporan", icon: "trending" },
   { to: "/bom", label: "BOM / Bahan", icon: "beaker" },
+  { to: "/pembelian", label: "Pembelian Stok", icon: "package" },
   { to: "/hpp", label: "HPP & Harga Jual", icon: "tag" },
   { to: "/wallet", label: "Wallet", icon: "wallet" },
   { to: "/pencairan", label: "Pencairan Dana", icon: "banknote" },

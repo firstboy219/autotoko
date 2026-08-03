@@ -1,0 +1,2 @@
+ALTER TABLE "product_costing" ADD COLUMN "packing_cost_per_order" numeric(15, 2) DEFAULT '0' NOT NULL;--> statement-breakpoint
+ALTER TABLE "product_costing" ADD COLUMN "avg_units_per_order" numeric(10, 2) DEFAULT '1' NOT NULL;

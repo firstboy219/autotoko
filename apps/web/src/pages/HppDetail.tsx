@@ -37,6 +37,8 @@ interface MaterialLine {
 }
 interface Costing {
   serviceCostPerPcs: number;
+  packingCostPerOrder: number;
+  avgUnitsPerOrder: number;
   publishPrice: number | null;
   marketplaceFeeRate: number;
   eventRate: number;
@@ -66,7 +68,7 @@ interface Detail {
   product: { id: string; sku: string; name: string };
   materials: MaterialLine[];
   costing: Costing;
-  hpp: { materialCost: number; serviceCost: number; total: number };
+  hpp: { materialCost: number; serviceCost: number; packingCost: number; total: number };
   pricing: Pricing | null;
 }
 
@@ -120,25 +122,45 @@ function HppSection({
 }) {
   const toast = useToast();
   const [service, setService] = useState(String(data.costing.serviceCostPerPcs));
+  const [packing, setPacking] = useState(String(data.costing.packingCostPerOrder));
+  const [avgUnits, setAvgUnits] = useState(String(data.costing.avgUnitsPerOrder));
+  const [suggest, setSuggest] = useState<{ suggested: number | null; basedOnOrders: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     setService(String(data.costing.serviceCostPerPcs));
-  }, [data.costing.serviceCostPerPcs]);
+    setPacking(String(data.costing.packingCostPerOrder));
+    setAvgUnits(String(data.costing.avgUnitsPerOrder));
+  }, [data.costing]);
 
   async function saveService() {
     setBusy(true);
     try {
-      await api.patch(`/costing/${productId}`, { serviceCostPerPcs: Number(service) || 0 });
-      toast("Biaya jasa produksi disimpan", "success");
+      await api.patch(`/costing/${productId}`, {
+        serviceCostPerPcs: Number(service) || 0,
+        packingCostPerOrder: Number(packing) || 0,
+        avgUnitsPerOrder: Math.max(0.01, Number(avgUnits) || 1),
+      });
+      toast("Biaya produksi & packing disimpan", "success");
       onChange();
     } finally {
       setBusy(false);
     }
   }
 
-  const serviceDirty = Number(service) !== data.costing.serviceCostPerPcs;
+  const serviceDirty =
+    Number(service) !== data.costing.serviceCostPerPcs ||
+    Number(packing) !== data.costing.packingCostPerOrder ||
+    Number(avgUnits) !== data.costing.avgUnitsPerOrder;
+
+  async function loadSuggestion() {
+    const r = await api.get<{ suggested: number | null; basedOnOrders: number }>(
+      "/costing/meta/avg-units-per-order",
+    );
+    setSuggest(r);
+    if (r.suggested) setAvgUnits(String(r.suggested));
+  }
 
   return (
     <Card padded={false}>
@@ -218,11 +240,10 @@ function HppSection({
       )}
 
       <div className="border-t border-line p-5">
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Field
             label="Biaya Jasa Produksi / pcs"
-            hint="Ongkos produksi di luar bahan baku (jahit, packing, dll)."
-            className="w-full sm:w-64"
+            hint="Ongkos produksi di luar bahan baku (jahit, rakit, dll)."
           >
             <Input
               inputMode="numeric"
@@ -232,6 +253,64 @@ function HppSection({
               className="tabular-nums"
             />
           </Field>
+
+          <Field
+            label="Biaya Packing / resi"
+            hint="Dibayar sekali per pengiriman, bukan per pcs."
+          >
+            <Input
+              inputMode="numeric"
+              value={packing ? Number(packing).toLocaleString("id-ID") : ""}
+              onChange={(e) => setPacking(e.target.value.replace(/\D/g, ""))}
+              placeholder="0"
+              className="tabular-nums"
+            />
+          </Field>
+
+          <Field
+            label="Rata-rata pcs / resi"
+            hint="Pembagi biaya packing agar jadi per produk."
+          >
+            <Input
+              inputMode="decimal"
+              value={avgUnits}
+              onChange={(e) => setAvgUnits(e.target.value.replace(/[^\d.]/g, ""))}
+              placeholder="1"
+              className="tabular-nums"
+            />
+          </Field>
+        </div>
+
+        {/* Packing is charged per shipment but HPP is per product, so the cost
+            has to be divided by however many units ship together. */}
+        {Number(packing) > 0 && (
+          <div className="mt-3 rounded-lg bg-canvas border border-line px-3.5 py-2.5">
+            <div className="text-xs text-ink-2">
+              {rupiah(Number(packing) || 0)} per resi ÷{" "}
+              {Number(avgUnits) > 0 ? Number(avgUnits) : 1} pcs ={" "}
+              <span className="text-ink tabular-nums">
+                {rupiah((Number(packing) || 0) / (Number(avgUnits) > 0 ? Number(avgUnits) : 1))}
+              </span>{" "}
+              per produk
+            </div>
+            <button
+              type="button"
+              onClick={loadSuggestion}
+              className="text-xs text-brand-ink hover:underline mt-1.5"
+            >
+              Hitung rata-rata dari riwayat order
+            </button>
+            {suggest && (
+              <div className="text-xs text-ink-2 mt-1">
+                {suggest.suggested
+                  ? `Rata-rata ${suggest.suggested} pcs per order, dari ${suggest.basedOnOrders} order terakhir.`
+                  : "Belum ada data order untuk dihitung."}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-4">
           <Button
             variant={serviceDirty ? "filled" : "outline"}
             loading={busy}
@@ -252,6 +331,17 @@ function HppSection({
               <dt className="text-ink-2">Biaya jasa produksi</dt>
               <dd className="text-ink tabular-nums">{rupiah(data.hpp.serviceCost)}</dd>
             </div>
+            {data.hpp.packingCost > 0 && (
+              <div className="flex justify-between">
+                <dt className="text-ink-2">
+                  Biaya packing{" "}
+                  <span className="text-ink-3">
+                    ({rupiah(data.costing.packingCostPerOrder)}/resi ÷ {data.costing.avgUnitsPerOrder} pcs)
+                  </span>
+                </dt>
+                <dd className="text-ink tabular-nums">{rupiah(data.hpp.packingCost)}</dd>
+              </div>
+            )}
             <div className="flex justify-between pt-2 mt-1 border-t border-line">
               <dt className="font-medium text-ink">Harga Pokok Produksi / pcs</dt>
               <dd className="text-lg text-ink tabular-nums">{rupiah(data.hpp.total)}</dd>
