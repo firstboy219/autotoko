@@ -24,6 +24,8 @@ import {
   EmailVerifyDto,
   PasswordLoginDto,
   SetPasswordDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
 } from "./dto/auth.dto.js";
 
 // Tighter limit on auth: max 30 requests/min per IP (brute-force protection
@@ -117,5 +119,26 @@ export class AuthController {
   ): Promise<ApiResponse<{ hasPassword: boolean }>> {
     const user = (req as FastifyRequest & { user: JwtPayload }).user;
     return { success: true, data: await this.passwordAuth.status(user.sub) };
+  }
+
+  /** Always 200, even for unknown addresses — see requestReset(). */
+  @Post("password/forgot")
+  async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<ApiResponse<{ ok: true }>> {
+    return { success: true, data: await this.passwordAuth.requestReset(dto.email) };
+  }
+
+  @Get("password/reset/check")
+  async checkReset(
+    @Query("token") token: string,
+  ): Promise<ApiResponse<{ valid: boolean; reason?: string }>> {
+    return { success: true, data: await this.passwordAuth.checkResetToken(token ?? "") };
+  }
+
+  @Post("password/reset")
+  async resetPassword(@Body() dto: ResetPasswordDto): Promise<ApiResponse<{ ok: true }>> {
+    return {
+      success: true,
+      data: await this.passwordAuth.resetWithToken(dto.token, dto.newPassword),
+    };
   }
 }

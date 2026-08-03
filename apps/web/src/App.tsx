@@ -20,6 +20,8 @@ import { Paket } from "./pages/Paket";
 import { Notifikasi } from "./pages/Notifikasi";
 import { Landing } from "./pages/Landing";
 import { Signup } from "./pages/Signup";
+import { LupaPassword } from "./pages/LupaPassword";
+import { ResetPassword } from "./pages/ResetPassword";
 import { Terms } from "./pages/Terms";
 import { Privacy } from "./pages/Privacy";
 import { NotFound } from "./pages/NotFound";
@@ -44,6 +46,8 @@ export function App() {
         <Route path="/welcome" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/lupa-password" element={<LupaPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/onboarding" element={<Protected><Onboarding /></Protected>} />

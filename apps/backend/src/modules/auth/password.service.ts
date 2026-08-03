@@ -6,9 +6,12 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
+import { createHash, randomBytes } from "node:crypto";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { users } from "../../database/schema/index.js";
+import { passwordResetTokens, users } from "../../database/schema/index.js";
+import { MailService } from "../../common/mail/mail.service.js";
+import { ConfigService } from "@nestjs/config";
 import { TenantService } from "../../database/tenant.service.js";
 import type { JwtPayload } from "./jwt-auth.guard.js";
 import { MIN_PASSWORD_LENGTH, hashPassword, verifyPassword } from "./password.util.js";
@@ -29,6 +32,8 @@ export class PasswordAuthService {
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly jwt: JwtService,
     private readonly tenant: TenantService,
+    private readonly mail: MailService,
+    private readonly config: ConfigService,
   ) {}
 
   async login(rawEmail: string, password: string): Promise<{ accessToken: string }> {
@@ -113,4 +118,127 @@ export class PasswordAuthService {
       .limit(1);
     return { hasPassword: Boolean(row?.passwordHash) };
   }
+
+  /* ------------------------------------------------------- forgot password */
+
+  /**
+   * Issues a reset link.
+   *
+   * ALWAYS reports success, whether or not the address belongs to an account —
+   * a different reply for unknown emails would turn this endpoint into a
+   * membership oracle. A failure to actually send is logged server-side and
+   * surfaced through the Admin SMTP page, not to the requester.
+   */
+  async requestReset(rawEmail: string): Promise<{ ok: true }> {
+    const email = rawEmail.trim().toLowerCase();
+
+    // Same RLS bypass the login path needs: this runs with no tenant context.
+    const user = await this.tenant.runBypass(async () => {
+      const [u] = await this.db
+        .select({ id: users.id, isActive: users.isActive, isSuspended: users.isSuspended })
+        .from(users)
+        .where(eq(users.email, email))
+        .limit(1);
+      return u ?? null;
+    });
+
+    if (!user || !user.isActive || user.isSuspended) {
+      this.logger.log(`Password reset requested for a non-resettable address (${email})`);
+      return { ok: true };
+    }
+
+    const token = randomBytes(32).toString("base64url");
+    const expiresAt = new Date(Date.now() + RESET_TTL_MIN * 60 * 1000);
+
+    await this.tenant.runBypass(async () => {
+      await this.db.insert(passwordResetTokens).values({
+        userId: user.id,
+        tokenHash: hashToken(token),
+        expiresAt,
+      });
+    });
+
+    const appUrl = this.config.get<string>("APP_URL", "https://viewtoko.cosger.online");
+    const link = `${appUrl}/reset-password?token=${token}`;
+
+    try {
+      await this.mail.send(
+        email,
+        "Reset password AutoToko",
+        `<p>Kami menerima permintaan reset password untuk akun ini.</p>
+         <p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#0e6e55;color:#fff;border-radius:8px;text-decoration:none">Atur Password Baru</a></p>
+         <p style="color:#6b7178;font-size:13px">Atau buka tautan ini: <br>${link}</p>
+         <p style="color:#6b7178;font-size:13px">Berlaku ${RESET_TTL_MIN} menit dan hanya bisa dipakai sekali. Abaikan email ini jika kamu tidak memintanya — password lama tetap berlaku.</p>`,
+        `Reset password AutoToko\n\nBuka: ${link}\n\nBerlaku ${RESET_TTL_MIN} menit, sekali pakai.`,
+      );
+      this.logger.log(`Password reset link sent to ${email}`);
+    } catch (e) {
+      // Deliberately swallowed for the caller: reporting the send failure here
+      // would reveal that the address exists. The admin sees SMTP health on
+      // the Admin > Email/SMTP page instead.
+      this.logger.error(
+        `Password reset email FAILED for ${email}: ${(e as Error).message.split("\n")[0]}`,
+      );
+    }
+
+    return { ok: true };
+  }
+
+  /** Checks a link before showing the form, so an expired one says so up front. */
+  async checkResetToken(token: string): Promise<{ valid: boolean; reason?: string }> {
+    const row = await this.findToken(token);
+    if (!row) return { valid: false, reason: "Tautan tidak valid." };
+    if (row.usedAt) return { valid: false, reason: "Tautan ini sudah dipakai." };
+    if (row.expiresAt.getTime() < Date.now()) return { valid: false, reason: "Tautan sudah kedaluwarsa." };
+    return { valid: true };
+  }
+
+  async resetWithToken(token: string, newPassword: string): Promise<{ ok: true }> {
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      throw new BadRequestException(`Password minimal ${MIN_PASSWORD_LENGTH} karakter.`);
+    }
+    const row = await this.findToken(token);
+    if (!row) throw new BadRequestException("Tautan tidak valid.");
+    if (row.usedAt) throw new BadRequestException("Tautan ini sudah dipakai. Minta tautan baru.");
+    if (row.expiresAt.getTime() < Date.now()) {
+      throw new BadRequestException("Tautan sudah kedaluwarsa. Minta tautan baru.");
+    }
+
+    const hashed = await hashPassword(newPassword);
+    await this.tenant.runBypass(async () => {
+      await this.db
+        .update(users)
+        .set({ passwordHash: hashed, updatedAt: new Date() })
+        .where(eq(users.id, row.userId));
+
+      // Burn this token, and every other outstanding one for the same user — a
+      // second link sitting in an inbox must not still work after a reset.
+      await this.db
+        .update(passwordResetTokens)
+        .set({ usedAt: new Date() })
+        .where(and(eq(passwordResetTokens.userId, row.userId), isNull(passwordResetTokens.usedAt)));
+    });
+
+    this.logger.log(`Password reset completed for user ${row.userId}`);
+    return { ok: true };
+  }
+
+  private async findToken(token: string) {
+    if (!token || token.length < 20) return null;
+    return this.tenant.runBypass(async () => {
+      const [row] = await this.db
+        .select()
+        .from(passwordResetTokens)
+        .where(eq(passwordResetTokens.tokenHash, hashToken(token)))
+        .limit(1);
+      return row ?? null;
+    });
+  }
+}
+
+const RESET_TTL_MIN = 60;
+
+/** Tokens are looked up by hash, never stored in the clear. */
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }

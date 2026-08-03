@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api, setToken } from "../lib/api";
 import { Button, Field, InlineAlert, Input } from "./ui";
 
@@ -46,7 +47,13 @@ export function PasswordLogin({ onDone }: { onDone: (token: string) => void }) {
         />
       </Field>
 
-      <Field label="Password" className="mb-3">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-medium text-ink-2">Password</span>
+        <Link to="/lupa-password" className="text-xs text-brand-ink hover:underline">
+          Lupa password?
+        </Link>
+      </div>
+      <Field className="mb-3">
         <div className="relative">
           <Input
             type={show ? "text" : "password"}

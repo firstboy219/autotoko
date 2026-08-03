@@ -1,4 +1,5 @@
 import {
+  index,
   pgTable,
   uuid,
   varchar,
@@ -76,3 +77,29 @@ export const emailOtpSessions = pgTable("email_otp_sessions", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
 });
+
+/**
+ * One-time password-reset links.
+ *
+ * The token is stored HASHED, exactly like the email OTP codes above: a leaked
+ * database dump must not hand out working reset links. Rows are kept after use
+ * rather than deleted so a "this link was already used" reply can be given
+ * instead of an indistinguishable "invalid token".
+ */
+export const passwordResetTokens = pgTable(
+  "password_reset_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: varchar("token_hash", { length: 128 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    hashIdx: index("password_reset_tokens_hash_idx").on(t.tokenHash),
+    userIdx: index("password_reset_tokens_user_idx").on(t.userId),
+  }),
+);

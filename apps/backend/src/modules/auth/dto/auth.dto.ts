@@ -63,3 +63,18 @@ export class SetPasswordDto {
   @IsString()
   currentPassword?: string;
 }
+
+export class ForgotPasswordDto {
+  @IsEmail()
+  email!: string;
+}
+
+export class ResetPasswordDto {
+  @IsString()
+  @MinLength(20, { message: "Tautan tidak valid." })
+  token!: string;
+
+  @IsString()
+  @MinLength(8, { message: "Password minimal 8 karakter." })
+  newPassword!: string;
+}
