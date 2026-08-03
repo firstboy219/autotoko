@@ -38,6 +38,10 @@ export class PayoutSellersService {
   }
 
   async createSubSeller(userId: string, dto: CreateSubSellerDto) {
+    // Fall back to the tenant's configured default so "20%" is set once on
+    // the Pengaturan page rather than retyped for every sub-seller.
+    const settings = await this.getSettings(userId);
+    const fallbackRate = settings?.defaultSubSellerRate;
     const [row] = await this.db
       .insert(subSellers)
       .values({
@@ -47,7 +51,11 @@ export class PayoutSellersService {
         loginEmail: dto.loginEmail ?? null,
         bankAccount: dto.bankAccount ?? null,
         kuotaTokoMaksimal: dto.kuotaTokoMaksimal ?? null,
-        ...(dto.defaultRate != null ? { defaultRate: rate(dto.defaultRate) } : {}),
+        ...(dto.defaultRate != null
+          ? { defaultRate: rate(dto.defaultRate) }
+          : fallbackRate
+            ? { defaultRate: fallbackRate }
+            : {}),
       })
       .returning();
     return row;
@@ -302,11 +310,30 @@ export class PayoutSellersService {
   }
 
   async updateSettings(userId: string, dto: UpdatePayoutSettingsDto) {
-    await this.getSettings(userId); // ensure the row exists
+    const current = await this.getSettings(userId); // ensure the row exists
+
+    // Only the parallel mode can over-allocate — the other two always take a
+    // fraction of what is still left, so they can never exceed the credit.
+    // Checked against the merged values so changing either field alone is
+    // still validated against the other's stored value.
+    const basis = dto.sedekahBasis ?? current!.sedekahBasis;
+    if (basis === "both_from_total") {
+      const sedekah = dto.sedekahRate ?? Number(current!.sedekahRate);
+      const sub = dto.defaultSubSellerRate ?? Number(current!.defaultSubSellerRate);
+      if (sedekah + sub > 1) {
+        throw new BadRequestException(
+          `Sedekah ${(sedekah * 100).toFixed(1)}% + sub-seller ${(sub * 100).toFixed(1)}% ` +
+            "melebihi 100% — tidak mungkin bila keduanya dihitung dari total kredit awal.",
+        );
+      }
+    }
     const [row] = await this.db
       .update(payoutSettings)
       .set({
         ...(dto.sedekahRate != null ? { sedekahRate: rate(dto.sedekahRate) } : {}),
+        ...(dto.defaultSubSellerRate != null
+          ? { defaultSubSellerRate: rate(dto.defaultSubSellerRate) }
+          : {}),
         ...(dto.sedekahBasis != null ? { sedekahBasis: dto.sedekahBasis } : {}),
         ...(dto.sedekahBankAccount != null
           ? { sedekahBankAccount: dto.sedekahBankAccount }

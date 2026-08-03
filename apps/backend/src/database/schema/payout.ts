@@ -117,6 +117,12 @@ export const payoutSettings = pgTable("payout_settings", {
     .notNull()
     .default("0.0500"),
   sedekahBasis: sedekahBasisEnum("sedekah_basis").notNull().default("total_credit"),
+  // Inherited by newly created sub-sellers. Each sub-seller still keeps its
+  // own defaultRate, and a shop can override that again — this is only the
+  // starting value so the tenant sets "20%" once instead of per person.
+  defaultSubSellerRate: numeric("default_sub_seller_rate", { precision: 5, scale: 4 })
+    .notNull()
+    .default("0.2000"),
   sedekahBankAccount: varchar("sedekah_bank_account", { length: 255 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

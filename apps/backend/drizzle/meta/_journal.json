@@ -92,6 +92,13 @@
       "when": 1785766317360,
       "tag": "0012_shop_display_name",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785767073525,
+      "tag": "0013_payout_split_settings",
+      "breakpoints": true
     }
   ]
 }

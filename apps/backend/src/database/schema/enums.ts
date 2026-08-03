@@ -101,6 +101,8 @@ export const fulfillmentStatusEnum = pgEnum("fulfillment_status", [
 export const sedekahBasisEnum = pgEnum("sedekah_basis", [
   "total_credit",
   "after_subseller_split",
+  // Both cuts computed on the full credit, independently of each other.
+  "both_from_total",
 ]);
 
 export const subSellerStatusEnum = pgEnum("sub_seller_status", [
