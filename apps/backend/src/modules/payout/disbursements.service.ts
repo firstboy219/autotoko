@@ -85,7 +85,7 @@ export class DisbursementsService {
     return rows.map((r) => ({
       id: r.disbursement.id,
       payoutMutationId: r.disbursement.payoutMutationId,
-      shopName: r.shop ? (r.shop.shopName ?? r.shop.shopId) : null,
+      shopName: r.shop ? (r.shop.displayName ?? r.shop.shopName ?? r.shop.shopId) : null,
       marketplace: r.shop?.marketplace ?? null,
       recipientType: r.disbursement.recipientType,
       recipientName:

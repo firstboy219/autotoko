@@ -6,6 +6,7 @@ import {
   Get,
   Logger,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -45,6 +46,13 @@ class ManualConnectDto {
   @IsOptional()
   @IsUUID()
   userId?: string;
+}
+
+class UpdateShopDto {
+  /** Empty string clears the override and reverts to the marketplace name. */
+  @IsOptional() @IsString() @MaxLength(255) displayName?: string;
+  /** Only accepted while the shop is still a placeholder. */
+  @IsOptional() @IsIn(["tiktok", "shopee"]) marketplace?: Marketplace;
 }
 
 class AddManualShopDto {
@@ -212,5 +220,16 @@ export class ShopsController {
 ${codeBlock}
 <p><a href="${appUrl}/toko" style="color:#2563eb">← Kembali ke AutoToko</a></p>
 </body></html>`;
+  }
+
+  /** Edits the seller-facing label (and, for placeholders, the marketplace). */
+  @Patch(":id")
+  @UseGuards(JwtAuthGuard)
+  async update(
+    @Param("id") id: string,
+    @Body() dto: UpdateShopDto,
+    @Req() req: FastifyRequest,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.shops.updateShop(uid(req), id, dto) };
   }
 }

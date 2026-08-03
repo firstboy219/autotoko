@@ -217,7 +217,7 @@ export class PayoutSellersService {
       return {
         id: shop.id,
         marketplace: shop.marketplace,
-        shopName: shop.shopName ?? shop.shopId,
+        shopName: shop.displayName ?? shop.shopName ?? shop.shopId,
         subSellerId: shop.subSellerId,
         subSubSellerId: shop.subSubSellerId,
         subSellerName: sub?.name ?? null,
@@ -266,7 +266,7 @@ export class PayoutSellersService {
 
       return {
         id: shop.id,
-        shopName: shop.shopName ?? shop.shopId,
+        shopName: shop.displayName ?? shop.shopName ?? shop.shopId,
         marketplace: shop.marketplace,
         scenario,
         subSellerId: shop.subSellerId,

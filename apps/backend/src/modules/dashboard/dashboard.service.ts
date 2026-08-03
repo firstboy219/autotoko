@@ -105,7 +105,7 @@ export class DashboardService {
     const expRows = await this.db
       .select({
         shop_id: shops.id,
-        shop_name: shops.shopName,
+        shop_name: sql<string>`coalesce(${shops.displayName}, ${shops.shopName})`,
         expires_at: shops.accessTokenExpireAt,
       })
       .from(shops)

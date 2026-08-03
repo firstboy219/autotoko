@@ -87,7 +87,7 @@ export class ProductsService {
     const rows = await this.db
       .select({
         posting: productPostings,
-        shopName: shops.shopName,
+        shopName: sql<string>`coalesce(${shops.displayName}, ${shops.shopName})`,
         marketplace: shops.marketplace,
       })
       .from(productPostings)

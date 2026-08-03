@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq } from "drizzle-orm";
+import { sql, and, desc, eq } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   subSellers,
@@ -48,7 +48,7 @@ export class PortalDataService {
       .select({
         id: shops.id,
         marketplace: shops.marketplace,
-        shopName: shops.shopName,
+        shopName: sql<string>`coalesce(${shops.displayName}, ${shops.shopName})`,
         shopId: shops.shopId,
       })
       .from(shops)
@@ -74,7 +74,7 @@ export class PortalDataService {
         expectedAmount: payoutDisbursements.expectedAmount,
         validationStatus: payoutDisbursements.validationStatus,
         payoutDate: payoutMutations.payoutDate,
-        shopName: shops.shopName,
+        shopName: sql<string>`coalesce(${shops.displayName}, ${shops.shopName})`,
         marketplace: shops.marketplace,
       })
       .from(payoutDisbursements)

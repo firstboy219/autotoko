@@ -4,12 +4,33 @@ import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
 import { dateShort } from "../lib/fmt";
+import { Icon } from "../components/Icon";
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  ConfirmModal,
+  EmptyState,
+  Field,
+  InlineAlert,
+  Input,
+  Modal,
+  PageHeader,
+  Select,
+  Skeleton,
+  useToast,
+} from "../components/ui";
+
+type Marketplace = "tiktok" | "shopee";
 
 interface Shop {
   id: string;
   marketplace: string;
   shopId: string;
   shopName: string | null;
+  /** Seller's own label; wins over shopName when set. */
+  displayName: string | null;
   sellerRegion: string | null;
   shopStatus: string;
   accessTokenExpireAt: string | null;
@@ -17,6 +38,7 @@ interface Shop {
 }
 
 const DAY = 86400_000;
+const MP_LABEL: Record<string, string> = { tiktok: "TikTok Shop", shopee: "Shopee" };
 
 /** Days until expiry; null if unknown. */
 function daysToExpiry(iso: string | null): number | null {
@@ -24,14 +46,18 @@ function daysToExpiry(iso: string | null): number | null {
   return Math.floor((new Date(iso).getTime() - Date.now()) / DAY);
 }
 
+const shopLabel = (s: Shop) => s.displayName ?? s.shopName ?? s.shopId;
+
 export function Toko() {
+  const toast = useToast();
   const { data, loading, reload } = useFetch<Shop[]>("/shops");
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
+  const [editing, setEditing] = useState<Shop | null>(null);
+  const [removing, setRemoving] = useState<Shop | null>(null);
 
-  async function connect(mp: "tiktok" | "shopee", placeholderId?: string) {
+  async function connect(mp: Marketplace, placeholderId?: string) {
     setBusy(placeholderId ?? mp);
     setErr(null);
     try {
@@ -45,165 +71,413 @@ export function Toko() {
   }
 
   async function refresh(id: string) {
-    setBusy(id); setErr(null); setMsg(null);
+    setBusy(id);
+    setErr(null);
     try {
       await api.post(`/shops/${id}/refresh`);
-      setMsg("Token diperbarui.");
+      toast("Token diperbarui", "success");
       reload();
-    } catch (e) { setErr((e as Error).message); }
-    finally { setBusy(null); }
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
   }
 
-  async function disconnect(s: Shop) {
-    const isPlaceholder = !s.connectedAt;
-    const confirmMsg = isPlaceholder
-      ? `Hapus toko manual "${s.shopName ?? s.shopId}"?`
-      : `Putuskan koneksi toko "${s.shopName ?? s.shopId}"? Order lama tetap tersimpan.`;
-    if (!confirm(confirmMsg)) return;
-    setBusy(s.id); setErr(null); setMsg(null);
+  async function doRemove() {
+    if (!removing) return;
+    setBusy(removing.id);
+    setErr(null);
     try {
-      await api.del(`/shops/${s.id}`);
+      await api.del(`/shops/${removing.id}`);
+      toast(removing.connectedAt ? "Koneksi toko diputus" : "Toko dihapus", "success");
       reload();
-    } catch (e) { setErr((e as Error).message); }
-    finally { setBusy(null); }
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+      setRemoving(null);
+    }
   }
 
   return (
     <Layout title="Toko Saya">
-      <div className="flex flex-wrap gap-2 mb-2">
-        <button onClick={() => connect("shopee")} disabled={busy !== null} className="px-4 py-2 rounded-md bg-[#EE4D2D] text-white text-sm font-semibold disabled:opacity-60">
-          + Hubungkan Shopee
-        </button>
-        <button onClick={() => connect("tiktok")} disabled={busy !== null} className="px-4 py-2 rounded-md bg-navy text-white text-sm font-semibold disabled:opacity-60">
-          + Hubungkan TikTok
-        </button>
-        <button onClick={() => setShowManual((v) => !v)} disabled={busy !== null}
-          className="px-4 py-2 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-semibold disabled:opacity-60">
-          + Tambah Toko Manual
-        </button>
-      </div>
-      <p className="text-[11px] text-slate-400 mb-2">
+      <PageHeader
+        title="Toko Saya"
+        subtitle="Hubungkan toko marketplace, atau siapkan toko manual dulu sebelum dihubungkan."
+        actions={
+          <>
+            <Button
+              variant="outline"
+              icon="plus"
+              disabled={busy !== null}
+              onClick={() => connect("shopee")}
+            >
+              Shopee
+            </Button>
+            <Button
+              variant="outline"
+              icon="plus"
+              disabled={busy !== null}
+              onClick={() => connect("tiktok")}
+            >
+              TikTok
+            </Button>
+            <Button
+              variant="filled"
+              icon="store"
+              disabled={busy !== null}
+              onClick={() => setShowManual((v) => !v)}
+            >
+              Tambah Toko Manual
+            </Button>
+          </>
+        }
+      />
+
+      <p className="text-xs text-ink-3 mb-4">
         Dengan menghubungkan toko, kamu menyetujui{" "}
-        <Link to="/terms" className="underline">Ketentuan Layanan</Link> &{" "}
-        <Link to="/privacy" className="underline">Kebijakan Privasi</Link>.
+        <Link to="/terms" className="underline">
+          Ketentuan Layanan
+        </Link>{" "}
+        &{" "}
+        <Link to="/privacy" className="underline">
+          Kebijakan Privasi
+        </Link>
+        .
       </p>
-      {showManual && <ManualShopForm onDone={() => { setShowManual(false); reload(); }} onCancel={() => setShowManual(false)} />}
-      {err && <div className="text-red-500 text-sm mb-3">{err}</div>}
-      {msg && <div className="text-green-600 text-sm mb-3">{msg}</div>}
+
+      {showManual && (
+        <div className="mb-4">
+          <ManualShopForm
+            onDone={() => {
+              setShowManual(false);
+              reload();
+            }}
+            onCancel={() => setShowManual(false)}
+          />
+        </div>
+      )}
+
+      {err && (
+        <div className="mb-4">
+          <InlineAlert tone="danger">{err}</InlineAlert>
+        </div>
+      )}
 
       {loading ? (
-        <div className="text-slate-400 text-sm">Memuat…</div>
-      ) : !data?.length ? (
-        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-sm">
-          Belum ada toko terhubung. Klik tombol di atas untuk mulai (OAuth).
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Skeleton className="h-36 rounded-lg" />
+          <Skeleton className="h-36 rounded-lg" />
         </div>
+      ) : !data?.length ? (
+        <Card padded={false}>
+          <EmptyState
+            icon="store"
+            title="Belum ada toko"
+            description="Hubungkan toko marketplace lewat OAuth, atau tambahkan toko manual dulu untuk disiapkan mapping-nya."
+            action={
+              <Button variant="filled" icon="store" onClick={() => setShowManual(true)}>
+                Tambah Toko Manual
+              </Button>
+            }
+          />
+        </Card>
       ) : (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {data.map((s) => {
             const isPlaceholder = !s.connectedAt;
             const dte = daysToExpiry(s.accessTokenExpireAt);
             const expiring = dte !== null && dte < 7;
             return (
-              <div key={s.id} className={`bg-white rounded-xl border p-4 ${isPlaceholder ? "border-amber-300 border-dashed" : "border-slate-200"}`}>
-                <div className="flex items-center justify-between">
-                  <div className="font-bold">{s.shopName ?? s.shopId}</div>
+              <div
+                key={s.id}
+                className={`bg-white rounded-lg border p-4 ${
+                  isPlaceholder ? "border-mn-amber border-dashed" : "border-line"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-ink truncate">{shopLabel(s)}</div>
+                    <div className="text-xs text-ink-3 mt-0.5">
+                      {MP_LABEL[s.marketplace] ?? s.marketplace}
+                      {s.sellerRegion ? ` · ${s.sellerRegion}` : ""}
+                    </div>
+                    {/* Show the marketplace's own name when the seller has
+                        renamed it, so the two can still be reconciled. */}
+                    {s.displayName && s.shopName && s.displayName !== s.shopName && (
+                      <div className="text-xs text-ink-3 mt-0.5 truncate">
+                        nama marketplace: {s.shopName}
+                      </div>
+                    )}
+                  </div>
                   {isPlaceholder ? (
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-700">
-                      Belum Terhubung (Manual)
-                    </span>
+                    <Badge tone="warning">Belum Terhubung</Badge>
                   ) : (
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${s.shopStatus === "active" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+                    <Badge tone={s.shopStatus === "active" ? "success" : "warning"}>
                       {s.shopStatus === "active" ? "Terhubung" : s.shopStatus}
-                    </span>
+                    </Badge>
                   )}
                 </div>
-                <div className="text-xs text-slate-500 mt-1 capitalize">{s.marketplace} {s.sellerRegion ? `· ${s.sellerRegion}` : ""}</div>
 
                 {isPlaceholder ? (
-                  <div className="text-[11px] text-slate-400 mt-2">
-                    Dibuat manual — hubungkan ke akun {s.marketplace} yang asli kapan saja.
+                  <div className="text-xs text-ink-2 mt-3">
+                    Dibuat manual — hubungkan ke akun {MP_LABEL[s.marketplace] ?? s.marketplace}{" "}
+                    yang asli kapan saja.
                   </div>
                 ) : (
-                  <>
-                    <div className="text-[11px] text-slate-400 mt-2">Terhubung: {dateShort(s.connectedAt)}</div>
-                    <div className="text-[11px] mt-0.5 flex items-center gap-1">
-                      <span className="text-slate-400">Token expire: {dateShort(s.accessTokenExpireAt)}</span>
+                  <div className="mt-3 space-y-1">
+                    <div className="text-xs text-ink-2">
+                      Terhubung: {dateShort(s.connectedAt)}
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-ink-2">
+                      <span>Token expire: {dateShort(s.accessTokenExpireAt)}</span>
                       {dte !== null && (
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${expiring ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-500"}`}>
+                        <Badge tone={expiring ? "danger" : "neutral"}>
                           {dte < 0 ? "kedaluwarsa" : `${dte} hari`}
-                        </span>
+                        </Badge>
                       )}
                     </div>
-                  </>
+                  </div>
                 )}
 
-                <div className="flex gap-2 mt-3">
+                <div className="flex flex-wrap gap-2 mt-4">
                   {isPlaceholder ? (
-                    <button onClick={() => connect(s.marketplace as "tiktok" | "shopee", s.id)} disabled={busy !== null}
-                      className="px-2.5 py-1 rounded-md bg-brand hover:bg-brand-dark text-white text-xs font-semibold disabled:opacity-50">
-                      {busy === s.id ? "…" : "Hubungkan Sekarang"}
-                    </button>
+                    <Button
+                      size="sm"
+                      variant="filled"
+                      icon="link"
+                      disabled={busy !== null}
+                      loading={busy === s.id}
+                      onClick={() => connect(s.marketplace as Marketplace, s.id)}
+                    >
+                      Hubungkan Sekarang
+                    </Button>
                   ) : (
-                    <button onClick={() => refresh(s.id)} disabled={busy !== null} className="px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold disabled:opacity-50">
-                      🔄 Refresh Token
-                    </button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      icon="refresh"
+                      disabled={busy !== null}
+                      loading={busy === s.id}
+                      onClick={() => refresh(s.id)}
+                    >
+                      Refresh Token
+                    </Button>
                   )}
-                  <button onClick={() => disconnect(s)} disabled={busy !== null} className="px-2.5 py-1 rounded-md text-red-600 hover:bg-red-50 text-xs font-semibold disabled:opacity-50">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    icon="pencil"
+                    disabled={busy !== null}
+                    onClick={() => setEditing(s)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    icon="trash"
+                    disabled={busy !== null}
+                    onClick={() => setRemoving(s)}
+                  >
                     {isPlaceholder ? "Hapus" : "Putus Koneksi"}
-                  </button>
+                  </Button>
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      {editing && (
+        <EditShopModal
+          shop={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            reload();
+          }}
+        />
+      )}
+
+      <ConfirmModal
+        open={removing !== null}
+        onClose={() => setRemoving(null)}
+        onConfirm={doRemove}
+        loading={busy !== null && busy === removing?.id}
+        title={removing?.connectedAt ? "Putuskan koneksi toko?" : "Hapus toko manual?"}
+        confirmLabel={removing?.connectedAt ? "Putus Koneksi" : "Hapus"}
+        description={
+          removing
+            ? removing.connectedAt
+              ? `Koneksi "${shopLabel(removing)}" akan diputus. Order lama tetap tersimpan.`
+              : `Toko manual "${shopLabel(removing)}" akan dihapus.`
+            : ""
+        }
+      />
     </Layout>
   );
 }
 
+/* --------------------------------------------------------------- edit */
+
+function EditShopModal({
+  shop,
+  onClose,
+  onSaved,
+}: {
+  shop: Shop;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const toast = useToast();
+  const isPlaceholder = !shop.connectedAt;
+  const [name, setName] = useState(shop.displayName ?? shop.shopName ?? "");
+  const [marketplace, setMarketplace] = useState<Marketplace>(shop.marketplace as Marketplace);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.patch(`/shops/${shop.id}`, {
+        displayName: name.trim(),
+        ...(isPlaceholder ? { marketplace } : {}),
+      });
+      toast("Toko diperbarui", "success");
+      onSaved();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Edit Toko"
+      footer={
+        <>
+          <Button variant="text" onClick={onClose} disabled={busy}>
+            Batal
+          </Button>
+          <Button variant="filled" icon="check" loading={busy} onClick={save}>
+            Simpan
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <Field
+          label="Nama Tampilan"
+          hint={
+            shop.shopName
+              ? `Kosongkan untuk memakai nama dari marketplace ("${shop.shopName}").`
+              : "Nama yang tampil di seluruh aplikasi."
+          }
+        >
+          <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        </Field>
+
+        <Field
+          label="Marketplace"
+          hint={
+            isPlaceholder
+              ? "Masih bisa diubah karena toko ini belum terhubung."
+              : "Terkunci — sudah terikat dengan koneksi OAuth toko ini."
+          }
+        >
+          <Select
+            value={marketplace}
+            disabled={!isPlaceholder}
+            onChange={(e) => setMarketplace(e.target.value as Marketplace)}
+          >
+            <option value="tiktok">TikTok Shop</option>
+            <option value="shopee">Shopee</option>
+          </Select>
+        </Field>
+
+        <div className="rounded-lg bg-canvas border border-line px-3.5 py-2.5">
+          <div className="text-xs text-ink-3">ID Toko di Marketplace</div>
+          <div className="text-xs font-mono text-ink mt-0.5 break-all">{shop.shopId}</div>
+        </div>
+
+        {err && <InlineAlert tone="danger">{err}</InlineAlert>}
+      </div>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------- manual create */
+
 function ManualShopForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
-  const [marketplace, setMarketplace] = useState<"tiktok" | "shopee">("tiktok");
+  const toast = useToast();
+  const [marketplace, setMarketplace] = useState<Marketplace>("tiktok");
   const [shopName, setShopName] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true); setErr(null);
+    setBusy(true);
+    setErr(null);
     try {
       await api.post("/shops/manual", { marketplace, shopName });
+      toast("Toko manual ditambahkan", "success");
       onDone();
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <form onSubmit={submit} className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
-      <div className="font-bold text-sm mb-1">Tambah Toko Manual</div>
-      <p className="text-[11px] text-slate-400 mb-3">
-        Untuk toko yang belum resmi terhubung ke marketplace, tapi ingin sudah disiapkan di sistem (misal untuk mapping sub-seller) — hubungkan ke akun aslinya kapan saja nanti.
-      </p>
-      <div className="flex flex-wrap gap-2 items-end">
-        <label className="text-xs font-semibold text-slate-600">
-          Marketplace
-          <select value={marketplace} onChange={(e) => setMarketplace(e.target.value as "tiktok" | "shopee")}
-            className="mt-1 block px-2 py-2 rounded-md border border-slate-300 text-sm font-normal">
-            <option value="tiktok">TikTok Shop</option>
-            <option value="shopee">Shopee</option>
-          </select>
-        </label>
-        <label className="text-xs font-semibold text-slate-600 flex-1 min-w-[180px]">
-          Nama Toko
-          <input value={shopName} onChange={(e) => setShopName(e.target.value)} required placeholder="Nama toko"
-            className="mt-1 w-full px-2 py-2 rounded-md border border-slate-300 text-sm font-normal" />
-        </label>
-        <button disabled={busy || !shopName} className="px-4 py-2 rounded-md bg-brand hover:bg-brand-dark text-white text-sm font-semibold disabled:opacity-50">
-          {busy ? "…" : "Tambah"}
-        </button>
-        <button type="button" onClick={onCancel} className="px-3 py-2 text-xs text-slate-400 hover:underline">
-          Batal
-        </button>
-      </div>
-      {err && <div className="text-red-500 text-xs mt-2">{err}</div>}
-    </form>
+    <Card padded={false}>
+      <CardHeader
+        title="Tambah Toko Manual"
+        subtitle="Untuk toko yang belum resmi terhubung ke marketplace, tapi ingin disiapkan lebih dulu (misal untuk mapping sub-seller)."
+        action={
+          <Button variant="text" size="sm" onClick={onCancel}>
+            Tutup
+          </Button>
+        }
+      />
+      <form onSubmit={submit} className="p-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Marketplace" required>
+            <Select
+              value={marketplace}
+              onChange={(e) => setMarketplace(e.target.value as Marketplace)}
+            >
+              <option value="tiktok">TikTok Shop</option>
+              <option value="shopee">Shopee</option>
+            </Select>
+          </Field>
+          <Field label="Nama Toko" required>
+            <Input
+              value={shopName}
+              onChange={(e) => setShopName(e.target.value)}
+              required
+              placeholder="Nama toko"
+            />
+          </Field>
+        </div>
+        {err && (
+          <div className="mt-3">
+            <InlineAlert tone="danger">{err}</InlineAlert>
+          </div>
+        )}
+        <div className="mt-4">
+          <Button variant="filled" icon="plus" loading={busy} disabled={!shopName.trim()}>
+            Tambah
+          </Button>
+        </div>
+      </form>
+    </Card>
   );
 }

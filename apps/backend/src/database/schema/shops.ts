@@ -23,6 +23,11 @@ export const shops = pgTable(
     marketplace: marketplaceEnum("marketplace").notNull(),
     shopId: varchar("shop_id", { length: 128 }).notNull(), // id from marketplace
     shopName: varchar("shop_name", { length: 255 }),
+    // Seller-chosen label. Kept SEPARATE from shopName because saveShop()
+    // overwrites shopName with whatever the marketplace returns on every
+    // reconnect — editing that field directly would silently lose the name.
+    // Null = fall back to the marketplace name.
+    displayName: varchar("display_name", { length: 255 }),
     shopCipher: varchar("shop_cipher", { length: 255 }), // TikTok only
     openId: varchar("open_id", { length: 255 }), // TikTok only
     merchantId: varchar("merchant_id", { length: 255 }), // Shopee only

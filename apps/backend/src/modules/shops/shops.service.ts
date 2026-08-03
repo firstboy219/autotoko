@@ -175,12 +175,78 @@ export class ShopsService {
       marketplace: s.marketplace,
       shopId: s.shopId,
       shopName: s.shopName,
+      displayName: s.displayName,
       sellerRegion: s.sellerRegion,
       shopStatus: s.shopStatus,
       accessTokenExpireAt: s.accessTokenExpireAt,
       connectedAt: s.connectedAt,
       lastSyncAt: s.lastSyncAt,
     }));
+  }
+
+
+  /**
+   * Edits the seller-facing details of a shop.
+   *
+   * `displayName` is a label owned by the seller and is stored separately from
+   * shopName, which saveShop() rewrites from the marketplace on every
+   * reconnect. Passing an empty string clears the override and reverts to the
+   * marketplace name.
+   *
+   * `marketplace` is only editable while the shop is still a placeholder — once
+   * connected it is bound to the OAuth tokens, so changing it would leave the
+   * row describing one marketplace while holding another's credentials.
+   */
+  async updateShop(
+    userId: string,
+    id: string,
+    dto: { displayName?: string | null; marketplace?: Marketplace },
+  ) {
+    const [shop] = await this.db
+      .select()
+      .from(shops)
+      .where(and(eq(shops.id, id), eq(shops.userId, userId)))
+      .limit(1);
+    if (!shop) throw new NotFoundException("Toko tidak ditemukan");
+
+    const set: Record<string, unknown> = {};
+
+    if (dto.displayName !== undefined) {
+      const trimmed = dto.displayName?.trim() ?? "";
+      set.displayName = trimmed === "" ? null : trimmed;
+    }
+
+    if (dto.marketplace !== undefined && dto.marketplace !== shop.marketplace) {
+      if (shop.connectedAt) {
+        throw new BadRequestException(
+          "Marketplace tidak bisa diubah untuk toko yang sudah terhubung — putuskan koneksi dulu.",
+        );
+      }
+      set.marketplace = dto.marketplace;
+    }
+
+    if (Object.keys(set).length) {
+      await this.db.update(shops).set(set).where(and(eq(shops.id, id), eq(shops.userId, userId)));
+      this.logger.log(`Shop ${id} updated by user ${userId}`);
+    }
+
+    const [updated] = await this.db
+      .select()
+      .from(shops)
+      .where(eq(shops.id, id))
+      .limit(1);
+    return {
+      id: updated!.id,
+      marketplace: updated!.marketplace,
+      shopId: updated!.shopId,
+      shopName: updated!.shopName,
+      displayName: updated!.displayName,
+      sellerRegion: updated!.sellerRegion,
+      shopStatus: updated!.shopStatus,
+      accessTokenExpireAt: updated!.accessTokenExpireAt,
+      connectedAt: updated!.connectedAt,
+      lastSyncAt: updated!.lastSyncAt,
+    };
   }
 
   private async saveShop(userId: string, mp: Marketplace, r: ConnectResult): Promise<void> {
