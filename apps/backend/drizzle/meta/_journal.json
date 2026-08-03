@@ -120,6 +120,13 @@
       "when": 1785772451514,
       "tag": "0016_password_reset_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785773594193,
+      "tag": "0017_sessions_valid_from",
+      "breakpoints": true
     }
   ]
 }

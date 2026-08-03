@@ -6,23 +6,28 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { createHash, randomBytes } from "node:crypto";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { passwordResetTokens, users } from "../../database/schema/index.js";
 import { MailService } from "../../common/mail/mail.service.js";
 import { ConfigService } from "@nestjs/config";
 import { TenantService } from "../../database/tenant.service.js";
-import type { JwtPayload } from "./jwt-auth.guard.js";
+import { invalidateSuspensionCache, type JwtPayload } from "./jwt-auth.guard.js";
 import { MIN_PASSWORD_LENGTH, hashPassword, verifyPassword } from "./password.util.js";
 
 /**
  * Email + password login, offered alongside the existing passwordless WA/email
  * OTP flows rather than replacing them.
  *
- * There is deliberately no "forgot password" email flow: OTP login already IS
- * the recovery path, and it proves ownership of the same address. A user who
- * forgets their password signs in with an OTP and sets a new one.
+ * Recovery is by emailed reset link (requestReset/resetWithToken). That was
+ * originally left out on the grounds that OTP login already proved ownership
+ * of the same address — true, but only while OTP was the sole way in. With a
+ * password tab on the login page, a locked-out user expects a reset link.
+ *
+ * Changing OR resetting a password stamps users.sessions_valid_from, which
+ * kills every JWT issued earlier. A reset that leaves the intruder's session
+ * alive would only be half a recovery.
  */
 @Injectable()
 export class PasswordAuthService {
@@ -73,7 +78,12 @@ export class PasswordAuthService {
   }
 
   /** Sets or replaces the caller's own password. Requires an authenticated session. */
-  async setPassword(userId: string, newPassword: string, currentPassword?: string): Promise<{ ok: true }> {
+  async setPassword(
+    caller: JwtPayload,
+    newPassword: string,
+    currentPassword?: string,
+  ): Promise<{ ok: true; accessToken: string }> {
+    const userId = caller.sub;
     if (newPassword.length < MIN_PASSWORD_LENGTH) {
       throw new BadRequestException(
         `Password minimal ${MIN_PASSWORD_LENGTH} karakter.`,
@@ -102,11 +112,23 @@ export class PasswordAuthService {
 
     await this.db
       .update(users)
-      .set({ passwordHash: await hashPassword(newPassword), updatedAt: new Date() })
+      .set({
+        passwordHash: await hashPassword(newPassword),
+        // Signs out every OTHER device. The caller keeps working because we
+        // hand them a newly signed token below — changing your password
+        // should not log you out of the tab you changed it in.
+        sessionsValidFrom: new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(users.id, userId));
+    invalidateSuspensionCache(userId);
 
-    this.logger.log(`Password set for user ${userId}`);
-    return { ok: true };
+    // Re-sign whatever the caller already was (regular seller or portal
+    // principal) rather than assembling a payload here, so a sub-seller does
+    // not silently get promoted to a full tenant token.
+    const { iat: _iat, exp: _exp, ...claims } = caller as JwtPayload & { exp?: number };
+    this.logger.log(`Password set for user ${userId}; earlier sessions invalidated`);
+    return { ok: true, accessToken: this.jwt.sign(claims) };
   }
 
   /** Lets the UI show "set" vs "change" without leaking the hash. */
@@ -146,6 +168,42 @@ export class PasswordAuthService {
       this.logger.log(`Password reset requested for a non-resettable address (${email})`);
       return { ok: true };
     }
+
+    // Per-address cap. The controller-wide 30/min is per IP, which does
+    // nothing to stop someone pointing the form at one victim's inbox — and
+    // every send burns the shared Gmail daily quota that OTP login also
+    // depends on, so an unthrottled form is a denial of service on the whole
+    // platform, not just an annoyance for one person.
+    //
+    // Over the cap we return the SAME {ok:true} and simply skip the send:
+    // throwing 429 here would only ever happen for addresses that really do
+    // have an account, handing an attacker the enumeration oracle that the
+    // uniform response exists to deny.
+    const since = new Date(Date.now() - RESET_WINDOW_MIN * 60 * 1000);
+    const recent = await this.tenant.runBypass(async () => {
+      const [r] = await this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(passwordResetTokens)
+        .where(
+          and(
+            eq(passwordResetTokens.userId, user.id),
+            // gt(), not sql`... > ${since}` — interpolating a bare Date into a
+            // raw template gives the driver an unmapped value and it throws
+            // "argument must be of type string ... Received an instance of
+            // Date" at bind time. tsc cannot see that; only running it does.
+            gt(passwordResetTokens.createdAt, since),
+          ),
+        );
+      return r?.count ?? 0;
+    });
+    if (recent >= MAX_RESETS_PER_WINDOW) {
+      this.logger.warn(
+        `Password reset throttled for ${email} (${recent} in ${RESET_WINDOW_MIN}m)`,
+      );
+      return { ok: true };
+    }
+
+    await this.purgeStaleTokens();
 
     const token = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + RESET_TTL_MIN * 60 * 1000);
@@ -208,7 +266,14 @@ export class PasswordAuthService {
     await this.tenant.runBypass(async () => {
       await this.db
         .update(users)
-        .set({ passwordHash: hashed, updatedAt: new Date() })
+        .set({
+          passwordHash: hashed,
+          // The reason someone resets is usually that somebody else got in.
+          // Evict every existing session, or the reset changes nothing for
+          // the intruder already holding a 12-hour token.
+          sessionsValidFrom: new Date(),
+          updatedAt: new Date(),
+        })
         .where(eq(users.id, row.userId));
 
       // Burn this token, and every other outstanding one for the same user — a
@@ -219,8 +284,26 @@ export class PasswordAuthService {
         .where(and(eq(passwordResetTokens.userId, row.userId), isNull(passwordResetTokens.usedAt)));
     });
 
-    this.logger.log(`Password reset completed for user ${row.userId}`);
+    invalidateSuspensionCache(row.userId);
+    this.logger.log(`Password reset completed for user ${row.userId}; sessions invalidated`);
     return { ok: true };
+  }
+
+  /**
+   * Opportunistic housekeeping, piggybacked on a request that is already doing
+   * SMTP work — a nightly cron for one small DELETE would be more moving parts
+   * than the problem deserves. Failure is logged and ignored: tidying up must
+   * never be the reason a password reset does not go out.
+   */
+  private async purgeStaleTokens(): Promise<void> {
+    try {
+      const cutoff = new Date(Date.now() - TOKEN_RETENTION_H * 60 * 60 * 1000);
+      await this.tenant.runBypass(async () => {
+        await this.db.delete(passwordResetTokens).where(lt(passwordResetTokens.expiresAt, cutoff));
+      });
+    } catch (e) {
+      this.logger.warn(`Reset token cleanup skipped: ${(e as Error).message}`);
+    }
   }
 
   private async findToken(token: string) {
@@ -237,6 +320,10 @@ export class PasswordAuthService {
 }
 
 const RESET_TTL_MIN = 60;
+const RESET_WINDOW_MIN = 15;
+const MAX_RESETS_PER_WINDOW = 3;
+/** Spent tokens are kept a day for support/forensics, then dropped. */
+const TOKEN_RETENTION_H = 24;
 
 /** Tokens are looked up by hash, never stored in the clear. */
 function hashToken(token: string): string {

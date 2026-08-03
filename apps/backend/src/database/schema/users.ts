@@ -24,6 +24,12 @@ export const users = pgTable("users", {
   planExpiredAt: timestamp("plan_expired_at", { withTimezone: true }),
   isActive: boolean("is_active").notNull().default(true),
   isSuspended: boolean("is_suspended").notNull().default(false),
+  // Session epoch: any JWT issued before this instant is refused by
+  // JwtAuthGuard. Stamped whenever the password changes, so a reset actually
+  // evicts whoever was already signed in — the whole point of resetting a
+  // compromised account. NULL (the default, and every pre-existing row) means
+  // "never invalidated", so deploying this does not sign anybody out.
+  sessionsValidFrom: timestamp("sessions_valid_from", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

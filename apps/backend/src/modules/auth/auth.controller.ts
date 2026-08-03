@@ -108,7 +108,7 @@ export class AuthController {
     const user = (req as FastifyRequest & { user: JwtPayload }).user;
     return {
       success: true,
-      data: await this.passwordAuth.setPassword(user.sub, dto.newPassword, dto.currentPassword),
+      data: await this.passwordAuth.setPassword(user, dto.newPassword, dto.currentPassword),
     };
   }
 

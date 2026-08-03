@@ -1,14 +1,19 @@
 import { useState } from "react";
-import { api } from "../lib/api";
+import { api, setToken } from "../lib/api";
 import { useFetch } from "../lib/useFetch";
 import { Badge, Button, Card, CardHeader, Field, InlineAlert, Input, useToast } from "./ui";
 
 const MIN = 8;
 
 /**
- * Lets a signed-in seller set or replace their password. There is no
- * "forgot password" email flow by design — OTP login already proves ownership
- * of the address and is the recovery path.
+ * Lets a signed-in seller set or replace their password.
+ *
+ * Replacing one stamps a server-side session epoch, so every other device is
+ * signed out. The backend hands back a freshly signed token for THIS tab and
+ * we swap it in below — otherwise the user would be kicked out of the very
+ * page they just used, which reads as a bug rather than as security.
+ *
+ * Recovery for someone who cannot get in at all lives at /lupa-password.
  */
 export function PasswordSettings() {
   const toast = useToast();
@@ -39,11 +44,17 @@ export function PasswordSettings() {
     setBusy(true);
     setErr(null);
     try {
-      await api.post("/auth/password/set", {
+      const r = await api.post<{ ok: true; accessToken?: string }>("/auth/password/set", {
         newPassword: next,
         ...(has ? { currentPassword: current } : {}),
       });
-      toast(has ? "Password diganti" : "Password dibuat", "success");
+      // Swap in the replacement token before anything else fires a request:
+      // the one in localStorage was just invalidated server-side.
+      if (r.accessToken) setToken(r.accessToken);
+      toast(
+        has ? "Password diganti — perangkat lain otomatis keluar" : "Password dibuat",
+        "success",
+      );
       reset();
       reload();
     } catch (e) {

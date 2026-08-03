@@ -28,6 +28,8 @@ export interface JwtPayload {
   // uses to restrict a portal caller to their own shops/history only.
   principalType?: "sub_seller" | "sub_sub_seller";
   principalId?: string;
+  /** Issued-at, seconds. Set by jwt.sign(); used for the session-epoch check. */
+  iat?: number;
 }
 
 /** Mark a route/controller as admin-only. */
@@ -49,6 +51,8 @@ export const PortalOnly = () => SetMetadata(PORTAL_ONLY, true);
 
 interface SuspensionCacheEntry {
   blocked: boolean;
+  /** users.sessions_valid_from as epoch SECONDS, or 0 when never invalidated. */
+  validFromSec: number;
   expiresAt: number;
 }
 // Short-TTL cache so a fresh suspend/delete from the admin panel takes effect
@@ -100,8 +104,19 @@ export class JwtAuthGuard implements CanActivate {
     // here. Every "user" role token (regular seller login AND any portal
     // token, whose `sub` is the real tenant/seller) is checked live so a
     // suspend/delete takes effect immediately, not just on the next login.
-    if (payload.role === "user" && (await this.isBlocked(payload.sub))) {
-      throw new UnauthorizedException("Akun ini telah dinonaktifkan atau ditangguhkan");
+    if (payload.role === "user") {
+      const state = await this.loadState(payload.sub);
+      if (state.blocked) {
+        throw new UnauthorizedException("Akun ini telah dinonaktifkan atau ditangguhkan");
+      }
+      // Password changed after this token was minted -> the token is dead.
+      // `iat` is whole seconds, so compare in seconds and let a token issued
+      // during the very same second survive: setPassword() hands the caller a
+      // freshly signed token, and flooring must not kill the replacement it
+      // just issued.
+      if (state.validFromSec > 0 && (payload.iat ?? 0) < state.validFromSec) {
+        throw new UnauthorizedException("Sesi berakhir karena password diubah. Silakan masuk lagi.");
+      }
     }
 
     const adminOnly = this.reflector.getAllAndOverride<boolean>(ADMIN_ONLY, [
@@ -131,10 +146,12 @@ export class JwtAuthGuard implements CanActivate {
     return true;
   }
 
-  private async isBlocked(userId: string): Promise<boolean> {
+  private async loadState(userId: string): Promise<{ blocked: boolean; validFromSec: number }> {
     const cached = suspensionCache.get(userId);
     const now = Date.now();
-    if (cached && cached.expiresAt > now) return cached.blocked;
+    if (cached && cached.expiresAt > now) {
+      return { blocked: cached.blocked, validFromSec: cached.validFromSec };
+    }
 
     try {
       // users has RLS FORCED, keyed on its own id (app.user_id = id, or
@@ -146,22 +163,31 @@ export class JwtAuthGuard implements CanActivate {
       // RLS silently returns zero rows here and every real user gets
       // treated as "blocked" (a vanished row looks identical to a
       // suspended one) — caught by a live smoke test before this shipped.
-      const blocked = await this.tenant.runBypass(async () => {
+      const state = await this.tenant.runBypass(async () => {
         const [row] = await this.db
-          .select({ isActive: users.isActive, isSuspended: users.isSuspended })
+          .select({
+            isActive: users.isActive,
+            isSuspended: users.isSuspended,
+            sessionsValidFrom: users.sessionsValidFrom,
+          })
           .from(users)
           .where(eq(users.id, userId))
           .limit(1);
-        return !row || !row.isActive || row.isSuspended;
+        return {
+          blocked: !row || !row.isActive || row.isSuspended,
+          validFromSec: row?.sessionsValidFrom
+            ? Math.floor(row.sessionsValidFrom.getTime() / 1000)
+            : 0,
+        };
       });
-      suspensionCache.set(userId, { blocked, expiresAt: now + SUSPENSION_CACHE_TTL_MS });
-      return blocked;
+      suspensionCache.set(userId, { ...state, expiresAt: now + SUSPENSION_CACHE_TTL_MS });
+      return state;
     } catch (e) {
       // Fail OPEN on a DB hiccup — a transient outage must not lock every
       // single user out of the app; a real suspension just takes effect a
       // little later once the DB is reachable again.
       this.logger.warn(`Suspension check failed for ${userId}: ${(e as Error).message}`);
-      return false;
+      return { blocked: false, validFromSec: 0 };
     }
   }
 }
