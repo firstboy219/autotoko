@@ -176,6 +176,13 @@
       "when": 1785850120071,
       "tag": "0024_material_reserve",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785852979870,
+      "tag": "0025_packing_materials",
+      "breakpoints": true
     }
   ]
 }

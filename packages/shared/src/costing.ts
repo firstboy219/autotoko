@@ -35,6 +35,13 @@ export interface HppInput {
    */
   packingCostPerOrder?: number;
   /**
+   * Packing materials consumed per shipment — box, tape, bubble wrap. Costed
+   * from the material catalogue and ADDED to packingCostPerOrder rather than
+   * replacing it: the two describe different things, and folding them together
+   * would make one of them wrong the first time either changed.
+   */
+  packingMaterials?: { quantity: number; unitCost: number }[];
+  /**
    * Average units per shipment. Defaults to 1 (every order ships a single
    * unit), which is the conservative reading: it charges the full packing cost
    * to each product rather than quietly understating HPP.
@@ -47,6 +54,10 @@ export interface HppResult {
   serviceCostCents: number;
   /** The per-shipment packing cost apportioned down to one unit. */
   packingCostCents: number;
+  /** Cost of the packing materials for ONE shipment, before apportioning. */
+  packingMaterialCostCents: number;
+  /** Total packing cost for one shipment: materials + the manual figure. */
+  packingPerOrderCents: number;
   hppCents: number;
 }
 
@@ -68,7 +79,17 @@ export function calculateHpp(input: HppInput): HppResult {
 
   // Guard the divide: a zero/blank average would send the per-unit share to
   // Infinity, so fall back to 1 unit per shipment.
-  const perOrder = Number(input.packingCostPerOrder) || 0;
+  // Summed in rupiah and rounded once, for the same reason the recipe above
+  // is: rounding each line first drifts on small quantities.
+  let packingMaterial = 0;
+  for (const m of input.packingMaterials ?? []) {
+    const q = Number(m.quantity);
+    const c = Number(m.unitCost);
+    if (!Number.isFinite(q) || !Number.isFinite(c)) continue;
+    packingMaterial += q * c;
+  }
+  const perOrder = (Number(input.packingCostPerOrder) || 0) + packingMaterial;
+
   const units = Number(input.avgUnitsPerOrder);
   const safeUnits = Number.isFinite(units) && units > 0 ? units : 1;
   const packingCostCents = Math.round((perOrder / safeUnits) * 100);
@@ -77,6 +98,8 @@ export function calculateHpp(input: HppInput): HppResult {
     materialCostCents,
     serviceCostCents,
     packingCostCents,
+    packingMaterialCostCents: Math.round(packingMaterial * 100),
+    packingPerOrderCents: Math.round(perOrder * 100),
     hppCents: materialCostCents + serviceCostCents + packingCostCents,
   };
 }

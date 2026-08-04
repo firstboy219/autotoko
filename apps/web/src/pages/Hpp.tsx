@@ -17,6 +17,7 @@ import {
   THead,
   TR,
 } from "../components/ui";
+import { PackingMaterialsCard } from "../components/PackingMaterials";
 
 interface Row {
   productId: string;
@@ -39,6 +40,8 @@ export function Hpp() {
         title="HPP & Harga Jual"
         subtitle="Hitung harga pokok produksi dari bahan baku, lalu susun harga publish beserta seluruh potongannya."
       />
+
+      <PackingMaterialsCard />
 
       <Card padded={false}>
         <CardHeader

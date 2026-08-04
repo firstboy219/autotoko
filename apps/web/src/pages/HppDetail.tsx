@@ -64,9 +64,21 @@ interface Pricing {
   netProfit: number;
   netMarginRate: number;
 }
+interface PackingLine {
+  id: string;
+  name: string;
+  unit: string | null;
+  quantity: number;
+  defaultQuantity: number;
+  unitCost: number;
+  lineCost: number;
+  /** True when this product set its own amount instead of inheriting. */
+  isOverride: boolean;
+}
 interface Detail {
   product: { id: string; sku: string; name: string };
   materials: MaterialLine[];
+  packingMaterials: PackingLine[];
   costing: Costing;
   hpp: { materialCost: number; serviceCost: number; packingCost: number; total: number };
   pricing: Pricing | null;
@@ -163,6 +175,8 @@ function HppSection({
   }
 
   return (
+    <>
+    <PackingSection productId={productId} lines={data.packingMaterials ?? []} onChange={onChange} />
     <Card padded={false}>
       <CardHeader
         title="1 · Harga Pokok Produksi"
@@ -255,7 +269,7 @@ function HppSection({
           </Field>
 
           <Field
-            label="Biaya Packing / resi"
+            label="Biaya Packing Lain / resi"
             hint="Dibayar sekali per pengiriman, bukan per pcs."
           >
             <Input
@@ -350,6 +364,7 @@ function HppSection({
         </div>
       </div>
     </Card>
+    </>
   );
 }
 
@@ -904,5 +919,103 @@ function WaterRow({
         {negative ? `− ${rupiah(Math.abs(value))}` : rupiah(value)}
       </span>
     </div>
+  );
+}
+
+/**
+ * Packing materials for THIS product.
+ *
+ * The list is shared by every product; the amounts are not. A product that has
+ * not set its own inherits the shared default, and says so — otherwise nobody
+ * can tell whether a number was chosen here or came from somewhere else, and
+ * changing the shared default would look like it did nothing.
+ */
+function PackingSection({
+  productId,
+  lines,
+  onChange,
+}: {
+  productId: string;
+  lines: PackingLine[];
+  onChange: () => void;
+}) {
+  const toast = useToast();
+  if (!lines.length) return null;
+
+  const total = lines.reduce((a, l) => a + l.lineCost, 0);
+
+  async function save(line: PackingLine, raw: string) {
+    const q = Number(raw);
+    if (!Number.isFinite(q) || q <= 0 || q === line.quantity) return;
+    try {
+      await api.patch(`/costing/${productId}/packing/${line.id}`, { quantity: q });
+      onChange();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    }
+  }
+
+  async function reset(line: PackingLine) {
+    try {
+      await api.patch(`/costing/${productId}/packing/${line.id}`, {});
+      onChange();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    }
+  }
+
+  return (
+    <Card padded={false} className="mb-4">
+      <CardHeader
+        title="Bahan Packing Produk Ini"
+        subtitle="Daftar bahannya sama untuk semua produk; jumlahnya bisa beda per produk."
+        action={<span className="text-xs text-ink-2">{rupiah(total)}/resi</span>}
+      />
+      <TableWrap>
+        <Table>
+          <THead>
+            <TR>
+              <TH>Bahan</TH>
+              <TH className="text-right">Jumlah</TH>
+              <TH className="text-right">Harga Satuan</TH>
+              <TH className="text-right">Biaya</TH>
+              <TH />
+            </TR>
+          </THead>
+          <tbody>
+            {lines.map((l) => (
+              <TR key={l.id}>
+                <TD>
+                  {l.name}
+                  {l.unit ? <span className="text-ink-2"> ({l.unit})</span> : null}
+                  {!l.isOverride && (
+                    <span className="ml-2 text-[10px] text-ink-3">
+                      default ({l.defaultQuantity})
+                    </span>
+                  )}
+                </TD>
+                <TD className="text-right">
+                  <Input
+                    inputMode="decimal"
+                    defaultValue={String(l.quantity)}
+                    onBlur={(e) => save(l, e.target.value)}
+                    className="w-24 text-right tabular-nums"
+                  />
+                </TD>
+                <TD className="text-right tabular-nums">{rupiah(l.unitCost)}</TD>
+                <TD className="text-right tabular-nums">{rupiah(l.lineCost)}</TD>
+                <TD className="text-right">
+                  {l.isOverride && (
+                    <Button variant="text" onClick={() => reset(l)}>
+                      Pakai default
+                    </Button>
+                  )}
+                </TD>
+              </TR>
+            ))}
+          </tbody>
+        </Table>
+      </TableWrap>
+    </Card>
   );
 }

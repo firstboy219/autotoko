@@ -3,6 +3,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -56,4 +57,18 @@ export class SuggestPriceDto {
   @IsIn(["margin", "profit"]) kind!: "margin" | "profit";
   /** Fraction in [0,1] when kind=margin; rupiah when kind=profit. */
   @IsNumber() @Min(0) value!: number;
+}
+
+export class AddPackingMaterialDto {
+  @IsUUID() materialId!: string;
+  @IsNumber() @Min(0.001) defaultQuantity!: number;
+}
+
+export class UpdatePackingDefaultDto {
+  @IsNumber() @Min(0.001) defaultQuantity!: number;
+}
+
+export class SetProductPackingDto {
+  /** Omit to clear the override and go back to the shared default. */
+  @IsOptional() @IsNumber() @Min(0.001) quantity?: number;
 }

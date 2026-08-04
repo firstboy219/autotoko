@@ -14,10 +14,13 @@ import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, TenantOwnerOnly, type JwtPayload } from "../auth/jwt-auth.guard.js";
 import { CostingService } from "./costing.service.js";
 import {
+  AddPackingMaterialDto,
   CreateMaterialDto,
+  SetProductPackingDto,
   SuggestPriceDto,
   UpdateCostingDto,
   UpdateMaterialCostDto,
+  UpdatePackingDefaultDto,
 } from "./dto/costing.dto.js";
 
 function uid(req: FastifyRequest): string {
@@ -34,6 +37,53 @@ export class CostingController {
   @Get()
   async list(@Req() req: FastifyRequest) {
     return ok(await this.costing.list(uid(req)));
+  }
+
+  // Declared BEFORE @Get(":productId") — otherwise "packing-materials" is
+  // captured as a product id and every request 404s on a lookup for something
+  // that was never a product.
+  @Get("packing-materials")
+  async listPacking(@Req() req: FastifyRequest) {
+    return ok(await this.costing.listPackingMaterials(uid(req)));
+  }
+
+  @Post("packing-materials")
+  async addPacking(@Req() req: FastifyRequest, @Body() dto: AddPackingMaterialDto) {
+    return ok(
+      await this.costing.addPackingMaterial(uid(req), dto.materialId, dto.defaultQuantity),
+    );
+  }
+
+  @Patch("packing-materials/:id")
+  async updatePacking(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: UpdatePackingDefaultDto,
+  ) {
+    return ok(await this.costing.updatePackingDefault(uid(req), id, dto.defaultQuantity));
+  }
+
+  @Delete("packing-materials/:id")
+  async removePacking(@Req() req: FastifyRequest, @Param("id") id: string) {
+    return ok(await this.costing.removePackingMaterial(uid(req), id));
+  }
+
+  /** What ONE product uses; omit quantity to fall back to the shared default. */
+  @Patch(":productId/packing/:packingMaterialId")
+  async setProductPacking(
+    @Req() req: FastifyRequest,
+    @Param("productId") productId: string,
+    @Param("packingMaterialId") packingMaterialId: string,
+    @Body() dto: SetProductPackingDto,
+  ) {
+    return ok(
+      await this.costing.setProductPackingQuantity(
+        uid(req),
+        productId,
+        packingMaterialId,
+        dto.quantity ?? null,
+      ),
+    );
   }
 
   @Get(":productId")

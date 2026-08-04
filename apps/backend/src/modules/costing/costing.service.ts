@@ -1,4 +1,10 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
   calculateHpp,
@@ -10,9 +16,12 @@ import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   bomItems,
   masterProducts,
+  materials,
   orders,
+  packingMaterials,
   payoutSettings,
   productCosting,
+  productPackingQuantities,
 } from "../../database/schema/index.js";
 import type {
   CreateMaterialDto,
@@ -93,6 +102,168 @@ export class CostingService {
   }
 
   /** Full detail for one product: recipe lines, config, and the breakdown. */
+  // ---------------------------------------------------------------- packing
+
+  /**
+   * The shared packing list: which materials every shipment uses.
+   *
+   * Cost comes from the catalogue rather than being copied here, so a price
+   * change from a purchase reaches every product's HPP at once — the whole
+   * reason these are catalogue materials and not numbers typed per product.
+   */
+  async listPackingMaterials(userId: string) {
+    const rows = await this.db
+      .select({
+        id: packingMaterials.id,
+        materialId: packingMaterials.materialId,
+        name: materials.name,
+        unit: materials.unit,
+        defaultQuantity: packingMaterials.defaultQuantity,
+        unitCost: materials.unitCost,
+        currentStock: materials.currentStock,
+      })
+      .from(packingMaterials)
+      .innerJoin(materials, eq(packingMaterials.materialId, materials.id))
+      .where(eq(packingMaterials.userId, userId))
+      .orderBy(asc(materials.name));
+
+    return rows.map((r) => ({
+      id: r.id,
+      materialId: r.materialId,
+      name: r.name,
+      unit: r.unit,
+      defaultQuantity: num(r.defaultQuantity),
+      unitCost: num(r.unitCost),
+      currentStock: num(r.currentStock),
+    }));
+  }
+
+  /**
+   * The same list resolved for ONE product: its own amount where it has set
+   * one, the shared default otherwise. `isOverride` comes back so the page can
+   * show which figures this product actually chose, instead of leaving the
+   * operator guessing whether a number is theirs or inherited.
+   */
+  async packingForProduct(userId: string, productId: string) {
+    const shared = await this.listPackingMaterials(userId);
+    if (!shared.length) return [];
+
+    const overrides = await this.db
+      .select()
+      .from(productPackingQuantities)
+      .where(eq(productPackingQuantities.masterProductId, productId));
+    const byPackingId = new Map(overrides.map((o) => [o.packingMaterialId, num(o.quantity)]));
+
+    return shared.map((m) => {
+      const override = byPackingId.get(m.id);
+      const quantity = override ?? m.defaultQuantity;
+      return {
+        ...m,
+        quantity,
+        isOverride: override !== undefined,
+        lineCost: quantity * m.unitCost,
+      };
+    });
+  }
+
+  async addPackingMaterial(userId: string, materialId: string, defaultQuantity: number) {
+    if (!Number.isFinite(defaultQuantity) || defaultQuantity <= 0) {
+      throw new BadRequestException("Jumlah harus lebih dari 0.");
+    }
+    // Confirm the material belongs to the caller before linking: no RLS policy
+    // on packing_materials would catch a foreign materialId, because the row
+    // being written is legitimately theirs.
+    const [mat] = await this.db
+      .select({ id: materials.id })
+      .from(materials)
+      .where(and(eq(materials.userId, userId), eq(materials.id, materialId)))
+      .limit(1);
+    if (!mat) throw new NotFoundException("Bahan baku tidak ditemukan.");
+
+    try {
+      const [row] = await this.db
+        .insert(packingMaterials)
+        .values({ userId, materialId, defaultQuantity: defaultQuantity.toFixed(3) })
+        .returning();
+      return row;
+    } catch (e) {
+      if ((e as { code?: string }).code === "23505") {
+        throw new ConflictException("Bahan ini sudah ada di daftar packing.");
+      }
+      throw e;
+    }
+  }
+
+  async updatePackingDefault(userId: string, id: string, defaultQuantity: number) {
+    if (!Number.isFinite(defaultQuantity) || defaultQuantity <= 0) {
+      throw new BadRequestException("Jumlah harus lebih dari 0.");
+    }
+    const [row] = await this.db
+      .update(packingMaterials)
+      .set({ defaultQuantity: defaultQuantity.toFixed(3) })
+      .where(and(eq(packingMaterials.userId, userId), eq(packingMaterials.id, id)))
+      .returning();
+    if (!row) throw new NotFoundException("Bahan packing tidak ditemukan.");
+    return row;
+  }
+
+  /**
+   * Removes it from the packing list. The material stays in the catalogue, and
+   * the per-product amounts go with it via ON DELETE CASCADE — leaving those
+   * behind would resurrect stale numbers if the same material were re-added.
+   */
+  async removePackingMaterial(userId: string, id: string) {
+    const [row] = await this.db
+      .delete(packingMaterials)
+      .where(and(eq(packingMaterials.userId, userId), eq(packingMaterials.id, id)))
+      .returning();
+    if (!row) throw new NotFoundException("Bahan packing tidak ditemukan.");
+    return { ok: true as const };
+  }
+
+  /** Set what ONE product uses. Pass null to fall back to the shared default. */
+  async setProductPackingQuantity(
+    userId: string,
+    productId: string,
+    packingMaterialId: string,
+    quantity: number | null,
+  ) {
+    await this.getProductOrThrow(userId, productId);
+    const [pm] = await this.db
+      .select({ id: packingMaterials.id })
+      .from(packingMaterials)
+      .where(and(eq(packingMaterials.userId, userId), eq(packingMaterials.id, packingMaterialId)))
+      .limit(1);
+    if (!pm) throw new NotFoundException("Bahan packing tidak ditemukan.");
+
+    if (quantity == null) {
+      await this.db
+        .delete(productPackingQuantities)
+        .where(
+          and(
+            eq(productPackingQuantities.masterProductId, productId),
+            eq(productPackingQuantities.packingMaterialId, packingMaterialId),
+          ),
+        );
+      return { ok: true as const, usingDefault: true };
+    }
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new BadRequestException("Jumlah harus lebih dari 0.");
+    }
+    await this.db
+      .insert(productPackingQuantities)
+      .values({ masterProductId: productId, packingMaterialId, quantity: quantity.toFixed(3) })
+      .onConflictDoUpdate({
+        target: [
+          productPackingQuantities.masterProductId,
+          productPackingQuantities.packingMaterialId,
+        ],
+        set: { quantity: quantity.toFixed(3) },
+      });
+    return { ok: true as const, usingDefault: false };
+  }
+
   async detail(userId: string, productId: string) {
     const product = await this.getProductOrThrow(userId, productId);
     const cfg = await this.getOrCreateCosting(userId, productId);
@@ -111,10 +282,13 @@ export class CostingService {
       lineCost: num(m.quantity) * num(m.unitCost),
     }));
 
+    const packing = await this.packingForProduct(userId, productId);
+
     const hpp = calculateHpp({
       materials: lines.map((l) => ({ quantity: l.quantity, unitCost: l.unitCost })),
       serviceCostPerPcs: num(cfg.serviceCostPerPcs),
       packingCostPerOrder: num(cfg.packingCostPerOrder),
+      packingMaterials: packing.map((p) => ({ quantity: p.quantity, unitCost: p.unitCost })),
       avgUnitsPerOrder: num(cfg.avgUnitsPerOrder),
     });
 
@@ -127,6 +301,7 @@ export class CostingService {
     return {
       product: { id: product.id, sku: product.sku, name: product.name },
       materials: lines,
+      packingMaterials: packing,
       costing: this.serialiseCosting(cfg),
       hpp: {
         materialCost: rupiah(hpp.materialCostCents),

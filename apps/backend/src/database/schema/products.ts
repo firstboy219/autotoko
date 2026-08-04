@@ -157,6 +157,84 @@ export const materialPurchaseItems = pgTable(
 );
 
 // PRD Bagian 8.6 — Bill of Materials with full restock config.
+/**
+ * Packing materials — box, tape, bubble wrap — consumed once per SHIPMENT and
+ * shared by every product.
+ *
+ * Separate from bom_items, which is a per-product recipe. A packing list that
+ * had to be copied onto every product would drift the moment one product was
+ * edited and the others were not, and adding a new product would silently ship
+ * with no packing cost at all.
+ *
+ * Quantity is per shipment (per resi), the same basis as
+ * costing_settings.packing_cost_per_order, and the two ADD UP: this covers
+ * what comes out of the material catalogue, that one covers everything else
+ * (handling, labour). Neither replaces the other, so an existing tenant with
+ * no packing materials sees no change to their HPP.
+ */
+export const packingMaterials = pgTable(
+  "packing_materials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    materialId: uuid("material_id")
+      .notNull()
+      .references(() => materials.id, { onDelete: "cascade" }),
+    /**
+     * Starting amount for a product that has not set its own.
+     *
+     * The LIST of packing materials is shared by every product, but the AMOUNT
+     * is not — a large item takes a bigger box and more tape than a small one.
+     * So this is only a default, and product_packing_quantities below holds
+     * what each product actually uses.
+     */
+    defaultQuantity: numeric("default_quantity", { precision: 14, scale: 3 })
+      .notNull()
+      .default("1"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // One line per material: two rows for "Kardus" would be an editing
+    // mistake, never an intent, and would quietly double the cost.
+    userMaterialUnique: unique("packing_materials_user_material_unique").on(
+      t.userId,
+      t.materialId,
+    ),
+    userIdx: index("packing_materials_user_idx").on(t.userId),
+  }),
+);
+
+/**
+ * What ONE product uses of a shared packing material.
+ *
+ * Absent means "use the default". Storing only the differences keeps adding a
+ * packing material from having to write a row for every product that exists,
+ * and keeps changing the default meaningful for the products that never
+ * needed their own figure.
+ */
+export const productPackingQuantities = pgTable(
+  "product_packing_quantities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    masterProductId: uuid("master_product_id")
+      .notNull()
+      .references(() => masterProducts.id, { onDelete: "cascade" }),
+    packingMaterialId: uuid("packing_material_id")
+      .notNull()
+      .references(() => packingMaterials.id, { onDelete: "cascade" }),
+    quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+  },
+  (t) => ({
+    productMaterialUnique: unique("product_packing_qty_unique").on(
+      t.masterProductId,
+      t.packingMaterialId,
+    ),
+    productIdx: index("product_packing_qty_product_idx").on(t.masterProductId),
+  }),
+);
+
 export const bomItems = pgTable("bom_items", {
   id: uuid("id").primaryKey().defaultRandom(),
   masterProductId: uuid("master_product_id")
