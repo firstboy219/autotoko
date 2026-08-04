@@ -6,6 +6,7 @@ import { Toko } from "./pages/Toko";
 import { Produk } from "./pages/Produk";
 import { Wallet } from "./pages/Wallet";
 import { Orders } from "./pages/Orders";
+import { ProduksiPacking } from "./pages/ProduksiPacking";
 import { Bom } from "./pages/Bom";
 import { Pembelian } from "./pages/Pembelian";
 import { Hpp } from "./pages/Hpp";
@@ -58,6 +59,7 @@ export function App() {
         <Route path="/toko" element={<Protected><Toko /></Protected>} />
         <Route path="/produk" element={<Protected><Produk /></Protected>} />
         <Route path="/orders" element={<Protected><Orders /></Protected>} />
+        <Route path="/produksi-packing" element={<Protected><ProduksiPacking /></Protected>} />
         <Route path="/bom" element={<Protected><Bom /></Protected>} />
         <Route path="/pembelian" element={<Protected><Pembelian /></Protected>} />
         <Route path="/hpp" element={<Protected><Hpp /></Protected>} />

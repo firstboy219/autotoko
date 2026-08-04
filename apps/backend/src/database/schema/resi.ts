@@ -41,6 +41,10 @@ export const resiScans = pgTable(
     // valid on its own and this stays null rather than blocking the packer.
     orderId: uuid("order_id").references(() => orders.id, { onDelete: "set null" }),
     source: varchar("source", { length: 16 }).notNull().default("ocr"),
+    // The order's fulfillment status before this scan advanced it. Without it
+    // an undo would leave the order sitting at "dikirim" with nothing to
+    // justify it.
+    previousStatus: varchar("previous_status", { length: 32 }),
     deviceLabel: varchar("device_label", { length: 64 }),
     scannedAt: timestamp("scanned_at", { withTimezone: true }).notNull().defaultNow(),
   },

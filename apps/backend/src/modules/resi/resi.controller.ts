@@ -9,7 +9,16 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { IsIn, IsInt, IsOptional, IsString, MaxLength, Min, Matches } from "class-validator";
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  Min,
+  Matches,
+} from "class-validator";
 import { Type } from "class-transformer";
 import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
@@ -36,6 +45,11 @@ class ScanDto {
   deviceLabel?: string;
 }
 
+class LinkDto {
+  @IsUUID()
+  orderId!: string;
+}
+
 class ListQuery {
   @IsOptional() @IsString() @MaxLength(64)
   q?: string;
@@ -45,6 +59,10 @@ class ListQuery {
 
   @IsOptional() @Type(() => Number) @IsInt() @Min(0)
   offset?: number;
+
+  /** "yes" = only scans already attached to an order, "no" = only loose ones. */
+  @IsOptional() @IsIn(["yes", "no"])
+  linked?: "yes" | "no";
 }
 
 /**
@@ -68,13 +86,45 @@ export class ResiController {
   async list(@Req() req: FastifyRequest, @Query() q: ListQuery): Promise<ApiResponse<unknown>> {
     return {
       success: true,
-      data: await this.resi.list(uid(req), { q: q.q, limit: q.limit, offset: q.offset }),
+      data: await this.resi.list(uid(req), {
+        q: q.q,
+        limit: q.limit,
+        offset: q.offset,
+        linked: q.linked,
+      }),
     };
   }
 
   @Get("scans/summary")
   async summary(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.resi.summary(uid(req)) };
+  }
+
+  /** Orders a loose scan can still be attached to. */
+  @Get("linkable-orders")
+  async linkable(
+    @Req() req: FastifyRequest,
+    @Query("q") q?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.linkableOrders(uid(req), q) };
+  }
+
+  /** Attach a scan to an order: writes the resi onto it and marks it dikirim. */
+  @Post("scans/:id/link")
+  async link(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: LinkDto,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.link(uid(req), id, dto.orderId) };
+  }
+
+  @Delete("scans/:id/link")
+  async unlink(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.unlink(uid(req), id) };
   }
 
   @Delete("scans/:id")

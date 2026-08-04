@@ -13,6 +13,7 @@ const NAV: { to: string; label: string; icon: IconName; end?: boolean }[] = [
   { to: "/produk", label: "Master Produk", icon: "package" },
   { to: "/katalog", label: "Kesehatan Katalog", icon: "activity" },
   { to: "/orders", label: "Orders", icon: "cart" },
+  { to: "/produksi-packing", label: "Produksi & Packing", icon: "package" },
   { to: "/autopilot", label: "Autopilot", icon: "bot" },
   { to: "/affiliate", label: "Affiliate", icon: "users" },
   { to: "/laporan", label: "Laporan", icon: "trending" },
