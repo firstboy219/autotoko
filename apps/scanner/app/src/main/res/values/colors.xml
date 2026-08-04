@@ -1,0 +1,14 @@
+<resources>
+    <!-- Mirrors the web app's palette so the two do not look like different products. -->
+    <color name="brand">#0E6E55</color>
+    <color name="brand_dark">#0A5642</color>
+    <color name="canvas">#FAF9F6</color>
+    <color name="line">#E7E5DF</color>
+    <color name="ink">#1B1D1F</color>
+    <color name="ink2">#6B7178</color>
+    <color name="ok">#1B7F4B</color>
+    <color name="ok_bg">#E7F5EC</color>
+    <color name="warn">#B3261E</color>
+    <color name="warn_bg">#FCEAE9</color>
+    <color name="white">#FFFFFF</color>
+</resources>

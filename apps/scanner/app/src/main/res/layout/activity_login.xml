@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/canvas"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="AutoToko"
+            android:textColor="@color/brand"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Scan Resi"
+            android:textColor="@color/ink"
+            android:textSize="20sp"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Masuk dengan akun AutoToko yang sama seperti di web."
+            android:textColor="@color/ink2"
+            android:textSize="13sp"
+            android:layout_marginBottom="20dp" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Alamat Server" android:textColor="@color/ink2" android:textSize="12sp" />
+        <EditText android:id="@+id/server"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:background="@drawable/bg_input" android:padding="12dp"
+            android:inputType="textUri" android:textSize="14sp"
+            android:layout_marginTop="4dp" android:layout_marginBottom="12dp"
+            android:importantForAutofill="no" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Email" android:textColor="@color/ink2" android:textSize="12sp" />
+        <EditText android:id="@+id/email"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:background="@drawable/bg_input" android:padding="12dp"
+            android:inputType="textEmailAddress" android:textSize="14sp"
+            android:layout_marginTop="4dp" android:layout_marginBottom="12dp"
+            android:autofillHints="emailAddress" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Password" android:textColor="@color/ink2" android:textSize="12sp" />
+        <EditText android:id="@+id/password"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:background="@drawable/bg_input" android:padding="12dp"
+            android:inputType="textPassword" android:textSize="14sp"
+            android:layout_marginTop="4dp" android:layout_marginBottom="12dp"
+            android:autofillHints="password" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Nama Perangkat (mis. Meja Packing 1)" android:textColor="@color/ink2" android:textSize="12sp" />
+        <EditText android:id="@+id/device"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:background="@drawable/bg_input" android:padding="12dp"
+            android:inputType="text" android:textSize="14sp"
+            android:layout_marginTop="4dp" android:layout_marginBottom="16dp"
+            android:importantForAutofill="no" />
+
+        <Button android:id="@+id/submit"
+            android:layout_width="match_parent" android:layout_height="52dp"
+            android:background="@drawable/bg_button"
+            android:text="Masuk" android:textColor="@color/white"
+            android:textAllCaps="false" android:textSize="16sp" />
+
+        <TextView android:id="@+id/error"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:background="@drawable/bg_warn" android:padding="12dp"
+            android:textColor="@color/warn" android:textSize="13sp"
+            android:layout_marginTop="14dp" android:visibility="gone" />
+
+        <TextView
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Lupa password? Buka halaman web AutoToko dan pilih Lupa password."
+            android:textColor="@color/ink2" android:textSize="12sp"
+            android:layout_marginTop="16dp" />
+    </LinearLayout>
+</ScrollView>

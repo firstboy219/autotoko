@@ -29,6 +29,7 @@ import { PayoutModule } from "./modules/payout/payout.module.js";
 import { UploadsModule } from "./modules/uploads/uploads.module.js";
 import { CostingModule } from "./modules/costing/costing.module.js";
 import { MaterialsModule } from "./modules/materials/materials.module.js";
+import { ResiModule } from "./modules/resi/resi.module.js";
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { MaterialsModule } from "./modules/materials/materials.module.js";
     UploadsModule,
     CostingModule,
     MaterialsModule,
+    ResiModule,
   ],
   providers: [
     // Global RLS request-context wrapper (no-op unless RLS_ENABLED=true).

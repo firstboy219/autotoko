@@ -1,0 +1,8 @@
+.gradle/
+build/
+local.properties
+# The upload key must never enter git. Losing it means never being able to
+# publish an update to an already-installed app, so it lives outside the repo
+# and needs its own backup — see README.
+keystore.properties
+*.jks
