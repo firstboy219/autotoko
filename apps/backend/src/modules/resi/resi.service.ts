@@ -10,6 +10,9 @@ import { and, desc, eq, ilike, gte, isNull, ne, or, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders, resiScans, shops } from "../../database/schema/index.js";
 import { UploadsService } from "../uploads/uploads.service.js";
+import { ConfigService } from "@nestjs/config";
+import { readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
 
 /**
  * Strip a scanned waybill down to a comparison key.
@@ -76,7 +79,48 @@ export class ResiService {
   constructor(
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly uploads: UploadsService,
+    private readonly config: ConfigService,
   ) {}
+
+  /**
+   * The installable APK, reported from what is actually on disk rather than a
+   * link written into the page.
+   *
+   * A hard-coded URL here would fail exactly the way it already failed once:
+   * the file used to live under the directory deploy-frontends.sh rsyncs with
+   * --delete, so a routine frontend deploy removed it and the page would have
+   * gone on cheerfully offering a download that 404s. Reading the directory
+   * means the card simply disappears when there is nothing to hand out, which
+   * is the honest failure.
+   */
+  async appDownload(): Promise<{
+    url: string;
+    fileName: string;
+    sizeBytes: number;
+    updatedAt: Date;
+  } | null> {
+    const dir = this.config.get<string>("APK_DIR") ?? "/opt/autotoko/downloads";
+    try {
+      const names = (await readdir(dir)).filter((n) => n.toLowerCase().endsWith(".apk"));
+      if (!names.length) return null;
+
+      const stats = await Promise.all(
+        names.map(async (name) => ({ name, st: await stat(join(dir, name)) })),
+      );
+      // Newest wins, so publishing a new build is a file copy and nothing else.
+      stats.sort((a, b) => b.st.mtimeMs - a.st.mtimeMs);
+      const best = stats[0]!;
+      return {
+        url: `/unduh/${best.name}`,
+        fileName: best.name,
+        sizeBytes: best.st.size,
+        updatedAt: best.st.mtime,
+      };
+    } catch (e) {
+      this.logger.warn(`APK directory unreadable (${dir}): ${(e as Error).message}`);
+      return null;
+    }
+  }
 
   async scan(
     userId: string,

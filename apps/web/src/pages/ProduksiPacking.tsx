@@ -65,6 +65,12 @@ interface Summary {
   ocrFailed: number;
   lastScanAt: string | null;
 }
+interface AppDownload {
+  url: string;
+  fileName: string;
+  sizeBytes: number;
+  updatedAt: string;
+}
 interface LinkableOrder {
   id: string;
   marketplaceOrderId: string;
@@ -98,6 +104,7 @@ export function ProduksiPacking() {
 
   const scans = useFetch<{ rows: Scan[]; total: number }>(`/resi/scans?${query}`);
   const summary = useFetch<Summary>("/resi/scans/summary");
+  const app = useFetch<AppDownload | null>("/resi/app-download");
 
   const [linking, setLinking] = useState<Scan | null>(null);
   const [photo, setPhoto] = useState<Scan | null>(null);
@@ -164,6 +171,8 @@ export function ProduksiPacking() {
           </InlineAlert>
         </div>
       )}
+
+      {app.data && <AppCard app={app.data} />}
 
       <Card padded={false}>
         <CardHeader
@@ -322,6 +331,46 @@ export function ProduksiPacking() {
         </Modal>
       )}
     </Layout>
+  );
+}
+
+/**
+ * The install link for the scanner app.
+ *
+ * The full URL is spelled out and selectable, not hidden behind the button:
+ * the person reading this page is usually at a desktop, while the app has to
+ * end up on a warehouse phone, so being able to read the address across and
+ * type it in matters more than a tidy button.
+ */
+function AppCard({ app }: { app: AppDownload }) {
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const mb = (app.sizeBytes / (1024 * 1024)).toFixed(1);
+
+  return (
+    <Card className="mb-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-ink mb-1">Aplikasi Scan Resi (Android)</div>
+          <p className="text-xs text-ink-2 mb-2 max-w-xl">
+            Pasang di HP gudang untuk memindai barcode resi. Buka alamat berikut lewat browser di
+            HP, lalu izinkan pemasangan dari sumber ini saat diminta.
+          </p>
+          <code className="block text-[11px] bg-canvas border border-line rounded-lg px-2.5 py-2 break-all select-all">
+            {origin}
+            {app.url}
+          </code>
+          <div className="text-[11px] text-ink-2 mt-1.5">
+            {mb} MB &middot; diperbarui {dateShort(app.updatedAt)} &middot; Android 5.0 ke atas
+          </div>
+        </div>
+        <a href={app.url} download>
+          <Button variant="outline">
+            <Icon name="download" className="w-3.5 h-3.5" />
+            Unduh APK
+          </Button>
+        </a>
+      </div>
+    </Card>
   );
 }
 

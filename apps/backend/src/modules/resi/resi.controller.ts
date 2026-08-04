@@ -105,6 +105,12 @@ export class ResiController {
     };
   }
 
+  /** Where to get the scanner APK, or null when none is published. */
+  @Get("app-download")
+  async appDownload(): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.appDownload() };
+  }
+
   @Get("scans/summary")
   async summary(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.resi.summary(uid(req)) };
