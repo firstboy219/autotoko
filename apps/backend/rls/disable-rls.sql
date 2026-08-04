@@ -9,7 +9,7 @@ BEGIN
     'platform_invoices','autopilot_activity','notifications',
     'sub_sellers','sub_sub_sellers','payout_settings',
     'payout_batches','payout_mutations','payout_adjustments',
-    'payout_disbursements','product_costing','materials','material_purchases','material_purchase_items','password_reset_tokens','resi_scans'
+    'payout_disbursements','product_costing','materials','material_purchases','material_purchase_items','password_reset_tokens','resi_scans','packing_settings'
   ] LOOP
     EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', t);
     EXECUTE format('ALTER TABLE %I NO FORCE ROW LEVEL SECURITY', t);

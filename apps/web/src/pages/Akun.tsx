@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { useAccount, type Me } from "../lib/account";
 import { useAuth } from "../lib/auth";
 import { PasswordSettings } from "../components/PasswordSettings";
+import { PackingWageSettings } from "../components/PackingWageSettings";
 
 const PLAN_LABEL: Record<string, string> = { freemium: "Freemium", starter: "Starter", pro: "Pro" };
 
@@ -36,6 +37,8 @@ export function Akun() {
       {!me && <div className="text-slate-400 text-sm">Memuat…</div>}
       {me && (
         <div className="max-w-lg space-y-4">
+          <PackingWageSettings />
+
           <div className="bg-white rounded-xl border border-slate-200 p-4">
             <div className="text-sm font-semibold text-slate-700 mb-3">Profil</div>
             <label className="block text-xs text-slate-500 mb-1">Nama lengkap / toko</label>

@@ -6,9 +6,9 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq, ilike, gte, isNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { orders, resiScans, shops } from "../../database/schema/index.js";
+import { orders, packingSettings, resiScans, shops } from "../../database/schema/index.js";
 import { UploadsService } from "../uploads/uploads.service.js";
 import { ConfigService } from "@nestjs/config";
 import { readdir, stat } from "node:fs/promises";
@@ -379,6 +379,8 @@ export class ResiService {
         labelRecipient: resiScans.labelRecipient,
         labelMarketplace: resiScans.labelMarketplace,
         labelItems: resiScans.labelItems,
+        packerPaidAt: resiScans.packerPaidAt,
+        packerPaidAmount: resiScans.packerPaidAmount,
         orderId: resiScans.orderId,
         marketplaceOrderId: orders.marketplaceOrderId,
         buyerName: orders.buyerName,
@@ -469,6 +471,161 @@ export class ResiService {
       .where(and(...conds))
       .orderBy(desc(orders.createdAt))
       .limit(50);
+  }
+
+  // ------------------------------------------------------------------
+  // Packing wage
+  // ------------------------------------------------------------------
+
+  /**
+   * Grouping is by Jakarta calendar day, not UTC.
+   *
+   * A parcel handed to the courier at 20:00 WIB is 13:00 UTC — same day either
+   * way — but one scanned at 08:00 WIB is 01:00 UTC the SAME day, while
+   * anything after 07:00 WIB... the edge that actually bites is the evening:
+   * 23:30 WIB is 16:30 UTC same day, and 06:30 WIB is 23:30 UTC the PREVIOUS
+   * day. Grouping on UTC would move early-morning packing onto the day before
+   * and hand the packer a wage for a day they did not work.
+   */
+  private static readonly DAY_EXPR = sql`(${resiScans.scannedAt} at time zone 'Asia/Jakarta')::date`;
+
+  async getSettings(userId: string): Promise<{ feePerResi: number }> {
+    const [row] = await this.db
+      .select()
+      .from(packingSettings)
+      .where(eq(packingSettings.userId, userId))
+      .limit(1);
+    return { feePerResi: Number(row?.feePerResi ?? 0) };
+  }
+
+  async saveSettings(userId: string, feePerResi: number): Promise<{ feePerResi: number }> {
+    if (!Number.isFinite(feePerResi) || feePerResi < 0) {
+      throw new BadRequestException("Upah per resi tidak boleh negatif.");
+    }
+    const value = feePerResi.toFixed(2);
+    await this.db
+      .insert(packingSettings)
+      .values({ userId, feePerResi: value })
+      .onConflictDoUpdate({
+        target: packingSettings.userId,
+        set: { feePerResi: value, updatedAt: new Date() },
+      });
+    return { feePerResi: Number(value) };
+  }
+
+  /**
+   * One row per day the packer worked: parcels handed over, how many are
+   * already settled, and what is still owed.
+   *
+   * `paidAmount` is summed from what was actually recorded against each
+   * parcel, while `dueAmount` uses today's rate — so raising the rate changes
+   * what you still owe without rewriting what you already paid.
+   */
+  async daily(
+    userId: string,
+    opts: { from?: string; to?: string; limit?: number } = {},
+  ) {
+    const { feePerResi } = await this.getSettings(userId);
+    const conds = [eq(resiScans.userId, userId)];
+    if (opts.from) conds.push(gte(ResiService.DAY_EXPR, sql`${opts.from}::date`));
+    if (opts.to) conds.push(lte(ResiService.DAY_EXPR, sql`${opts.to}::date`));
+
+    const rows = await this.db
+      .select({
+        day: sql<string>`${ResiService.DAY_EXPR}::text`,
+        total: sql<number>`count(*)::int`,
+        paid: sql<number>`count(${resiScans.packerPaidAt})::int`,
+        paidAmount: sql<string>`coalesce(sum(${resiScans.packerPaidAmount}), 0)`,
+      })
+      .from(resiScans)
+      .where(and(...conds))
+      .groupBy(ResiService.DAY_EXPR)
+      .orderBy(sql`${ResiService.DAY_EXPR} desc`)
+      .limit(Math.min(Math.max(opts.limit ?? 60, 1), 365));
+
+    const days = rows.map((r) => {
+      const unpaid = r.total - r.paid;
+      return {
+        day: r.day,
+        total: r.total,
+        paid: r.paid,
+        unpaid,
+        paidAmount: Number(r.paidAmount),
+        dueAmount: unpaid * feePerResi,
+      };
+    });
+
+    return {
+      feePerResi,
+      days,
+      totals: {
+        resi: days.reduce((a, d) => a + d.total, 0),
+        paid: days.reduce((a, d) => a + d.paid, 0),
+        unpaid: days.reduce((a, d) => a + d.unpaid, 0),
+        paidAmount: days.reduce((a, d) => a + d.paidAmount, 0),
+        dueAmount: days.reduce((a, d) => a + d.dueAmount, 0),
+      },
+    };
+  }
+
+  /**
+   * Settle a day (or a hand-picked set of parcels).
+   *
+   * Only parcels not already settled are touched, so pressing the button twice
+   * cannot pay the same parcel twice — the guard is in the WHERE clause rather
+   * than in a prior read, which is the only version that survives two people
+   * settling the same day at once.
+   */
+  async payPacker(
+    userId: string,
+    input: { day?: string; ids?: string[]; note?: string },
+  ): Promise<{ paidCount: number; amount: number; feePerResi: number }> {
+    const { feePerResi } = await this.getSettings(userId);
+    if (feePerResi <= 0) {
+      throw new BadRequestException(
+        "Upah per resi belum diatur. Isi dulu di Akun > Upah Packing.",
+      );
+    }
+
+    const conds = [eq(resiScans.userId, userId), isNull(resiScans.packerPaidAt)];
+    if (input.day) conds.push(eq(ResiService.DAY_EXPR, sql`${input.day}::date`));
+    else if (input.ids?.length) conds.push(inArray(resiScans.id, input.ids));
+    else throw new BadRequestException("Tentukan tanggal atau daftar resi.");
+
+    const updated = await this.db
+      .update(resiScans)
+      .set({
+        packerPaidAt: new Date(),
+        packerPaidAmount: feePerResi.toFixed(2),
+        packerNote: input.note?.slice(0, 120) ?? null,
+      })
+      .where(and(...conds))
+      .returning({ id: resiScans.id });
+
+    const paidCount = updated.length;
+    this.logger.log(
+      `Packer wage settled for user ${userId}: ${paidCount} resi at ${feePerResi}`,
+    );
+    return { paidCount, amount: paidCount * feePerResi, feePerResi };
+  }
+
+  /** Undo a settlement — a wrong day marked paid must be reversible. */
+  async unpayPacker(
+    userId: string,
+    input: { day?: string; ids?: string[] },
+  ): Promise<{ revertedCount: number }> {
+    const conds = [eq(resiScans.userId, userId), sql`${resiScans.packerPaidAt} is not null`];
+    if (input.day) conds.push(eq(ResiService.DAY_EXPR, sql`${input.day}::date`));
+    else if (input.ids?.length) conds.push(inArray(resiScans.id, input.ids));
+    else throw new BadRequestException("Tentukan tanggal atau daftar resi.");
+
+    const reverted = await this.db
+      .update(resiScans)
+      .set({ packerPaidAt: null, packerPaidAmount: null, packerNote: null })
+      .where(and(...conds))
+      .returning({ id: resiScans.id });
+
+    return { revertedCount: reverted.length };
   }
 
   /**

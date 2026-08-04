@@ -49,6 +49,8 @@ interface Scan {
   labelRecipient: string | null;
   labelMarketplace: string | null;
   labelItems: LabelItem[] | null;
+  packerPaidAt: string | null;
+  packerPaidAmount: string | null;
   orderId: string | null;
   marketplaceOrderId: string | null;
   buyerName: string | null;
@@ -64,6 +66,25 @@ interface Summary {
   ocrPending: number;
   ocrFailed: number;
   lastScanAt: string | null;
+}
+interface DailyRow {
+  day: string;
+  total: number;
+  paid: number;
+  unpaid: number;
+  paidAmount: number;
+  dueAmount: number;
+}
+interface DailyRecap {
+  feePerResi: number;
+  days: DailyRow[];
+  totals: {
+    resi: number;
+    paid: number;
+    unpaid: number;
+    paidAmount: number;
+    dueAmount: number;
+  };
 }
 interface AppDownload {
   url: string;
@@ -105,6 +126,7 @@ export function ProduksiPacking() {
   const scans = useFetch<{ rows: Scan[]; total: number }>(`/resi/scans?${query}`);
   const summary = useFetch<Summary>("/resi/scans/summary");
   const app = useFetch<AppDownload | null>("/resi/app-download");
+  const recap = useFetch<DailyRecap>("/resi/daily?limit=60");
 
   const [linking, setLinking] = useState<Scan | null>(null);
   const [photo, setPhoto] = useState<Scan | null>(null);
@@ -112,6 +134,7 @@ export function ProduksiPacking() {
   function refresh() {
     scans.reload();
     summary.reload();
+    recap.reload();
   }
 
   async function unlink(scan: Scan) {
@@ -171,6 +194,8 @@ export function ProduksiPacking() {
           </InlineAlert>
         </div>
       )}
+
+      {recap.data && <DailyRecapCard recap={recap.data} onChange={refresh} />}
 
       {app.data && <AppCard app={app.data} />}
 
@@ -255,6 +280,12 @@ export function ProduksiPacking() {
                         {s.courier ?? "-"}
                         {s.source === "manual" ? " / manual" : ""}
                       </div>
+                      {s.packerPaidAt && (
+                        <Badge tone="success">
+                          upah dibayar
+                          {s.packerPaidAmount ? ` ${rupiah(Number(s.packerPaidAmount))}` : ""}
+                        </Badge>
+                      )}
                     </TD>
 
                     <TD className="whitespace-nowrap">
@@ -331,6 +362,147 @@ export function ProduksiPacking() {
         </Modal>
       )}
     </Layout>
+  );
+}
+
+/**
+ * Parcels handed to the courier per day, and the packing wage that follows.
+ *
+ * "Sudah dibayar" is recorded on each parcel together with the rate actually
+ * paid, so raising the rate later changes what is still owed without quietly
+ * restating payslips already settled. Amount still due uses today's rate;
+ * amount already paid is summed from what was recorded at the time.
+ */
+function DailyRecapCard({ recap, onChange }: { recap: DailyRecap; onChange: () => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function settle(day: string, paying: boolean) {
+    setBusy(day);
+    try {
+      const r = await api.post<{ paidCount?: number; amount?: number; revertedCount?: number }>(
+        paying ? "/resi/pay-packer" : "/resi/unpay-packer",
+        { day },
+      );
+      toast(
+        paying
+          ? `${r.paidCount ?? 0} resi ditandai terbayar (${rupiah(r.amount ?? 0)}).`
+          : `${r.revertedCount ?? 0} resi dikembalikan ke belum terbayar.`,
+        "success",
+      );
+      onChange();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const noRate = recap.feePerResi <= 0;
+
+  return (
+    <Card padded={false} className="mb-5">
+      <CardHeader
+        title="Rekap Harian & Upah Packing"
+        subtitle={
+          noRate
+            ? "Upah per resi belum diatur."
+            : `${rupiah(recap.feePerResi)} per resi. Belum dibayar: ${rupiah(
+                recap.totals.dueAmount,
+              )} (${recap.totals.unpaid} resi).`
+        }
+        action={
+          <a href="/akun" className="text-xs text-brand-ink hover:underline">
+            Atur upah per resi
+          </a>
+        }
+      />
+
+      {noRate && (
+        <div className="px-4 pt-4">
+          <InlineAlert tone="warning">
+            Isi dulu upah per resi di halaman Akun sebelum menandai pembayaran, supaya nominal
+            yang tercatat pada tiap resi benar.
+          </InlineAlert>
+        </div>
+      )}
+
+      <TableWrap>
+        <Table>
+          <THead>
+            <TR>
+              <TH>Tanggal</TH>
+              <TH className="text-right">Resi Dikirim</TH>
+              <TH className="text-right">Sudah Dibayar</TH>
+              <TH className="text-right">Belum</TH>
+              <TH className="text-right">Nominal Belum Dibayar</TH>
+              <TH className="text-right">Sudah Terbayar</TH>
+              <TH className="text-right">Aksi</TH>
+            </TR>
+          </THead>
+          <tbody>
+            {recap.days.length === 0 ? (
+              <TR>
+                <TD colSpan={7}>
+                  <EmptyState
+                    icon="package"
+                    title="Belum ada resi yang discan"
+                    description="Rekap harian muncul setelah ada resi yang discan dari aplikasi."
+                  />
+                </TD>
+              </TR>
+            ) : (
+              recap.days.map((d) => (
+                <TR key={d.day}>
+                  <TD className="whitespace-nowrap">{d.day}</TD>
+                  <TD className="text-right">{d.total}</TD>
+                  <TD className="text-right">{d.paid}</TD>
+                  <TD className="text-right">
+                    {d.unpaid > 0 ? (
+                      <Badge tone="warning">{d.unpaid}</Badge>
+                    ) : (
+                      <span className="text-ink-2">0</span>
+                    )}
+                  </TD>
+                  <TD className="text-right">{d.dueAmount > 0 ? rupiah(d.dueAmount) : "-"}</TD>
+                  <TD className="text-right text-ink-2">
+                    {d.paidAmount > 0 ? rupiah(d.paidAmount) : "-"}
+                  </TD>
+                  <TD className="text-right whitespace-nowrap">
+                    {d.unpaid > 0 && (
+                      <Button
+                        variant="outline"
+                        disabled={busy !== null || noRate}
+                        onClick={() => settle(d.day, true)}
+                      >
+                        Tandai Terbayar
+                      </Button>
+                    )}
+                    {d.paid > 0 && (
+                      <Button
+                        variant="text"
+                        disabled={busy !== null}
+                        onClick={() => settle(d.day, false)}
+                      >
+                        Batalkan
+                      </Button>
+                    )}
+                  </TD>
+                </TR>
+              ))
+            )}
+          </tbody>
+        </Table>
+      </TableWrap>
+
+      {recap.days.length > 0 && (
+        <div className="px-5 py-3 border-t border-line text-xs text-ink-2">
+          Total {recap.totals.resi} resi &middot; sudah dibayar {recap.totals.paid} (
+          {rupiah(recap.totals.paidAmount)}) &middot; belum {recap.totals.unpaid} (
+          {rupiah(recap.totals.dueAmount)})
+        </div>
+      )}
+    </Card>
   );
 }
 

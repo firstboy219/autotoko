@@ -2,6 +2,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   text,
   uuid,
@@ -29,6 +30,25 @@ import { orders } from "./orders";
  * keeps exactly what OCR read, so a support question about a bad scan can be
  * answered without guessing what the camera actually saw.
  */
+/**
+ * Per-tenant packing/production payroll settings.
+ *
+ * Deliberately NOT the same field as costing_settings.packing_cost_per_order.
+ * That one is the packing cost that feeds HPP — box, tape, bubble wrap AND
+ * labour — and is used to price the product. This one is only what the packer
+ * is actually handed per parcel. Paying out the HPP figure would overpay by
+ * the cost of the materials; folding them together would make one of the two
+ * numbers wrong the first time either changes.
+ */
+export const packingSettings = pgTable("packing_settings", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** Rupiah paid to the packer per parcel handed to the courier. */
+  feePerResi: numeric("fee_per_resi", { precision: 15, scale: 2 }).notNull().default("0"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const resiScans = pgTable(
   "resi_scans",
   {
@@ -67,12 +87,24 @@ export const resiScans = pgTable(
     labelMarketplace: varchar("label_marketplace", { length: 32 }),
     /** [{ name, qty }] read off the label's product block. */
     labelItems: jsonb("label_items").$type<{ name: string; qty: number }[]>(),
+
+    // --- Packing wage. Paying per parcel means the record of what was paid
+    // has to live on the parcel.
+    packerPaidAt: timestamp("packer_paid_at", { withTimezone: true }),
+    /**
+     * The rate that was actually paid for THIS parcel, frozen at payment time.
+     * Reading the current rate instead would quietly restate every past
+     * payslip the moment the rate changes.
+     */
+    packerPaidAmount: numeric("packer_paid_amount", { precision: 15, scale: 2 }),
+    packerNote: varchar("packer_note", { length: 120 }),
   },
   (t) => ({
     userResiUnique: unique("resi_scans_user_resi_unique").on(t.userId, t.resi),
     // The background reader polls on this; without it every tick sequentially
     // scans the whole table as the archive grows.
     ocrQueueIdx: index("resi_scans_ocr_status_idx").on(t.ocrStatus, t.scannedAt),
+    paidIdx: index("resi_scans_packer_paid_idx").on(t.userId, t.packerPaidAt),
     userScannedIdx: index("resi_scans_user_scanned_idx").on(t.userId, t.scannedAt),
   }),
 );

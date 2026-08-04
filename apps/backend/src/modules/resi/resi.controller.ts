@@ -4,17 +4,21 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
 import {
+  IsArray,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
   Min,
   Matches,
@@ -58,6 +62,34 @@ class ScanDto {
 class LinkDto {
   @IsUUID()
   orderId!: string;
+}
+
+class PackingSettingsDto {
+  @Type(() => Number) @IsNumber() @Min(0) @Max(10_000_000)
+  feePerResi!: number;
+}
+
+class PayDto {
+  /** Settle a whole day (YYYY-MM-DD), or hand-pick parcels with ids. */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: "Tanggal harus YYYY-MM-DD." })
+  day?: string;
+
+  @IsOptional() @IsArray() @IsUUID("4", { each: true })
+  ids?: string[];
+
+  @IsOptional() @IsString() @MaxLength(120)
+  note?: string;
+}
+
+class DailyQuery {
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from?: string;
+
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to?: string;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
+  limit?: number;
 }
 
 class ListQuery {
@@ -141,6 +173,49 @@ export class ResiController {
     @Param("id") id: string,
   ): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.resi.unlink(uid(req), id) };
+  }
+
+  // --- Packing wage -------------------------------------------------
+
+  @Get("packing-settings")
+  async packingSettings(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.getSettings(uid(req)) };
+  }
+
+  @Patch("packing-settings")
+  async savePackingSettings(
+    @Req() req: FastifyRequest,
+    @Body() dto: PackingSettingsDto,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.saveSettings(uid(req), dto.feePerResi) };
+  }
+
+  /** Parcels handed over per Jakarta day, with what is owed and what is settled. */
+  @Get("daily")
+  async daily(
+    @Req() req: FastifyRequest,
+    @Query() q: DailyQuery,
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.resi.daily(uid(req), { from: q.from, to: q.to, limit: q.limit }),
+    };
+  }
+
+  @Post("pay-packer")
+  async payPacker(
+    @Req() req: FastifyRequest,
+    @Body() dto: PayDto,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.payPacker(uid(req), dto) };
+  }
+
+  @Post("unpay-packer")
+  async unpayPacker(
+    @Req() req: FastifyRequest,
+    @Body() dto: PayDto,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.unpayPacker(uid(req), dto) };
   }
 
   @Delete("scans/:id")
