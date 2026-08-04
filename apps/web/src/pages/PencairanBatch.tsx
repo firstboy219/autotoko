@@ -704,9 +704,10 @@ function MutationList({
         acc.seller += Number(m.sellerAmount) || 0;
         acc.subSeller += Number(m.subSellerAmount) || 0;
         acc.subSubSeller += Number(m.subSubSellerAmount) || 0;
+        acc.material += Number(m.sellerMaterialAmount) || 0;
         return acc;
       },
-      { credit: 0, sedekah: 0, seller: 0, subSeller: 0, subSubSeller: 0 },
+      { credit: 0, sedekah: 0, seller: 0, subSeller: 0, subSubSeller: 0, material: 0 },
     );
   }, [batch.mutations]);
 
@@ -762,23 +763,59 @@ function MutationList({
     }
   }
 
+  /**
+   * The message someone reads on their phone, so every figure that was
+   * calculated is spelled out rather than left to be re-derived from the
+   * credit. Rows that do not apply are omitted entirely: a batch with no
+   * sub-seller should not carry a line of zeroes, and neither should one where
+   * the material reserve is switched off.
+   */
   function shareWhatsApp() {
     const lines = [
       `*Rekap Pencairan* (${batch.mutations.length} toko)`,
       `Total Kredit: ${rupiah(totals.credit)}`,
+      "",
+      "*Hasil Kalkulasi*",
       `Sedekah: ${rupiah(totals.sedekah)}`,
-      `Seller: ${rupiah(totals.seller)}`,
     ];
     if (totals.subSeller > 0) lines.push(`Sub-seller: ${rupiah(totals.subSeller)}`);
     if (totals.subSubSeller > 0) lines.push(`Sub-sub-seller: ${rupiah(totals.subSubSeller)}`);
-    lines.push("", "Detail Toko:");
+    lines.push(`Seller: ${rupiah(totals.seller)}`);
+    if (totals.material > 0) {
+      // Indented under Seller because it is carved out of that figure, not
+      // taken alongside it — reading them as two separate payouts would double
+      // count the seller's share.
+      lines.push(`  - Bahan baku: ${rupiah(totals.material)}`);
+      lines.push(`  - Sisa seller: ${rupiah(totals.seller - totals.material)}`);
+    }
+
+    lines.push("", "*Detail Toko*");
     batch.mutations.forEach((m, i) => {
       const shop = shops.find((s) => s.id === m.shopId);
+      const sedekahAmt = Number(m.sedekahAmount) || 0;
       const subAmt = Number(m.subSellerAmount) || 0;
-      let line = `${i + 1}. ${shopName(m.shopId)} - ${rupiah(m.creditAmount)}`;
-      if (subAmt > 0) line += ` (Sub-seller${shop?.subSellerName ? ` ${shop.subSellerName}` : ""}: ${rupiah(subAmt)})`;
-      lines.push(line);
-      if (m.marketplaceProofUrl) lines.push(absoluteUrl(m.marketplaceProofUrl));
+      const subSubAmt = Number(m.subSubSellerAmount) || 0;
+      const materialAmt = Number(m.sellerMaterialAmount) || 0;
+
+      lines.push(`${i + 1}. ${shopName(m.shopId)} - ${rupiah(m.creditAmount)}`);
+
+      const parts: string[] = [];
+      if (sedekahAmt > 0) parts.push(`Sedekah ${rupiah(sedekahAmt)}`);
+      if (subAmt > 0) {
+        parts.push(
+          `Sub-seller${shop?.subSellerName ? ` ${shop.subSellerName}` : ""} ${rupiah(subAmt)}`,
+        );
+      }
+      if (subSubAmt > 0) {
+        parts.push(
+          `Sub-sub-seller${shop?.subSubSellerName ? ` ${shop.subSubSellerName}` : ""} ${rupiah(subSubAmt)}`,
+        );
+      }
+      parts.push(`Seller ${rupiah(m.sellerAmount)}`);
+      if (materialAmt > 0) parts.push(`Bahan baku ${rupiah(materialAmt)}`);
+      lines.push(`   ${parts.join(" | ")}`);
+
+      if (m.marketplaceProofUrl) lines.push(`   ${absoluteUrl(m.marketplaceProofUrl)}`);
     });
     window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
   }
