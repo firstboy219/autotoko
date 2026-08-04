@@ -162,6 +162,13 @@
       "when": 1785820757317,
       "tag": "0022_courier_tracking",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785835122022,
+      "tag": "0023_shop_categories",
+      "breakpoints": true
     }
   ]
 }

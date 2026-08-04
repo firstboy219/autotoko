@@ -14,7 +14,15 @@ import {
   UseGuards,
   BadRequestException,
 } from "@nestjs/common";
-import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  MaxLength,
+} from "class-validator";
 import { ConfigService } from "@nestjs/config";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { ApiResponse, Marketplace } from "@autotoko/shared";
@@ -32,6 +40,26 @@ function assertMarketplace(mp: string): Marketplace {
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
+}
+
+class ShopCategoryDto {
+  // \S so a name of only spaces cannot slip past MaxLength - the same hole a
+  // nameless material row went through on the catalog endpoint.
+  @IsOptional() @IsString() @Matches(/\S/, { message: "Nama kategori tidak boleh kosong." })
+  @MaxLength(60)
+  name!: string;
+
+  @IsOptional() @IsString() @MaxLength(9)
+  color?: string;
+
+  @IsOptional() @IsInt()
+  sortOrder?: number;
+}
+
+class SetShopCategoryDto {
+  /** Omit or send null to clear the shop's category. */
+  @IsOptional() @IsUUID()
+  categoryId?: string | null;
 }
 
 class ManualConnectDto {
@@ -68,6 +96,56 @@ export class ShopsController {
     private readonly shops: ShopsService,
     private readonly config: ConfigService,
   ) {}
+
+  // --- Categories. Declared BEFORE @Get(":id")-style routes would be, so
+  // --- "categories" is never swallowed as a shop id.
+
+  @Get("categories")
+  @UseGuards(JwtAuthGuard)
+  async listCategories(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.shops.listCategories(uid(req)) };
+  }
+
+  @Post("categories")
+  @UseGuards(JwtAuthGuard)
+  async createCategory(
+    @Req() req: FastifyRequest,
+    @Body() dto: ShopCategoryDto,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.shops.createCategory(uid(req), dto) };
+  }
+
+  @Patch("categories/:id")
+  @UseGuards(JwtAuthGuard)
+  async updateCategory(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: ShopCategoryDto,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.shops.updateCategory(uid(req), id, dto) };
+  }
+
+  @Delete("categories/:id")
+  @UseGuards(JwtAuthGuard)
+  async deleteCategory(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.shops.deleteCategory(uid(req), id) };
+  }
+
+  @Patch(":id/category")
+  @UseGuards(JwtAuthGuard)
+  async setCategory(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: SetShopCategoryDto,
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.shops.setShopCategory(uid(req), id, dto.categoryId ?? null),
+    };
+  }
 
   @Get()
   @UseGuards(JwtAuthGuard)

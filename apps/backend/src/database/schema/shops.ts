@@ -6,6 +6,8 @@ import {
   numeric,
   timestamp,
   index,
+  integer,
+  unique,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { subSellers, subSubSellers } from "./payout";
@@ -13,6 +15,39 @@ import { marketplaceEnum, shopStatusEnum, shopAddedByTypeEnum } from "./enums";
 
 // PRD Bagian 9.1 — marketplace shops per user. Tokens stored AES-256 encrypted
 // (encryption handled in the app layer; columns are opaque text).
+/**
+ * Seller-defined grouping for shops.
+ *
+ * A separate axis from subSellerId/subSubSellerId on the shop itself: those
+ * say who earns the commission and drive the payout split, so bending them
+ * into a general grouping would tie a bookkeeping label to money movement.
+ * This is purely how the owner wants to see their own shops — by brand, by
+ * warehouse, by whatever they choose.
+ *
+ * One category per shop, not many: the request was grouping, and a shop that
+ * appears under three headings is no longer a group.
+ */
+export const shopCategories = pgTable(
+  "shop_categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 60 }).notNull(),
+    /** Hex, for telling groups apart at a glance. */
+    color: varchar("color", { length: 9 }),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Two categories with the same name defeat the point of grouping, and the
+    // owner would have no way to tell them apart in a dropdown.
+    userNameUnique: unique("shop_categories_user_name_unique").on(t.userId, t.name),
+    userIdx: index("shop_categories_user_idx").on(t.userId),
+  }),
+);
+
 export const shops = pgTable(
   "shops",
   {
@@ -64,6 +99,12 @@ export const shops = pgTable(
     // reassign its ownership to a sub-seller, so these can diverge.
     addedByType: shopAddedByTypeEnum("added_by_type").notNull().default("seller"),
     addedById: uuid("added_by_id"), // sub_sellers.id or sub_sub_sellers.id, per addedByType
+
+    // Seller's own grouping. set null on delete: removing a category must
+    // never take the shops with it.
+    categoryId: uuid("category_id").references(() => shopCategories.id, {
+      onDelete: "set null",
+    }),
   },
   (t) => ({
     userIdx: index("shops_user_idx").on(t.userId),

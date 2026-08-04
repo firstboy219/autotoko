@@ -2,15 +2,22 @@ import {
   Inject,
   Injectable,
   BadRequestException,
+  ConflictException,
   NotFoundException,
   Logger,
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { randomUUID } from "node:crypto";
-import { and, eq, lt } from "drizzle-orm";
+import { and, asc, eq, lt, sql } from "drizzle-orm";
 import type { ConnectResult, Marketplace } from "@autotoko/shared";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { shops, subSellers, subSubSellers, payoutMutations } from "../../database/schema/index.js";
+import {
+  shopCategories,
+  shops,
+  subSellers,
+  subSubSellers,
+  payoutMutations,
+} from "../../database/schema/index.js";
 import { CryptoService } from "../../common/crypto/crypto.service.js";
 import { MarketplaceService } from "../../marketplace/marketplace.service.js";
 
@@ -30,8 +37,136 @@ interface StatePayload {
   placeholderShopId?: string;
 }
 
+export interface ShopCategoryInput {
+  name: string;
+  color?: string | null;
+  sortOrder?: number;
+}
+
+/** Hex only, and short enough that a stray paste cannot become a style. */
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
 @Injectable()
 export class ShopsService {
+  // ---------------------------------------------------------------- categories
+
+  async listCategories(userId: string) {
+    // A LEFT JOIN with GROUP BY rather than a correlated subquery built from
+    // an sql`` template. The template version returned 0 for every category
+    // while the identical SQL run by hand returned the right number:
+    // interpolating a table object does not correlate the way it reads like it
+    // does. Drizzle's own join machinery leaves nothing to interpret.
+    return this.db
+      .select({
+        id: shopCategories.id,
+        name: shopCategories.name,
+        color: shopCategories.color,
+        sortOrder: shopCategories.sortOrder,
+        // count(shops.id), not count(*): with a LEFT JOIN, count(*) counts the
+        // null row too and every empty category would report 1.
+        shopCount: sql<number>`count(${shops.id})::int`,
+      })
+      .from(shopCategories)
+      .leftJoin(shops, eq(shops.categoryId, shopCategories.id))
+      .where(eq(shopCategories.userId, userId))
+      .groupBy(shopCategories.id, shopCategories.name, shopCategories.color, shopCategories.sortOrder)
+      .orderBy(asc(shopCategories.sortOrder), asc(shopCategories.name));
+  }
+
+  async createCategory(userId: string, input: ShopCategoryInput) {
+    const name = input.name.trim();
+    if (!name) throw new BadRequestException("Nama kategori tidak boleh kosong.");
+    if (input.color && !HEX_RE.test(input.color)) {
+      throw new BadRequestException("Warna harus format hex, contoh #0E6E55.");
+    }
+    try {
+      const [row] = await this.db
+        .insert(shopCategories)
+        .values({
+          userId,
+          name,
+          color: input.color ?? null,
+          sortOrder: input.sortOrder ?? 0,
+        })
+        .returning();
+      return row;
+    } catch (e) {
+      // 23505 = the (user, name) unique index. Reaching it means the owner
+      // already has this category, which is worth saying plainly rather than
+      // surfacing as a 500.
+      if ((e as { code?: string }).code === "23505") {
+        throw new ConflictException(`Kategori "${name}" sudah ada.`);
+      }
+      throw e;
+    }
+  }
+
+  async updateCategory(userId: string, id: string, input: Partial<ShopCategoryInput>) {
+    const set: Record<string, unknown> = {};
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (!name) throw new BadRequestException("Nama kategori tidak boleh kosong.");
+      set.name = name;
+    }
+    if (input.color !== undefined) {
+      if (input.color && !HEX_RE.test(input.color)) {
+        throw new BadRequestException("Warna harus format hex, contoh #0E6E55.");
+      }
+      set.color = input.color || null;
+    }
+    if (input.sortOrder !== undefined) set.sortOrder = input.sortOrder;
+    if (!Object.keys(set).length) throw new BadRequestException("Tidak ada perubahan.");
+
+    try {
+      const [row] = await this.db
+        .update(shopCategories)
+        .set(set)
+        .where(and(eq(shopCategories.userId, userId), eq(shopCategories.id, id)))
+        .returning();
+      if (!row) throw new NotFoundException("Kategori tidak ditemukan.");
+      return row;
+    } catch (e) {
+      if ((e as { code?: string }).code === "23505") {
+        throw new ConflictException("Sudah ada kategori dengan nama itu.");
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Removing a category leaves its shops alone — they simply become
+   * ungrouped. Deleting shops along with a bookkeeping label would be a
+   * catastrophic reading of "delete category".
+   */
+  async deleteCategory(userId: string, id: string) {
+    const [row] = await this.db
+      .delete(shopCategories)
+      .where(and(eq(shopCategories.userId, userId), eq(shopCategories.id, id)))
+      .returning();
+    if (!row) throw new NotFoundException("Kategori tidak ditemukan.");
+    return { ok: true as const, name: row.name };
+  }
+
+  /** Assign or clear a shop's category. null clears it. */
+  async setShopCategory(userId: string, shopId: string, categoryId: string | null) {
+    if (categoryId) {
+      const [cat] = await this.db
+        .select({ id: shopCategories.id })
+        .from(shopCategories)
+        .where(and(eq(shopCategories.userId, userId), eq(shopCategories.id, categoryId)))
+        .limit(1);
+      // Without this a caller could point a shop at another tenant's category.
+      if (!cat) throw new NotFoundException("Kategori tidak ditemukan.");
+    }
+    const [row] = await this.db
+      .update(shops)
+      .set({ categoryId })
+      .where(and(eq(shops.userId, userId), eq(shops.id, shopId)))
+      .returning({ id: shops.id, categoryId: shops.categoryId });
+    if (!row) throw new NotFoundException("Toko tidak ditemukan.");
+    return row;
+  }
+
   private readonly logger = new Logger(ShopsService.name);
 
   constructor(
@@ -169,8 +304,20 @@ export class ShopsService {
   }
 
   async listShops(userId: string) {
-    const rows = await this.db.select().from(shops).where(eq(shops.userId, userId));
-    return rows.map((s) => ({
+    // Joined rather than resolved in the page: the category's name and colour
+    // are needed on every row, and fetching them separately would make the
+    // grouping flicker into place after the list has already drawn.
+    const rows = await this.db
+      .select({
+        shop: shops,
+        categoryName: shopCategories.name,
+        categoryColor: shopCategories.color,
+      })
+      .from(shops)
+      .leftJoin(shopCategories, eq(shops.categoryId, shopCategories.id))
+      .where(eq(shops.userId, userId));
+
+    return rows.map(({ shop: s, categoryName, categoryColor }) => ({
       id: s.id,
       marketplace: s.marketplace,
       shopId: s.shopId,
@@ -181,6 +328,9 @@ export class ShopsService {
       accessTokenExpireAt: s.accessTokenExpireAt,
       connectedAt: s.connectedAt,
       lastSyncAt: s.lastSyncAt,
+      categoryId: s.categoryId,
+      categoryName,
+      categoryColor,
     }));
   }
 
