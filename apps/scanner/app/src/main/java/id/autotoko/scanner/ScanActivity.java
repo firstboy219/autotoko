@@ -7,6 +7,12 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.Rect;
+import android.graphics.RectF;
+import android.graphics.Canvas;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
+import android.graphics.Paint;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.os.Build;
@@ -32,6 +38,8 @@ import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
 import androidx.camera.core.ImageProxy;
+import androidx.camera.core.FocusMeteringAction;
+import androidx.camera.core.MeteringPoint;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
@@ -76,9 +84,32 @@ public class ScanActivity extends AppCompatActivity {
     private static final int REQ_CAMERA = 101;
     /** Ignore the same barcode for this long: it stays in frame after a scan. */
     private static final long REPEAT_MUTE_MS = 5000;
-    /** Longest edge of the uploaded photo. Enough for OCR, small on wifi. */
-    private static final int PHOTO_MAX_EDGE = 1600;
-    private static final int PHOTO_QUALITY = 78;
+    /**
+     * Longest edge of the uploaded photo.
+     *
+     * Was 1600 across the whole frame, which is why the first real scans came
+     * back as unreadable noise: the label filled maybe 40% of the picture, so
+     * its text landed at roughly 9 pixels tall. Tesseract needs about 20.
+     * Cropping to the label and keeping this much resolution puts character
+     * height back in the range where OCR has a chance.
+     */
+    private static final int PHOTO_MAX_EDGE = 2560;
+    private static final int PHOTO_QUALITY = 85;
+
+    /**
+     * How far past the barcode the label extends, in multiples of the
+     * barcode's own size. Measured off real Tokopedia and Shopee labels: the
+     * barcode sits in the upper third, with the address block above it and the
+     * product table well below. Generous on purpose - including some cardboard
+     * costs almost nothing, while clipping the product table loses the very
+     * thing we photograph the label for.
+     */
+    private static final float CROP_SIDE = 1.0f;
+    private static final float CROP_ABOVE = 3.0f;
+    private static final float CROP_BELOW = 8.0f;
+
+    /** Let autofocus settle before the shutter; the first scans were blurred. */
+    private static final long FOCUS_SETTLE_MS = 450;
 
     private PreviewView preview;
     private TextView status, detail, counter, hint;
@@ -92,6 +123,12 @@ public class ScanActivity extends AppCompatActivity {
     private ExecutorService cameraExecutor;
     private final Handler main = new Handler(Looper.getMainLooper());
 
+    private androidx.camera.core.Camera camera;
+    /** Barcode position as a fraction of the upright frame, for cropping. */
+    private volatile RectF lastBarcodeBox = null;
+
+    private volatile int frameWidth = 0;
+    private volatile int frameHeight = 0;
     private volatile boolean analysing = false;
     private volatile boolean busy = false;
     private String mutedResi = null;
@@ -175,7 +212,7 @@ public class ScanActivity extends AppCompatActivity {
                         .build();
 
                 provider.unbindAll();
-                provider.bindToLifecycle(
+                camera = provider.bindToLifecycle(
                         this, CameraSelector.DEFAULT_BACK_CAMERA, p, analysis, imageCapture);
             } catch (Exception e) {
                 hint.setText("Kamera tidak bisa dibuka: " + e.getMessage());
@@ -195,7 +232,13 @@ public class ScanActivity extends AppCompatActivity {
         }
         analysing = true;
 
-        InputImage image = InputImage.fromMediaImage(media, proxy.getImageInfo().getRotationDegrees());
+        int rot = proxy.getImageInfo().getRotationDegrees();
+        // ML Kit reports boxes in the UPRIGHT frame, so at 90/270 the sides swap.
+        boolean swapped = rot == 90 || rot == 270;
+        frameWidth = swapped ? proxy.getHeight() : proxy.getWidth();
+        frameHeight = swapped ? proxy.getWidth() : proxy.getHeight();
+
+        InputImage image = InputImage.fromMediaImage(media, rot);
         scanner.process(image)
                 .addOnSuccessListener(codes -> main.post(() -> onBarcodes(codes)))
                 .addOnCompleteListener(t -> {
@@ -207,6 +250,12 @@ public class ScanActivity extends AppCompatActivity {
     private void onBarcodes(List<Barcode> codes) {
         if (busy || codes == null || codes.isEmpty()) return;
 
+        // With several parcels in shot the camera sees several barcodes, and
+        // taking whichever came first recorded the wrong one - that already
+        // happened on a real scan. The packer aims at the parcel they mean, so
+        // the barcode nearest the middle of the frame is the intended one.
+        Barcode best = null;
+        double bestDistance = Double.MAX_VALUE;
         for (Barcode code : codes) {
             String raw = code.getRawValue();
             if (raw == null) continue;
@@ -214,20 +263,69 @@ public class ScanActivity extends AppCompatActivity {
             // A barcode is exact, but labels also carry codes for other things
             // (postal routing, a URL in a QR). Length is the cheap filter.
             if (resi.length() < 8 || resi.length() > 32) continue;
-            if (resi.equals(mutedResi) && System.currentTimeMillis() < mutedUntil) return;
 
-            mute(resi);
-            capture(resi, raw, formatName(code.getFormat()));
+            Rect box = code.getBoundingBox();
+            double d = 0;
+            if (box != null && frameWidth > 0) {
+                double dx = box.exactCenterX() / frameWidth - 0.5;
+                double dy = box.exactCenterY() / frameHeight - 0.5;
+                d = dx * dx + dy * dy;
+            }
+            if (d < bestDistance) {
+                bestDistance = d;
+                best = code;
+            }
+        }
+        if (best == null) return;
+
+        String resi = ResiExtractor.normalize(best.getRawValue());
+        if (resi.equals(mutedResi) && System.currentTimeMillis() < mutedUntil) return;
+
+        Rect box = best.getBoundingBox();
+        lastBarcodeBox = (box == null || frameWidth <= 0) ? null : new RectF(
+                box.left / (float) frameWidth,
+                box.top / (float) frameHeight,
+                box.right / (float) frameWidth,
+                box.bottom / (float) frameHeight);
+
+        mute(resi);
+        focusThenCapture(resi, best.getRawValue(), formatName(best.getFormat()));
+    }
+
+    /**
+     * Nudge autofocus onto the label before the shutter. The first real scans
+     * came back soft enough that even a human had to squint, and a blurred
+     * photo is unreadable no matter how many pixels it has.
+     */
+    private void focusThenCapture(String resi, String raw, String format) {
+        busy = true;
+        status.setText(resi);
+        status.setTextColor(Color.parseColor("#1B1D1F"));
+        detail.setVisibility(View.GONE);
+        hint.setText("Fokus...");
+
+        RectF box = lastBarcodeBox;
+        if (camera == null || box == null) {
+            capture(resi, raw, format);
             return;
         }
+        try {
+            MeteringPoint point = preview.getMeteringPointFactory()
+                    .createPoint(box.centerX() * preview.getWidth(),
+                                 box.centerY() * preview.getHeight());
+            camera.getCameraControl().startFocusAndMetering(
+                    new FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
+                            .disableAutoCancel()
+                            .build());
+        } catch (Exception ignored) {
+            // Focus is an improvement, not a requirement.
+        }
+        main.postDelayed(() -> capture(resi, raw, format), FOCUS_SETTLE_MS);
     }
 
     /** Takes the still, then submits. The photo is what the server will read. */
     private void capture(String resi, String raw, String format) {
         busy = true;
-        status.setText(resi);
-        status.setTextColor(Color.parseColor("#1B1D1F"));
-        detail.setVisibility(View.GONE);
         hint.setText("Memotret label...");
 
         if (imageCapture == null) {
@@ -256,6 +354,14 @@ public class ScanActivity extends AppCompatActivity {
         });
     }
 
+    /**
+     * Rotate upright, crop to the label, then flatten to high-contrast grey.
+     *
+     * Order matters: rotating first puts the still in the same upright space
+     * ML Kit reported the barcode in, so the recorded fractions map straight
+     * across. Cropping before the size cap is the whole point - it spends the
+     * pixel budget on the label instead of on the cardboard around it.
+     */
     private String toBase64Jpeg(ImageProxy image) {
         ByteBuffer buffer = image.getPlanes()[0].getBuffer();
         byte[] bytes = new byte[buffer.remaining()];
@@ -265,22 +371,85 @@ public class ScanActivity extends AppCompatActivity {
         if (bmp == null) return null;
 
         int rotation = image.getImageInfo().getRotationDegrees();
+        if (rotation != 0) {
+            Matrix m = new Matrix();
+            m.postRotate(rotation);
+            Bitmap rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.getWidth(), bmp.getHeight(), m, true);
+            if (rotated != bmp) bmp.recycle();
+            bmp = rotated;
+        }
+
+        Bitmap cropped = cropToLabel(bmp, lastBarcodeBox);
+        if (cropped != bmp) bmp.recycle();
+        bmp = cropped;
+
         int w = bmp.getWidth(), h = bmp.getHeight();
         int longest = Math.max(w, h);
         if (longest > PHOTO_MAX_EDGE) {
             float s = (float) PHOTO_MAX_EDGE / longest;
-            bmp = Bitmap.createScaledBitmap(bmp, Math.round(w * s), Math.round(h * s), true);
+            Bitmap scaled = Bitmap.createScaledBitmap(bmp, Math.round(w * s), Math.round(h * s), true);
+            if (scaled != bmp) bmp.recycle();
+            bmp = scaled;
         }
-        if (rotation != 0) {
-            Matrix m = new Matrix();
-            m.postRotate(rotation);
-            bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.getWidth(), bmp.getHeight(), m, true);
-        }
+
+        Bitmap flat = toHighContrastGrey(bmp);
+        if (flat != bmp) bmp.recycle();
+        bmp = flat;
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         bmp.compress(Bitmap.CompressFormat.JPEG, PHOTO_QUALITY, out);
         bmp.recycle();
         return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+    }
+
+    /** Expand the barcode's box out to the label around it. */
+    private static Bitmap cropToLabel(Bitmap src, RectF box) {
+        if (box == null) return src;
+        int w = src.getWidth(), h = src.getHeight();
+
+        float bw = box.width() * w;
+        float bh = box.height() * h;
+        if (bw <= 0 || bh <= 0) return src;
+
+        float cx = box.centerX() * w;
+        float cy = box.centerY() * h;
+
+        int left = Math.max(0, Math.round(cx - bw * (0.5f + CROP_SIDE)));
+        int right = Math.min(w, Math.round(cx + bw * (0.5f + CROP_SIDE)));
+        int top = Math.max(0, Math.round(cy - bh * CROP_ABOVE));
+        int bottom = Math.min(h, Math.round(cy + bh * CROP_BELOW));
+
+        // If the maths collapses, keep the whole frame rather than a sliver.
+        if (right - left < w / 8 || bottom - top < h / 8) return src;
+        return Bitmap.createBitmap(src, left, top, right - left, bottom - top);
+    }
+
+    /**
+     * Grey with the contrast pushed hard.
+     *
+     * These labels are photographed off a screen or under warehouse light and
+     * arrive as grey text on a grey background; measured on a real scan, plain
+     * greyscale plus a contrast stretch was the difference between OCR
+     * returning noise and returning readable words. Doing it here, before JPEG
+     * compression, keeps the edges the compressor would otherwise smear.
+     */
+    private static Bitmap toHighContrastGrey(Bitmap src) {
+        Bitmap out = Bitmap.createBitmap(src.getWidth(), src.getHeight(), Bitmap.Config.ARGB_8888);
+        ColorMatrix grey = new ColorMatrix();
+        grey.setSaturation(0f);
+        float c = 2.2f;                 // contrast multiplier
+        float t = (1f - c) * 128f;      // keep mid-grey where it was
+        ColorMatrix contrast = new ColorMatrix(new float[]{
+                c, 0, 0, 0, t,
+                0, c, 0, 0, t,
+                0, 0, c, 0, t,
+                0, 0, 0, 1, 0,
+        });
+        grey.postConcat(contrast);
+        Paint paint = new Paint();
+        paint.setColorFilter(new ColorMatrixColorFilter(grey));
+        new Canvas(out).drawBitmap(src, 0, 0, paint);
+        return out;
     }
 
     private void submit(String resi, String raw, String format, String photoBase64) {
