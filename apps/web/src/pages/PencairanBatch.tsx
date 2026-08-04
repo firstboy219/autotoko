@@ -35,6 +35,7 @@ interface ShopOpt {
 }
 interface Settings {
   sedekahRate: string;
+  materialReserveRate: string;
   sedekahBasis: SedekahBasis;
 }
 interface Mutation {
@@ -46,6 +47,7 @@ interface Mutation {
   marketplaceProofUrl: string | null;
   sedekahAmount: string;
   sellerAmount: string;
+  sellerMaterialAmount: string | null;
   subSellerAmount: string | null;
   subSubSellerAmount: string | null;
 }
@@ -223,10 +225,11 @@ function BatchProgress({ batch, onDone }: { batch: BatchDetail; onDone: () => vo
           a.credit += Number(m.creditAmount) || 0;
           a.sedekah += Number(m.sedekahAmount) || 0;
           a.seller += Number(m.sellerAmount) || 0;
+          a.material += Number(m.sellerMaterialAmount) || 0;
           a.sub += (Number(m.subSellerAmount) || 0) + (Number(m.subSubSellerAmount) || 0);
           return a;
         },
-        { credit: 0, sedekah: 0, seller: 0, sub: 0 },
+        { credit: 0, sedekah: 0, seller: 0, sub: 0, material: 0 },
       ),
     [batch.mutations],
   );
@@ -329,6 +332,9 @@ function BatchProgress({ batch, onDone }: { batch: BatchDetail; onDone: () => vo
                   ["Total Kredit", totals.credit],
                   ["Sedekah", totals.sedekah],
                   ["Seller", totals.seller],
+                  ...(totals.material > 0
+                    ? ([["- Bahan baku", totals.material]] as [string, number][])
+                    : []),
                   ...(totals.sub > 0 ? ([["Sub-seller", totals.sub]] as [string, number][]) : []),
                 ].map(([label, val]) => (
                   <div key={label as string}>
@@ -422,6 +428,7 @@ function MutationForm({
         sedekahBasis: settings.sedekahBasis,
         subSellerRate: shop.effectiveSubSellerRate,
         subSubSellerRate: shop.effectiveSubSubSellerRate,
+        materialReserveRate: Number(settings.materialReserveRate ?? 0),
       });
     } catch {
       return null;
@@ -619,6 +626,12 @@ function MutationForm({
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <SplitCell label="Sedekah" value={split.sedekahCents} />
               <SplitCell label="Seller" value={split.sellerCents} />
+              {split.sellerMaterialCents > 0 && (
+                <>
+                  <SplitCell label="- Bahan baku" value={split.sellerMaterialCents} />
+                  <SplitCell label="- Sisa seller" value={split.sellerNetCents} />
+                </>
+              )}
               {split.subSellerCents > 0 && (
                 <SplitCell
                   label={`Sub-seller${shop.subSellerName ? ` (${shop.subSellerName})` : ""}`}

@@ -331,6 +331,9 @@ export class PayoutSellersService {
       .update(payoutSettings)
       .set({
         ...(dto.sedekahRate != null ? { sedekahRate: rate(dto.sedekahRate) } : {}),
+        ...(dto.materialReserveRate != null
+          ? { materialReserveRate: rate(dto.materialReserveRate) }
+          : {}),
         ...(dto.defaultSubSellerRate != null
           ? { defaultSubSellerRate: rate(dto.defaultSubSellerRate) }
           : {}),

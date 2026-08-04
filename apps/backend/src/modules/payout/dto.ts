@@ -62,6 +62,7 @@ export class AssignShopDto {
 
 export class UpdatePayoutSettingsDto {
   @IsOptional() @IsNumber() @Min(0) @Max(1) sedekahRate?: number;
+  @IsOptional() @IsNumber() @Min(0) @Max(1) materialReserveRate?: number;
   @IsOptional() @IsNumber() @Min(0) @Max(1) defaultSubSellerRate?: number;
   @IsOptional() @IsIn(SEDEKAH_BASES) sedekahBasis?: (typeof SEDEKAH_BASES)[number];
   @IsOptional() @IsString() @MaxLength(255) sedekahBankAccount?: string;

@@ -67,12 +67,14 @@ export class PayoutMutationService {
     // "Nominal Kredit" input — the user merged the two, per their own request).
     const creditCents = toCents(dto.marketplaceProofAmount);
 
+    const materialReserveRate = Number(settings.materialReserveRate ?? 0);
     const split = calculatePayoutSplit({
       creditCents,
       sedekahRate: Number(settings.sedekahRate),
       sedekahBasis: settings.sedekahBasis as SedekahBasis,
       subSellerRate: rates.subSellerRate,
       subSubSellerRate: rates.subSubSellerRate,
+      materialReserveRate,
     });
 
     const [row] = await this.db
@@ -94,6 +96,7 @@ export class PayoutMutationService {
         // Snapshots — later rate edits must not change this record.
         sedekahRateUsed: settings.sedekahRate,
         sedekahBasisUsed: settings.sedekahBasis,
+        materialReserveRateUsed: materialReserveRate.toFixed(4),
         subSellerRateUsed: rates.subSellerRate != null ? rates.subSellerRate.toFixed(4) : null,
         subSubSellerRateUsed:
           rates.subSubSellerRate != null ? rates.subSubSellerRate.toFixed(4) : null,
@@ -101,6 +104,7 @@ export class PayoutMutationService {
         subSubSellerId: shop.subSubSellerId,
         sedekahAmount: fromCents(split.sedekahCents),
         sellerAmount: fromCents(split.sellerCents),
+        sellerMaterialAmount: fromCents(split.sellerMaterialCents),
         subSellerAmount: shop.subSellerId ? fromCents(split.subSellerCents) : null,
         subSubSellerAmount: shop.subSubSellerId ? fromCents(split.subSubSellerCents) : null,
         orderRefIds: dto.orderRefIds ?? null,
@@ -129,6 +133,9 @@ export class PayoutMutationService {
       subSellerRate: mut.subSellerRateUsed != null ? Number(mut.subSellerRateUsed) : null,
       subSubSellerRate:
         mut.subSubSellerRateUsed != null ? Number(mut.subSubSellerRateUsed) : null,
+      // From the row, not from settings: editing an old mutation must not pull
+      // in a rate the seller changed afterwards.
+      materialReserveRate: Number(mut.materialReserveRateUsed ?? 0),
     });
 
     const [row] = await this.db
@@ -145,6 +152,7 @@ export class PayoutMutationService {
         ...(dto.note != null ? { note: dto.note } : {}),
         sedekahAmount: fromCents(split.sedekahCents),
         sellerAmount: fromCents(split.sellerCents),
+        sellerMaterialAmount: fromCents(split.sellerMaterialCents),
         subSellerAmount: mut.subSellerId ? fromCents(split.subSellerCents) : null,
         subSubSellerAmount: mut.subSubSellerId ? fromCents(split.subSubSellerCents) : null,
         updatedAt: new Date(),

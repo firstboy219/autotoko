@@ -124,6 +124,16 @@ export const payoutSettings = pgTable("payout_settings", {
     .notNull()
     .default("0.2000"),
   sedekahBankAccount: varchar("sedekah_bank_account", { length: 255 }),
+  /**
+   * Share of the SELLER's own cut to set aside for buying raw materials.
+   *
+   * Not another recipient — nothing leaves the seller's pocket. It splits what
+   * they already keep so restocking is budgeted before the rest reads as
+   * profit. 0 = off, which is the default so existing tenants see no change.
+   */
+  materialReserveRate: numeric("material_reserve_rate", { precision: 5, scale: 4 })
+    .notNull()
+    .default("0.0000"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -228,6 +238,20 @@ export const payoutMutations = pgTable(
     // sedekah + seller + subSeller + subSubSeller === creditAmount, exactly.
     sedekahAmount: numeric("sedekah_amount", { precision: 15, scale: 2 }).notNull(),
     sellerAmount: numeric("seller_amount", { precision: 15, scale: 2 }).notNull(),
+    /**
+     * The part of sellerAmount earmarked for raw materials, frozen at the rate
+     * in force when this mutation was recorded. Stored rather than recomputed
+     * for the same reason every other amount here is: changing the rate later
+     * must not restate a batch that is already closed.
+     */
+    sellerMaterialAmount: numeric("seller_material_amount", { precision: 15, scale: 2 })
+      .notNull()
+      .default("0"),
+    /** The reserve rate in force when this row was written; see the *RateUsed
+     *  columns below, which exist for exactly the same reason. */
+    materialReserveRateUsed: numeric("material_reserve_rate_used", { precision: 5, scale: 4 })
+      .notNull()
+      .default("0.0000"),
     subSellerAmount: numeric("sub_seller_amount", { precision: 15, scale: 2 }),
     subSubSellerAmount: numeric("sub_sub_seller_amount", { precision: 15, scale: 2 }),
 

@@ -20,6 +20,7 @@ import {
 interface Settings {
   sedekahRate: string;
   defaultSubSellerRate: string;
+  materialReserveRate: string;
   sedekahBasis: SedekahBasis;
   sedekahBankAccount: string | null;
 }
@@ -64,6 +65,7 @@ export function PencairanSettings() {
   const { data, loading, reload } = useFetch<Settings>("/payout/settings");
   const [rate, setRate] = useState("5");
   const [subRate, setSubRate] = useState("20");
+  const [materialRate, setMaterialRate] = useState("0");
   const [basis, setBasis] = useState<SedekahBasis>("total_credit");
   const [bank, setBank] = useState("");
   const [busy, setBusy] = useState(false);
@@ -73,6 +75,7 @@ export function PencairanSettings() {
     if (!data) return;
     setRate((Number(data.sedekahRate) * 100).toString());
     setSubRate((Number(data.defaultSubSellerRate) * 100).toString());
+    setMaterialRate((Number(data.materialReserveRate ?? 0) * 100).toString());
     setBasis(data.sedekahBasis);
     setBank(data.sedekahBankAccount ?? "");
   }, [data]);
@@ -87,6 +90,10 @@ export function PencairanSettings() {
 
   /** Live worked example on Rp 1.000.000, using the very same shared calculator
    *  the backend will use — so the preview cannot drift from reality. */
+  const materialNum = Number(materialRate);
+  const materialInvalid =
+    materialRate.trim() === "" || !Number.isFinite(materialNum) || materialNum < 0 || materialNum > 100;
+
   const preview = useMemo(() => {
     if (rateInvalid || subInvalid || overAllocated) return null;
     try {
@@ -95,21 +102,23 @@ export function PencairanSettings() {
         sedekahRate: sedekahNum / 100,
         sedekahBasis: basis,
         subSellerRate: subNum / 100,
+        materialReserveRate: materialInvalid ? 0 : materialNum / 100,
       });
     } catch {
       return null;
     }
-  }, [sedekahNum, subNum, basis, rateInvalid, subInvalid, overAllocated]);
+  }, [sedekahNum, subNum, materialNum, materialInvalid, basis, rateInvalid, subInvalid, overAllocated]);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    if (rateInvalid || subInvalid || overAllocated) return;
+    if (rateInvalid || subInvalid || materialInvalid || overAllocated) return;
     setBusy(true);
     setErr(null);
     try {
       await api.patch("/payout/settings", {
         sedekahRate: sedekahNum / 100,
         defaultSubSellerRate: subNum / 100,
+        materialReserveRate: materialNum / 100,
         sedekahBasis: basis,
         sedekahBankAccount: bank || undefined,
       });
@@ -190,6 +199,34 @@ export function PencairanSettings() {
           </Card>
 
           <Card>
+            <div className="text-sm font-medium text-ink mb-1">Sisihkan untuk Bahan Baku</div>
+            <p className="text-xs text-ink-2 mb-4">
+              Bagian dari <b>hasil seller</b> yang disisihkan untuk membeli bahan baku. Ini bukan
+              potongan ke pihak lain &mdash; uangnya tetap milik Anda, hanya dipisahkan supaya
+              modal restock sudah teralokasi sebelum sisanya dihitung sebagai keuntungan. Isi 0
+              untuk mematikan.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field
+                label="Porsi Bahan Baku"
+                error={materialInvalid ? "Isi angka antara 0 dan 100." : null}
+                hint={!materialInvalid ? "Dihitung dari hasil seller, bukan dari kredit awal." : undefined}
+              >
+                <div className="relative">
+                  <Input
+                    inputMode="decimal"
+                    value={materialRate}
+                    invalid={materialInvalid}
+                    onChange={(e) => setMaterialRate(e.target.value.replace(/[^\d.]/g, ""))}
+                    className="pr-7 tabular-nums"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink-3">%</span>
+                </div>
+              </Field>
+            </div>
+          </Card>
+
+          <Card>
             <div className="text-sm font-medium text-ink mb-1">Urutan Pemotongan</div>
             <p className="text-xs text-ink-2 mb-3">
               Menentukan <b>dari mana</b> masing-masing potongan dihitung. Sedekah dan sub-seller
@@ -261,7 +298,9 @@ export function PencairanSettings() {
                 {[
                   ["Sedekah", preview.sedekahCents],
                   ["Sub-seller", preview.subSellerCents],
-                  ["Seller", preview.sellerCents],
+                  ["Seller (total)", preview.sellerCents],
+                  ["  - Bahan baku", preview.sellerMaterialCents],
+                  ["  - Sisa seller", preview.sellerNetCents],
                 ].map(([label, cents]) => (
                   <div key={label as string} className="rounded-lg border border-line bg-canvas px-3 py-2.5">
                     <div className="text-xs text-ink-3">{label}</div>

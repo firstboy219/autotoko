@@ -32,6 +32,16 @@ export interface SplitInput {
   sedekahBasis: SedekahBasis;
   subSellerRate?: number | null;
   subSubSellerRate?: number | null;
+  /**
+   * Portion of the SELLER's own share to set aside for buying raw materials.
+   *
+   * Not a fifth party in the split. Nobody else is paid from it and no money
+   * leaves: it earmarks part of what the seller already keeps, so restocking
+   * is budgeted for before the rest is treated as profit. Keeping it inside
+   * sellerCents is what preserves the invariant below — adding a fifth
+   * recipient would have meant re-deriving every other party.
+   */
+  materialReserveRate?: number | null;
 }
 
 export interface SplitResult {
@@ -39,6 +49,10 @@ export interface SplitResult {
   sellerCents: number;
   subSellerCents: number;
   subSubSellerCents: number;
+  /** Part of sellerCents earmarked for raw materials. */
+  sellerMaterialCents: number;
+  /** The rest of sellerCents, once the material reserve is set aside. */
+  sellerNetCents: number;
   scenario: "A" | "B" | "C";
 }
 
@@ -53,6 +67,9 @@ function assertValid(input: SplitInput): void {
   if (!inRange(subSellerRate)) throw new Error(`subSellerRate out of range: ${subSellerRate}`);
   if (!inRange(subSubSellerRate)) {
     throw new Error(`subSubSellerRate out of range: ${subSubSellerRate}`);
+  }
+  if (!inRange(input.materialReserveRate)) {
+    throw new Error(`materialReserveRate out of range: ${input.materialReserveRate}`);
   }
   if (subSubSellerRate != null && subSellerRate == null) {
     throw new Error("subSubSellerRate given without subSellerRate (invalid hierarchy)");
@@ -73,6 +90,26 @@ function assertValid(input: SplitInput): void {
 
 export function calculatePayoutSplit(input: SplitInput): SplitResult {
   assertValid(input);
+  return withMaterialReserve(splitCore(input), input.materialReserveRate ?? 0);
+}
+
+/**
+ * Divides the seller's share into a raw-material reserve and the remainder.
+ *
+ * The remainder is derived by subtraction, never a second rounded formula —
+ * the same discipline every other party in this file follows, and the reason
+ * sellerMaterialCents + sellerNetCents === sellerCents holds exactly.
+ */
+function withMaterialReserve(core: SplitResult, rate: number): SplitResult {
+  const sellerMaterialCents = Math.round(core.sellerCents * rate);
+  return {
+    ...core,
+    sellerMaterialCents,
+    sellerNetCents: core.sellerCents - sellerMaterialCents,
+  };
+}
+
+function splitCore(input: SplitInput): SplitResult {
   const { creditCents, sedekahRate, sedekahBasis } = input;
   const subSellerRate = input.subSellerRate ?? null;
   const subSubSellerRate = input.subSubSellerRate ?? null;
@@ -86,6 +123,10 @@ export function calculatePayoutSplit(input: SplitInput): SplitResult {
       sellerCents: creditCents - sedekahCents,
       subSellerCents: 0,
       subSubSellerCents: 0,
+      // Filled in by withMaterialReserve(); splitCore only divides the credit
+      // between the parties.
+      sellerMaterialCents: 0,
+      sellerNetCents: 0,
       scenario: "A",
     };
   }
@@ -118,6 +159,8 @@ export function calculatePayoutSplit(input: SplitInput): SplitResult {
       sellerCents,
       subSellerCents: subSellerGross,
       subSubSellerCents: 0,
+      sellerMaterialCents: 0,
+      sellerNetCents: 0,
       scenario: "B",
     };
   }
@@ -129,6 +172,8 @@ export function calculatePayoutSplit(input: SplitInput): SplitResult {
     sellerCents,
     subSellerCents: subSellerGross - subSubSellerCents,
     subSubSellerCents,
+    sellerMaterialCents: 0,
+    sellerNetCents: 0,
     scenario: "C",
   };
 }
