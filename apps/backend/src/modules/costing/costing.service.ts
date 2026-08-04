@@ -267,20 +267,39 @@ export class CostingService {
   async detail(userId: string, productId: string) {
     const product = await this.getProductOrThrow(userId, productId);
     const cfg = await this.getOrCreateCosting(userId, productId);
-    const materials = await this.db
-      .select()
+    // Left join: the catalogue is the price of record when a line is linked,
+    // so raising a material's cost once reaches every product that uses it.
+    // Unlinked lines fall back to their own copy — those are pre-catalogue
+    // rows, and dropping them to zero would understate HPP without warning.
+    const recipe = await this.db
+      .select({
+        bom: bomItems,
+        catalogName: materials.name,
+        catalogUnit: materials.unit,
+        catalogCost: materials.unitCost,
+        catalogStock: materials.currentStock,
+      })
       .from(bomItems)
+      .leftJoin(materials, eq(bomItems.materialId, materials.id))
       .where(eq(bomItems.masterProductId, productId))
       .orderBy(asc(bomItems.materialName));
 
-    const lines = materials.map((m) => ({
-      id: m.id,
-      materialName: m.materialName,
-      unit: m.unit,
-      quantity: num(m.quantity),
-      unitCost: num(m.unitCost),
-      lineCost: num(m.quantity) * num(m.unitCost),
-    }));
+    const lines = recipe.map(({ bom: m, catalogName, catalogUnit, catalogCost, catalogStock }) => {
+      const linked = m.materialId != null && catalogName != null;
+      const unitCost = linked ? num(catalogCost) : num(m.unitCost);
+      return {
+        id: m.id,
+        materialId: m.materialId,
+        materialName: linked ? catalogName! : m.materialName,
+        unit: linked ? catalogUnit : m.unit,
+        quantity: num(m.quantity),
+        unitCost,
+        lineCost: num(m.quantity) * unitCost,
+        currentStock: linked ? num(catalogStock) : null,
+        /** False for rows written before the catalogue existed. */
+        isLinked: linked,
+      };
+    });
 
     const packing = await this.packingForProduct(userId, productId);
 
@@ -349,15 +368,157 @@ export class CostingService {
    * Adds a recipe line without leaving the costing page. Supplier/restock
    * columns keep their defaults — those are BOM-module concerns.
    */
+  /**
+   * Adds a recipe line, ALWAYS linked to the shared material catalogue.
+   *
+   * Previously this wrote a free-text name with its own copy of the price, so
+   * the same material entered on two products became two unrelated things —
+   * visible in this tenant's own data as "Botol" and "botol", each with their
+   * own stock and cost. One material used by several products is the whole
+   * point of having a catalogue, so a line can no longer exist outside it:
+   * either pick an existing material, or a new one is created and linked.
+   */
   async addMaterial(userId: string, productId: string, dto: CreateMaterialDto) {
     await this.getProductOrThrow(userId, productId);
+
+    let material: { id: string; name: string; unit: string | null; unitCost: string };
+
+    if (dto.materialId) {
+      const [found] = await this.db
+        .select({
+          id: materials.id,
+          name: materials.name,
+          unit: materials.unit,
+          unitCost: materials.unitCost,
+        })
+        .from(materials)
+        .where(and(eq(materials.userId, userId), eq(materials.id, dto.materialId)))
+        .limit(1);
+      if (!found) throw new NotFoundException("Bahan baku tidak ditemukan di master data.");
+      material = found;
+    } else {
+      const name = (dto.materialName ?? "").trim();
+      if (!name) throw new BadRequestException("Pilih bahan dari master data atau isi namanya.");
+      material = await this.findOrCreateMaterial(userId, name, dto.unit, dto.unitCost);
+    }
+
+    // The same material twice in one recipe is an editing slip, never an
+    // intent, and would silently double that ingredient's cost.
+    const [existing] = await this.db
+      .select({ id: bomItems.id })
+      .from(bomItems)
+      .where(
+        and(eq(bomItems.masterProductId, productId), eq(bomItems.materialId, material.id)),
+      )
+      .limit(1);
+    if (existing) {
+      throw new ConflictException(
+        `"${material.name}" sudah ada di resep produk ini. Ubah takarannya saja.`,
+      );
+    }
+
     await this.db.insert(bomItems).values({
       masterProductId: productId,
-      materialName: dto.materialName.trim(),
+      materialId: material.id,
+      // Kept in step with the catalogue so the legacy columns are not stale if
+      // anything still reads them; the catalogue is what HPP actually uses.
+      materialName: material.name,
       quantity: dto.quantity.toFixed(3),
-      unit: dto.unit?.trim() || null,
-      unitCost: (dto.unitCost ?? 0).toFixed(2),
+      unit: material.unit,
+      unitCost: material.unitCost,
     });
+    return this.detail(userId, productId);
+  }
+
+  /**
+   * Finds a catalogue material by normalised name, or creates it.
+   *
+   * Matching on the normalised name is what stops "Botol" and "botol" becoming
+   * two materials — the same collapse the catalogue already uses for its own
+   * uniqueness, so a name that would collide is reused rather than rejected.
+   */
+  private async findOrCreateMaterial(
+    userId: string,
+    name: string,
+    unit?: string,
+    unitCost?: number,
+  ) {
+    const normalized = name.trim().toLowerCase().replace(/\s+/g, " ");
+    const [found] = await this.db
+      .select({
+        id: materials.id,
+        name: materials.name,
+        unit: materials.unit,
+        unitCost: materials.unitCost,
+      })
+      .from(materials)
+      .where(and(eq(materials.userId, userId), eq(materials.normalizedName, normalized)))
+      .limit(1);
+    if (found) return found;
+
+    const [created] = await this.db
+      .insert(materials)
+      .values({
+        userId,
+        name: name.trim(),
+        normalizedName: normalized,
+        unit: unit?.trim() || null,
+        unitCost: (unitCost ?? 0).toFixed(2),
+      })
+      .returning({
+        id: materials.id,
+        name: materials.name,
+        unit: materials.unit,
+        unitCost: materials.unitCost,
+      });
+    if (!created) throw new Error("Insert materials returned no row");
+    return created;
+  }
+
+  /**
+   * Attaches an old free-text recipe line to the catalogue, reusing a material
+   * of the same name or creating one from the line's own figures.
+   *
+   * Needed because linking only new lines would leave every recipe written
+   * before this change orphaned, which is where the duplicates already are.
+   */
+  async linkMaterialToCatalog(userId: string, bomItemId: string, materialId?: string) {
+    const productId = await this.getMaterialProductOrThrow(userId, bomItemId);
+    const [row] = await this.db.select().from(bomItems).where(eq(bomItems.id, bomItemId)).limit(1);
+    if (!row) throw new NotFoundException("Baris resep tidak ditemukan.");
+
+    let material;
+    if (materialId) {
+      const [found] = await this.db
+        .select({
+          id: materials.id,
+          name: materials.name,
+          unit: materials.unit,
+          unitCost: materials.unitCost,
+        })
+        .from(materials)
+        .where(and(eq(materials.userId, userId), eq(materials.id, materialId)))
+        .limit(1);
+      if (!found) throw new NotFoundException("Bahan baku tidak ditemukan di master data.");
+      material = found;
+    } else {
+      material = await this.findOrCreateMaterial(
+        userId,
+        row.materialName,
+        row.unit ?? undefined,
+        num(row.unitCost),
+      );
+    }
+
+    await this.db
+      .update(bomItems)
+      .set({
+        materialId: material.id,
+        materialName: material.name,
+        unit: material.unit,
+        unitCost: material.unitCost,
+      })
+      .where(eq(bomItems.id, bomItemId));
     return this.detail(userId, productId);
   }
 
@@ -385,15 +546,31 @@ export class CostingService {
   async suggestPrice(userId: string, productId: string, dto: SuggestPriceDto) {
     await this.getProductOrThrow(userId, productId);
     const cfg = await this.getOrCreateCosting(userId, productId);
-    const materials = await this.db
-      .select({ quantity: bomItems.quantity, unitCost: bomItems.unitCost })
+    // Same catalogue-first pricing as detail(); otherwise the suggested price
+    // would be derived from a different HPP than the one on screen.
+    const recipeRows = await this.db
+      .select({
+        quantity: bomItems.quantity,
+        ownCost: bomItems.unitCost,
+        materialId: bomItems.materialId,
+        catalogCost: materials.unitCost,
+      })
       .from(bomItems)
+      .leftJoin(materials, eq(bomItems.materialId, materials.id))
       .where(eq(bomItems.masterProductId, productId));
+    const recipe = recipeRows.map((m) => ({
+      quantity: num(m.quantity),
+      unitCost: m.materialId != null && m.catalogCost != null ? num(m.catalogCost) : num(m.ownCost),
+    }));
 
     const hpp = calculateHpp({
-      materials: materials.map((m) => ({ quantity: num(m.quantity), unitCost: num(m.unitCost) })),
+      materials: recipe,
       serviceCostPerPcs: num(cfg.serviceCostPerPcs),
       packingCostPerOrder: num(cfg.packingCostPerOrder),
+      packingMaterials: (await this.packingForProduct(userId, productId)).map((p) => ({
+        quantity: p.quantity,
+        unitCost: p.unitCost,
+      })),
       avgUnitsPerOrder: num(cfg.avgUnitsPerOrder),
     });
 

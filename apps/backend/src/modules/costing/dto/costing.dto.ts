@@ -42,12 +42,21 @@ export class UpdateMaterialCostDto {
  * their column defaults and are configured in the BOM module if needed.
  */
 export class CreateMaterialDto {
+  /**
+   * Pick an existing catalogue material. When absent, materialName is used to
+   * find or create one — a recipe line can no longer exist outside the
+   * catalogue, which is what lets one material serve several products.
+   */
+  @IsOptional() @IsUUID()
+  materialId?: string;
+
   // \S guards against both "" and whitespace-only — plain @IsString/@MaxLength
   // accepted an empty name, which produced a nameless row in the recipe.
+  @IsOptional()
   @IsString()
   @MaxLength(255)
   @Matches(/\S/, { message: "Nama bahan baku tidak boleh kosong" })
-  materialName!: string;
+  materialName?: string;
   @IsNumber() @Min(0) quantity!: number;
   @IsOptional() @IsString() @MaxLength(32) unit?: string;
   @IsOptional() @IsNumber() @Min(0) unitCost?: number;
@@ -71,4 +80,9 @@ export class UpdatePackingDefaultDto {
 export class SetProductPackingDto {
   /** Omit to clear the override and go back to the shared default. */
   @IsOptional() @IsNumber() @Min(0.001) quantity?: number;
+}
+
+export class LinkMaterialDto {
+  /** Omit to reuse a catalogue material of the same name, or create one. */
+  @IsOptional() @IsUUID() materialId?: string;
 }

@@ -18,6 +18,7 @@ import {
   Input,
   PageHeader,
   Skeleton,
+  Select,
   Table,
   TableWrap,
   TD,
@@ -63,6 +64,12 @@ interface Pricing {
   ads: number;
   netProfit: number;
   netMarginRate: number;
+}
+interface CatalogMaterial {
+  id: string;
+  name: string;
+  unit: string | null;
+  unitCost: number;
 }
 interface PackingLine {
   id: string;
@@ -378,6 +385,12 @@ function AddMaterialForm({
   onCancel: () => void;
 }) {
   const toast = useToast();
+  const catalog = useFetch<CatalogMaterial[]>("/materials");
+  // Picking from master data is the default and creating is the exception,
+  // because typing a name that already exists is how "Botol" and "botol"
+  // became two different materials with their own stock and price.
+  const [mode, setMode] = useState<"pick" | "new">("pick");
+  const [materialId, setMaterialId] = useState("");
   const [name, setName] = useState("");
   const [qty, setQty] = useState("");
   const [unit, setUnit] = useState("");
@@ -385,7 +398,10 @@ function AddMaterialForm({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const valid = name.trim() !== "" && Number(qty) > 0;
+  const chosen = (catalog.data ?? []).find((m) => m.id === materialId);
+  const effectiveCost = mode === "pick" ? (chosen?.unitCost ?? 0) : Number(cost) || 0;
+  const valid =
+    Number(qty) > 0 && (mode === "pick" ? materialId !== "" : name.trim() !== "");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -393,13 +409,18 @@ function AddMaterialForm({
     setBusy(true);
     setErr(null);
     try {
-      await api.post(`/costing/${productId}/materials`, {
-        materialName: name.trim(),
-        quantity: Number(qty),
-        unit: unit.trim() || undefined,
-        unitCost: Number(cost) || 0,
-      });
-      toast(`${name.trim()} ditambahkan`, "success");
+      await api.post(
+        `/costing/${productId}/materials`,
+        mode === "pick"
+          ? { materialId, quantity: Number(qty) }
+          : {
+              materialName: name.trim(),
+              quantity: Number(qty),
+              unit: unit.trim() || undefined,
+              unitCost: Number(cost) || 0,
+            },
+      );
+      toast(`${mode === "pick" ? chosen?.name : name.trim()} ditambahkan`, "success");
       onDone();
     } catch (e) {
       setErr((e as Error).message);
@@ -410,44 +431,93 @@ function AddMaterialForm({
 
   return (
     <form onSubmit={submit} className="border-b border-line bg-canvas p-5">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <Field label="Nama Bahan" required>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="mis. Biji Kopi Arabika"
-            autoFocus
-          />
-        </Field>
-        <Field label="Takaran / pcs" required hint="Untuk 1 pcs produk">
-          <Input
-            inputMode="decimal"
-            value={qty}
-            onChange={(e) => setQty(e.target.value.replace(/[^\d.]/g, ""))}
-            placeholder="0"
-            className="tabular-nums"
-          />
-        </Field>
-        <Field label="Satuan" hint="kg, gram, meter, pcs…">
-          <Input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="kg" />
-        </Field>
-        <Field label="Harga Satuan" hint="Harga per 1 satuan di atas">
-          <Input
-            inputMode="numeric"
-            value={cost ? Number(cost).toLocaleString("id-ID") : ""}
-            onChange={(e) => setCost(e.target.value.replace(/\D/g, ""))}
-            placeholder="0"
-            className="tabular-nums"
-          />
-        </Field>
+      <div className="flex gap-2 mb-3">
+        <Button
+          type="button"
+          variant={mode === "pick" ? "filled" : "outline"}
+          onClick={() => setMode("pick")}
+        >
+          Dari Master Data
+        </Button>
+        <Button
+          type="button"
+          variant={mode === "new" ? "filled" : "outline"}
+          onClick={() => setMode("new")}
+        >
+          Bahan Baru
+        </Button>
       </div>
 
-      {Number(qty) > 0 && Number(cost) > 0 && (
+      {mode === "pick" ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Bahan Baku" required hint="Harga & stok mengikuti master data.">
+            <Select value={materialId} onChange={(e) => setMaterialId(e.target.value)}>
+              <option value="">Pilih bahan…</option>
+              {(catalog.data ?? []).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                  {m.unit ? ` (${m.unit})` : ""} — {rupiah(m.unitCost)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Takaran / pcs" required hint="Untuk 1 pcs produk">
+            <Input
+              inputMode="decimal"
+              value={qty}
+              onChange={(e) => setQty(e.target.value.replace(/[^\d.]/g, ""))}
+              placeholder="0"
+              className="tabular-nums"
+            />
+          </Field>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label="Nama Bahan" required hint="Akan ditambahkan ke master data.">
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="mis. Biji Kopi Arabika"
+              autoFocus
+            />
+          </Field>
+          <Field label="Takaran / pcs" required hint="Untuk 1 pcs produk">
+            <Input
+              inputMode="decimal"
+              value={qty}
+              onChange={(e) => setQty(e.target.value.replace(/[^\d.]/g, ""))}
+              placeholder="0"
+              className="tabular-nums"
+            />
+          </Field>
+          <Field label="Satuan" hint="kg, gram, meter, pcs…">
+            <Input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="kg" />
+          </Field>
+          <Field label="Harga Satuan" hint="Harga per 1 satuan di atas">
+            <Input
+              inputMode="numeric"
+              value={cost ? Number(cost).toLocaleString("id-ID") : ""}
+              onChange={(e) => setCost(e.target.value.replace(/\D/g, ""))}
+              placeholder="0"
+              className="tabular-nums"
+            />
+          </Field>
+        </div>
+      )}
+
+      {Number(qty) > 0 && effectiveCost > 0 && (
         <div className="text-xs text-ink-2 mt-3">
           Subtotal untuk 1 pcs:{" "}
           <span className="text-ink tabular-nums">
-            {rupiah(Number(qty) * Number(cost))}
+            {rupiah(Number(qty) * effectiveCost)}
           </span>
+        </div>
+      )}
+
+      {mode === "new" && (
+        <div className="text-[11px] text-ink-3 mt-2">
+          Kalau namanya sudah ada di master data, bahan yang lama yang dipakai — tidak dibuat
+          ganda.
         </div>
       )}
 

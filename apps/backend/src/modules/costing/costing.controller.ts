@@ -16,6 +16,7 @@ import { CostingService } from "./costing.service.js";
 import {
   AddPackingMaterialDto,
   CreateMaterialDto,
+  LinkMaterialDto,
   SetProductPackingDto,
   SuggestPriceDto,
   UpdateCostingDto,
@@ -116,6 +117,16 @@ export class CostingController {
     @Body() dto: UpdateMaterialCostDto,
   ) {
     return ok(await this.costing.updateMaterial(uid(req), bomItemId, dto));
+  }
+
+  /** Attaches an old free-text recipe line to the shared catalogue. */
+  @Patch("materials/:bomItemId/link")
+  async linkMaterial(
+    @Req() req: FastifyRequest,
+    @Param("bomItemId") bomItemId: string,
+    @Body() dto: LinkMaterialDto,
+  ) {
+    return ok(await this.costing.linkMaterialToCatalog(uid(req), bomItemId, dto.materialId));
   }
 
   @Delete("materials/:bomItemId")
