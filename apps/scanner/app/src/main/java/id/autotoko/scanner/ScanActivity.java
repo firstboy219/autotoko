@@ -33,6 +33,8 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.CameraSelector;
+import android.util.Range;
+import androidx.camera.core.ExposureState;
 import androidx.camera.core.ExperimentalGetImage;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageCapture;
@@ -109,7 +111,10 @@ public class ScanActivity extends AppCompatActivity {
     private static final float CROP_BELOW = 8.0f;
 
     /** Let autofocus settle before the shutter; the first scans were blurred. */
-    private static final long FOCUS_SETTLE_MS = 450;
+    private static final long FOCUS_SETTLE_MS = 700;
+
+    /** Stops on the meter, negative. See dimForTheLabel(). */
+    private static final double EXPOSURE_EV = -1.0;
 
     private PreviewView preview;
     private TextView status, detail, counter, hint;
@@ -158,17 +163,19 @@ public class ScanActivity extends AppCompatActivity {
             startActivity(new Intent(this, HistoryActivity.class)));
         findViewById(R.id.logout).setOnClickListener(v -> confirmLogout());
 
-        // Formats Indonesian courier labels actually print. Restricting the set
-        // keeps the detector fast and stops it locking onto unrelated codes.
+        // CODE_128 and CODE_39 only.
+        //
+        // The wider set was a mistake, and the first ten real scans showed it
+        // cleanly: every CODE_128 read came back as a genuine waybill
+        // (JY1289933656, CM90266206973), while every EAN_13 or ITF read came
+        // back as a bare 12-13 digit number matching nothing on the label -
+        // spurious decodes off the moire of a screen, and off retail barcodes
+        // that happen to be in shot. Five of ten scans recorded a resi that
+        // does not exist, and because the server refuses duplicates each one
+        // permanently occupies a key the real parcel may later need. A missed
+        // scan is retried in a second; a wrong one is silent and lasting.
         scanner = BarcodeScanning.getClient(new BarcodeScannerOptions.Builder()
-                .setBarcodeFormats(
-                        Barcode.FORMAT_CODE_128,
-                        Barcode.FORMAT_CODE_39,
-                        Barcode.FORMAT_CODE_93,
-                        Barcode.FORMAT_CODABAR,
-                        Barcode.FORMAT_ITF,
-                        Barcode.FORMAT_EAN_13,
-                        Barcode.FORMAT_QR_CODE)
+                .setBarcodeFormats(Barcode.FORMAT_CODE_128, Barcode.FORMAT_CODE_39)
                 .build());
         cameraExecutor = Executors.newSingleThreadExecutor();
 
@@ -214,10 +221,37 @@ public class ScanActivity extends AppCompatActivity {
                 provider.unbindAll();
                 camera = provider.bindToLifecycle(
                         this, CameraSelector.DEFAULT_BACK_CAMERA, p, analysis, imageCapture);
+                dimForTheLabel();
             } catch (Exception e) {
                 hint.setText("Kamera tidak bisa dibuka: " + e.getMessage());
             }
         }, ContextCompat.getMainExecutor(this));
+    }
+
+    /**
+     * Bias the exposure down.
+     *
+     * A shipping label is a sheet of white paper, usually the brightest thing
+     * in a dim warehouse or on a dark desk. Metering the whole scene therefore
+     * over-exposes the one part that matters, and on the first real scans the
+     * label came back as a blank white rectangle with the print burned away.
+     * Under-exposing costs nothing here - the paper stays legible - and it
+     * keeps the ink from being clipped into the paper.
+     */
+    private void dimForTheLabel() {
+        try {
+            if (camera == null) return;
+            ExposureState state = camera.getCameraInfo().getExposureState();
+            if (!state.isExposureCompensationSupported()) return;
+            double step = state.getExposureCompensationStep().doubleValue();
+            if (step <= 0) return;
+            int index = (int) Math.round(EXPOSURE_EV / step);
+            Range<Integer> range = state.getExposureCompensationRange();
+            index = Math.max(range.getLower(), Math.min(range.getUpper(), index));
+            camera.getCameraControl().setExposureCompensationIndex(index);
+        } catch (Exception ignored) {
+            // Not every device supports it; the photo is still usable without.
+        }
     }
 
     private void analyse(ImageProxy proxy) {
@@ -392,9 +426,9 @@ public class ScanActivity extends AppCompatActivity {
             bmp = scaled;
         }
 
-        Bitmap flat = toHighContrastGrey(bmp);
-        if (flat != bmp) bmp.recycle();
-        bmp = flat;
+        Bitmap grey = toGrey(bmp);
+        if (grey != bmp) bmp.recycle();
+        bmp = grey;
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         bmp.compress(Bitmap.CompressFormat.JPEG, PHOTO_QUALITY, out);
@@ -425,27 +459,27 @@ public class ScanActivity extends AppCompatActivity {
     }
 
     /**
-     * Grey with the contrast pushed hard.
+     * Plain greyscale. No contrast stretch - that was actively harmful.
      *
-     * These labels are photographed off a screen or under warehouse light and
-     * arrive as grey text on a grey background; measured on a real scan, plain
-     * greyscale plus a contrast stretch was the difference between OCR
-     * returning noise and returning readable words. Doing it here, before JPEG
-     * compression, keeps the edges the compressor would otherwise smear.
+     * The previous build multiplied contrast by 2.2 around a fixed mid-grey.
+     * On these photos, where the white label is already near the top of the
+     * range, that pushed roughly a quarter of every image to pure white and
+     * another quarter to pure black. Thin strokes live in the mid-tones, so
+     * the small print - recipient, order number, the product table - dissolved
+     * entirely while only the large bold text survived. Measured on the real
+     * scans: 25-30% of pixels clipped at each end, mid-tones down to a fifth
+     * of the image, and OCR scoring zero. Clipping is not recoverable, so no
+     * amount of later processing brought it back.
+     *
+     * Greyscale alone is kept because it roughly halves the upload without
+     * discarding anything: tesseract works on luminance and does its own
+     * adaptive thresholding, which is better than a fixed stretch precisely
+     * because it adapts to each image.
      */
-    private static Bitmap toHighContrastGrey(Bitmap src) {
+    private static Bitmap toGrey(Bitmap src) {
         Bitmap out = Bitmap.createBitmap(src.getWidth(), src.getHeight(), Bitmap.Config.ARGB_8888);
         ColorMatrix grey = new ColorMatrix();
         grey.setSaturation(0f);
-        float c = 2.2f;                 // contrast multiplier
-        float t = (1f - c) * 128f;      // keep mid-grey where it was
-        ColorMatrix contrast = new ColorMatrix(new float[]{
-                c, 0, 0, 0, t,
-                0, c, 0, 0, t,
-                0, 0, c, 0, t,
-                0, 0, 0, 1, 0,
-        });
-        grey.postConcat(contrast);
         Paint paint = new Paint();
         paint.setColorFilter(new ColorMatrixColorFilter(grey));
         new Canvas(out).drawBitmap(src, 0, 0, paint);
