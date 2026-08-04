@@ -141,6 +141,13 @@
       "when": 1785811637897,
       "tag": "0019_resi_previous_status",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785812852263,
+      "tag": "0020_resi_label_ocr",
+      "breakpoints": true
     }
   ]
 }

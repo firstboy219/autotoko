@@ -1,6 +1,9 @@
 import {
   index,
+  integer,
+  jsonb,
   pgTable,
+  text,
   uuid,
   varchar,
   timestamp,
@@ -47,9 +50,29 @@ export const resiScans = pgTable(
     previousStatus: varchar("previous_status", { length: 32 }),
     deviceLabel: varchar("device_label", { length: 64 }),
     scannedAt: timestamp("scanned_at", { withTimezone: true }).notNull().defaultNow(),
+
+    // --- The photographed label, and what the background OCR made of it.
+    // The waybill itself is NOT in here: it comes from the barcode, which is
+    // exact. Everything below is best-effort and may stay null forever, which
+    // is why the raw text is kept alongside it.
+    photoUrl: varchar("photo_url", { length: 255 }),
+    barcodeFormat: varchar("barcode_format", { length: 32 }),
+    /** none (no photo) | pending | done | failed */
+    ocrStatus: varchar("ocr_status", { length: 16 }).notNull().default("none"),
+    ocrAttempts: integer("ocr_attempts").notNull().default(0),
+    ocrAt: timestamp("ocr_at", { withTimezone: true }),
+    ocrText: text("ocr_text"),
+    labelOrderNo: varchar("label_order_no", { length: 128 }),
+    labelRecipient: varchar("label_recipient", { length: 255 }),
+    labelMarketplace: varchar("label_marketplace", { length: 32 }),
+    /** [{ name, qty }] read off the label's product block. */
+    labelItems: jsonb("label_items").$type<{ name: string; qty: number }[]>(),
   },
   (t) => ({
     userResiUnique: unique("resi_scans_user_resi_unique").on(t.userId, t.resi),
+    // The background reader polls on this; without it every tick sequentially
+    // scans the whole table as the archive grows.
+    ocrQueueIdx: index("resi_scans_ocr_status_idx").on(t.ocrStatus, t.scannedAt),
     userScannedIdx: index("resi_scans_user_scanned_idx").on(t.userId, t.scannedAt),
   }),
 );

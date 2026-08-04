@@ -32,6 +32,10 @@ const FS_LABEL: Record<string, string> = {
   retur: "Retur", dibatalkan: "Dibatalkan",
 };
 
+interface LabelItem {
+  name: string;
+  qty: number;
+}
 interface Scan {
   id: string;
   resi: string;
@@ -39,6 +43,12 @@ interface Scan {
   source: string;
   deviceLabel: string | null;
   scannedAt: string;
+  photoUrl: string | null;
+  ocrStatus: string;
+  labelOrderNo: string | null;
+  labelRecipient: string | null;
+  labelMarketplace: string | null;
+  labelItems: LabelItem[] | null;
   orderId: string | null;
   marketplaceOrderId: string | null;
   buyerName: string | null;
@@ -51,6 +61,8 @@ interface Summary {
   total: number;
   linked: number;
   unlinked: number;
+  ocrPending: number;
+  ocrFailed: number;
   lastScanAt: string | null;
 }
 interface LinkableOrder {
@@ -65,14 +77,14 @@ interface LinkableOrder {
 }
 
 /**
- * Everything the scanner app has recorded, and the one action that turns a
- * scanned parcel into a shipped order.
+ * Everything the scanner app has recorded: the waybill from the barcode, the
+ * photographed label, and whatever the background reader has since made of it.
  *
- * The link is manual by necessity, not by preference: an order only gains a
- * tracking number once somebody has attached one, so there is nothing to match
- * against until then. Attaching writes the resi onto the order, which is what
- * makes the NEXT scan of that label match by itself. The manual step exists to
- * make itself unnecessary.
+ * Fields read off the label are shown exactly as confidently as they deserve.
+ * A blank recipient means OCR found no anchor for one, not that the parcel had
+ * no recipient; that gap is meant to be visible, because a wrong name filled
+ * in by a guess would look identical to a right one and nobody would ever
+ * check it.
  */
 export function ProduksiPacking() {
   const toast = useToast();
@@ -88,6 +100,7 @@ export function ProduksiPacking() {
   const summary = useFetch<Summary>("/resi/scans/summary");
 
   const [linking, setLinking] = useState<Scan | null>(null);
+  const [photo, setPhoto] = useState<Scan | null>(null);
 
   function refresh() {
     scans.reload();
@@ -106,12 +119,19 @@ export function ProduksiPacking() {
 
   const rows = scans.data?.rows ?? [];
   const unlinked = summary.data?.unlinked ?? 0;
+  const pending = summary.data?.ocrPending ?? 0;
 
   return (
     <Layout title="Produksi & Packing">
       <PageHeader
         title="Produksi & Packing"
-        subtitle="Resi yang sudah discan dari aplikasi Android, dan order yang jadi terkirim karenanya."
+        subtitle="Resi yang discan dari aplikasi Android, isi labelnya, dan order yang jadi terkirim karenanya."
+        actions={
+          <Button variant="outline" onClick={refresh}>
+            <Icon name="refresh" className="w-3.5 h-3.5" />
+            Muat Ulang
+          </Button>
+        }
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
@@ -125,12 +145,22 @@ export function ProduksiPacking() {
         />
       </div>
 
+      {pending > 0 && (
+        <div className="mb-3">
+          <InlineAlert tone="info">
+            {pending} label sedang dibaca di server. Nomor pesanan, penerima dan isi paket akan
+            muncul sendiri dalam beberapa saat. Nomor resinya sudah tersimpan sejak awal karena
+            diambil dari barcode, bukan dari pembacaan foto.
+          </InlineAlert>
+        </div>
+      )}
+
       {unlinked > 0 && (
         <div className="mb-5">
           <InlineAlert tone="info">
             {unlinked} resi belum terhubung ke order, jadi belum terhitung sebagai Dikirim di
-            Laporan. Hubungkan lewat tombol di tabel. Setelah itu nomor resinya tersimpan di order,
-            sehingga label yang sama kalau discan lagi akan cocok otomatis.
+            Laporan. Kalau nomor pesanan terbaca dari label, penghubungan terjadi otomatis;
+            sisanya bisa dihubungkan lewat tombol di tabel.
           </InlineAlert>
         </div>
       )}
@@ -168,25 +198,24 @@ export function ProduksiPacking() {
           <Table>
             <THead>
               <TR>
+                <TH>Foto</TH>
                 <TH>Resi</TH>
-                <TH>Kurir</TH>
                 <TH>Waktu</TH>
-                <TH>Perangkat</TH>
+                <TH>Isi Label (hasil OCR)</TH>
                 <TH>Order</TH>
-                <TH>Status Order</TH>
                 <TH className="text-right">Aksi</TH>
               </TR>
             </THead>
             <tbody>
               {scans.loading ? (
-                <SkeletonRows n={5} cols={7} />
+                <SkeletonRows n={5} cols={6} />
               ) : rows.length === 0 ? (
                 <TR>
-                  <TD colSpan={7}>
+                  <TD colSpan={6}>
                     <EmptyState
                       icon="package"
                       title="Belum ada resi yang discan"
-                      description="Scan resi lewat aplikasi AutoToko Scan Resi di HP, hasilnya muncul di sini."
+                      description="Scan barcode resi lewat aplikasi AutoToko Scan Resi di HP, hasilnya muncul di sini."
                     />
                   </TD>
                 </TR>
@@ -194,14 +223,40 @@ export function ProduksiPacking() {
                 rows.map((s) => (
                   <TR key={s.id}>
                     <TD>
-                      <span className="font-mono text-[13px]">{s.resi}</span>
-                      {s.source === "manual" && (
-                        <span className="ml-2 text-[10px] text-ink-2">manual</span>
+                      {s.photoUrl ? (
+                        <button
+                          onClick={() => setPhoto(s)}
+                          className="block w-12 h-12 rounded-lg overflow-hidden border border-line hover:border-brand"
+                          title="Lihat foto label"
+                        >
+                          <img
+                            src={s.photoUrl}
+                            alt={`Label ${s.resi}`}
+                            className="w-full h-full object-cover"
+                          />
+                        </button>
+                      ) : (
+                        <span className="text-ink-2 text-xs">-</span>
                       )}
                     </TD>
-                    <TD>{s.courier ?? "-"}</TD>
-                    <TD className="whitespace-nowrap">{dateShort(s.scannedAt)}</TD>
-                    <TD className="text-ink-2">{s.deviceLabel ?? "-"}</TD>
+
+                    <TD>
+                      <div className="font-mono text-[13px]">{s.resi}</div>
+                      <div className="text-[11px] text-ink-2">
+                        {s.courier ?? "-"}
+                        {s.source === "manual" ? " / manual" : ""}
+                      </div>
+                    </TD>
+
+                    <TD className="whitespace-nowrap">
+                      <div className="text-[12px]">{dateShort(s.scannedAt)}</div>
+                      <div className="text-[11px] text-ink-2">{s.deviceLabel ?? "-"}</div>
+                    </TD>
+
+                    <TD>
+                      <LabelCell scan={s} />
+                    </TD>
+
                     <TD>
                       {s.orderId ? (
                         <div>
@@ -211,20 +266,17 @@ export function ProduksiPacking() {
                             {s.shopName ? ` / ${s.shopName}` : ""}
                             {s.totalAmount ? ` / ${rupiah(Number(s.totalAmount))}` : ""}
                           </div>
+                          {s.orderStatus && (
+                            <Badge tone={s.orderStatus === "dikirim" ? "info" : "neutral"}>
+                              {FS_LABEL[s.orderStatus] ?? s.orderStatus}
+                            </Badge>
+                          )}
                         </div>
                       ) : (
                         <span className="text-ink-2 text-xs">belum terhubung</span>
                       )}
                     </TD>
-                    <TD>
-                      {s.orderStatus ? (
-                        <Badge tone={s.orderStatus === "dikirim" ? "info" : "neutral"}>
-                          {FS_LABEL[s.orderStatus] ?? s.orderStatus}
-                        </Badge>
-                      ) : (
-                        "-"
-                      )}
-                    </TD>
+
                     <TD className="text-right">
                       {s.orderId ? (
                         <Button variant="text" onClick={() => unlink(s)}>
@@ -232,7 +284,6 @@ export function ProduksiPacking() {
                         </Button>
                       ) : (
                         <Button variant="outline" onClick={() => setLinking(s)}>
-                          <Icon name="link" className="w-3.5 h-3.5" />
                           Hubungkan
                         </Button>
                       )}
@@ -255,7 +306,72 @@ export function ProduksiPacking() {
           }}
         />
       )}
+
+      {photo && (
+        <Modal open title={`Label ${photo.resi}`} onClose={() => setPhoto(null)} width="max-w-3xl">
+          {photo.photoUrl && (
+            <img
+              src={photo.photoUrl}
+              alt={`Label ${photo.resi}`}
+              className="w-full rounded-lg border border-line"
+            />
+          )}
+          <div className="mt-3 text-xs text-ink-2">
+            Discan {dateShort(photo.scannedAt)} dari {photo.deviceLabel ?? "perangkat tak dikenal"}.
+          </div>
+        </Modal>
+      )}
     </Layout>
+  );
+}
+
+/** What the background reader found, stated only as far as it is known. */
+function LabelCell({ scan }: { scan: Scan }) {
+  if (scan.ocrStatus === "pending") {
+    return <span className="text-[11px] text-ink-2">sedang dibaca...</span>;
+  }
+  if (scan.ocrStatus === "none") {
+    return <span className="text-[11px] text-ink-2">tanpa foto</span>;
+  }
+  if (scan.ocrStatus === "failed") {
+    return (
+      <span className="text-[11px] text-ink-2" title="Foto tidak terbaca setelah 3 percobaan">
+        label tidak terbaca
+      </span>
+    );
+  }
+
+  const items = scan.labelItems ?? [];
+  const nothing = !scan.labelOrderNo && !scan.labelRecipient && items.length === 0;
+  if (nothing) {
+    return <span className="text-[11px] text-ink-2">terbaca, tidak ada data dikenali</span>;
+  }
+
+  return (
+    <div className="text-[11px] leading-relaxed">
+      {scan.labelOrderNo && (
+        <div>
+          <span className="text-ink-2">Pesanan </span>
+          <span className="font-mono">{scan.labelOrderNo}</span>
+        </div>
+      )}
+      {scan.labelRecipient && (
+        <div>
+          <span className="text-ink-2">Penerima </span>
+          {scan.labelRecipient}
+        </div>
+      )}
+      {scan.labelMarketplace && <Badge tone="neutral">{scan.labelMarketplace}</Badge>}
+      {items.length > 0 && (
+        <ul className="mt-1">
+          {items.map((it, i) => (
+            <li key={i}>
+              {it.qty}x {it.name}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -269,7 +385,9 @@ function LinkModal({
   onDone: () => void;
 }) {
   const toast = useToast();
-  const [q, setQ] = useState("");
+  // Prefer the order number the label gave us; it is the strongest hint there
+  // is about which order this parcel belongs to.
+  const [q, setQ] = useState(scan.labelOrderNo ?? "");
   const [busy, setBusy] = useState<string | null>(null);
   const list = useFetch<LinkableOrder[]>(
     `/resi/linkable-orders${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ""}`,
@@ -294,8 +412,20 @@ function LinkModal({
     <Modal open title={`Hubungkan resi ${scan.resi}`} onClose={onClose} width="max-w-2xl">
       <p className="text-sm text-ink-2 mb-3">
         Pilih order yang dikirim dengan resi ini. Order akan ditandai <strong>Dikirim</strong> dan
-        nomor resinya tersimpan, sehingga scan berikutnya atas label yang sama cocok otomatis.
+        nomor resinya tersimpan.
       </p>
+
+      {scan.labelRecipient && (
+        <div className="mb-3 text-xs text-ink-2">
+          Dari label: penerima <strong>{scan.labelRecipient}</strong>
+          {scan.labelOrderNo ? (
+            <>
+              {" "}
+              / pesanan <span className="font-mono">{scan.labelOrderNo}</span>
+            </>
+          ) : null}
+        </div>
+      )}
 
       <Input
         placeholder="Cari nomor order atau nama pembeli"
@@ -312,7 +442,7 @@ function LinkModal({
       ) : orders.length === 0 ? (
         <EmptyState
           icon="cart"
-          title="Tidak ada order yang bisa dihubungkan"
+          title="Tidak ada order yang cocok"
           description="Order yang sudah punya nomor resi atau sudah dibatalkan tidak ditampilkan di sini."
         />
       ) : (

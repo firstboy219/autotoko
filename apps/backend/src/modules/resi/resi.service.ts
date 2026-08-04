@@ -9,6 +9,7 @@ import {
 import { and, desc, eq, ilike, gte, isNull, ne, or, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders, resiScans, shops } from "../../database/schema/index.js";
+import { UploadsService } from "../uploads/uploads.service.js";
 
 /**
  * Strip a scanned waybill down to a comparison key.
@@ -48,6 +49,9 @@ export function detectCourier(normalized: string): string | null {
   return null;
 }
 
+/** Accepted provenance values; anything else is recorded as a barcode scan. */
+const SOURCES = ["barcode", "ocr", "manual"];
+
 const MIN_RESI_LEN = 6;
 const MAX_RESI_LEN = 64;
 
@@ -61,6 +65,7 @@ export interface ScanResult {
   orderId: string | null;
   /** Set when the scan advanced an order, so the app can say so out loud. */
   linkedOrder: { id: string; marketplaceOrderId: string; from: string; to: string } | null;
+  photoUrl: string | null;
   scannedAt: Date;
 }
 
@@ -68,11 +73,21 @@ export interface ScanResult {
 export class ResiService {
   private readonly logger = new Logger(ResiService.name);
 
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly uploads: UploadsService,
+  ) {}
 
   async scan(
     userId: string,
-    input: { resi: string; resiRaw?: string; source?: string; deviceLabel?: string },
+    input: {
+      resi: string;
+      resiRaw?: string;
+      source?: string;
+      deviceLabel?: string;
+      photoBase64?: string;
+      barcodeFormat?: string;
+    },
   ): Promise<ScanResult> {
     const resi = normalizeResi(input.resi);
     if (resi.length < MIN_RESI_LEN) {
@@ -142,6 +157,19 @@ export class ResiService {
       };
     }
 
+    // Store the photo before inserting, so a row never claims to have one it
+    // does not. A failed upload must not sink the scan either: the barcode
+    // already identified the parcel, and that is the part the packer is
+    // standing there waiting for.
+    let photoUrl: string | null = null;
+    if (input.photoBase64) {
+      try {
+        photoUrl = (await this.uploads.saveImage(input.photoBase64, "jpg")).url;
+      } catch (e) {
+        this.logger.warn(`Photo for ${resi} could not be stored: ${(e as Error).message}`);
+      }
+    }
+
     const [inserted] = await this.db
       .insert(resiScans)
       .values({
@@ -153,8 +181,13 @@ export class ResiService {
         // Remembered so unlinking can put the order back where it was, rather
         // than leaving it marked shipped after the link is undone.
         previousStatus: linkedOrder?.from ?? null,
-        source: input.source === "manual" ? "manual" : "ocr",
+        source: SOURCES.includes(input.source ?? "") ? input.source! : "barcode",
         deviceLabel: input.deviceLabel?.slice(0, 64) ?? null,
+        photoUrl,
+        barcodeFormat: input.barcodeFormat?.slice(0, 32) ?? null,
+        // "pending" only when there is something to read. The background task
+        // polls on this, so a photoless scan must not sit in its queue.
+        ocrStatus: photoUrl ? "pending" : "none",
       })
       .returning();
     if (!inserted) throw new Error("Insert resi_scans returned no row");
@@ -165,6 +198,7 @@ export class ResiService {
       courier: inserted.courier,
       orderId: inserted.orderId,
       linkedOrder,
+      photoUrl: inserted.photoUrl,
       scannedAt: inserted.scannedAt,
     };
   }
@@ -295,6 +329,12 @@ export class ResiService {
         source: resiScans.source,
         deviceLabel: resiScans.deviceLabel,
         scannedAt: resiScans.scannedAt,
+        photoUrl: resiScans.photoUrl,
+        ocrStatus: resiScans.ocrStatus,
+        labelOrderNo: resiScans.labelOrderNo,
+        labelRecipient: resiScans.labelRecipient,
+        labelMarketplace: resiScans.labelMarketplace,
+        labelItems: resiScans.labelItems,
         orderId: resiScans.orderId,
         marketplaceOrderId: orders.marketplaceOrderId,
         buyerName: orders.buyerName,
@@ -327,6 +367,8 @@ export class ResiService {
         .select({
           count: sql<number>`count(*)::int`,
           linked: sql<number>`count(${resiScans.orderId})::int`,
+          ocrPending: sql<number>`count(*) filter (where ${resiScans.ocrStatus} = 'pending')::int`,
+          ocrFailed: sql<number>`count(*) filter (where ${resiScans.ocrStatus} = 'failed')::int`,
           last: sql<Date | null>`max(${resiScans.scannedAt})`,
         })
         .from(resiScans)
@@ -344,6 +386,8 @@ export class ResiService {
       total,
       linked,
       unlinked: total - linked,
+      ocrPending: all?.ocrPending ?? 0,
+      ocrFailed: all?.ocrFailed ?? 0,
       lastScanAt: all?.last ?? null,
     };
   }

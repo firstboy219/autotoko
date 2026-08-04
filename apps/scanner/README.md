@@ -59,9 +59,8 @@ Tanpa `keystore.properties`, project tetap bisa di-build (tidak tertandatangani)
 
 ## Yang diuji
 
-`ResiExtractorTest` (10 test, jalan di JVM tanpa perangkat). OCR sendiri tidak
-bisa diuji di JVM, jadi bagian yang mengubah teks OCR menjadi nomor resi
-itulah yang harus terbukti benar. Kasus yang dijaga:
+`ResiExtractorTest` (10 test, jalan di JVM tanpa perangkat). Dipakai untuk
+normalisasi resi dan sebagai cadangan pembacaan teks. Kasus yang dijaga:
 
 - memilih resi, bukan nomor HP pembeli yang ada di label yang sama
 - membaca kelompok berspasi (`SPXID 0432 1234 5678`) sebagai satu nomor
@@ -77,5 +76,8 @@ itulah yang harus terbukti benar. Kasus yang dijaga:
   harus dicegah di tempat.
 - Kurir dengan awalan huruf yang tidak dikenal dan nomornya tercetak
   berspasi mungkin perlu Input Manual.
-- Membaca teks (OCR), bukan barcode. Kalau nanti akurasi jadi masalah,
-  membaca barcode pada label jauh lebih pasti daripada OCR.
+- Barcode yang rusak/terlipat tidak akan terbaca; gunakan Input Manual.
+- Foto diunggah base64 dalam permintaan scan yang sama. Ukurannya diperkecil
+  di HP (sisi terpanjang 1600px, JPEG 78) supaya tetap ringan di wifi gudang.
+- Penyimpanan foto belum dibatasi umur. Sekitar 60-100 KB per paket; perlu
+  kebijakan retensi kalau volumenya besar.

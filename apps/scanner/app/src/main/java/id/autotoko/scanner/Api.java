@@ -76,13 +76,20 @@ public final class Api {
         call("POST", baseUrl + "/api/auth/password/login", null, payload, cb);
     }
 
-    public void scan(String resi, String raw, String source, Cb cb) {
+    /**
+     * photoBase64 may be null: a scan whose photo failed to encode is still a
+     * scan, and losing the parcel would be far worse than losing the picture.
+     */
+    public void scan(String resi, String raw, String source, String barcodeFormat,
+                     String photoBase64, Cb cb) {
         JSONObject payload = new JSONObject();
         try {
             payload.put("resi", resi);
             payload.put("resiRaw", raw);
             payload.put("source", source);
             payload.put("deviceLabel", session.device());
+            if (barcodeFormat != null) payload.put("barcodeFormat", barcodeFormat);
+            if (photoBase64 != null) payload.put("photoBase64", photoBase64);
         } catch (Exception ignored) {}
         call("POST", session.baseUrl() + "/api/resi/scan", session.token(), payload, cb);
     }

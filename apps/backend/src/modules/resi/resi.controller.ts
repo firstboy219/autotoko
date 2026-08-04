@@ -38,11 +38,21 @@ class ScanDto {
   @IsOptional() @IsString() @MaxLength(128)
   resiRaw?: string;
 
-  @IsOptional() @IsIn(["ocr", "manual"])
-  source?: "ocr" | "manual";
+  // "barcode" is what the app sends now that the waybill is decoded rather
+  // than read visually. "ocr" stays accepted so an older installed APK keeps
+  // working through a staged rollout instead of failing every scan.
+  @IsOptional() @IsIn(["barcode", "ocr", "manual"])
+  source?: "barcode" | "ocr" | "manual";
 
   @IsOptional() @IsString() @MaxLength(64)
   deviceLabel?: string;
+
+  /** JPEG of the label, base64. Read by OCR later, not on this request. */
+  @IsOptional() @IsString() @MaxLength(12_000_000)
+  photoBase64?: string;
+
+  @IsOptional() @IsString() @MaxLength(32)
+  barcodeFormat?: string;
 }
 
 class LinkDto {
