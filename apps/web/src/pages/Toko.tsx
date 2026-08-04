@@ -372,6 +372,14 @@ export function Toko() {
         ))
       )}
 
+      {managingCategories && (
+        <ManageCategoriesModal
+          categories={categories.data ?? []}
+          onClose={() => setManagingCategories(false)}
+          onChange={reloadAll}
+        />
+      )}
+
       {editing && (
         <EditShopModal
           shop={editing}
