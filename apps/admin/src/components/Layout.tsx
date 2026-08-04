@@ -6,6 +6,7 @@ const NAV = [
   { to: "/users", label: "Manajemen User", icon: "👥" },
   { to: "/settings", label: "Kredensial & Config", icon: "🔑" },
   { to: "/smtp", label: "Email / SMTP", icon: "✉️" },
+  { to: "/cek-resi", label: "Cek Resi Kurir", icon: "📦" },
   { to: "/pricing", label: "Pricing", icon: "💰" },
   { to: "/ai", label: "AI Autopilot", icon: "🤖" },
   { to: "/branding", label: "Branding", icon: "🎨" },

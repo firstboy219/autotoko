@@ -12,6 +12,7 @@ import {
 } from "@nestjs/common";
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsNumber,
@@ -26,8 +27,14 @@ import {
 import { Type } from "class-transformer";
 import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
-import { JwtAuthGuard, TenantOwnerOnly, type JwtPayload } from "../auth/jwt-auth.guard.js";
+import {
+  AdminOnly,
+  JwtAuthGuard,
+  TenantOwnerOnly,
+  type JwtPayload,
+} from "../auth/jwt-auth.guard.js";
 import { ResiService } from "./resi.service.js";
+import { CourierTrackingService } from "./courier-tracking.service.js";
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
@@ -62,6 +69,28 @@ class ScanDto {
 class LinkDto {
   @IsUUID()
   orderId!: string;
+}
+
+class TrackingConfigDto {
+  @IsOptional() @IsString() @MaxLength(200)
+  apiKey?: string;
+
+  @IsOptional() @IsString() @MaxLength(40)
+  provider?: string;
+
+  @IsOptional() @IsBoolean()
+  blockInTransit?: boolean;
+}
+
+class TrackingTestDto {
+  @IsString() @MaxLength(200)
+  apiKey!: string;
+
+  @IsString() @MaxLength(40)
+  courier!: string;
+
+  @IsString() @MaxLength(64)
+  awb!: string;
 }
 
 class PackingSettingsDto {
@@ -116,7 +145,10 @@ class ListQuery {
 @UseGuards(JwtAuthGuard)
 @TenantOwnerOnly()
 export class ResiController {
-  constructor(private readonly resi: ResiService) {}
+  constructor(
+    private readonly resi: ResiService,
+    private readonly tracking: CourierTrackingService,
+  ) {}
 
   /** 201 on a new resi; 409 with the earlier scan's details on a repeat. */
   @Post("scan")
@@ -173,6 +205,36 @@ export class ResiController {
     @Param("id") id: string,
   ): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.resi.unlink(uid(req), id) };
+  }
+
+  // --- Courier tracking ---------------------------------------------
+
+  @Get("tracking-config")
+  @AdminOnly()
+  async trackingConfig(): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.tracking.getConfig() };
+  }
+
+  @Patch("tracking-config")
+  @AdminOnly()
+  async saveTrackingConfig(@Body() dto: TrackingConfigDto): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.tracking.saveConfig({
+        apiKey: dto.apiKey,
+        provider: dto.provider,
+        blockInTransit: dto.blockInTransit,
+      }),
+    };
+  }
+
+  @Post("tracking-test")
+  @AdminOnly()
+  async testTracking(@Body() dto: TrackingTestDto): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.tracking.testKey(dto.apiKey, dto.courier, dto.awb),
+    };
   }
 
   // --- Packing wage -------------------------------------------------

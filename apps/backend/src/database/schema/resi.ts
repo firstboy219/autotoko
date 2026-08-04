@@ -98,6 +98,13 @@ export const resiScans = pgTable(
      */
     packerPaidAmount: numeric("packer_paid_amount", { precision: 15, scale: 2 }),
     packerNote: varchar("packer_note", { length: 120 }),
+
+    // What the courier said about this waybill when it was scanned. Stored raw
+    // so a status our keyword list does not know is visible in the data rather
+    // than silently collapsed into "unknown".
+    trackingStatus: varchar("tracking_status", { length: 120 }),
+    trackingCategory: varchar("tracking_category", { length: 24 }),
+    trackingCheckedAt: timestamp("tracking_checked_at", { withTimezone: true }),
   },
   (t) => ({
     userResiUnique: unique("resi_scans_user_resi_unique").on(t.userId, t.resi),

@@ -4,6 +4,7 @@ import { Login } from "./pages/Login";
 import { Users } from "./pages/Users";
 import { Settings } from "./pages/Settings";
 import { Smtp } from "./pages/Smtp";
+import { CourierTracking } from "./pages/CourierTracking";
 import { Pricing } from "./pages/Pricing";
 import { AiAutopilot } from "./pages/AiAutopilot";
 import { Branding } from "./pages/Branding";
@@ -21,6 +22,7 @@ export function App() {
         <Route path="/users" element={<Protected><Users /></Protected>} />
         <Route path="/settings" element={<Protected><Settings /></Protected>} />
         <Route path="/smtp" element={<Protected><Smtp /></Protected>} />
+        <Route path="/cek-resi" element={<Protected><CourierTracking /></Protected>} />
         <Route path="/pricing" element={<Protected><Pricing /></Protected>} />
         <Route path="/ai" element={<Protected><AiAutopilot /></Protected>} />
         <Route path="/branding" element={<Protected><Branding /></Protected>} />

@@ -10,6 +10,7 @@ import { and, desc, eq, ilike, gte, inArray, isNull, lte, ne, or, sql } from "dr
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders, packingSettings, resiScans, shops } from "../../database/schema/index.js";
 import { UploadsService } from "../uploads/uploads.service.js";
+import { CourierTrackingService } from "./courier-tracking.service.js";
 import { ConfigService } from "@nestjs/config";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -80,6 +81,7 @@ export class ResiService {
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly uploads: UploadsService,
     private readonly config: ConfigService,
+    private readonly tracking: CourierTrackingService,
   ) {}
 
   /**
@@ -201,6 +203,36 @@ export class ResiService {
       };
     }
 
+    // Ask the courier before recording anything. Refusing here rather than
+    // flagging afterwards is the point: once a parcel is on the courier's van
+    // it cannot be unshipped, so the only moment this is worth knowing is
+    // while the packer is still holding it.
+    //
+    // A null decision means the check could not run — no API key, unknown
+    // courier, timeout — and the scan proceeds. Every failure mode is the
+    // permissive one on purpose: this is a safety net over the bench, not a
+    // gate on it, and a warehouse halted by somebody else's outage would cost
+    // more than it saves.
+    let trackingStatus: string | null = null;
+    let trackingCategory: string | null = null;
+    let trackingCheckedAt: Date | null = null;
+    const decision = await this.tracking.check(resi, detectCourier(resi));
+    if (decision) {
+      trackingStatus = decision.status;
+      trackingCategory = decision.category;
+      trackingCheckedAt = new Date();
+      if (decision.verdict === "block") {
+        this.logger.warn(`Scan of ${resi} refused: courier says ${decision.status}`);
+        throw new ConflictException({
+          code: "COURIER_BLOCKED",
+          message: decision.reason,
+          resi,
+          courierStatus: decision.status,
+          category: decision.category,
+        });
+      }
+    }
+
     // Store the photo before inserting, so a row never claims to have one it
     // does not. A failed upload must not sink the scan either: the barcode
     // already identified the parcel, and that is the part the packer is
@@ -232,6 +264,9 @@ export class ResiService {
         // "pending" only when there is something to read. The background task
         // polls on this, so a photoless scan must not sit in its queue.
         ocrStatus: photoUrl ? "pending" : "none",
+        trackingStatus,
+        trackingCategory,
+        trackingCheckedAt,
       })
       .returning();
     if (!inserted) throw new Error("Insert resi_scans returned no row");
@@ -379,6 +414,8 @@ export class ResiService {
         labelRecipient: resiScans.labelRecipient,
         labelMarketplace: resiScans.labelMarketplace,
         labelItems: resiScans.labelItems,
+        trackingStatus: resiScans.trackingStatus,
+        trackingCategory: resiScans.trackingCategory,
         packerPaidAt: resiScans.packerPaidAt,
         packerPaidAmount: resiScans.packerPaidAmount,
         orderId: resiScans.orderId,
