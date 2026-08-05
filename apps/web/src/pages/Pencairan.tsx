@@ -35,6 +35,7 @@ interface Settings {
   sedekahRate: string;
   sedekahBasis: "total_credit" | "after_subseller_split";
   sedekahBankAccount: string | null;
+  materialReserveRate: string;
 }
 
 const STATUS_LABEL: Record<Batch["status"], string> = {
@@ -171,7 +172,10 @@ export function Pencairan() {
           title="Pengaturan Sedekah"
           desc={
             settings
-              ? `${(Number(settings.sedekahRate) * 100).toFixed(1)}% · ${BASIS_LABEL[settings.sedekahBasis]}`
+              ? `${(Number(settings.sedekahRate) * 100).toFixed(1)}% · ${BASIS_LABEL[settings.sedekahBasis]}` +
+                (Number(settings.materialReserveRate ?? 0) > 0
+                  ? ` · bahan baku ${(Number(settings.materialReserveRate) * 100).toFixed(1)}% dari seller`
+                  : "")
               : "Memuat…"
           }
         />

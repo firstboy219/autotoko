@@ -23,6 +23,7 @@ import {
 interface Mutation {
   id: string; batchId: string; shopId: string; payoutDate: string;
   creditAmount: string; sedekahAmount: string; sellerAmount: string;
+  sellerMaterialAmount: string | null;
   subSellerAmount: string | null; subSubSellerAmount: string | null;
   status: "draft" | "completed";
 }
@@ -44,11 +45,12 @@ export function PencairanMutasi() {
           a.credit += Number(m.creditAmount) || 0;
           a.sedekah += Number(m.sedekahAmount) || 0;
           a.seller += Number(m.sellerAmount) || 0;
+          a.material += Number(m.sellerMaterialAmount) || 0;
           a.sub += Number(m.subSellerAmount) || 0;
           a.subSub += Number(m.subSubSellerAmount) || 0;
           return a;
         },
-        { credit: 0, sedekah: 0, seller: 0, sub: 0, subSub: 0 },
+        { credit: 0, sedekah: 0, seller: 0, sub: 0, subSub: 0, material: 0 },
       ),
     [data],
   );
@@ -97,6 +99,7 @@ export function PencairanMutasi() {
                 <TH align="right">Kredit</TH>
                 <TH align="right">Sedekah</TH>
                 <TH align="right">Seller</TH>
+                <TH align="right">Bahan Baku</TH>
                 <TH align="right">Sub-seller</TH>
                 <TH align="right">Sub-sub</TH>
                 <TH>Status</TH>
@@ -108,7 +111,7 @@ export function PencairanMutasi() {
                 <SkeletonRows n={5} cols={9} />
               ) : !data?.length ? (
                 <TR>
-                  <TD colSpan={9} className="p-0">
+                  <TD colSpan={10} className="p-0">
                     <EmptyState
                       icon="fileText"
                       title="Tidak ada mutasi"
@@ -129,6 +132,12 @@ export function PencairanMutasi() {
                       <TD align="right" className="text-ink tabular-nums">{rupiah(m.creditAmount)}</TD>
                       <TD align="right" className="text-ink-2 tabular-nums">{rupiah(m.sedekahAmount)}</TD>
                       <TD align="right" className="text-ink-2 tabular-nums">{rupiah(m.sellerAmount)}</TD>
+                      {/* Carved out of the Seller column beside it, not taken
+                          on top of it — reading them as two payouts would
+                          double count what the seller keeps. */}
+                      <TD align="right" className="text-ink-3 tabular-nums">
+                        {Number(m.sellerMaterialAmount) > 0 ? rupiah(m.sellerMaterialAmount!) : "—"}
+                      </TD>
                       <TD align="right" className="text-ink-2 tabular-nums">
                         {m.subSellerAmount ? rupiah(m.subSellerAmount) : "—"}
                       </TD>
@@ -156,6 +165,9 @@ export function PencairanMutasi() {
                     <TD align="right" className="text-ink font-medium tabular-nums">{rupiah(totals.credit)}</TD>
                     <TD align="right" className="text-ink-2 tabular-nums">{rupiah(totals.sedekah)}</TD>
                     <TD align="right" className="text-ink-2 tabular-nums">{rupiah(totals.seller)}</TD>
+                    <TD align="right" className="text-ink-3 tabular-nums">
+                      {totals.material > 0 ? rupiah(totals.material) : "—"}
+                    </TD>
                     <TD align="right" className="text-ink-2 tabular-nums">{rupiah(totals.sub)}</TD>
                     <TD align="right" className="text-ink-2 tabular-nums">{rupiah(totals.subSub)}</TD>
                     <TD />
