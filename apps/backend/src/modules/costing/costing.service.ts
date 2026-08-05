@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   calculateHpp,
   calculatePublishPricing,
@@ -284,6 +284,22 @@ export class CostingService {
       .where(eq(bomItems.masterProductId, productId))
       .orderBy(asc(bomItems.materialName));
 
+    const linkedIds = recipe.map((r) => r.bom.materialId).filter((v): v is string => v != null);
+    const usageByMaterial = new Map<string, number>();
+    if (linkedIds.length) {
+      const counts = await this.db
+        .select({
+          materialId: bomItems.materialId,
+          products: sql<number>`count(distinct ${bomItems.masterProductId})::int`,
+        })
+        .from(bomItems)
+        .where(inArray(bomItems.materialId, linkedIds))
+        .groupBy(bomItems.materialId);
+      for (const c of counts) {
+        if (c.materialId) usageByMaterial.set(c.materialId, c.products);
+      }
+    }
+
     const lines = recipe.map(({ bom: m, catalogName, catalogUnit, catalogCost, catalogStock }) => {
       const linked = m.materialId != null && catalogName != null;
       const unitCost = linked ? num(catalogCost) : num(m.unitCost);
@@ -298,6 +314,8 @@ export class CostingService {
         currentStock: linked ? num(catalogStock) : null,
         /** False for rows written before the catalogue existed. */
         isLinked: linked,
+        /** How many products use this material; >1 means a price edit spreads. */
+        usedByProducts: linked && m.materialId ? (usageByMaterial.get(m.materialId) ?? 1) : 1,
       };
     });
 
@@ -545,15 +563,55 @@ export class CostingService {
   }
 
   /** Quantity + unit cost only; the rest of a material lives in the BOM module. */
+  /**
+   * Quantity is per product; PRICE is not.
+   *
+   * Once a line is linked to the catalogue, HPP reads the price from there —
+   * so writing it onto the recipe row, as this used to, changed a column
+   * nothing reads and the edit silently did nothing. A material's price
+   * belongs to the material: editing it here updates the catalogue and every
+   * product using it, which is the point of one material serving several
+   * products. The page says so next to the field, because a change with reach
+   * beyond the screen you are on must not be a surprise.
+   */
   async updateMaterial(userId: string, bomItemId: string, dto: UpdateMaterialCostDto) {
     const productId = await this.getMaterialProductOrThrow(userId, bomItemId);
+    const [row] = await this.db
+      .select({ id: bomItems.id, materialId: bomItems.materialId })
+      .from(bomItems)
+      .where(eq(bomItems.id, bomItemId))
+      .limit(1);
+    if (!row) throw new NotFoundException("Baris resep tidak ditemukan.");
 
-    const set: Record<string, unknown> = {};
-    if (dto.quantity != null) set.quantity = dto.quantity.toFixed(3);
-    if (dto.unitCost != null) set.unitCost = dto.unitCost.toFixed(2);
-    if (Object.keys(set).length) {
-      await this.db.update(bomItems).set(set).where(eq(bomItems.id, bomItemId));
+    if (dto.quantity != null) {
+      await this.db
+        .update(bomItems)
+        .set({ quantity: dto.quantity.toFixed(3) })
+        .where(eq(bomItems.id, bomItemId));
     }
+
+    if (dto.unitCost != null) {
+      const cost = dto.unitCost.toFixed(2);
+      if (row.materialId) {
+        await this.db
+          .update(materials)
+          .set({ unitCost: cost, updatedAt: new Date() })
+          .where(and(eq(materials.userId, userId), eq(materials.id, row.materialId)));
+        // Keep the denormalised copies in step. Nothing reads them for linked
+        // lines any more, but leaving them behind would make the two disagree
+        // for anyone reading the table directly.
+        await this.db
+          .update(bomItems)
+          .set({ unitCost: cost })
+          .where(eq(bomItems.materialId, row.materialId));
+      } else {
+        await this.db
+          .update(bomItems)
+          .set({ unitCost: cost })
+          .where(eq(bomItems.id, bomItemId));
+      }
+    }
+
     return this.detail(userId, productId);
   }
 

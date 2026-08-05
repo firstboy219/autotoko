@@ -29,6 +29,12 @@ import {
 } from "../components/ui";
 
 interface MaterialLine {
+  materialId?: string | null;
+  /** False for rows written before the shared catalogue existed. */
+  isLinked?: boolean;
+  /** Products sharing this material; >1 means a price edit reaches them too. */
+  usedByProducts?: number;
+  currentStock?: number | null;
   id: string;
   materialName: string;
   unit: string | null;
@@ -604,6 +610,11 @@ function MaterialRow({ m, onChange }: { m: MaterialLine; onChange: () => void })
     <TR>
       <TD>
         <div className="text-ink">{m.materialName}</div>
+        {(m.usedByProducts ?? 1) > 1 && (
+          <div className="text-[10px] text-ink-3 mt-0.5">
+            dipakai {m.usedByProducts} produk
+          </div>
+        )}
         {m.unit && <div className="text-xs text-ink-3 mt-0.5">satuan: {m.unit}</div>}
       </TD>
       <TD align="right">
@@ -626,6 +637,16 @@ function MaterialRow({ m, onChange }: { m: MaterialLine; onChange: () => void })
           invalid={Number(cost) <= 0}
           className="w-32 text-right tabular-nums"
         />
+        {/* A price change reaches every product using this material, so say so
+            before it is saved rather than leaving it to be discovered. */}
+        {(m.usedByProducts ?? 1) > 1 && Number(cost) !== m.unitCost && (
+          <div className="text-[10px] text-warn mt-1 text-right">
+            Dipakai {m.usedByProducts} produk &mdash; harga ikut berubah di semuanya
+          </div>
+        )}
+        {m.isLinked === false && (
+          <div className="text-[10px] text-ink-3 mt-1 text-right">belum di master data</div>
+        )}
       </TD>
       <TD align="right">
         <div className="flex items-center justify-end gap-2">
