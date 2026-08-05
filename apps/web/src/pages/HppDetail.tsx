@@ -87,7 +87,16 @@ interface Detail {
   materials: MaterialLine[];
   packingMaterials: PackingLine[];
   costing: Costing;
-  hpp: { materialCost: number; serviceCost: number; packingCost: number; total: number };
+  hpp: {
+    materialCost: number;
+    serviceCost: number;
+    packingCost: number;
+    packingMaterialCost: number;
+    packingOtherCost: number;
+    packingMaterialPerOrder: number;
+    packingOtherPerOrder: number;
+    total: number;
+  };
   pricing: Pricing | null;
 }
 
@@ -352,15 +361,26 @@ function HppSection({
               <dt className="text-ink-2">Biaya jasa produksi</dt>
               <dd className="text-ink tabular-nums">{rupiah(data.hpp.serviceCost)}</dd>
             </div>
-            {data.hpp.packingCost > 0 && (
+            {data.hpp.packingMaterialCost > 0 && (
               <div className="flex justify-between">
                 <dt className="text-ink-2">
-                  Biaya packing{" "}
+                  Bahan baku packing{" "}
                   <span className="text-ink-3">
-                    ({rupiah(data.costing.packingCostPerOrder)}/resi ÷ {data.costing.avgUnitsPerOrder} pcs)
+                    ({rupiah(data.hpp.packingMaterialPerOrder)}/resi ÷ {data.costing.avgUnitsPerOrder} pcs)
                   </span>
                 </dt>
-                <dd className="text-ink tabular-nums">{rupiah(data.hpp.packingCost)}</dd>
+                <dd className="text-ink tabular-nums">{rupiah(data.hpp.packingMaterialCost)}</dd>
+              </div>
+            )}
+            {data.hpp.packingOtherCost > 0 && (
+              <div className="flex justify-between">
+                <dt className="text-ink-2">
+                  Biaya packing lain{" "}
+                  <span className="text-ink-3">
+                    ({rupiah(data.hpp.packingOtherPerOrder)}/resi ÷ {data.costing.avgUnitsPerOrder} pcs)
+                  </span>
+                </dt>
+                <dd className="text-ink tabular-nums">{rupiah(data.hpp.packingOtherCost)}</dd>
               </div>
             )}
             <div className="flex justify-between pt-2 mt-1 border-t border-line">

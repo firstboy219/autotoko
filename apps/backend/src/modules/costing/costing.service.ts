@@ -311,6 +311,11 @@ export class CostingService {
       avgUnitsPerOrder: num(cfg.avgUnitsPerOrder),
     });
 
+    // Same guard the shared calculator uses: a blank or zero average would
+    // send the per-unit share to Infinity.
+    const unitsPerOrder = num(cfg.avgUnitsPerOrder) > 0 ? num(cfg.avgUnitsPerOrder) : 1;
+    const packingMaterialPerUnitCents = Math.round(hpp.packingMaterialCostCents / unitsPerOrder);
+
     const publishPrice = cfg.publishPrice != null ? num(cfg.publishPrice) : null;
     const pricing =
       publishPrice != null
@@ -326,6 +331,16 @@ export class CostingService {
         materialCost: rupiah(hpp.materialCostCents),
         serviceCost: rupiah(hpp.serviceCostCents),
         packingCost: rupiah(hpp.packingCostCents),
+        // Split so the page can show WHERE the packing cost comes from. The
+        // "other" share is derived by subtraction rather than rounded
+        // separately, so the two lines always add up to packingCost exactly —
+        // a breakdown whose parts do not sum to its total is worse than no
+        // breakdown at all.
+        packingMaterialCost: rupiah(packingMaterialPerUnitCents),
+        packingOtherCost: rupiah(hpp.packingCostCents - packingMaterialPerUnitCents),
+        /** Per shipment, before being spread across the units in it. */
+        packingMaterialPerOrder: rupiah(hpp.packingMaterialCostCents),
+        packingOtherPerOrder: rupiah(hpp.packingPerOrderCents - hpp.packingMaterialCostCents),
         total: rupiah(hpp.hppCents),
       },
       pricing: pricing ? this.serialisePricing(pricing) : null,
