@@ -261,6 +261,40 @@ function BatchProgress({ batch, onDone }: { batch: BatchDetail; onDone: () => vo
     }
   }
 
+  /**
+   * Back to step 1.
+   *
+   * Closing input wrote a transfer row per recipient, so going back deletes
+   * them — and with them any proof already uploaded. The server refuses the
+   * first attempt when that would destroy work and says how much; only then do
+   * we ask, and only a yes sends force. A "back" button must never quietly
+   * throw away evidence somebody photographed and uploaded.
+   */
+  async function reopenInput(force: boolean) {
+    setBusy(true);
+    try {
+      await api.post(`/payout/batches/${batch.id}/reopen-input`, force ? { force: true } : {});
+      toast("Kembali ke tahap Rekam Pencairan", "success");
+      onDone();
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (!force && /bukti|validasi/i.test(msg)) {
+        if (
+          window.confirm(
+            `${msg}\n\nLanjutkan? Bukti transfer yang sudah diunggah akan hilang dan tidak bisa dikembalikan.`,
+          )
+        ) {
+          setBusy(false);
+          return reopenInput(true);
+        }
+      } else {
+        toast(msg, "danger");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // The single most important thing on this page: what do I do next.
   let nextAction: React.ReactNode = null;
   let nextHint = "";
@@ -270,15 +304,34 @@ function BatchProgress({ batch, onDone }: { batch: BatchDetail; onDone: () => vo
         ? "Rekam pencairan minimal satu toko untuk melanjutkan."
         : `${batch.mutations.length} toko sudah direkam. Lanjutkan bila semua toko selesai direkam.`;
     nextAction = (
-      <Button
-        variant="filled"
-        iconRight="arrowRight"
-        disabled={batch.mutations.length === 0}
-        loading={busy}
-        onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close-input`), "Input ditutup — rekap transfer dibuat")}
-      >
-        Selesai Pencairan Semua Toko
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        {batch.mutations.length > 0 && (
+          <Button
+            variant="outline"
+            icon="refresh"
+            loading={busy}
+            onClick={() =>
+              run(async () => {
+                const r = await api.post<{ total: number; changed: number }>(
+                  `/payout/batches/${batch.id}/recalculate`,
+                );
+                return r;
+              }, "Perhitungan diperbarui")
+            }
+          >
+            Hitung Ulang
+          </Button>
+        )}
+        <Button
+          variant="filled"
+          iconRight="arrowRight"
+          disabled={batch.mutations.length === 0}
+          loading={busy}
+          onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close-input`), "Input ditutup — rekap transfer dibuat")}
+        >
+          Selesai Pencairan Semua Toko
+        </Button>
+      </div>
     );
   } else if (batch.status === "siap_distribusi") {
     nextHint =
@@ -286,15 +339,25 @@ function BatchProgress({ batch, onDone }: { batch: BatchDetail; onDone: () => vo
         ? `${notReady.length} transfer belum tervalidasi. Upload bukti atau override dulu.`
         : "Semua transfer sudah tervalidasi. Batch siap ditutup.";
     nextAction = (
-      <Button
-        variant="filled"
-        iconRight="check"
-        disabled={notReady.length > 0}
-        loading={busy}
-        onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close`), "Batch ditutup")}
-      >
-        Tutup Batch
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="outline"
+          icon="arrowLeft"
+          loading={busy}
+          onClick={() => reopenInput(false)}
+        >
+          Kembali ke Rekam Pencairan
+        </Button>
+        <Button
+          variant="filled"
+          iconRight="check"
+          disabled={notReady.length > 0}
+          loading={busy}
+          onClick={() => run(() => api.post(`/payout/batches/${batch.id}/close`), "Batch ditutup")}
+        >
+          Tutup Batch
+        </Button>
+      </div>
     );
   } else {
     nextHint = "Batch sudah ditutup. Tidak ada tindakan lagi.";

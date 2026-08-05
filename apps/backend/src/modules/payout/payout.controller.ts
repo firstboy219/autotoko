@@ -32,6 +32,7 @@ import {
   UploadDisbursementProofDto,
   OverrideDisbursementDto,
   OcrExtractDto,
+  ReopenBatchDto,
 } from "./dto.js";
 
 function uid(req: FastifyRequest): string {
@@ -160,6 +161,22 @@ export class PayoutController {
   }
 
   /** Tahap 4 — "Tutup Batch": only once every disbursement is validated/overridden. */
+  /** Step 2 back to step 1. force=true accepts discarding uploaded proofs. */
+  @Post("batches/:id/reopen-input")
+  async reopenInput(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: ReopenBatchDto,
+  ) {
+    return ok(await this.batches.reopenInput(uid(req), id, dto?.force === true));
+  }
+
+  /** Recompute every mutation from today's settings; only while still open. */
+  @Post("batches/:id/recalculate")
+  async recalculateBatch(@Req() req: FastifyRequest, @Param("id") id: string) {
+    return ok(await this.mutations.recalculateBatch(uid(req), id));
+  }
+
   @Post("batches/:id/close")
   async closeBatch(@Req() req: FastifyRequest, @Param("id") id: string) {
     return ok(await this.batches.closeBatch(uid(req), id));

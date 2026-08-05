@@ -334,17 +334,35 @@ export class CostingService {
     const unitsPerOrder = num(cfg.avgUnitsPerOrder) > 0 ? num(cfg.avgUnitsPerOrder) : 1;
     const packingMaterialPerUnitCents = Math.round(hpp.packingMaterialCostCents / unitsPerOrder);
 
-    const publishPrice = cfg.publishPrice != null ? num(cfg.publishPrice) : null;
+    // A price already set on the master product is the answer to "what do we
+    // sell this for" — showing 0 next to it just because the costing row has
+    // not been filled in makes the page look wrong and invites re-typing a
+    // number the seller has already given us.
+    const inheritedPrice = product.basePrice != null ? num(product.basePrice) : null;
+    const publishPrice =
+      cfg.publishPrice != null ? num(cfg.publishPrice) : inheritedPrice;
+    const publishPriceInherited = cfg.publishPrice == null && inheritedPrice != null;
     const pricing =
       publishPrice != null
         ? calculatePublishPricing(this.pricingInput(cfg, publishPrice, hpp.hppCents))
         : null;
 
     return {
-      product: { id: product.id, sku: product.sku, name: product.name },
+      product: {
+        id: product.id,
+        sku: product.sku,
+        name: product.name,
+        basePrice: inheritedPrice,
+      },
+      /** True when the price shown came from the master product, not costing. */
+      publishPriceInherited,
       materials: lines,
       packingMaterials: packing,
-      costing: this.serialiseCosting(cfg),
+      // The effective price, not the raw column: serialiseCosting reports what
+      // is stored, which is null while the product is still inheriting its
+      // price from the master product. Sending that through made the page show
+      // 0 next to a product that plainly has a price.
+      costing: { ...this.serialiseCosting(cfg), publishPrice },
       hpp: {
         materialCost: rupiah(hpp.materialCostCents),
         serviceCost: rupiah(hpp.serviceCostCents),
@@ -379,6 +397,17 @@ export class CostingService {
     // publishPrice is explicitly nullable — null clears it back to "not set".
     if (dto.publishPrice !== undefined) {
       set.publishPrice = dto.publishPrice == null ? null : money(dto.publishPrice);
+      // Keep the master product in step. Two places holding "the selling
+      // price" is already one too many; letting them drift would mean the
+      // catalogue and the costing page quietly disagree about what this
+      // product costs the customer. Clearing it here leaves the master
+      // product alone — that is "no override", not "no price".
+      if (dto.publishPrice != null) {
+        await this.db
+          .update(masterProducts)
+          .set({ basePrice: money(dto.publishPrice), updatedAt: new Date() })
+          .where(and(eq(masterProducts.userId, userId), eq(masterProducts.id, productId)));
+      }
     }
     if (dto.marketplaceFeeRate != null) set.marketplaceFeeRate = rate(dto.marketplaceFeeRate);
     if (dto.eventRate != null) set.eventRate = rate(dto.eventRate);

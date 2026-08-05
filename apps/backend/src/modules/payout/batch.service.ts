@@ -1,10 +1,12 @@
 ﻿import {
+  ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
 } from "@nestjs/common";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   payoutBatches,
@@ -20,6 +22,8 @@ const toCents = (v: string | number | null) => Math.round(Number(v ?? 0) * 100);
 
 @Injectable()
 export class PayoutBatchService {
+  private readonly logger = new Logger(PayoutBatchService.name);
+
   constructor(
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly disbursements: DisbursementsService,
@@ -155,6 +159,75 @@ export class PayoutBatchService {
   }
 
   /** "Tutup Batch" (Tahap 4): only once every disbursement is validated or overridden. */
+  /**
+   * Step 2 back to step 1.
+   *
+   * closeInput does real work — it writes a transfer row per recipient and
+   * marks every mutation completed — so going back has to undo it rather than
+   * just flipping the status, or the next close would append a second set of
+   * transfers beside the first.
+   *
+   * Refuses by default when any transfer already carries proof or has been
+   * validated, and says exactly which: that evidence was uploaded by hand and
+   * deleting it silently to satisfy a "back" button would be the worst kind of
+   * helpfulness. `force` is the caller stating they accept losing it, which
+   * the page asks for in as many words.
+   */
+  async reopenInput(userId: string, id: string, force = false) {
+    const batch = await this.getOrThrow(userId, id);
+    if (batch.status === "berjalan") return batch;
+    if (batch.status !== "siap_distribusi") {
+      throw new BadRequestException(
+        `Batch sudah "${batch.status}" — hanya batch di tahap Transfer & Bukti yang bisa dikembalikan.`,
+      );
+    }
+
+    const rows = await this.disbursements.listForBatch(userId, id);
+    const withWork = rows.filter(
+      (r) => r.proofUrl != null || r.validationStatus !== "belum_upload",
+    );
+    if (withWork.length && !force) {
+      throw new ConflictException({
+        code: "HAS_PROOF",
+        message:
+          `${withWork.length} transfer sudah punya bukti/validasi. ` +
+          "Kembali ke step 1 akan menghapusnya.",
+        affected: withWork.length,
+      });
+    }
+
+    await this.db
+      .delete(payoutDisbursements)
+      .where(
+        and(
+          eq(payoutDisbursements.userId, userId),
+          or(
+            eq(payoutDisbursements.batchId, id),
+            inArray(
+              payoutDisbursements.payoutMutationId,
+              this.db
+                .select({ id: payoutMutations.id })
+                .from(payoutMutations)
+                .where(eq(payoutMutations.batchId, id)),
+            ),
+          ),
+        ),
+      );
+
+    await this.db
+      .update(payoutMutations)
+      .set({ status: "draft", updatedAt: new Date() })
+      .where(eq(payoutMutations.batchId, id));
+
+    const [row] = await this.db
+      .update(payoutBatches)
+      .set({ status: "berjalan", closedAt: null, updatedAt: new Date() })
+      .where(and(eq(payoutBatches.id, id), eq(payoutBatches.userId, userId)))
+      .returning();
+    this.logger.log(`Batch ${id} reopened for input (${withWork.length} proofs discarded)`);
+    return row;
+  }
+
   async closeBatch(userId: string, id: string) {
     const batch = await this.getOrThrow(userId, id);
     if (batch.status !== "siap_distribusi") {

@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsString,
   IsOptional,
   IsNumber,
@@ -128,4 +129,9 @@ export class CreateAdjustmentDto {
 
 export class OcrExtractDto {
   @IsString() @MaxLength(1024) imageUrl!: string;
+}
+
+export class ReopenBatchDto {
+  /** Explicitly accept losing transfer proofs already uploaded. */
+  @IsOptional() @IsBoolean() force?: boolean;
 }

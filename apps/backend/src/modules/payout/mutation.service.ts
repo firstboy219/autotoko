@@ -117,6 +117,97 @@ export class PayoutMutationService {
     return row;
   }
 
+  /**
+   * Recomputes every mutation in a batch from TODAY's settings and each shop's
+   * current rates.
+   *
+   * Lives here rather than in the batch service because this is the same
+   * resolveRates + calculatePayoutSplit path used when a mutation is first
+   * recorded; a second copy over there would be free to drift from it.
+   *
+   * The split is normally frozen per mutation precisely so a rate change never
+   * restates a batch behind the operator's back. This is the deliberate
+   * opposite — they changed something and are asking for it to be applied — so
+   * it is refused once a batch has left the recording step, where transfers
+   * are already being made against the old figures.
+   */
+  async recalculateBatch(userId: string, batchId: string) {
+    const [batch] = await this.db
+      .select()
+      .from(payoutBatches)
+      .where(and(eq(payoutBatches.id, batchId), eq(payoutBatches.userId, userId)))
+      .limit(1);
+    if (!batch) throw new NotFoundException("Batch tidak ditemukan.");
+    if (batch.status !== "berjalan") {
+      throw new BadRequestException(
+        "Hitung ulang hanya bisa saat batch masih di tahap Rekam Pencairan.",
+      );
+    }
+
+    const settings = await this.ensureSettings(userId);
+    const materialReserveRate = Number(settings.materialReserveRate ?? 0);
+    const mutations = await this.db
+      .select()
+      .from(payoutMutations)
+      .where(eq(payoutMutations.batchId, batchId));
+
+    let changed = 0;
+    for (const mut of mutations) {
+      const [shop] = await this.db
+        .select()
+        .from(shops)
+        .where(and(eq(shops.id, mut.shopId), eq(shops.userId, userId)))
+        .limit(1);
+      if (!shop) continue;
+
+      const rates = await this.resolveRates(userId, shop);
+      const split = calculatePayoutSplit({
+        creditCents: toCents(mut.creditAmount),
+        sedekahRate: Number(settings.sedekahRate),
+        sedekahBasis: settings.sedekahBasis as SedekahBasis,
+        subSellerRate: rates.subSellerRate,
+        subSubSellerRate: rates.subSubSellerRate,
+        materialReserveRate,
+      });
+
+      const next = {
+        sedekahAmount: fromCents(split.sedekahCents),
+        sellerAmount: fromCents(split.sellerCents),
+        sellerMaterialAmount: fromCents(split.sellerMaterialCents),
+        subSellerAmount: shop.subSellerId ? fromCents(split.subSellerCents) : null,
+        subSubSellerAmount: shop.subSubSellerId ? fromCents(split.subSubSellerCents) : null,
+      };
+      const differs =
+        next.sedekahAmount !== mut.sedekahAmount ||
+        next.sellerAmount !== mut.sellerAmount ||
+        next.sellerMaterialAmount !== mut.sellerMaterialAmount ||
+        next.subSellerAmount !== mut.subSellerAmount ||
+        next.subSubSellerAmount !== mut.subSubSellerAmount;
+      if (!differs) continue;
+
+      await this.db
+        .update(payoutMutations)
+        .set({
+          ...next,
+          // The snapshots move with the amounts, or a later edit would
+          // recompute from rates that never produced these figures.
+          sedekahRateUsed: settings.sedekahRate,
+          sedekahBasisUsed: settings.sedekahBasis,
+          subSellerRateUsed: rates.subSellerRate != null ? rates.subSellerRate.toFixed(4) : null,
+          subSubSellerRateUsed:
+            rates.subSubSellerRate != null ? rates.subSubSellerRate.toFixed(4) : null,
+          materialReserveRateUsed: materialReserveRate.toFixed(4),
+          subSellerId: shop.subSellerId,
+          subSubSellerId: shop.subSubSellerId,
+          updatedAt: new Date(),
+        })
+        .where(eq(payoutMutations.id, mut.id));
+      changed += 1;
+    }
+
+    return { ok: true as const, total: mutations.length, changed };
+  }
+
   async update(userId: string, id: string, dto: UpdateMutationDto) {
     const mut = await this.getOrThrow(userId, id);
     await this.requireOpenBatch(userId, mut.batchId);
