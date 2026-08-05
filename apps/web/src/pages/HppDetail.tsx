@@ -162,6 +162,63 @@ function HppSection({
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
 
+  // One draft per row, held here rather than inside the rows, so a single
+  // Save can see every change. Keyed by bom item id.
+  const [pendingEdits, setPendingEdits] = useState<
+    Record<string, { quantity: string; unitCost: string }>
+  >({});
+  const [savingRows, setSavingRows] = useState(false);
+
+  // Re-seed whenever the server sends fresh figures, which also discards
+  // drafts that have just been saved.
+  useEffect(() => {
+    const seed: Record<string, { quantity: string; unitCost: string }> = {};
+    for (const m of data.materials) {
+      seed[m.id] = { quantity: String(m.quantity), unitCost: String(m.unitCost) };
+    }
+    setPendingEdits(seed);
+  }, [data.materials]);
+
+  const changedRows = data.materials.filter((m) => {
+    const d = pendingEdits[m.id];
+    if (!d) return false;
+    return Number(d.quantity) !== m.quantity || Number(d.unitCost) !== m.unitCost;
+  });
+
+  /**
+   * Saves every changed row, then reloads once.
+   *
+   * allSettled rather than all: one bad row must not abandon the others
+   * half-written, and the operator needs to be told exactly which failed
+   * rather than seeing a single generic error.
+   */
+  async function saveRows() {
+    if (!changedRows.length) return;
+    setSavingRows(true);
+    try {
+      const results = await Promise.allSettled(
+        changedRows.map((m) =>
+          api.patch(`/costing/materials/${m.id}`, {
+            quantity: Number(pendingEdits[m.id]!.quantity) || 0,
+            unitCost: Number(pendingEdits[m.id]!.unitCost) || 0,
+          }),
+        ),
+      );
+      const failed = results
+        .map((r, i) => (r.status === "rejected" ? changedRows[i]!.materialName : null))
+        .filter((n): n is string => n !== null);
+
+      if (failed.length) {
+        toast(`Gagal menyimpan: ${failed.join(", ")}`, "danger");
+      } else {
+        toast(`${changedRows.length} bahan diperbarui`, "success");
+      }
+      onChange();
+    } finally {
+      setSavingRows(false);
+    }
+  }
+
   useEffect(() => {
     setService(String(data.costing.serviceCostPerPcs));
     setPacking(String(data.costing.packingCostPerOrder));
@@ -259,7 +316,18 @@ function HppSection({
             </THead>
             <tbody>
               {data.materials.map((m) => (
-                <MaterialRow key={m.id} m={m} onChange={onChange} />
+                <MaterialRow
+                  key={m.id}
+                  m={m}
+                  draft={
+                    pendingEdits[m.id] ?? {
+                      quantity: String(m.quantity),
+                      unitCost: String(m.unitCost),
+                    }
+                  }
+                  onDraft={(next) => setPendingEdits((p) => ({ ...p, [m.id]: next }))}
+                  onChange={onChange}
+                />
               ))}
               <TR className="bg-canvas">
                 <TD colSpan={3} className="text-sm text-ink-2">
@@ -270,6 +338,43 @@ function HppSection({
                 </TD>
                 <TD />
               </TR>
+              {changedRows.length > 0 && (
+                <TR>
+                  <TD colSpan={5}>
+                    <div className="flex items-center justify-end gap-3">
+                      <span className="text-xs text-ink-2">
+                        {changedRows.length} baris diubah dan belum disimpan
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="text"
+                        disabled={savingRows}
+                        onClick={() => {
+                          const seed: Record<string, { quantity: string; unitCost: string }> = {};
+                          for (const m of data.materials) {
+                            seed[m.id] = {
+                              quantity: String(m.quantity),
+                              unitCost: String(m.unitCost),
+                            };
+                          }
+                          setPendingEdits(seed);
+                        }}
+                      >
+                        Batalkan
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="filled"
+                        icon="check"
+                        loading={savingRows}
+                        onClick={saveRows}
+                      >
+                        Simpan Perubahan
+                      </Button>
+                    </div>
+                  </TD>
+                </TR>
+              )}
             </tbody>
           </Table>
         </TableWrap>
@@ -565,34 +670,32 @@ function AddMaterialForm({
   );
 }
 
-function MaterialRow({ m, onChange }: { m: MaterialLine; onChange: () => void }) {
+/**
+ * A row is now purely a view: the values it shows and the edits it collects
+ * both live in the table above it.
+ *
+ * With per-row save buttons, editing three rows and pressing one of them saved
+ * that row and silently dropped the other two — the page reloaded and the lost
+ * edits simply were not there. Nothing warned, nothing failed. One button for
+ * the whole table cannot lose an edit it can see.
+ */
+function MaterialRow({
+  m,
+  draft,
+  onDraft,
+  onChange,
+}: {
+  m: MaterialLine;
+  draft: { quantity: string; unitCost: string };
+  onDraft: (next: { quantity: string; unitCost: string }) => void;
+  onChange: () => void;
+}) {
   const toast = useToast();
-  const [qty, setQty] = useState(String(m.quantity));
-  const [cost, setCost] = useState(String(m.unitCost));
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
 
-  useEffect(() => {
-    setQty(String(m.quantity));
-    setCost(String(m.unitCost));
-  }, [m.quantity, m.unitCost]);
-
-  const dirty = Number(qty) !== m.quantity || Number(cost) !== m.unitCost;
-  const preview = (Number(qty) || 0) * (Number(cost) || 0);
-
-  async function save() {
-    setBusy(true);
-    try {
-      await api.patch(`/costing/materials/${m.id}`, {
-        quantity: Number(qty) || 0,
-        unitCost: Number(cost) || 0,
-      });
-      toast(`${m.materialName} diperbarui`, "success");
-      onChange();
-    } finally {
-      setBusy(false);
-    }
-  }
+  const preview = (Number(draft.quantity) || 0) * (Number(draft.unitCost) || 0);
+  const costChanged = Number(draft.unitCost) !== m.unitCost;
 
   async function remove() {
     setBusy(true);
@@ -621,8 +724,10 @@ function MaterialRow({ m, onChange }: { m: MaterialLine; onChange: () => void })
         <div className="flex items-center justify-end gap-1.5">
           <Input
             inputMode="decimal"
-            value={qty}
-            onChange={(e) => setQty(e.target.value.replace(/[^\d.]/g, ""))}
+            value={draft.quantity}
+            onChange={(e) =>
+              onDraft({ ...draft, quantity: e.target.value.replace(/[^\d.]/g, "") })
+            }
             className="w-24 text-right tabular-nums"
           />
           {m.unit && <span className="text-xs text-ink-3 w-10 text-left">{m.unit}</span>}
@@ -631,15 +736,15 @@ function MaterialRow({ m, onChange }: { m: MaterialLine; onChange: () => void })
       <TD align="right">
         <Input
           inputMode="numeric"
-          value={cost ? Number(cost).toLocaleString("id-ID") : ""}
-          onChange={(e) => setCost(e.target.value.replace(/\D/g, ""))}
+          value={draft.unitCost ? Number(draft.unitCost).toLocaleString("id-ID") : ""}
+          onChange={(e) => onDraft({ ...draft, unitCost: e.target.value.replace(/\D/g, "") })}
           placeholder="0"
-          invalid={Number(cost) <= 0}
+          invalid={Number(draft.unitCost) <= 0}
           className="w-32 text-right tabular-nums"
         />
         {/* A price change reaches every product using this material, so say so
             before it is saved rather than leaving it to be discovered. */}
-        {(m.usedByProducts ?? 1) > 1 && Number(cost) !== m.unitCost && (
+        {(m.usedByProducts ?? 1) > 1 && costChanged && (
           <div className="text-[10px] text-warn mt-1 text-right">
             Dipakai {m.usedByProducts} produk &mdash; harga ikut berubah di semuanya
           </div>
@@ -648,15 +753,8 @@ function MaterialRow({ m, onChange }: { m: MaterialLine; onChange: () => void })
           <div className="text-[10px] text-ink-3 mt-1 text-right">belum di master data</div>
         )}
       </TD>
-      <TD align="right">
-        <div className="flex items-center justify-end gap-2">
-          <span className="text-ink tabular-nums">{rupiah(preview)}</span>
-          {dirty && (
-            <Button size="sm" variant="filled" loading={busy} onClick={save}>
-              Simpan
-            </Button>
-          )}
-        </div>
+      <TD align="right" className="text-ink tabular-nums">
+        {rupiah(preview)}
       </TD>
       <TD align="right">
         <button
@@ -681,7 +779,6 @@ function MaterialRow({ m, onChange }: { m: MaterialLine; onChange: () => void })
 }
 
 /* ------------------------------------------------------- publish section */
-
 const RATE_FIELDS: { key: keyof Costing; label: string; hint?: string }[] = [
   { key: "marketplaceFeeRate", label: "Biaya Marketplace", hint: "% dari harga publish" },
   { key: "eventRate", label: "Biaya Event", hint: "% dari harga publish" },
