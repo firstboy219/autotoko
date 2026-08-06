@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
 import { rupiah, dateShort } from "../lib/fmt";
 import { Icon } from "../components/Icon";
+import { ScanItemsEditor } from "../components/ScanItems";
 import {
   Badge,
   Button,
@@ -38,6 +39,8 @@ interface LabelItem {
 }
 interface Scan {
   id: string;
+  itemCount?: number;
+  unmappedCount?: number;
   resi: string;
   courier: string | null;
   source: string;
@@ -130,6 +133,9 @@ export function ProduksiPacking() {
 
   const [linking, setLinking] = useState<Scan | null>(null);
   const [photo, setPhoto] = useState<Scan | null>(null);
+  // Only one open at a time: these editors each fetch the product list, and a
+  // dozen expanded at once would be a dozen identical requests.
+  const [openItems, setOpenItems] = useState<string | null>(null);
 
   function refresh() {
     scans.reload();
@@ -255,7 +261,10 @@ export function ProduksiPacking() {
                 </TR>
               ) : (
                 rows.map((s) => (
-                  <TR key={s.id}>
+                  // Two sibling rows per scan (the row and its expanded
+                  // contents), so the key goes on the fragment.
+                  <Fragment key={s.id}>
+                  <TR>
                     <TD>
                       {s.photoUrl ? (
                         <button
@@ -318,17 +327,35 @@ export function ProduksiPacking() {
                     </TD>
 
                     <TD className="text-right">
-                      {s.orderId ? (
-                        <Button variant="text" onClick={() => unlink(s)}>
-                          Lepas
+                      <div className="flex flex-col items-end gap-1">
+                        {s.orderId ? (
+                          <Button variant="text" onClick={() => unlink(s)}>
+                            Lepas
+                          </Button>
+                        ) : (
+                          <Button variant="outline" onClick={() => setLinking(s)}>
+                            Hubungkan
+                          </Button>
+                        )}
+                        <Button
+                          variant="text"
+                          onClick={() => setOpenItems(openItems === s.id ? null : s.id)}
+                        >
+                          Isi Paket
+                          {s.itemCount ? ` (${s.itemCount})` : ""}
+                          {s.unmappedCount ? " ⚠" : ""}
                         </Button>
-                      ) : (
-                        <Button variant="outline" onClick={() => setLinking(s)}>
-                          Hubungkan
-                        </Button>
-                      )}
+                      </div>
                     </TD>
                   </TR>
+                  {openItems === s.id && (
+                    <TR>
+                      <TD colSpan={6}>
+                        <ScanItemsEditor scanId={s.id} />
+                      </TD>
+                    </TR>
+                  )}
+                  </Fragment>
                 ))
               )}
             </tbody>

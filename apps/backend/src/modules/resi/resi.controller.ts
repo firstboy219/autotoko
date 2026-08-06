@@ -121,6 +121,26 @@ class DailyQuery {
   limit?: number;
 }
 
+class ScanItemDto {
+  /** Null/omitted leaves the line unmapped, which is a valid state. */
+  @IsOptional() @IsUUID()
+  masterProductId?: string | null;
+
+  @IsOptional() @IsString() @MaxLength(255)
+  rawName?: string;
+
+  @Type(() => Number) @IsNumber() @Min(0.01)
+  qty!: number;
+}
+
+class UpdateScanItemDto {
+  @IsOptional() @IsUUID()
+  masterProductId?: string | null;
+
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0.01)
+  qty?: number;
+}
+
 class ListQuery {
   @IsOptional() @IsString() @MaxLength(64)
   q?: string;
@@ -278,6 +298,44 @@ export class ResiController {
     @Body() dto: PayDto,
   ): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.resi.unpayPacker(uid(req), dto) };
+  }
+
+  // --- What was in the parcel -----------------------------------------
+
+  @Get("scans/:id/items")
+  async listItems(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.listItems(uid(req), id) };
+  }
+
+  @Post("scans/:id/items")
+  async addItem(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: ScanItemDto,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.addItem(uid(req), id, dto) };
+  }
+
+  @Patch("scans/:id/items/:itemId")
+  async updateItem(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Param("itemId") itemId: string,
+    @Body() dto: UpdateScanItemDto,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.updateItem(uid(req), id, itemId, dto) };
+  }
+
+  @Delete("scans/:id/items/:itemId")
+  async removeItem(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Param("itemId") itemId: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.removeItem(uid(req), id, itemId) };
   }
 
   @Delete("scans/:id")

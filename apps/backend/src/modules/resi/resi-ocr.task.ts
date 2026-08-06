@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { TenantService } from "../../database/tenant.service.js";
-import { orders, resiScans } from "../../database/schema/index.js";
+import { orders, resiScanItems, resiScans } from "../../database/schema/index.js";
 import { UploadsService } from "../uploads/uploads.service.js";
 import { parseShippingLabel } from "./label-parser.js";
 
@@ -120,6 +120,27 @@ export class ResiOcrTask {
         })
         .where(eq(resiScans.id, scan.id)),
     );
+
+    // Seed the mappable lines, but only when there are none yet: re-reading a
+    // photo must not duplicate rows an operator has already corrected by hand.
+    if (parsed.items.length) {
+      await this.tenant.runBypass(async () => {
+        const [existing] = await this.db
+          .select({ id: resiScanItems.id })
+          .from(resiScanItems)
+          .where(eq(resiScanItems.resiScanId, scan.id))
+          .limit(1);
+        if (existing) return;
+        await this.db.insert(resiScanItems).values(
+          parsed.items.map((it) => ({
+            resiScanId: scan.id,
+            rawName: it.name.slice(0, 255),
+            rawQty: String(it.qty),
+            qty: String(it.qty),
+          })),
+        );
+      });
+    }
 
     this.logger.log(
       `OCR done for ${scan.resi}: order=${parsed.orderNo ?? "-"} recipient=${parsed.recipient ?? "-"} items=${parsed.items.length}`,

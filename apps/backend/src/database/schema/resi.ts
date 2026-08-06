@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { orders } from "./orders";
+import { masterProducts } from "./products";
 
 /**
  * One row per resi (waybill) recorded from the warehouse scanner app.
@@ -48,6 +49,44 @@ export const packingSettings = pgTable("packing_settings", {
   feePerResi: numeric("fee_per_resi", { precision: 15, scale: 2 }).notNull().default("0"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * What was actually inside one parcel, mapped to the seller's own products.
+ *
+ * OCR seeds this where it can, but it is not the source of truth and on real
+ * photographs it frequently finds nothing at all — every scan recorded so far
+ * has an empty label_items. So the operator maps: the label may say
+ * "mouthspray siwak x3" and they point it at "Mouthspray Siwak 100ml", or they
+ * add a line OCR never saw. Automatic name matching was deliberately left out;
+ * the seller's product names and the marketplace's rarely agree closely enough
+ * for a guess to be trustworthy, and a wrong mapping is worse than an empty
+ * one because nobody re-checks it.
+ *
+ * rawName/rawQty keep what OCR read even after the mapping is corrected, so
+ * the two can be compared later to see where the reading goes wrong.
+ */
+export const resiScanItems = pgTable(
+  "resi_scan_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    resiScanId: uuid("resi_scan_id")
+      .notNull()
+      .references(() => resiScans.id, { onDelete: "cascade" }),
+    /** Null until the operator maps it; a line can exist unmapped. */
+    masterProductId: uuid("master_product_id").references(() => masterProducts.id, {
+      onDelete: "set null",
+    }),
+    /** Exactly what OCR read, kept for comparison. Null for a hand-added line. */
+    rawName: varchar("raw_name", { length: 255 }),
+    rawQty: numeric("raw_qty", { precision: 10, scale: 2 }),
+    /** The quantity the operator stands behind. */
+    qty: numeric("qty", { precision: 10, scale: 2 }).notNull().default("1"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    scanIdx: index("resi_scan_items_scan_idx").on(t.resiScanId),
+  }),
+);
 
 export const resiScans = pgTable(
   "resi_scans",

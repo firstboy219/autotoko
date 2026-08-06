@@ -183,6 +183,13 @@
       "when": 1785852979870,
       "tag": "0025_packing_materials",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1786026560220,
+      "tag": "0026_resi_scan_items",
+      "breakpoints": true
     }
   ]
 }

@@ -6,9 +6,16 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq, ilike, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { orders, packingSettings, resiScans, shops } from "../../database/schema/index.js";
+import {
+  masterProducts,
+  orders,
+  packingSettings,
+  resiScanItems,
+  resiScans,
+  shops,
+} from "../../database/schema/index.js";
 import { UploadsService } from "../uploads/uploads.service.js";
 import { CourierTrackingService } from "./courier-tracking.service.js";
 import { ConfigService } from "@nestjs/config";
@@ -414,6 +421,13 @@ export class ResiService {
         labelRecipient: resiScans.labelRecipient,
         labelMarketplace: resiScans.labelMarketplace,
         labelItems: resiScans.labelItems,
+        itemCount: sql<number>`(
+          select count(*)::int from resi_scan_items i where i.resi_scan_id = ${resiScans.id}
+        )`,
+        unmappedCount: sql<number>`(
+          select count(*)::int from resi_scan_items i
+          where i.resi_scan_id = ${resiScans.id} and i.master_product_id is null
+        )`,
         trackingStatus: resiScans.trackingStatus,
         trackingCategory: resiScans.trackingCategory,
         packerPaidAt: resiScans.packerPaidAt,
@@ -508,6 +522,124 @@ export class ResiService {
       .where(and(...conds))
       .orderBy(desc(orders.createdAt))
       .limit(50);
+  }
+
+  // ------------------------------------------------------------------
+  // What was in the parcel
+
+  /** The mapped contents of one scan, newest lines last. */
+  async listItems(userId: string, scanId: string) {
+    await this.getScanOrThrow(userId, scanId);
+    const rows = await this.db
+      .select({
+        id: resiScanItems.id,
+        masterProductId: resiScanItems.masterProductId,
+        productName: masterProducts.name,
+        productSku: masterProducts.sku,
+        rawName: resiScanItems.rawName,
+        rawQty: resiScanItems.rawQty,
+        qty: resiScanItems.qty,
+      })
+      .from(resiScanItems)
+      .leftJoin(masterProducts, eq(resiScanItems.masterProductId, masterProducts.id))
+      .where(eq(resiScanItems.resiScanId, scanId))
+      .orderBy(asc(resiScanItems.createdAt));
+
+    return rows.map((r) => ({
+      ...r,
+      rawQty: r.rawQty != null ? Number(r.rawQty) : null,
+      qty: Number(r.qty),
+      /** False while the operator has not said which product this is. */
+      isMapped: r.masterProductId != null,
+    }));
+  }
+
+  async addItem(
+    userId: string,
+    scanId: string,
+    input: { masterProductId?: string | null; rawName?: string; qty: number },
+  ) {
+    await this.getScanOrThrow(userId, scanId);
+    if (!Number.isFinite(input.qty) || input.qty <= 0) {
+      throw new BadRequestException("Jumlah harus lebih dari 0.");
+    }
+    if (input.masterProductId) await this.assertProduct(userId, input.masterProductId);
+    if (!input.masterProductId && !input.rawName?.trim()) {
+      throw new BadRequestException("Pilih produk atau isi namanya.");
+    }
+
+    const [row] = await this.db
+      .insert(resiScanItems)
+      .values({
+        resiScanId: scanId,
+        masterProductId: input.masterProductId ?? null,
+        rawName: input.rawName?.trim().slice(0, 255) ?? null,
+        qty: input.qty.toFixed(2),
+      })
+      .returning();
+    return row;
+  }
+
+  async updateItem(
+    userId: string,
+    scanId: string,
+    itemId: string,
+    input: { masterProductId?: string | null; qty?: number },
+  ) {
+    await this.getScanOrThrow(userId, scanId);
+    const set: Record<string, unknown> = {};
+    if (input.masterProductId !== undefined) {
+      if (input.masterProductId) await this.assertProduct(userId, input.masterProductId);
+      set.masterProductId = input.masterProductId || null;
+    }
+    if (input.qty !== undefined) {
+      if (!Number.isFinite(input.qty) || input.qty <= 0) {
+        throw new BadRequestException("Jumlah harus lebih dari 0.");
+      }
+      set.qty = input.qty.toFixed(2);
+    }
+    if (!Object.keys(set).length) throw new BadRequestException("Tidak ada perubahan.");
+
+    const [row] = await this.db
+      .update(resiScanItems)
+      .set(set)
+      .where(and(eq(resiScanItems.id, itemId), eq(resiScanItems.resiScanId, scanId)))
+      .returning();
+    if (!row) throw new NotFoundException("Baris isi paket tidak ditemukan.");
+    return row;
+  }
+
+  async removeItem(userId: string, scanId: string, itemId: string) {
+    await this.getScanOrThrow(userId, scanId);
+    const [row] = await this.db
+      .delete(resiScanItems)
+      .where(and(eq(resiScanItems.id, itemId), eq(resiScanItems.resiScanId, scanId)))
+      .returning();
+    if (!row) throw new NotFoundException("Baris isi paket tidak ditemukan.");
+    return { ok: true as const };
+  }
+
+  /** Ownership check: a scan id alone proves nothing about who owns it. */
+  private async getScanOrThrow(userId: string, scanId: string) {
+    const [row] = await this.db
+      .select({ id: resiScans.id })
+      .from(resiScans)
+      .where(and(eq(resiScans.userId, userId), eq(resiScans.id, scanId)))
+      .limit(1);
+    if (!row) throw new NotFoundException("Data scan tidak ditemukan.");
+    return row;
+  }
+
+  private async assertProduct(userId: string, productId: string) {
+    const [row] = await this.db
+      .select({ id: masterProducts.id })
+      .from(masterProducts)
+      .where(and(eq(masterProducts.userId, userId), eq(masterProducts.id, productId)))
+      .limit(1);
+    // Without this a request could point a scan line at another tenant's
+    // product; no RLS policy on resi_scan_items would catch it, since the
+    // scan being written to is legitimately theirs.
+    if (!row) throw new NotFoundException("Produk tidak ditemukan.");
   }
 
   // ------------------------------------------------------------------
