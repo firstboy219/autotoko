@@ -45,7 +45,13 @@ async function main() {
   const worker = await createWorker("ind+eng");
   try {
     const { data } = await worker.recognize(buffer);
-    process.stdout.write(JSON.stringify({ text: data.text ?? "" }));
+    // Confidence travels with the text so a caller can present a reading as
+    // a guess rather than a fact. On warehouse label photos this comes back
+    // between 32 and 50, which is exactly the range where tesseract invents
+    // digits instead of leaving them out.
+    process.stdout.write(
+      JSON.stringify({ text: data.text ?? "", confidence: data.confidence ?? null }),
+    );
     process.exit(0);
   } finally {
     await worker.terminate();

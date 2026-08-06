@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -121,11 +122,44 @@ export const resiScans = pgTable(
     ocrAttempts: integer("ocr_attempts").notNull().default(0),
     ocrAt: timestamp("ocr_at", { withTimezone: true }),
     ocrText: text("ocr_text"),
+    /** 0-100, as tesseract reported it. On these photos it runs 32-50. */
+    ocrConfidence: numeric("ocr_confidence", { precision: 5, scale: 2 }),
+
+    // Everything the label prints, read off four real photographs: the sending
+    // shop and its city, the recipient with area and street, the service
+    // level, weight, COD flag, the courier's sortation code, the order and
+    // package ids, the buyer's nickname, the product table and its total.
+    //
+    // All nullable and expected to stay that way for a while. Tesseract reads
+    // the large print sometimes and the small print never, so in practice
+    // these are filled in by the operator on the Produksi & Packing page. The
+    // columns exist so that both routes have somewhere to put an answer.
     labelOrderNo: varchar("label_order_no", { length: 128 }),
     labelRecipient: varchar("label_recipient", { length: 255 }),
+    labelRecipientArea: varchar("label_recipient_area", { length: 200 }),
+    labelRecipientAddress: varchar("label_recipient_address", { length: 400 }),
+    /** The seller's own shop name, as the courier prints it under "Pengirim". */
+    labelSenderName: varchar("label_sender_name", { length: 160 }),
+    labelSenderArea: varchar("label_sender_area", { length: 160 }),
     labelMarketplace: varchar("label_marketplace", { length: 32 }),
+    /** Courier service level: ECO, EZ, REG. */
+    labelService: varchar("label_service", { length: 32 }),
+    labelWeightKg: numeric("label_weight_kg", { precision: 10, scale: 3 }),
+    labelCod: boolean("label_cod"),
+    /** J&T's destination sortation code, e.g. "260-BKH08-05". */
+    labelSortCode: varchar("label_sort_code", { length: 48 }),
+    labelPackageId: varchar("label_package_id", { length: 64 }),
+    labelBuyerNickname: varchar("label_buyer_nickname", { length: 120 }),
+    labelQtyTotal: numeric("label_qty_total", { precision: 10, scale: 2 }),
+    labelShipDate: varchar("label_ship_date", { length: 32 }),
     /** [{ name, qty }] read off the label's product block. */
     labelItems: jsonb("label_items").$type<{ name: string; qty: number }[]>(),
+    /**
+     * Set the moment a human corrects any label field. The background reader
+     * checks it and leaves those columns alone: a re-read exists to improve on
+     * a machine guess, never to overwrite a correction.
+     */
+    labelEditedAt: timestamp("label_edited_at", { withTimezone: true }),
 
     // --- Packing wage. Paying per parcel means the record of what was paid
     // has to live on the parcel.

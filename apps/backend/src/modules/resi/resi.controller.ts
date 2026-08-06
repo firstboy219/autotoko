@@ -141,6 +141,48 @@ class UpdateScanItemDto {
   qty?: number;
 }
 
+/**
+ * Corrections to what the label says.
+ *
+ * Every field is optional and every field accepts null, which is the point:
+ * OCR reads the fine print on these photographs essentially never, so most of
+ * these arrive from a keyboard, and an operator who finds a wrong guess must
+ * be able to empty the box as well as retype it.
+ */
+class LabelDto {
+  @IsOptional() @IsString() @MaxLength(128) orderNo?: string | null;
+  @IsOptional() @IsString() @MaxLength(255) recipient?: string | null;
+  @IsOptional() @IsString() @MaxLength(200) recipientArea?: string | null;
+  @IsOptional() @IsString() @MaxLength(400) recipientAddress?: string | null;
+  /** The seller's own shop, as printed under "Pengirim". */
+  @IsOptional() @IsString() @MaxLength(160) senderName?: string | null;
+  @IsOptional() @IsString() @MaxLength(160) senderArea?: string | null;
+  @IsOptional() @IsString() @MaxLength(32) marketplace?: string | null;
+  @IsOptional() @IsString() @MaxLength(32) service?: string | null;
+  @IsOptional() @IsString() @MaxLength(48) sortCode?: string | null;
+  @IsOptional() @IsString() @MaxLength(64) packageId?: string | null;
+  @IsOptional() @IsString() @MaxLength(120) buyerNickname?: string | null;
+  @IsOptional() @IsString() @MaxLength(32) shipDate?: string | null;
+
+  @IsOptional() @IsBoolean() cod?: boolean | null;
+
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(1000) weightKg?: number | null;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(9999) qtyTotal?: number | null;
+}
+
+class RecheckBulkDto {
+  /** Hand-picked scans. Takes precedence over scope when both are sent. */
+  @IsOptional() @IsArray() @IsUUID("4", { each: true })
+  ids?: string[];
+
+  /** failed = the reader gave up, blank = it read nothing useful. */
+  @IsOptional() @IsIn(["failed", "blank", "all"])
+  scope?: "failed" | "blank" | "all";
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
+  limit?: number;
+}
+
 class ListQuery {
   @IsOptional() @IsString() @MaxLength(64)
   q?: string;
@@ -336,6 +378,55 @@ export class ResiController {
     @Param("itemId") itemId: string,
   ): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.resi.removeItem(uid(req), id, itemId) };
+  }
+
+  // --- What the label says, and reading it again ----------------------
+
+  /** Every field recorded from one label, plus the raw OCR text behind it. */
+  @Get("scans/:id/label")
+  async labelDetail(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.labelDetail(uid(req), id) };
+  }
+
+  /** Correct the label by hand; stops the reader overwriting what you typed. */
+  @Patch("scans/:id/label")
+  async updateLabel(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: LabelDto,
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.resi.updateLabel(uid(req), id, dto as Record<string, never>),
+    };
+  }
+
+  /** Queue this scan's saved photo to be read again. */
+  @Post("scans/:id/recheck-ocr")
+  async recheckOcr(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.recheckOcr(uid(req), id) };
+  }
+
+  /** Queue a batch: named ids, or everything that failed or came back blank. */
+  @Post("recheck-ocr")
+  async recheckOcrBulk(
+    @Req() req: FastifyRequest,
+    @Body() dto: RecheckBulkDto,
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.resi.recheckOcrBulk(uid(req), {
+        ids: dto.ids,
+        scope: dto.scope,
+        limit: dto.limit,
+      }),
+    };
   }
 
   @Delete("scans/:id")

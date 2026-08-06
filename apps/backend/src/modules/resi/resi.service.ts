@@ -417,9 +417,15 @@ export class ResiService {
         scannedAt: resiScans.scannedAt,
         photoUrl: resiScans.photoUrl,
         ocrStatus: resiScans.ocrStatus,
+        ocrConfidence: resiScans.ocrConfidence,
         labelOrderNo: resiScans.labelOrderNo,
         labelRecipient: resiScans.labelRecipient,
+        labelSenderName: resiScans.labelSenderName,
         labelMarketplace: resiScans.labelMarketplace,
+        labelService: resiScans.labelService,
+        labelSortCode: resiScans.labelSortCode,
+        labelCod: resiScans.labelCod,
+        labelEditedAt: resiScans.labelEditedAt,
         labelItems: resiScans.labelItems,
         itemCount: sql<number>`(
           select count(*)::int from resi_scan_items i where i.resi_scan_id = ${resiScans.id}
@@ -640,6 +646,214 @@ export class ResiService {
     // product; no RLS policy on resi_scan_items would catch it, since the
     // scan being written to is legitimately theirs.
     if (!row) throw new NotFoundException("Produk tidak ditemukan.");
+  }
+
+  // ------------------------------------------------------------------
+  // The label itself
+  // ------------------------------------------------------------------
+
+  /**
+   * Everything recorded from one label, plus how the reading went.
+   *
+   * The raw OCR text comes back too. It is unglamorous but it is the only way
+   * an operator can tell "the photo is unreadable" from "the parser missed
+   * it", and that difference decides whether they retake the photo or type the
+   * value in.
+   */
+  async labelDetail(userId: string, scanId: string) {
+    const [row] = await this.db
+      .select()
+      .from(resiScans)
+      .where(and(eq(resiScans.userId, userId), eq(resiScans.id, scanId)))
+      .limit(1);
+    if (!row) throw new NotFoundException("Data scan tidak ditemukan.");
+
+    return {
+      id: row.id,
+      resi: row.resi,
+      courier: row.courier,
+      photoUrl: row.photoUrl,
+      scannedAt: row.scannedAt,
+      ocr: {
+        status: row.ocrStatus,
+        attempts: row.ocrAttempts,
+        at: row.ocrAt,
+        confidence: row.ocrConfidence != null ? Number(row.ocrConfidence) : null,
+        /** Trimmed: the column holds up to 20k characters of mostly noise. */
+        text: row.ocrText ? row.ocrText.slice(0, 6000) : null,
+        textLength: row.ocrText?.length ?? 0,
+        canRecheck: row.photoUrl != null,
+      },
+      editedAt: row.labelEditedAt,
+      label: {
+        orderNo: row.labelOrderNo,
+        recipient: row.labelRecipient,
+        recipientArea: row.labelRecipientArea,
+        recipientAddress: row.labelRecipientAddress,
+        senderName: row.labelSenderName,
+        senderArea: row.labelSenderArea,
+        marketplace: row.labelMarketplace,
+        service: row.labelService,
+        weightKg: row.labelWeightKg != null ? Number(row.labelWeightKg) : null,
+        cod: row.labelCod,
+        sortCode: row.labelSortCode,
+        packageId: row.labelPackageId,
+        buyerNickname: row.labelBuyerNickname,
+        qtyTotal: row.labelQtyTotal != null ? Number(row.labelQtyTotal) : null,
+        shipDate: row.labelShipDate,
+      },
+    };
+  }
+
+  /** Fields the operator may correct, and the column each one writes. */
+  private static readonly LABEL_FIELDS = {
+    orderNo: "labelOrderNo",
+    recipient: "labelRecipient",
+    recipientArea: "labelRecipientArea",
+    recipientAddress: "labelRecipientAddress",
+    senderName: "labelSenderName",
+    senderArea: "labelSenderArea",
+    marketplace: "labelMarketplace",
+    service: "labelService",
+    sortCode: "labelSortCode",
+    packageId: "labelPackageId",
+    buyerNickname: "labelBuyerNickname",
+    shipDate: "labelShipDate",
+  } as const;
+
+  /**
+   * Correct what the label says.
+   *
+   * This is not a convenience. OCR reads the small print on these photographs
+   * essentially never, so without a keyboard route the columns would stay
+   * empty forever and the data would exist only as a photograph.
+   *
+   * Writing here stamps labelEditedAt, which stops the background reader from
+   * overwriting the correction on its next pass.
+   */
+  async updateLabel(
+    userId: string,
+    scanId: string,
+    dto: Record<string, string | number | boolean | null | undefined>,
+  ) {
+    await this.getScanOrThrow(userId, scanId);
+
+    // undefined means "not sent, leave it alone"; null and "" mean "clear it".
+    //
+    // The distinction is not academic. `dto` is a validated class instance, so
+    // every declared property exists on it whether or not the client sent one,
+    // and the fields nobody sent arrive as undefined. Treating undefined the
+    // same as null made a request correcting a single field empty every other
+    // field on the label — caught end-to-end against production, where a PATCH
+    // of just the nickname wiped the shop, the recipient and the order number.
+    const set: Record<string, unknown> = {};
+    for (const [key, column] of Object.entries(ResiService.LABEL_FIELDS)) {
+      const raw = dto[key];
+      if (raw === undefined) continue;
+      // An emptied box means "there is nothing there", which is a real answer
+      // and has to be storable — otherwise a wrong OCR guess can be corrected
+      // to a different wrong value but never cleared.
+      const value = typeof raw === "string" ? raw.trim() : raw;
+      set[column] = value === "" || value === null ? null : value;
+    }
+    if (dto.cod !== undefined) set.labelCod = dto.cod === null ? null : Boolean(dto.cod);
+    for (const [key, column] of [
+      ["weightKg", "labelWeightKg"],
+      ["qtyTotal", "labelQtyTotal"],
+    ] as const) {
+      const n = dto[key];
+      if (n === undefined) continue;
+      set[column] = n === null || n === "" ? null : Number(n).toFixed(key === "weightKg" ? 3 : 2);
+    }
+
+    if (!Object.keys(set).length) {
+      throw new BadRequestException("Tidak ada data label yang dikirim.");
+    }
+    set.labelEditedAt = new Date();
+
+    await this.db.update(resiScans).set(set).where(eq(resiScans.id, scanId));
+    return this.labelDetail(userId, scanId);
+  }
+
+  /**
+   * Read the saved photo again.
+   *
+   * Worth being honest about what this buys: the reader is unchanged, so a
+   * re-read of a clear photo mostly reproduces the same answer. It earns its
+   * place in three cases — a reading that failed on a transient error, a photo
+   * whose product lines were deleted and should be seeded again, and any
+   * future improvement to the reader, which this makes retroactive across
+   * every photo already on disk. Corrections typed by hand survive it.
+   */
+  async recheckOcr(userId: string, scanId: string) {
+    const [row] = await this.db
+      .select({ id: resiScans.id, photoUrl: resiScans.photoUrl, status: resiScans.ocrStatus })
+      .from(resiScans)
+      .where(and(eq(resiScans.userId, userId), eq(resiScans.id, scanId)))
+      .limit(1);
+    if (!row) throw new NotFoundException("Data scan tidak ditemukan.");
+    if (!row.photoUrl) {
+      throw new BadRequestException("Scan ini tidak punya foto, tidak ada yang bisa dibaca ulang.");
+    }
+
+    // Attempts go back to zero so a scan that previously exhausted its three
+    // tries gets a fresh set rather than failing again immediately.
+    await this.db
+      .update(resiScans)
+      .set({ ocrStatus: "pending", ocrAttempts: 0 })
+      .where(eq(resiScans.id, scanId));
+
+    return { ok: true as const, ocrStatus: "pending" as const, queued: 1 };
+  }
+
+  /**
+   * Queue a batch for re-reading.
+   *
+   * Capped rather than unbounded: each photo costs seconds of CPU on a box
+   * that also serves the API, and a whole archive queued at once would run the
+   * background reader flat out for hours.
+   */
+  async recheckOcrBulk(
+    userId: string,
+    opts: { ids?: string[]; scope?: "failed" | "blank" | "all"; limit?: number },
+  ) {
+    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
+    const conds = [
+      eq(resiScans.userId, userId),
+      sql`${resiScans.photoUrl} is not null`,
+      // Already queued: leave it alone rather than resetting its attempt count
+      // out from under a read that may be running right now.
+      ne(resiScans.ocrStatus, "pending"),
+    ];
+
+    if (opts.ids?.length) {
+      conds.push(inArray(resiScans.id, opts.ids));
+    } else if (opts.scope === "failed") {
+      conds.push(eq(resiScans.ocrStatus, "failed"));
+    } else if (opts.scope === "blank") {
+      // Nothing useful came out last time. Rows a human has corrected are
+      // excluded: they are not blank, they are done.
+      conds.push(isNull(resiScans.labelEditedAt));
+      conds.push(isNull(resiScans.labelOrderNo));
+      conds.push(isNull(resiScans.labelRecipient));
+    }
+
+    const targets = await this.db
+      .select({ id: resiScans.id })
+      .from(resiScans)
+      .where(and(...conds))
+      .orderBy(desc(resiScans.scannedAt))
+      .limit(limit);
+
+    if (!targets.length) return { queued: 0 };
+
+    await this.db
+      .update(resiScans)
+      .set({ ocrStatus: "pending", ocrAttempts: 0 })
+      .where(inArray(resiScans.id, targets.map((t) => t.id)));
+
+    this.logger.log(`Queued ${targets.length} scan(s) for re-reading (user ${userId})`);
+    return { queued: targets.length };
   }
 
   // ------------------------------------------------------------------

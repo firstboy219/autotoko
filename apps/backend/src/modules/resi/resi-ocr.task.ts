@@ -11,7 +11,7 @@ import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { TenantService } from "../../database/tenant.service.js";
 import { orders, resiScanItems, resiScans } from "../../database/schema/index.js";
 import { UploadsService } from "../uploads/uploads.service.js";
-import { parseShippingLabel } from "./label-parser.js";
+import { labelColumns, parseShippingLabel } from "./label-parser.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -38,6 +38,22 @@ const MAX_ATTEMPTS = 3;
  * information is worth at that moment. The barcode already gave us the one
  * fact needed immediately — which parcel this is — so everything else can
  * arrive late.
+ *
+ * How well it does: on the twelve scans recorded so far, the large print — the
+ * waybill, the marketplace, the COD flag, the sortation code — comes through
+ * some of the time, and the small print never does. Tesseract reports 32-50%
+ * confidence on these photographs, and at that level it invents digits rather
+ * than omitting them. So the order number, the shop, the recipient and the
+ * product table are expected to arrive empty and to be filled in by hand on
+ * the Produksi & Packing page; the columns exist for both routes.
+ *
+ * Preprocessing was tried and rejected. Cropping the frame down to the label
+ * before reading (found by brightness and detail density, never once slicing
+ * the label off) cut junk lines by half but read the waybill on fewer photos,
+ * not more, across six scans. Enlarging and sharpening were worse still —
+ * tesseract does its own scaling and binarisation, and pre-empting it fights
+ * it. Doubling OCR cost on a two-core box that also serves the API needs a
+ * measured gain behind it, and there was none.
  */
 @Injectable()
 export class ResiOcrTask {
@@ -80,15 +96,15 @@ export class ResiOcrTask {
 
   private async processOne(scan: typeof resiScans.$inferSelect): Promise<void> {
     const attempts = (scan.ocrAttempts ?? 0) + 1;
-    let text: string | null = null;
+    let reading: { text: string; confidence: number | null } | null = null;
 
     try {
-      text = await this.readText(scan.photoUrl!);
+      reading = await this.readText(scan.photoUrl!);
     } catch (e) {
       this.logger.warn(`OCR threw for scan ${scan.id}: ${(e as Error).message}`);
     }
 
-    if (text === null) {
+    if (reading === null) {
       // Give up after a few goes rather than re-reading an unreadable photo
       // every twenty seconds forever. The scan itself is unaffected: the resi
       // came from the barcode and is already recorded.
@@ -103,7 +119,12 @@ export class ResiOcrTask {
       return;
     }
 
-    const parsed = parseShippingLabel(text);
+    const parsed = parseShippingLabel(reading.text);
+
+    // Whatever a human typed stands. A re-read exists to improve on a machine
+    // guess, never to overwrite a correction: the operator held the actual
+    // parcel, and tesseract saw a blurred photograph of it at 40% confidence.
+    const keepManual = scan.labelEditedAt != null;
 
     await this.tenant.runBypass(() =>
       this.db
@@ -112,11 +133,9 @@ export class ResiOcrTask {
           ocrStatus: "done",
           ocrAttempts: attempts,
           ocrAt: new Date(),
-          ocrText: text!.slice(0, 20_000),
-          labelOrderNo: parsed.orderNo?.slice(0, 128) ?? null,
-          labelRecipient: parsed.recipient?.slice(0, 255) ?? null,
-          labelMarketplace: parsed.marketplace?.slice(0, 32) ?? null,
-          labelItems: parsed.items.length ? parsed.items : null,
+          ocrText: reading!.text.slice(0, 20_000),
+          ocrConfidence: reading!.confidence != null ? reading!.confidence.toFixed(2) : null,
+          ...(keepManual ? {} : labelColumns(parsed)),
         })
         .where(eq(resiScans.id, scan.id)),
     );
@@ -143,10 +162,14 @@ export class ResiOcrTask {
     }
 
     this.logger.log(
-      `OCR done for ${scan.resi}: order=${parsed.orderNo ?? "-"} recipient=${parsed.recipient ?? "-"} items=${parsed.items.length}`,
+      `OCR done for ${scan.resi} (conf=${reading.confidence ?? "?"}): order=${
+        parsed.orderNo ?? "-"
+      } recipient=${parsed.recipient ?? "-"} shop=${parsed.senderName ?? "-"} items=${
+        parsed.items.length
+      }${keepManual ? " [label fields kept: edited by hand]" : ""}`,
     );
 
-    if (!scan.orderId && parsed.orderNo) await this.autoLink(scan, parsed.orderNo);
+    if (!scan.orderId && !keepManual && parsed.orderNo) await this.autoLink(scan, parsed.orderNo);
   }
 
   /**
@@ -203,7 +226,7 @@ export class ResiOcrTask {
    * an account number off a transfer receipt and returns those, not text. The
    * shared artefact is the worker script itself, which both call.
    */
-  private async readText(photoUrl: string): Promise<string | null> {
+  private async readText(photoUrl: string): Promise<{ text: string; confidence: number | null } | null> {
     const buffer = await this.uploads.readByUrl(photoUrl);
     if (!buffer) {
       this.logger.warn(`Photo missing on disk for ${photoUrl}`);
@@ -216,8 +239,13 @@ export class ResiOcrTask {
         timeout: OCR_TIMEOUT_MS,
         maxBuffer: 10 * 1024 * 1024,
       });
-      const parsed = JSON.parse(stdout) as { text?: string };
-      return parsed.text ?? "";
+      const out = JSON.parse(stdout) as { text?: string; confidence?: number };
+      return {
+        text: out.text ?? "",
+        // Kept so the page can mark a reading as unreliable rather than
+        // presenting a 40%-confidence guess as though it were typed in.
+        confidence: typeof out.confidence === "number" ? out.confidence : null,
+      };
     } catch (err) {
       const stderr = (err as { stderr?: string }).stderr;
       this.logger.warn(

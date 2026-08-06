@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { rupiah, dateShort } from "../lib/fmt";
 import { Icon } from "../components/Icon";
 import { ScanItemsEditor } from "../components/ScanItems";
+import { ScanLabelEditor } from "../components/ScanLabel";
 import {
   Badge,
   Button,
@@ -48,9 +49,15 @@ interface Scan {
   scannedAt: string;
   photoUrl: string | null;
   ocrStatus: string;
+  ocrConfidence: string | null;
   labelOrderNo: string | null;
   labelRecipient: string | null;
+  labelSenderName: string | null;
   labelMarketplace: string | null;
+  labelService: string | null;
+  labelSortCode: string | null;
+  labelCod: boolean | null;
+  labelEditedAt: string | null;
   labelItems: LabelItem[] | null;
   packerPaidAt: string | null;
   packerPaidAmount: string | null;
@@ -136,6 +143,33 @@ export function ProduksiPacking() {
   // Only one open at a time: these editors each fetch the product list, and a
   // dozen expanded at once would be a dozen identical requests.
   const [openItems, setOpenItems] = useState<string | null>(null);
+  const [openLabel, setOpenLabel] = useState<string | null>(null);
+  const [rechecking, setRechecking] = useState(false);
+
+  /**
+   * Re-read every photo whose label came back blank.
+   *
+   * Capped server-side rather than here: each photo costs seconds of CPU on
+   * the box that also serves this page, so a whole archive queued at once
+   * would make the site crawl for an hour.
+   */
+  async function recheckBlank() {
+    setRechecking(true);
+    try {
+      const r = await api.post<{ queued: number }>("/resi/recheck-ocr", { scope: "blank" });
+      toast(
+        r.queued
+          ? `${r.queued} foto masuk antrean untuk dibaca ulang.`
+          : "Tidak ada foto yang perlu dibaca ulang.",
+        r.queued ? "success" : "neutral",
+      );
+      refresh();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setRechecking(false);
+    }
+  }
 
   function refresh() {
     scans.reload();
@@ -210,6 +244,10 @@ export function ProduksiPacking() {
           title={`Hasil Scan (${scans.data?.total ?? 0})`}
           action={
             <div className="flex gap-2">
+              <Button variant="outline" onClick={recheckBlank} disabled={rechecking}>
+                <Icon name="refresh" className="w-3.5 h-3.5" />
+                Baca Ulang Label Kosong
+              </Button>
               <Input
                 placeholder="Cari resi"
                 value={q}
@@ -339,6 +377,13 @@ export function ProduksiPacking() {
                         )}
                         <Button
                           variant="text"
+                          onClick={() => setOpenLabel(openLabel === s.id ? null : s.id)}
+                        >
+                          Data Label
+                          {s.labelEditedAt ? " ✓" : ""}
+                        </Button>
+                        <Button
+                          variant="text"
                           onClick={() => setOpenItems(openItems === s.id ? null : s.id)}
                         >
                           Isi Paket
@@ -348,6 +393,13 @@ export function ProduksiPacking() {
                       </div>
                     </TD>
                   </TR>
+                  {openLabel === s.id && (
+                    <TR>
+                      <TD colSpan={6}>
+                        <ScanLabelEditor scanId={s.id} onSaved={refresh} />
+                      </TD>
+                    </TR>
+                  )}
                   {openItems === s.id && (
                     <TR>
                       <TD colSpan={6}>
@@ -590,9 +642,17 @@ function LabelCell({ scan }: { scan: Scan }) {
   }
 
   const items = scan.labelItems ?? [];
-  const nothing = !scan.labelOrderNo && !scan.labelRecipient && items.length === 0;
+  const nothing =
+    !scan.labelOrderNo && !scan.labelRecipient && !scan.labelSenderName && items.length === 0;
   if (nothing) {
-    return <span className="text-[11px] text-ink-2">terbaca, tidak ada data dikenali</span>;
+    // Says what to do about it. The small print on these photos is beyond the
+    // reader, so an operator who needs the data types it in rather than
+    // waiting for a re-read to succeed.
+    return (
+      <span className="text-[11px] text-ink-2">
+        tidak ada data dikenali — isi lewat “Data Label”
+      </span>
+    );
   }
 
   return (
@@ -609,7 +669,18 @@ function LabelCell({ scan }: { scan: Scan }) {
           {scan.labelRecipient}
         </div>
       )}
-      {scan.labelMarketplace && <Badge tone="neutral">{scan.labelMarketplace}</Badge>}
+      {scan.labelSenderName && (
+        <div>
+          <span className="text-ink-2">Toko </span>
+          {scan.labelSenderName}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-1 mt-0.5">
+        {scan.labelMarketplace && <Badge tone="neutral">{scan.labelMarketplace}</Badge>}
+        {scan.labelService && <Badge tone="neutral">{scan.labelService}</Badge>}
+        {scan.labelCod === true && <Badge tone="warning">COD</Badge>}
+        {scan.labelEditedAt && <Badge tone="success">dikoreksi manual</Badge>}
+      </div>
       {items.length > 0 && (
         <ul className="mt-1">
           {items.map((it, i) => (
