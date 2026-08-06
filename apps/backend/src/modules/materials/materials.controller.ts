@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, TenantOwnerOnly, type JwtPayload } from "../auth/jwt-auth.guard.js";
@@ -35,6 +46,25 @@ export class MaterialsController {
   }
 
   /** OCR only — proposes rows, writes nothing. */
+  @Get(":id/usage")
+  async usage(@Req() req: FastifyRequest, @Param("id") id: string) {
+    return ok(await this.materials.materialUsage(uid(req), id));
+  }
+
+  /**
+   * Deleting a material in use is refused unless a replacement is named — the
+   * FK would otherwise unlink recipe lines silently and leave them costing
+   * from a stale copy.
+   */
+  @Delete(":id")
+  async remove(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Query("replaceWith") replaceWith?: string,
+  ) {
+    return ok(await this.materials.deleteMaterial(uid(req), id, replaceWith || null));
+  }
+
   @Post("purchases/parse")
   async parse(@Req() req: FastifyRequest, @Body() dto: ParseReceiptDto) {
     return ok(await this.materials.parseReceipt(uid(req), dto.imageUrl));

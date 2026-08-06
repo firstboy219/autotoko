@@ -3,6 +3,7 @@ import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { useRealtime } from "../lib/realtime";
 import { api } from "../lib/api";
+import { MaterialsCatalogCard } from "../components/MaterialsCatalog";
 
 interface Bom {
   id: string;
@@ -79,6 +80,8 @@ export function Bom() {
 
   return (
     <Layout title="BOM / Bahan Baku">
+      <MaterialsCatalogCard />
+
       <div className="flex justify-between items-center mb-4">
         <div className="text-sm text-slate-500">
           {data?.length ?? 0} bahan

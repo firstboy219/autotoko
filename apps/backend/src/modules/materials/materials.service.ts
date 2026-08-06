@@ -1,11 +1,20 @@
-import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   bomItems,
+  masterProducts,
   materialPurchaseItems,
   materialPurchases,
   materials,
+  packingMaterials,
 } from "../../database/schema/index.js";
 import { UploadsService } from "../uploads/uploads.service.js";
 import { OcrService } from "../payout/ocr.service.js";
@@ -64,6 +73,191 @@ export class MaterialsService {
     }));
   }
 
+  /**
+   * What would break if this material went away.
+   *
+   * Asked for before the delete rather than discovered during it, so the page
+   * can show the operator what they are about to affect and offer somewhere to
+   * move it — a material used by nine products is not something to remove on a
+   * single click.
+   */
+  async materialUsage(userId: string, id: string) {
+    await this.getOrThrow(userId, id);
+
+    const recipes = await this.db
+      .select({
+        bomItemId: bomItems.id,
+        productId: masterProducts.id,
+        productName: masterProducts.name,
+        quantity: bomItems.quantity,
+      })
+      .from(bomItems)
+      .innerJoin(masterProducts, eq(bomItems.masterProductId, masterProducts.id))
+      .where(and(eq(masterProducts.userId, userId), eq(bomItems.materialId, id)));
+
+    const [packing] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(packingMaterials)
+      .where(and(eq(packingMaterials.userId, userId), eq(packingMaterials.materialId, id)));
+
+    const [purchases] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(materialPurchaseItems)
+      .where(
+        and(eq(materialPurchaseItems.userId, userId), eq(materialPurchaseItems.materialId, id)),
+      );
+
+    return {
+      products: recipes.map((r) => ({
+        id: r.productId,
+        name: r.productName,
+        quantity: num(r.quantity),
+      })),
+      packingLines: packing?.count ?? 0,
+      purchaseLines: purchases?.count ?? 0,
+      inUse: recipes.length > 0 || (packing?.count ?? 0) > 0,
+    };
+  }
+
+  /**
+   * Deletes a material, optionally moving everything that used it somewhere
+   * else first.
+   *
+   * Without a replacement, bom_items.material_id is ON DELETE SET NULL — the
+   * recipe line survives but stops being linked to the catalogue, quietly
+   * falling back to its own stale copy of the price. That is a bad default for
+   * a delete button, so this refuses when the material is in use and nothing
+   * was named to take its place; the page then asks where to move it.
+   *
+   * Quantities are SUMMED when a product already has the replacement in its
+   * recipe. Merging two entries for what turned out to be the same thing
+   * should leave that product's total unchanged — dropping one of them would
+   * silently reduce its HPP.
+   */
+  async deleteMaterial(userId: string, id: string, replaceWithId?: string | null) {
+    const material = await this.getOrThrow(userId, id);
+    const usage = await this.materialUsage(userId, id);
+
+    if (usage.inUse && !replaceWithId) {
+      throw new ConflictException({
+        code: "IN_USE",
+        message:
+          `"${material.name}" dipakai ${usage.products.length} produk` +
+          (usage.packingLines ? " dan ada di daftar bahan packing" : "") +
+          ". Pilih bahan penggantinya.",
+        products: usage.products,
+        packingLines: usage.packingLines,
+        purchaseLines: usage.purchaseLines,
+      });
+    }
+
+    let moved = { recipes: 0, merged: 0, packing: 0, purchases: 0 };
+
+    if (replaceWithId) {
+      if (replaceWithId === id) {
+        throw new BadRequestException("Bahan pengganti tidak boleh bahan yang sama.");
+      }
+      const target = await this.getOrThrow(userId, replaceWithId);
+
+      // --- recipes
+      const targetRows = await this.db
+        .select({ id: bomItems.id, productId: bomItems.masterProductId, quantity: bomItems.quantity })
+        .from(bomItems)
+        .innerJoin(masterProducts, eq(bomItems.masterProductId, masterProducts.id))
+        .where(and(eq(masterProducts.userId, userId), eq(bomItems.materialId, replaceWithId)));
+      const targetByProduct = new Map(targetRows.map((r) => [r.productId, r]));
+
+      const sourceRows = await this.db
+        .select({ id: bomItems.id, productId: bomItems.masterProductId, quantity: bomItems.quantity })
+        .from(bomItems)
+        .innerJoin(masterProducts, eq(bomItems.masterProductId, masterProducts.id))
+        .where(and(eq(masterProducts.userId, userId), eq(bomItems.materialId, id)));
+
+      for (const row of sourceRows) {
+        const existing = targetByProduct.get(row.productId);
+        if (existing) {
+          await this.db
+            .update(bomItems)
+            .set({ quantity: (num(existing.quantity) + num(row.quantity)).toFixed(3) })
+            .where(eq(bomItems.id, existing.id));
+          await this.db.delete(bomItems).where(eq(bomItems.id, row.id));
+          moved.merged += 1;
+        } else {
+          await this.db
+            .update(bomItems)
+            .set({
+              materialId: replaceWithId,
+              materialName: target.name,
+              unit: target.unit,
+              unitCost: target.unitCost,
+            })
+            .where(eq(bomItems.id, row.id));
+          moved.recipes += 1;
+        }
+      }
+
+      // --- packing list. unique(user, material), so a collision is a merge.
+      const [targetPacking] = await this.db
+        .select()
+        .from(packingMaterials)
+        .where(
+          and(
+            eq(packingMaterials.userId, userId),
+            eq(packingMaterials.materialId, replaceWithId),
+          ),
+        )
+        .limit(1);
+      const sourcePacking = await this.db
+        .select()
+        .from(packingMaterials)
+        .where(and(eq(packingMaterials.userId, userId), eq(packingMaterials.materialId, id)));
+
+      for (const p of sourcePacking) {
+        if (targetPacking) {
+          await this.db
+            .update(packingMaterials)
+            .set({
+              defaultQuantity: (
+                num(targetPacking.defaultQuantity) + num(p.defaultQuantity)
+              ).toFixed(3),
+            })
+            .where(eq(packingMaterials.id, targetPacking.id));
+          await this.db.delete(packingMaterials).where(eq(packingMaterials.id, p.id));
+        } else {
+          await this.db
+            .update(packingMaterials)
+            .set({ materialId: replaceWithId })
+            .where(eq(packingMaterials.id, p.id));
+        }
+        moved.packing += 1;
+      }
+
+      // --- purchase history moves too: if these were the same thing all
+      // along, what was bought under the old name was bought for the new one.
+      const purch = await this.db
+        .update(materialPurchaseItems)
+        .set({ materialId: replaceWithId })
+        .where(
+          and(
+            eq(materialPurchaseItems.userId, userId),
+            eq(materialPurchaseItems.materialId, id),
+          ),
+        )
+        .returning({ id: materialPurchaseItems.id });
+      moved.purchases = purch.length;
+    }
+
+    await this.db
+      .delete(materials)
+      .where(and(eq(materials.userId, userId), eq(materials.id, id)));
+
+    this.logger.log(
+      `Material ${material.name} deleted by ${userId}` +
+        (replaceWithId ? ` (moved ${JSON.stringify(moved)})` : ""),
+    );
+    return { ok: true as const, name: material.name, moved };
+  }
+
   async updateMaterial(userId: string, id: string, dto: UpdateMaterialDto) {
     await this.getOrThrow(userId, id);
     const set: Record<string, unknown> = { updatedAt: new Date() };
@@ -73,9 +267,20 @@ export class MaterialsService {
     }
     if (dto.unit !== undefined) set.unit = dto.unit?.trim() || null;
     if (dto.minimumThreshold != null) set.minimumThreshold = dto.minimumThreshold.toFixed(3);
-    // Deliberately NOT settable here: currentStock and unitCost are derived
-    // from purchases and order deductions, so letting them be typed over would
-    // silently break the weighted-average cost that HPP depends on.
+    // Cost and stock ARE settable, having originally been locked here.
+    //
+    // Both are normally derived — cost from the weighted average of purchases,
+    // stock from purchases minus what orders consume — and typing over them
+    // does overwrite that derivation until the next purchase recomputes it.
+    // But the HPP page already writes unitCost directly when a seller edits a
+    // material's price there, so refusing it here left the same field editable
+    // in one place and silently ignored in another: the form accepted a new
+    // figure, saved without error, and changed nothing. Sellers who do not
+    // record every purchase have no other way to state a price, and a stock
+    // count has to be enterable somewhere. The page says the next purchase
+    // will recompute the average.
+    if (dto.unitCost != null) set.unitCost = dto.unitCost.toFixed(2);
+    if (dto.currentStock != null) set.currentStock = dto.currentStock.toFixed(3);
     await this.db.update(materials).set(set).where(eq(materials.id, id));
     return this.list(userId);
   }

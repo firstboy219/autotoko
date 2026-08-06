@@ -15,6 +15,10 @@ export class UpdateMaterialDto {
   @IsOptional() @IsString() @MaxLength(255) name?: string;
   @IsOptional() @IsString() @MaxLength(32) unit?: string;
   @IsOptional() @IsNumber() @Min(0) minimumThreshold?: number;
+  /** Overrides the weighted average until the next purchase recomputes it. */
+  @IsOptional() @IsNumber() @Min(0) unitCost?: number;
+  /** Manual stock adjustment, e.g. after a stock count. */
+  @IsOptional() @IsNumber() @Min(0) currentStock?: number;
 }
 
 export class ParseReceiptDto {
