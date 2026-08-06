@@ -87,6 +87,14 @@ export const materials = pgTable(
     // Weighted-average cost, recomputed on every purchase so HPP reflects what
     // the stock on hand actually cost rather than only the latest price.
     unitCost: numeric("unit_cost", { precision: 15, scale: 2 }).notNull().default("0"),
+    /**
+     * When the price above last changed — not when the row did.
+     *
+     * updatedAt moves for a rename or a stock count as well, so it cannot
+     * answer the question a seller actually asks of a costing sheet: is this
+     * price still current? Null means never priced.
+     */
+    unitCostUpdatedAt: timestamp("unit_cost_updated_at", { withTimezone: true }),
     minimumThreshold: numeric("minimum_threshold", { precision: 14, scale: 3 })
       .notNull()
       .default("0"),

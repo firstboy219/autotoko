@@ -66,6 +66,7 @@ export class MaterialsService {
       unit: m.unit,
       currentStock: num(m.currentStock),
       unitCost: num(m.unitCost),
+      unitCostUpdatedAt: m.unitCostUpdatedAt,
       minimumThreshold: num(m.minimumThreshold),
       stockValue: num(m.currentStock) * num(m.unitCost),
       usedByProducts: usedBy.get(m.id) ?? 0,
@@ -279,7 +280,10 @@ export class MaterialsService {
     // record every purchase have no other way to state a price, and a stock
     // count has to be enterable somewhere. The page says the next purchase
     // will recompute the average.
-    if (dto.unitCost != null) set.unitCost = dto.unitCost.toFixed(2);
+    if (dto.unitCost != null) {
+      set.unitCost = dto.unitCost.toFixed(2);
+      set.unitCostUpdatedAt = new Date();
+    }
     if (dto.currentStock != null) set.currentStock = dto.currentStock.toFixed(3);
     await this.db.update(materials).set(set).where(eq(materials.id, id));
     return this.list(userId);
@@ -406,6 +410,10 @@ export class MaterialsService {
         .set({
           currentStock: newStock.toFixed(3),
           unitCost: newCost.toFixed(2),
+          // A purchase is the commonest way a price moves, so it stamps the
+          // date too — otherwise the BOM page would show a months-old date
+          // beside a figure that changed this morning.
+          unitCostUpdatedAt: new Date(),
           ...(line.unit?.trim() ? { unit: line.unit.trim() } : {}),
           updatedAt: new Date(),
         })

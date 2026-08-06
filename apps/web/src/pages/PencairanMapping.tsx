@@ -34,16 +34,16 @@ interface MappingRow {
   addedByName: string;
 }
 
-const SCENARIO_LABEL: Record<MappingRow["scenario"], string> = {
-  A: "A — Milik Seller",
-  B: "B — Milik Sub-seller",
-  C: "C — Milik Sub-sub-seller",
-};
-const SCENARIO_TONE: Record<MappingRow["scenario"], "neutral" | "info" | "brand"> = {
-  A: "neutral",
-  B: "info",
-  C: "brand",
-};
+/**
+ * `scenario` is not stored anywhere — the server derives it per shop:
+ * a sub-sub-seller makes it C, a sub-seller makes it B, neither makes it A.
+ * It still decides which rates a row shows, so the field stays.
+ *
+ * Its own column does not. It said exactly what the ownership chain beside it
+ * already said — A meant the chain was empty, B meant one name, C meant two —
+ * so the table asked the reader to learn a letter for something already spelled
+ * out in words one column over.
+ */
 const pct = (r: number | null) => (r == null ? "—" : `${(r * 100).toFixed(1)}%`);
 
 export function PencairanMapping() {
@@ -100,9 +100,9 @@ export function PencairanMapping() {
 
       {!loading && (data?.length ?? 0) > 0 && (
         <div className="flex flex-wrap gap-2 mb-4">
-          <Badge tone="neutral">Skenario A · {counts.A} toko</Badge>
-          <Badge tone="info">Skenario B · {counts.B} toko</Badge>
-          <Badge tone="brand">Skenario C · {counts.C} toko</Badge>
+          <Badge tone="neutral">{counts.A} toko milik seller</Badge>
+          <Badge tone="info">{counts.B} lewat sub-seller</Badge>
+          <Badge tone="brand">{counts.C} lewat sub-sub-seller</Badge>
         </div>
       )}
 
@@ -117,7 +117,6 @@ export function PencairanMapping() {
               <TR className="border-t-0">
                 <TH>Nama Toko</TH>
                 <TH>Marketplace</TH>
-                <TH>Skenario</TH>
                 <TH>Rantai Kepemilikan</TH>
                 <TH>Rekening Tujuan Aktif</TH>
                 <TH>Rate Berlaku</TH>
@@ -126,10 +125,10 @@ export function PencairanMapping() {
             </THead>
             <tbody>
               {loading ? (
-                <SkeletonRows n={5} cols={7} />
+                <SkeletonRows n={5} cols={6} />
               ) : !rows.length ? (
                 <TR>
-                  <TD colSpan={7} className="p-0">
+                  <TD colSpan={6} className="p-0">
                     <EmptyState
                       icon="store"
                       title={filterSub ? "Tidak ada toko untuk sub-seller ini" : "Belum ada toko"}
@@ -146,11 +145,8 @@ export function PencairanMapping() {
                   <TR key={r.id}>
                     <TD className="text-ink font-medium">{r.shopName}</TD>
                     <TD className="text-ink-2 capitalize">{r.marketplace}</TD>
-                    <TD>
-                      <Badge tone={SCENARIO_TONE[r.scenario]}>{SCENARIO_LABEL[r.scenario]}</Badge>
-                    </TD>
                     <TD className="text-ink-2">
-                      {r.scenario === "A" && "—"}
+                      {r.scenario === "A" && "Milik seller"}
                       {r.scenario === "B" && r.subSellerName}
                       {r.scenario === "C" && `${r.subSubSellerName} › ${r.subSellerName}`}
                     </TD>

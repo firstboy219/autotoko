@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../lib/api";
 import { useFetch } from "../lib/useFetch";
-import { rupiah } from "../lib/fmt";
+import { rupiah, dateShort } from "../lib/fmt";
 import { Icon } from "./Icon";
 import {
   Badge,
@@ -30,6 +30,7 @@ interface Material {
   unit: string | null;
   currentStock: number;
   unitCost: number;
+  unitCostUpdatedAt: string | null;
   minimumThreshold: number;
   usedByProducts: number;
   isLow: boolean;
@@ -101,7 +102,17 @@ export function MaterialsCatalogCard() {
                       </span>
                     )}
                   </TD>
-                  <TD className="text-right tabular-nums">{rupiah(m.unitCost)}</TD>
+                  <TD className="text-right tabular-nums">
+                    {rupiah(m.unitCost)}
+                    {/* A costing sheet is only as good as the age of the prices
+                        in it, and updated_at cannot answer that -- it moves for
+                        a rename or a stock count too. */}
+                    <div className="text-[10px] text-ink-3 tabular-nums">
+                      {m.unitCostUpdatedAt
+                        ? `diubah ${dateShort(m.unitCostUpdatedAt)}`
+                        : "belum pernah diisi"}
+                    </div>
+                  </TD>
                   <TD className="text-right tabular-nums text-ink-2">
                     {m.usedByProducts} produk
                   </TD>

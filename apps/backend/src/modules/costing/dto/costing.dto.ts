@@ -69,7 +69,14 @@ export class SuggestPriceDto {
 }
 
 export class AddPackingMaterialDto {
-  @IsUUID() materialId!: string;
+  /** Pick from the catalogue, or leave out and give materialName instead. */
+  @IsOptional() @IsUUID() materialId?: string;
+
+  /** Creates the material if no catalogue entry matches the name. */
+  @IsOptional() @IsString() @MaxLength(255) materialName?: string;
+  @IsOptional() @IsString() @MaxLength(32) unit?: string;
+  @IsOptional() @IsNumber() @Min(0) unitCost?: number;
+
   @IsNumber() @Min(0.001) defaultQuantity!: number;
 }
 

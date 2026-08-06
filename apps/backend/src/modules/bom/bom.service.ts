@@ -4,6 +4,7 @@ import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   bomItems,
   masterProducts,
+  materials,
   productPostings,
   users,
 } from "../../database/schema/index.js";
@@ -55,6 +56,41 @@ export class BomService {
     return this.list(userId, true);
   }
 
+  /**
+   * The catalogue id for a material name, creating the entry if it is new.
+   *
+   * Matching is on the normalised name, the same key the catalogue's unique
+   * index uses, so "Botol" and "botol " land on one material rather than two
+   * with separate stock and separate prices.
+   */
+  private async linkToCatalog(
+    userId: string,
+    name: string,
+    unit?: string | null,
+    unitCost?: string | number | null,
+  ): Promise<string> {
+    const normalized = name.trim().toLowerCase().replace(/\s+/g, " ");
+    const [found] = await this.db
+      .select({ id: materials.id })
+      .from(materials)
+      .where(and(eq(materials.userId, userId), eq(materials.normalizedName, normalized)))
+      .limit(1);
+    if (found) return found.id;
+
+    const [made] = await this.db
+      .insert(materials)
+      .values({
+        userId,
+        name: name.trim(),
+        normalizedName: normalized,
+        unit: unit?.trim() || null,
+        unitCost: unitCost != null ? Number(unitCost).toFixed(2) : "0",
+        unitCostUpdatedAt: unitCost != null ? new Date() : null,
+      })
+      .returning({ id: materials.id });
+    return made!.id;
+  }
+
   private async requireMasterOwned(userId: string, masterProductId: string) {
     const [m] = await this.db
       .select({ id: masterProducts.id })
@@ -78,8 +114,14 @@ export class BomService {
 
   async create(userId: string, dto: CreateBomDto) {
     await this.requireMasterOwned(userId, dto.masterProductId);
+    // Join the catalogue on the way in. This endpoint used to insert a name and
+    // a price straight onto the line, which is how 8 of 39 lines ended up
+    // costing from a private copy that a catalogue price change could not
+    // reach. Its form is gone from the page, but the route is still callable.
+    const materialId = await this.linkToCatalog(userId, dto.materialName, dto.unit);
     const values = {
       ...dto,
+      materialId,
       supplierApiKey: dto.supplierApiKey ? this.crypto.encrypt(dto.supplierApiKey) : undefined,
     };
     const [row] = await this.db.insert(bomItems).values(values).returning();

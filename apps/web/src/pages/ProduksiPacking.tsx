@@ -145,6 +145,21 @@ export function ProduksiPacking() {
   const [openItems, setOpenItems] = useState<string | null>(null);
   const [openLabel, setOpenLabel] = useState<string | null>(null);
   const [rechecking, setRechecking] = useState(false);
+  const [recheckingRow, setRecheckingRow] = useState<string | null>(null);
+
+  /** Re-read one scan's photo, without opening its panel first. */
+  async function recheckRow(s: Scan) {
+    setRecheckingRow(s.id);
+    try {
+      await api.post(`/resi/scans/${s.id}/recheck-ocr`, {});
+      toast(`${s.resi} masuk antrean dibaca ulang.`, "success");
+      refresh();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setRecheckingRow(null);
+    }
+  }
 
   /**
    * Re-read every photo whose label came back blank.
@@ -382,6 +397,16 @@ export function ProduksiPacking() {
                           Data Label
                           {s.labelEditedAt ? " ✓" : ""}
                         </Button>
+                        {s.photoUrl && (
+                          <Button
+                            variant="text"
+                            onClick={() => recheckRow(s)}
+                            disabled={recheckingRow === s.id || s.ocrStatus === "pending"}
+                          >
+                            <Icon name="refresh" className="w-3.5 h-3.5" />
+                            {s.ocrStatus === "pending" ? "Sedang dibaca…" : "Baca Ulang"}
+                          </Button>
+                        )}
                         <Button
                           variant="text"
                           onClick={() => setOpenItems(openItems === s.id ? null : s.id)}

@@ -1,5 +1,6 @@
 import {
   index,
+  jsonb,
   pgTable,
   uuid,
   varchar,
@@ -92,6 +93,36 @@ export const emailOtpSessions = pgTable("email_otp_sessions", {
  * rather than deleted so a "this link was already used" reply can be given
  * instead of an indistinguishable "invalid token".
  */
+/**
+ * A seller's own arrangement of the app shell — today, the sidebar.
+ *
+ * Server-side rather than in the browser: someone who spends an afternoon
+ * grouping fifteen menu items does not expect to do it again on the laptop,
+ * and a menu that resets itself reads as a bug rather than a setting.
+ *
+ * One jsonb column rather than tables for groups and memberships, because
+ * nothing ever queries inside it. The object is read whole when the shell
+ * mounts and written back whole when it changes, so structure in the database
+ * would buy nothing and cost a migration every time the shape moved.
+ */
+export const userUiPrefs = pgTable("user_ui_prefs", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** { groups: [{ id, label, items }], counts: { path: n }, collapsed: [] } */
+  nav: jsonb("nav").$type<NavPrefs>().notNull().default({ groups: [], counts: {}, collapsed: [] }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export interface NavPrefs {
+  /** User-made groups, in the order they should appear. */
+  groups: { id: string; label: string; items: string[] }[];
+  /** Times each path was opened, for the automatic "sering digunakan" group. */
+  counts: Record<string, number>;
+  /** Ids of groups the user has collapsed. */
+  collapsed: string[];
+}
+
 export const passwordResetTokens = pgTable(
   "password_reset_tokens",
   {

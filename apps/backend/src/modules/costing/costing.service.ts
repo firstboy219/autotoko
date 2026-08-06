@@ -166,10 +166,34 @@ export class CostingService {
     });
   }
 
-  async addPackingMaterial(userId: string, materialId: string, defaultQuantity: number) {
+  /**
+   * Add a material to the shared packing list.
+   *
+   * Either an existing catalogue entry (materialId) or a new one by name — dus
+   * and lakban are usually bought for packing and nowhere else, so requiring a
+   * trip to another page to create them first was a dead end whenever the
+   * catalogue was empty. Creating by name goes through the same find-or-create
+   * as the recipe form, so "Dus" typed twice is one material, not two.
+   */
+  async addPackingMaterial(
+    userId: string,
+    input: { materialId?: string; materialName?: string; unit?: string; unitCost?: number },
+    defaultQuantity: number,
+  ) {
     if (!Number.isFinite(defaultQuantity) || defaultQuantity <= 0) {
       throw new BadRequestException("Jumlah harus lebih dari 0.");
     }
+
+    let materialId = input.materialId;
+    if (!materialId) {
+      const name = input.materialName?.trim();
+      if (!name) {
+        throw new BadRequestException("Pilih bahan dari master data atau isi nama bahan baru.");
+      }
+      const made = await this.findOrCreateMaterial(userId, name, input.unit, input.unitCost);
+      materialId = made.id;
+    }
+
     // Confirm the material belongs to the caller before linking: no RLS policy
     // on packing_materials would catch a foreign materialId, because the row
     // being written is legitimately theirs.
@@ -499,6 +523,13 @@ export class CostingService {
    * two materials — the same collapse the catalogue already uses for its own
    * uniqueness, so a name that would collide is reused rather than rejected.
    */
+  /**
+   * The catalogue entry for a name, created if it is new.
+   *
+   * A price given at creation stamps unitCostUpdatedAt, because it IS the
+   * moment that price was set — without it the BOM page reported "belum pernah
+   * diisi" beside a figure the seller had just typed in.
+   */
   private async findOrCreateMaterial(
     userId: string,
     name: string,
@@ -526,6 +557,7 @@ export class CostingService {
         normalizedName: normalized,
         unit: unit?.trim() || null,
         unitCost: (unitCost ?? 0).toFixed(2),
+        unitCostUpdatedAt: unitCost != null ? new Date() : null,
       })
       .returning({
         id: materials.id,
@@ -624,7 +656,7 @@ export class CostingService {
       if (row.materialId) {
         await this.db
           .update(materials)
-          .set({ unitCost: cost, updatedAt: new Date() })
+          .set({ unitCost: cost, unitCostUpdatedAt: new Date(), updatedAt: new Date() })
           .where(and(eq(materials.userId, userId), eq(materials.id, row.materialId)));
         // Keep the denormalised copies in step. Nothing reads them for linked
         // lines any more, but leaving them behind would make the two disagree

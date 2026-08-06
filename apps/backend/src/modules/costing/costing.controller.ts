@@ -51,7 +51,16 @@ export class CostingController {
   @Post("packing-materials")
   async addPacking(@Req() req: FastifyRequest, @Body() dto: AddPackingMaterialDto) {
     return ok(
-      await this.costing.addPackingMaterial(uid(req), dto.materialId, dto.defaultQuantity),
+      await this.costing.addPackingMaterial(
+        uid(req),
+        {
+          materialId: dto.materialId,
+          materialName: dto.materialName,
+          unit: dto.unit,
+          unitCost: dto.unitCost,
+        },
+        dto.defaultQuantity,
+      ),
     );
   }
 
