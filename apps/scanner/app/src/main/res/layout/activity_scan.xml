@@ -9,14 +9,6 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- Aiming guide: tells the packer where to hold the label. -->
-    <View
-        android:layout_width="300dp"
-        android:layout_height="110dp"
-        android:layout_gravity="center_horizontal"
-        android:layout_marginTop="120dp"
-        android:background="@drawable/bg_reticle" />
-
     <LinearLayout
         android:id="@+id/banner"
         android:layout_width="match_parent"
@@ -41,6 +33,34 @@
         android:orientation="vertical"
         android:background="@color/white"
         android:padding="16dp">
+
+        <!-- Clarity, first thing in the panel: it is the one reading the
+             packer can act on while the parcel is still in their hand. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="6dp">
+
+            <ProgressBar
+                android:id="@+id/clarityBar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="6dp"
+                android:max="100"
+                android:progress="0" />
+
+            <TextView
+                android:id="@+id/clarityText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="10dp"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:text="Kejelasan —" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/counter"

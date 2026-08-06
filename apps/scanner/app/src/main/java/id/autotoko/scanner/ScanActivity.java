@@ -116,8 +116,49 @@ public class ScanActivity extends AppCompatActivity {
     /** Stops on the meter, negative. See dimForTheLabel(). */
     private static final double EXPOSURE_EV = -1.0;
 
+    /**
+     * How sharp the picture has to be before the shutter fires, as the
+     * percentage shown on screen.
+     *
+     * The whole point of the photo is that a server reads the small print off
+     * it, and blur is what stops that -- a soft photo is unreadable no matter
+     * how many pixels it has. Measuring before the shutter is the only cheap
+     * moment to catch it: afterwards the parcel has gone in the box.
+     */
+    private static final int CLARITY_MIN = 60;
+
+    /**
+     * How long to keep waiting for a steady shot before giving up and taking
+     * it anyway.
+     *
+     * Never blocks a scan outright. The waybill came from the barcode and is
+     * already exact, so refusing to record the parcel because its photograph
+     * is soft would throw away the reliable half to protect the unreliable
+     * one. Past this the picture is taken and the packer is told it was blurry.
+     */
+    private static final long CLARITY_WAIT_MS = 3000;
+
+    /** Samples per axis. Enough to judge focus, cheap enough for every frame. */
+    private static final int CLARITY_SAMPLES = 96;
+
+    /**
+     * Half-way point of the clarity scale: a Laplacian variance of this reads
+     * as 50%. Chosen so a label held steadily at arm's length lands above
+     * CLARITY_MIN and a hand-waved one lands well below; it is the number to
+     * turn if the meter turns out to be too strict or too generous in the
+     * warehouse.
+     */
+    private static final double CLARITY_HALF = 100.0;
+
+    /** Don't re-measure on every frame; focus does not move that fast. */
+    private static final long CLARITY_INTERVAL_MS = 90;
+
+    /** Fraction of the frame measured, centred: where the label is aimed. */
+    private static final float CLARITY_REGION = 0.55f;
+
     private PreviewView preview;
-    private TextView status, detail, counter, hint;
+    private TextView status, detail, counter, hint, clarityText;
+    private android.widget.ProgressBar clarityBar;
     private View banner;
     private TextView bannerText;
 
@@ -136,6 +177,11 @@ public class ScanActivity extends AppCompatActivity {
     private volatile int frameHeight = 0;
     private volatile boolean analysing = false;
     private volatile boolean busy = false;
+    /** Latest reading, 0-100. Written on the camera thread, read on main. */
+    private volatile int clarity = 0;
+    private volatile long clarityAt = 0;
+    /** Set when a photo was taken below CLARITY_MIN, to say so afterwards. */
+    private boolean tookBlurred = false;
     private String mutedResi = null;
     private long mutedUntil = 0;
 
@@ -155,6 +201,8 @@ public class ScanActivity extends AppCompatActivity {
         detail = findViewById(R.id.courier);
         counter = findViewById(R.id.counter);
         hint = findViewById(R.id.hint);
+        clarityBar = findViewById(R.id.clarityBar);
+        clarityText = findViewById(R.id.clarityText);
         banner = findViewById(R.id.banner);
         bannerText = findViewById(R.id.bannerText);
 
@@ -255,12 +303,27 @@ public class ScanActivity extends AppCompatActivity {
     }
 
     private void analyse(ImageProxy proxy) {
-        if (analysing || busy) {
+        if (analysing) {
             proxy.close();
             return;
         }
         android.media.Image media = proxy.getImage();
         if (media == null) {
+            proxy.close();
+            return;
+        }
+
+        // Measured even while a capture is pending. The gate below waits for
+        // this number to come up, so it has to keep moving after the barcode
+        // is found -- which is exactly when the packer is steadying their hand.
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - clarityAt >= CLARITY_INTERVAL_MS) {
+            clarityAt = now;
+            clarity = measureClarity(media);
+            main.post(this::renderClarity);
+        }
+
+        if (busy) {
             proxy.close();
             return;
         }
@@ -279,6 +342,79 @@ public class ScanActivity extends AppCompatActivity {
                     analysing = false;
                     proxy.close();
                 });
+    }
+
+    /**
+     * Sharpness of the middle of the frame, as a percentage.
+     *
+     * Variance of the Laplacian: a focused edge swings hard between
+     * neighbouring pixels and a blurred one does not, so the spread of that
+     * difference is a direct measure of focus. Read straight off the Y plane,
+     * which is already luminance, and subsampled to a fixed grid so the cost
+     * does not change with the camera's resolution.
+     *
+     * The centre only. The packer aims the label at the middle of the screen,
+     * and measuring the whole frame would average their hand and the floor into
+     * the reading. Sensor orientation is not corrected because a centred box
+     * stays centred however the frame is rotated.
+     */
+    private int measureClarity(android.media.Image img) {
+        try {
+            android.media.Image.Plane plane = img.getPlanes()[0];
+            java.nio.ByteBuffer buf = plane.getBuffer();
+            int rowStride = plane.getRowStride();
+            int pixStride = plane.getPixelStride();
+            int w = img.getWidth();
+            int h = img.getHeight();
+
+            int marginX = Math.round(w * (1f - CLARITY_REGION) / 2f);
+            int marginY = Math.round(h * (1f - CLARITY_REGION) / 2f);
+            int x0 = marginX, x1 = w - marginX;
+            int y0 = marginY, y1 = h - marginY;
+
+            int stepX = Math.max(1, (x1 - x0) / CLARITY_SAMPLES);
+            int stepY = Math.max(1, (y1 - y0) / CLARITY_SAMPLES);
+
+            double sum = 0, sumSq = 0;
+            int n = 0;
+            for (int y = y0 + stepY; y < y1 - stepY; y += stepY) {
+                for (int x = x0 + stepX; x < x1 - stepX; x += stepX) {
+                    int c = luma(buf, rowStride, pixStride, x, y);
+                    int lap = 4 * c
+                            - luma(buf, rowStride, pixStride, x - stepX, y)
+                            - luma(buf, rowStride, pixStride, x + stepX, y)
+                            - luma(buf, rowStride, pixStride, x, y - stepY)
+                            - luma(buf, rowStride, pixStride, x, y + stepY);
+                    sum += lap;
+                    sumSq += (double) lap * lap;
+                    n++;
+                }
+            }
+            if (n < 32) return 0;
+            double mean = sum / n;
+            double variance = Math.max(0, sumSq / n - mean * mean);
+            // Saturating rather than linear: variance has no ceiling, and a
+            // percentage that keeps climbing past "sharp enough" would mean
+            // nothing to the person reading it.
+            return (int) Math.round(100.0 * variance / (variance + CLARITY_HALF));
+        } catch (Exception e) {
+            // A meter that throws must not stop the scanner. Zero reads as
+            // "unknown", and the wait below falls through on its timeout.
+            return 0;
+        }
+    }
+
+    private static int luma(java.nio.ByteBuffer buf, int rowStride, int pixStride, int x, int y) {
+        return buf.get(y * rowStride + x * pixStride) & 0xFF;
+    }
+
+    private void renderClarity() {
+        if (clarityBar == null) return;
+        int value = clarity;
+        clarityBar.setProgress(value);
+        boolean enough = value >= CLARITY_MIN;
+        clarityText.setText("Kejelasan " + value + "% " + (enough ? "· cukup" : "· kurang"));
+        clarityText.setTextColor(Color.parseColor(enough ? "#1B7F4B" : "#B3261E"));
     }
 
     private void onBarcodes(List<Barcode> codes) {
@@ -354,7 +490,34 @@ public class ScanActivity extends AppCompatActivity {
         } catch (Exception ignored) {
             // Focus is an improvement, not a requirement.
         }
-        main.postDelayed(() -> capture(resi, raw, format), FOCUS_SETTLE_MS);
+        main.postDelayed(
+                () -> waitForClarity(resi, raw, format, android.os.SystemClock.uptimeMillis()),
+                FOCUS_SETTLE_MS);
+    }
+
+    /**
+     * Hold the shutter until the picture is sharp enough to be worth reading.
+     *
+     * Polls rather than blocks: the analyser is still running and updating the
+     * meter, so this only has to notice when the number comes up. The wait is
+     * capped -- see CLARITY_WAIT_MS -- because the waybill is already known and
+     * losing the scan would cost more than a soft photograph does.
+     */
+    private void waitForClarity(String resi, String raw, String format, long startedAt) {
+        if (isFinishing() || isDestroyed()) return;
+
+        if (clarity >= CLARITY_MIN) {
+            tookBlurred = false;
+            capture(resi, raw, format);
+            return;
+        }
+        if (android.os.SystemClock.uptimeMillis() - startedAt >= CLARITY_WAIT_MS) {
+            tookBlurred = true;
+            capture(resi, raw, format);
+            return;
+        }
+        hint.setText("Tahan agak diam - kejelasan " + clarity + "%, perlu " + CLARITY_MIN + "%");
+        main.postDelayed(() -> waitForClarity(resi, raw, format, startedAt), 100);
     }
 
     /** Takes the still, then submits. The photo is what the server will read. */
@@ -499,7 +662,14 @@ public class ScanActivity extends AppCompatActivity {
                             + r.data().optJSONObject("linkedOrder").optString("marketplaceOrderId")
                             + " jadi Dikirim";
                 }
-                showBanner(true, resi, extra);
+                // Saved either way, but a blurred photo is worth saying out
+                // loud: the label data will come back thin and the packer is
+                // the only one who can retake it.
+                if (tookBlurred) {
+                    showBanner(false, resi, extra + ", tapi foto kurang tajam - data label mungkin tidak terbaca");
+                } else {
+                    showBanner(true, resi, extra);
+                }
                 refreshCounter();
                 idle();
                 return;
@@ -539,6 +709,7 @@ public class ScanActivity extends AppCompatActivity {
         status.setText("Siap");
         status.setTextColor(Color.parseColor("#6B7178"));
         detail.setVisibility(View.GONE);
+        tookBlurred = false;
         hint.setText("Arahkan kamera ke barcode pada resi. Tersimpan otomatis.");
     }
 
