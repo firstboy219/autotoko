@@ -34,9 +34,18 @@ import java.util.regex.Pattern;
  */
 public final class LabelReader {
 
-    /** Order ids on these labels run 18-19 digits; the range is deliberately loose. */
+    /** Tokopedia/TikTok order ids run 18-19 digits; the range is loose on purpose. */
     private static final int ID_MIN = 14;
     private static final int ID_MAX = 22;
+
+    /**
+     * Shopee prints something else entirely: 260504GDA9EMG5 — letters and
+     * digits, fourteen characters, and on the line BELOW "No.Pesanan:" rather
+     * than beside it. A digits-only reader anchored to the same line finds
+     * nothing on a Shopee label, which is what happened on the first real one.
+     */
+    private static final int ALNUM_MIN = 8;
+    private static final int ALNUM_MAX = 24;
 
     /** Seen in fewer frames than this and it is one frame's noise, not a reading. */
     private static final int MIN_SIGHTINGS = 2;
@@ -64,6 +73,16 @@ public final class LabelReader {
 
     private static final Pattern BARE_ID =
             Pattern.compile("(?<![0-9])([0-9]{" + ID_MIN + "," + ID_MAX + "})(?![0-9])");
+
+    /** The label word on its own, with the value expected on the next line. */
+    private static final Pattern ORDER_LABEL_ONLY = Pattern.compile(
+            "^\\s*(?:no\\.?\\s*pesanan|nomor\\s*pesanan|order\\s*id|no\\.?\\s*order|invoice)"
+                    + "\\s*[:#.]?\\s*$",
+            Pattern.CASE_INSENSITIVE);
+
+    /** A plausible order id once the label has already identified it as one. */
+    private static final Pattern ALNUM_ID = Pattern.compile(
+            "^[A-Z0-9][A-Z0-9-]{" + (ALNUM_MIN - 1) + "," + (ALNUM_MAX - 1) + "}$");
 
     private static final Pattern NOT_PRODUCT = Pattern.compile(
             "^(?:product\\s*name|nama\\s*produk|penerima|pengirim|order\\s*id|package\\s*id|"
@@ -134,6 +153,19 @@ public final class LabelReader {
         while (any.find()) {
             String d = any.group(1);
             if (!packageIds.contains(d) && !anchoredHere.contains(d)) bareHere.add(d);
+        }
+
+        // "No.Pesanan:" alone on its line, the value underneath. Shopee prints
+        // it this way and the same-line patterns above see nothing at all.
+        String[] rows = text.split("\\r?\\n");
+        for (int i = 0; i < rows.length - 1; i++) {
+            if (!ORDER_LABEL_ONLY.matcher(rows[i].trim()).matches()) continue;
+            for (int j = i + 1; j < Math.min(rows.length, i + 3); j++) {
+                String v = rows[j].trim().replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
+                if (v.isEmpty()) continue;
+                if (ALNUM_ID.matcher(v).matches() && !packageIds.contains(v)) anchoredHere.add(v);
+                break;
+            }
         }
         anchored.addAll(anchoredHere);
         bare.addAll(bareHere);
@@ -227,13 +259,25 @@ public final class LabelReader {
         List<String> agreed = new ArrayList<>();
         for (String c : candidates) if (c.length() == bestLen) agreed.add(c);
 
+        // Per character rather than per digit: Shopee's ids carry letters, and
+        // a tally indexed by digit silently threw those away.
         StringBuilder out = new StringBuilder();
         for (int i = 0; i < bestLen; i++) {
-            int[] tally = new int[10];
-            for (String c : agreed) tally[c.charAt(i) - '0']++;
-            int digit = 0;
-            for (int d = 1; d < 10; d++) if (tally[d] > tally[digit]) digit = d;
-            out.append((char) ('0' + digit));
+            Map<Character, Integer> tally = new LinkedHashMap<>();
+            for (String c : agreed) {
+                char ch = c.charAt(i);
+                Integer n = tally.get(ch);
+                tally.put(ch, n == null ? 1 : n + 1);
+            }
+            char best = agreed.get(0).charAt(i);
+            int bestSeen = 0;
+            for (Map.Entry<Character, Integer> e : tally.entrySet()) {
+                if (e.getValue() > bestSeen) {
+                    bestSeen = e.getValue();
+                    best = e.getKey();
+                }
+            }
+            out.append(best);
         }
         return out.toString();
     }
@@ -248,14 +292,22 @@ public final class LabelReader {
         return n;
     }
 
-    /** Candidate product lines, the most-agreed first. */
+    /**
+     * Candidate product lines, in the order they were first read.
+     *
+     * Reading order, not most-agreed-first, because a product name is
+     * routinely split across consecutive lines — "Perghilang Bau" /
+     * "Kaki Cooling Foot Spray" / "Deodorant Kaki FOOT SPRAY" is one product on
+     * a real Shopee label. Whoever matches these has to be able to try
+     * neighbours together, and sorting by confidence destroys the adjacency
+     * that makes that possible.
+     */
     public List<Line> productLines() {
         List<Line> out = new ArrayList<>();
         for (Cluster c : clusters) {
             if (c.count < MIN_SIGHTINGS) continue;
             out.add(new Line(c.longest, c.count));
         }
-        Collections.sort(out, (a, b) -> Integer.compare(b.sightings, a.sightings));
         return out;
     }
 }

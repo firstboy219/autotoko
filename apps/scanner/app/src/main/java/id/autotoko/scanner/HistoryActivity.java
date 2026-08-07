@@ -37,6 +37,11 @@ public class HistoryActivity extends AppCompatActivity {
         header = findViewById(R.id.header);
         findViewById(R.id.back).setOnClickListener(v -> finish());
 
+        // A tap, not only a long press. Delete existed here from the start and
+        // was reported missing, which is the same thing when the only way to
+        // reach it is a gesture nothing on screen mentions.
+        list.setOnItemClickListener((AdapterView<?> p, View v, int pos, long id) ->
+                confirmDelete(pos));
         list.setOnItemLongClickListener((AdapterView<?> p, View v, int pos, long id) -> {
             confirmDelete(pos);
             return true;
@@ -72,7 +77,7 @@ public class HistoryActivity extends AppCompatActivity {
                     labels.add(sb.toString());
                 }
             }
-            header.setText("Riwayat Scan (" + total + ")");
+            header.setText("Riwayat Scan (" + total + ")  ·  ketuk untuk hapus");
             list.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, labels));
             empty.setText("Belum ada resi yang discan.");
             empty.setVisibility(labels.isEmpty() ? View.VISIBLE : View.GONE);

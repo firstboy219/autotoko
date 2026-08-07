@@ -1,6 +1,7 @@
 package id.autotoko.scanner;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -104,6 +105,73 @@ public class LabelReaderTest {
         r.addFrame("jauh lebih panjang dan lengkap isinya daripada yang tadi");
         assertEquals(2, r.frames());
         assertTrue(r.rawText().startsWith("jauh lebih panjang"));
+    }
+
+    /**
+     * Read off a real parcel by the scanner, misspellings and all. Kept exactly
+     * as it came back so the tests fail the way the warehouse does.
+     */
+    private static final String SHOPEE_TEXT = String.join("\n",
+            "S Shopee",
+            "Resi:SPXIDO62006572945",
+            "Pengirim: Bulanja.com",
+            "Penerima: Erma",
+            "COD Cek Dulu: Tidak",
+            "Berat: 20 gr",
+            "No.Pesanan:",
+            "260504GDA9EMG5",
+            "Variasi",
+            "SKU",
+            "Nama Produk",
+            "Perghilang Bau",
+            "Kaki Cooling Foot Spray",
+            "Deodorant Kaki FOOT SPRAY",
+            "PENGHILANG BAU KAKI BY",
+            "PHARMACIE ORGANICO");
+
+    @Test
+    public void reads_a_shopee_order_number_from_the_line_below_its_label() {
+        LabelReader r = new LabelReader();
+        r.addFrame(SHOPEE_TEXT);
+        r.addFrame(SHOPEE_TEXT);
+        // Letters and digits, and printed under "No.Pesanan:" rather than
+        // beside it. A digits-only same-line reader found nothing here.
+        assertEquals("260504GDA9EMG5", r.orderNo());
+    }
+
+    @Test
+    public void votes_across_letters_too() {
+        LabelReader r = new LabelReader();
+        r.addFrame("No.Pesanan:\n260504GDA9EMG5");
+        r.addFrame("No.Pesanan:\n260504G0A9EMGS");
+        r.addFrame("No.Pesanan:\n260504GDA9EMG5");
+        assertEquals("260504GDA9EMG5", r.orderNo());
+    }
+
+    @Test
+    public void does_not_mistake_the_waybill_for_the_order_number() {
+        LabelReader r = new LabelReader();
+        r.addFrame(SHOPEE_TEXT);
+        r.addFrame(SHOPEE_TEXT);
+        assertNotEquals("SPXIDO62006572945", r.orderNo());
+    }
+
+    @Test
+    public void keeps_product_lines_in_reading_order() {
+        LabelReader r = new LabelReader();
+        r.addFrame(SHOPEE_TEXT);
+        r.addFrame(SHOPEE_TEXT);
+        List<LabelReader.Line> lines = r.productLines();
+        // One product's name, split across consecutive lines. Whoever matches
+        // these has to be able to try neighbours together, which is only
+        // possible while they are still adjacent.
+        int first = -1, last = -1;
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).text.contains("Perghilang")) first = i;
+            if (lines.get(i).text.contains("PHARMACIE")) last = i;
+        }
+        assertTrue("kedua baris harus ada", first >= 0 && last >= 0);
+        assertTrue("urutannya harus terjaga", last > first);
     }
 
     @Test

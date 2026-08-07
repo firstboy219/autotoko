@@ -69,6 +69,7 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -191,6 +192,22 @@ public class ScanActivity extends AppCompatActivity {
 
     /** ...and at least this many readings, if they arrive faster than that. */
     private static final int READ_MIN_FRAMES = 3;
+
+    /**
+     * How many consecutive label lines may be joined into one product name.
+     *
+     * A listing title routinely prints across several lines — a real Shopee
+     * label put one product across five — and scored a line at a time every
+     * fragment looks like noise and nothing matches. Three covers what has
+     * actually been seen without letting two different products merge.
+     */
+    private static final int MERGE_MAX = 3;
+
+    /** Enough for any parcel; past this the reading is noise, not contents. */
+    private static final int MAX_ITEMS_PER_SCAN = 6;
+
+    /** How long "SELESAI" stays up before the screen returns to ready. */
+    private static final long DONE_HOLD_MS = 1800;
 
     private PreviewView preview;
     private TextView status, detail, counter, hint, clarityText, liveRead;
@@ -766,12 +783,15 @@ public class ScanActivity extends AppCompatActivity {
 
     /** One product line the label appears to carry, and what it might be. */
     private static final class Candidate {
+        /** What the label said, or null when the packer added the line. */
         final String rawText;
         final List<ProductMatcher.Match> ranked;
         /** Index into ranked, or -1 for "not one of my products". */
         int chosen = 0;
         double qty = 1;
         EditText qtyField;
+        /** True when the packer picked the product rather than the phone. */
+        boolean manual = false;
 
         Candidate(String rawText, List<ProductMatcher.Match> ranked) {
             this.rawText = rawText;
@@ -789,23 +809,87 @@ public class ScanActivity extends AppCompatActivity {
      * characters OCR gets wrong. A confident-looking wrong product is worse
      * than an empty line, because nobody re-checks a filled-in field.
      */
+    /** One window of consecutive label lines, and what it might be. */
+    private static final class Window {
+        final double score;
+        final int start;
+        final int len;
+        final String text;
+        final List<ProductMatcher.Match> ranked;
+
+        Window(double score, int start, int len, String text, List<ProductMatcher.Match> ranked) {
+            this.score = score;
+            this.start = start;
+            this.len = len;
+            this.text = text;
+            this.ranked = ranked;
+        }
+    }
+
+    /**
+     * Match the label's product lines, trying neighbours together.
+     *
+     * A product name is routinely split across consecutive lines. Scored one at
+     * a time, "Perghilang Bau" and "Kaki Cooling Foot Spray" are two weak
+     * fragments that match nothing; joined, they are a product. So every window
+     * of up to MERGE_MAX consecutive lines is scored, and the best-scoring
+     * windows are taken greedily as long as they do not overlap — one line
+     * belongs to one product.
+     */
+    private List<Candidate> buildCandidates(List<LabelReader.Line> lines) {
+        List<Window> windows = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            StringBuilder joined = new StringBuilder();
+            for (int len = 1; len <= MERGE_MAX && i + len <= lines.size(); len++) {
+                if (len > 1) joined.append(' ');
+                joined.append(lines.get(i + len - 1).text);
+                String text = joined.toString();
+                List<ProductMatcher.Match> ranked = ProductMatcher.rank(text, catalogue, 5);
+                if (ranked.isEmpty()) continue;
+                windows.add(new Window(ranked.get(0).score, i, len, text, ranked));
+            }
+        }
+        Collections.sort(windows, (a, b) -> Double.compare(b.score, a.score));
+
+        boolean[] taken = new boolean[lines.size()];
+        List<Candidate> out = new ArrayList<>();
+        for (Window w : windows) {
+            boolean clash = false;
+            for (int k = w.start; k < w.start + w.len; k++) if (taken[k]) clash = true;
+            if (clash) continue;
+            for (int k = w.start; k < w.start + w.len; k++) taken[k] = true;
+            out.add(new Candidate(w.text, w.ranked));
+            if (out.size() >= MAX_ITEMS_PER_SCAN) break;
+        }
+        return out;
+    }
+
     private void resolve(String resi, String raw, String format, String photoBase64) {
         collecting = false;
-        List<Candidate> candidates = new ArrayList<>();
+        List<LabelReader.Line> lines = reader.productLines();
+        List<Candidate> candidates = buildCandidates(lines);
+
         boolean unsure = false;
+        for (Candidate c : candidates) if (!c.ranked.get(0).confident) unsure = true;
 
-        for (LabelReader.Line line : reader.productLines()) {
-            List<ProductMatcher.Match> ranked = ProductMatcher.rank(line.text, catalogue, 5);
-            if (ranked.isEmpty()) continue;
-            candidates.add(new Candidate(line.text, ranked));
-            if (!ranked.get(0).confident) unsure = true;
-            if (candidates.size() >= 6) break;
-        }
-
-        if (candidates.isEmpty() || !unsure) {
+        // Nothing legible on the label at all. There is nothing to correct, so
+        // stopping the packer to say so would only cost them a parcel's time.
+        if (candidates.isEmpty() && lines.isEmpty()) {
             submit(resi, raw, format, photoBase64, reading(candidates, false));
             return;
         }
+
+        // Every line matched something the phone is sure of: beep and move on,
+        // which is what was asked for.
+        if (!candidates.isEmpty() && !unsure) {
+            submit(resi, raw, format, photoBase64, reading(candidates, false));
+            return;
+        }
+
+        // Unsure, OR the label carried product lines that matched nothing at
+        // all. That second case used to submit in silence with an empty parcel
+        // and no way to say otherwise — the packer was never offered the
+        // mapping they were expected to do.
         ask(resi, raw, format, photoBase64, candidates);
     }
 
@@ -818,6 +902,15 @@ public class ScanActivity extends AppCompatActivity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(pad, pad, pad, pad);
+
+        if (candidates.isEmpty()) {
+            TextView none = new TextView(this);
+            none.setText("Tidak ada produk yang dikenali dari resi ini. "
+                    + "Tambahkan sendiri di bawah.");
+            none.setTextSize(12);
+            none.setPadding(0, 0, 0, (int) (8 * d));
+            root.addView(none);
+        }
 
         for (final Candidate c : candidates) {
             TextView label = new TextView(this);
@@ -853,6 +946,57 @@ public class ScanActivity extends AppCompatActivity {
             root.addView(qty);
         }
 
+        // Add a product by hand. The whole catalogue, not just what was read:
+        // the label may name something the reader never saw, and until now the
+        // only way to record it was to go and find a computer.
+        final List<Candidate> manual = new ArrayList<>();
+        TextView addLabel = new TextView(this);
+        addLabel.setText("Tambah produk sendiri");
+        addLabel.setTextSize(11);
+        addLabel.setPadding(0, (int) (14 * d), 0, (int) (4 * d));
+        root.addView(addLabel);
+
+        final LinearLayout manualRows = new LinearLayout(this);
+        manualRows.setOrientation(LinearLayout.VERTICAL);
+        root.addView(manualRows);
+
+        Button addBtn = new Button(this);
+        addBtn.setText("+ Tambah produk");
+        addBtn.setAllCaps(false);
+        addBtn.setOnClickListener(v -> {
+            if (catalogue.isEmpty()) {
+                Toast.makeText(this, "Master produk belum termuat.", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            List<ProductMatcher.Match> all = new ArrayList<>();
+            for (ProductMatcher.Product p : catalogue) all.add(ProductMatcher.pick(p));
+            final Candidate c = new Candidate(null, all);
+            c.manual = true;
+            manual.add(c);
+
+            List<String> names = new ArrayList<>();
+            for (ProductMatcher.Match m : all) names.add(m.product.name);
+
+            Spinner sp = new Spinner(this);
+            sp.setAdapter(new ArrayAdapter<>(
+                    this, android.R.layout.simple_spinner_dropdown_item, names));
+            sp.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(AdapterView<?> p, View v2, int pos, long id) {
+                    c.chosen = pos;
+                }
+                @Override public void onNothingSelected(AdapterView<?> p) {}
+            });
+            manualRows.addView(sp);
+
+            EditText q = new EditText(this);
+            q.setInputType(InputType.TYPE_CLASS_NUMBER);
+            q.setText("1");
+            q.setHint("Jumlah");
+            c.qtyField = q;
+            manualRows.addView(q);
+        });
+        root.addView(addBtn);
+
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
 
@@ -864,6 +1008,7 @@ public class ScanActivity extends AppCompatActivity {
                 // with nothing on screen to say so.
                 .setCancelable(false)
                 .setPositiveButton("Simpan", (dlg, w) -> {
+                    candidates.addAll(manual);
                     for (Candidate c : candidates) {
                         try {
                             double v = Double.parseDouble(c.qtyField.getText().toString().trim());
@@ -904,11 +1049,16 @@ public class ScanActivity extends AppCompatActivity {
                 ProductMatcher.Match m = c.ranked.get(c.chosen);
                 JSONObject item = new JSONObject();
                 item.put("masterProductId", m.product.id);
-                item.put("rawName",
-                        c.rawText.length() > 255 ? c.rawText.substring(0, 255) : c.rawText);
+                // rawName is what the LABEL said. A hand-added line has no
+                // label wording behind it, and inventing one would make a
+                // choice look like a reading.
+                if (c.rawText != null) {
+                    item.put("rawName",
+                            c.rawText.length() > 255 ? c.rawText.substring(0, 255) : c.rawText);
+                }
                 item.put("qty", c.qty);
                 item.put("source", confirmed ? "device_confirmed" : "device_auto");
-                item.put("matchScore", Math.round(m.score * 1000) / 1000.0);
+                if (!c.manual) item.put("matchScore", Math.round(m.score * 1000) / 1000.0);
                 items.put(item);
             }
             if (items.length() > 0) out.put("items", items);
@@ -971,7 +1121,7 @@ public class ScanActivity extends AppCompatActivity {
                     showBanner(true, resi, extra);
                 }
                 refreshCounter();
-                idle();
+                done(resi);
                 return;
             }
 
@@ -1047,6 +1197,25 @@ public class ScanActivity extends AppCompatActivity {
                 })
                 .setNegativeButton("Bukan", (d, w) -> idle())
                 .show();
+    }
+
+    /**
+     * Say, unmistakably, that this parcel is finished.
+     *
+     * The scan is no longer instant: focus, then a second of reading, then the
+     * upload, and sometimes a dialog in between. Through all of that the screen
+     * looked much as it does when idle, so a packer had no way to know whether
+     * to keep holding the parcel or reach for the next one — and the honest
+     * answer to "am I done?" is worth more than any of the data on screen.
+     */
+    private void done(String resi) {
+        status.setText("SELESAI");
+        status.setTextColor(Color.parseColor("#1B7F4B"));
+        detail.setText(resi);
+        detail.setTextColor(Color.parseColor("#1B7F4B"));
+        detail.setVisibility(View.VISIBLE);
+        hint.setText("Lanjut ke resi berikutnya.");
+        main.postDelayed(this::idle, DONE_HOLD_MS);
     }
 
     private void idle() {

@@ -88,6 +88,19 @@ public final class ProductMatcher {
     private ProductMatcher() {}
 
     /**
+     * A product the packer named outright, wrapped so it travels the same path
+     * as a matched one.
+     *
+     * Score zero, deliberately: nothing was compared. Recording 1.0 here would
+     * make a human choice indistinguishable from the machine's most confident
+     * guess, and the whole reason the score is stored is to find the guesses
+     * that went wrong afterwards.
+     */
+    public static Match pick(Product p) {
+        return new Match(p, 0, true);
+    }
+
+    /**
      * Words that carry no distinguishing power in this catalogue and appear in
      * most listing titles. Left in, they lift every score by the same amount
      * and flatten the gap between the right product and the wrong one.

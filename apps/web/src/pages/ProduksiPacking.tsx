@@ -192,6 +192,33 @@ export function ProduksiPacking() {
     recap.reload();
   }
 
+  /**
+   * Remove a scan entirely.
+   *
+   * Worth having next to the row rather than only in the app: a parcel scanned
+   * by mistake blocks its own waybill from ever being scanned again, and until
+   * now the only way to clear that was to find the phone that did it.
+   */
+  async function removeScan(scan: Scan) {
+    if (
+      !window.confirm(
+        `Hapus scan ${scan.resi}?\n\n` +
+          "Foto, isi paket, dan data labelnya ikut terhapus. " +
+          "Setelah dihapus, resi ini bisa discan lagi." +
+          (scan.orderId ? "\n\nOrder yang terhubung akan dilepas kembali." : ""),
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.del(`/resi/scans/${scan.id}`);
+      toast(`Scan ${scan.resi} dihapus.`, "success");
+      refresh();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    }
+  }
+
   async function unlink(scan: Scan) {
     try {
       await api.del(`/resi/scans/${scan.id}/link`);
@@ -396,6 +423,10 @@ export function ProduksiPacking() {
                         >
                           Data Label
                           {s.labelEditedAt ? " ✓" : ""}
+                        </Button>
+                        <Button variant="text" onClick={() => removeScan(s)}>
+                          <Icon name="trash" className="w-3.5 h-3.5" />
+                          Hapus
                         </Button>
                         {s.photoUrl && (
                           <Button
