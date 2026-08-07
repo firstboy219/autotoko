@@ -869,27 +869,23 @@ public class ScanActivity extends AppCompatActivity {
         List<LabelReader.Line> lines = reader.productLines();
         List<Candidate> candidates = buildCandidates(lines);
 
-        boolean unsure = false;
-        for (Candidate c : candidates) if (!c.ranked.get(0).confident) unsure = true;
-
-        // Nothing legible on the label at all. There is nothing to correct, so
-        // stopping the packer to say so would only cost them a parcel's time.
-        if (candidates.isEmpty() && lines.isEmpty()) {
+        // Confirmed on EVERY scan, however sure the phone is.
+        //
+        // It used to skip the sheet when every line matched confidently, on the
+        // grounds that a tap per parcel is expensive. In practice a confident
+        // match is not the same as a correct one — this catalogue holds pairs
+        // that differ by one character OCR routinely drops — and a wrong
+        // product recorded silently is found weeks later in a sales report, if
+        // at all. The best match is pre-selected, so agreeing is one tap.
+        //
+        // The exception is having nothing to confirm against: with no product
+        // list loaded the sheet would offer an empty dropdown, which asks the
+        // packer to solve a problem that is not theirs.
+        if (catalogue.isEmpty()) {
+            hint.setText("Master produk belum termuat - isi paket dilewati.");
             submit(resi, raw, format, photoBase64, reading(candidates, false));
             return;
         }
-
-        // Every line matched something the phone is sure of: beep and move on,
-        // which is what was asked for.
-        if (!candidates.isEmpty() && !unsure) {
-            submit(resi, raw, format, photoBase64, reading(candidates, false));
-            return;
-        }
-
-        // Unsure, OR the label carried product lines that matched nothing at
-        // all. That second case used to submit in silence with an empty parcel
-        // and no way to say otherwise — the packer was never offered the
-        // mapping they were expected to do.
         ask(resi, raw, format, photoBase64, candidates);
     }
 
@@ -912,11 +908,20 @@ public class ScanActivity extends AppCompatActivity {
             root.addView(none);
         }
 
+        // Numbered, because a parcel with three products is the case this
+        // sheet exists for and an unlabelled stack of dropdowns does not read
+        // as a list of them.
+        int n = 0;
         for (final Candidate c : candidates) {
+            n++;
             TextView label = new TextView(this);
-            String shown = c.rawText.length() > 90 ? c.rawText.substring(0, 90) + "…" : c.rawText;
-            label.setText("Di resi: " + shown);
+            String shown = c.rawText == null
+                    ? "(ditambahkan manual)"
+                    : (c.rawText.length() > 90 ? c.rawText.substring(0, 90) + "…" : c.rawText);
+            boolean sure = !c.ranked.isEmpty() && c.ranked.get(0).confident;
+            label.setText("Produk " + n + (sure ? "  ✓ cocok" : "  ? periksa") + "\nDi resi: " + shown);
             label.setTextSize(11);
+            label.setTextColor(Color.parseColor(sure ? "#1B7F4B" : "#6B7178"));
             label.setPadding(0, (int) (10 * d), 0, (int) (2 * d));
             root.addView(label);
 
@@ -1001,7 +1006,9 @@ public class ScanActivity extends AppCompatActivity {
         scroll.addView(root);
 
         new AlertDialog.Builder(this)
-                .setTitle("Cocokkan isi paket")
+                .setTitle(candidates.isEmpty()
+                        ? "Isi paket"
+                        : "Cocokkan isi paket (" + candidates.size() + ")")
                 .setView(scroll)
                 // Not cancellable by tapping away: the scan is already held
                 // open and a dismissed dialog would leave the parcel unsaved
@@ -1102,7 +1109,14 @@ public class ScanActivity extends AppCompatActivity {
                         JSONObject reading) {
         hint.setText("Menyimpan...");
         api.scan(resi, raw, "barcode", format, photoBase64, reading, r -> {
-            busy = false;
+            // NOT released here.
+            //
+            // Clearing busy the moment the response landed put the camera back
+            // to work while the screen was still showing the result and while
+            // a dialog was still open — so the sheet still in frame was read
+            // again, refused as a duplicate, and "Halaman lain dari resi ini?"
+            // appeared on top of a parcel that had not finished. busy now means
+            // "this parcel is not finished with", and only idle() ends that.
 
             if (r.ok()) {
                 feedback(true);
@@ -1135,6 +1149,9 @@ public class ScanActivity extends AppCompatActivity {
                     sb.append(" - ").append(device);
                 }
                 showBanner(false, resi, sb.toString());
+                // Same reason as done(): without this the sheet is read again
+                // the moment the dialog closes.
+                mute(resi);
 
                 // A refused duplicate is often not a mistake: some orders print
                 // across two or three sheets that all carry the same waybill,
@@ -1209,6 +1226,12 @@ public class ScanActivity extends AppCompatActivity {
      * answer to "am I done?" is worth more than any of the data on screen.
      */
     private void done(String resi) {
+        // Re-armed from the moment the scan FINISHED, not from when the
+        // barcode was first seen. The mute is five seconds and a scan takes
+        // several — focus, reading, then uploading a 2.5MP photo over
+        // warehouse wifi — so by the time the packer saw "SELESAI" the window
+        // protecting them from re-reading the same sheet had already expired.
+        mute(resi);
         status.setText("SELESAI");
         status.setTextColor(Color.parseColor("#1B7F4B"));
         detail.setText(resi);
@@ -1219,6 +1242,9 @@ public class ScanActivity extends AppCompatActivity {
     }
 
     private void idle() {
+        // The single place a parcel is let go of. Every path ends here, which
+        // is what makes it safe for busy to be released only here.
+        busy = false;
         status.setText("Siap");
         status.setTextColor(Color.parseColor("#6B7178"));
         detail.setVisibility(View.GONE);
