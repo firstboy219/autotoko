@@ -33,6 +33,9 @@ type Marketplace = "tiktok" | "shopee";
 interface ShopPayout {
   id: string;
   credit: number;
+  sellerGross: number;
+  /** Set aside out of sellerGross for raw materials; sellerNet is what remains. */
+  material: number;
   sellerNet: number;
   subSeller: number;
   subSubSeller: number;
@@ -113,6 +116,15 @@ function ShopPayoutBlock({ row, loading }: { row?: ShopPayout; loading: boolean 
         <span className="text-xs text-ink-2">Bagian Anda (bersih)</span>
         <span className="text-xs text-ink tabular-nums">{rupiah(row.sellerNet)}</span>
       </div>
+      {/* The subtraction, spelled out. Without it the card showed only the
+          answer, and "is this already net of the reserve?" is not a question a
+          number can answer about itself. */}
+      {row.material > 0 && (
+        <div className="flex items-baseline justify-between gap-2 text-[11px] text-ink-3">
+          <span>= {rupiah(row.sellerGross)} − bahan baku</span>
+          <span className="tabular-nums">−{rupiah(row.material)}</span>
+        </div>
+      )}
       {commission > 0 && (
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-xs text-ink-2 truncate">
