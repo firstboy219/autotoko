@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
-import { dateShort } from "../lib/fmt";
+import { dateShort, rupiah } from "../lib/fmt";
 import { Icon } from "../components/Icon";
 import {
   CategoryChip,
@@ -28,6 +28,29 @@ import {
 } from "../components/ui";
 
 type Marketplace = "tiktok" | "shopee";
+
+/** One shop's slice of the payout report, for the current month. */
+interface ShopPayout {
+  id: string;
+  credit: number;
+  sellerNet: number;
+  subSeller: number;
+  subSubSeller: number;
+  owner: string | null;
+  mutations: number;
+}
+interface PayoutReport {
+  totals: { credit: number; sellerNet: number };
+  byShop: ShopPayout[];
+}
+
+/** First day of the current month, as the API wants it. */
+function monthStart(): string {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1).toLocaleDateString("sv-SE");
+}
+const TODAY_ISO = new Date().toLocaleDateString("sv-SE");
+const MONTH_LABEL = new Date().toLocaleDateString("id-ID", { month: "long", year: "numeric" });
 
 interface Shop {
   categoryId: string | null;
@@ -56,9 +79,69 @@ function daysToExpiry(iso: string | null): number | null {
 
 const shopLabel = (s: Shop) => s.displayName ?? s.shopName ?? s.shopId;
 
+/**
+ * This month's payouts for one shop.
+ *
+ * "Bagian Anda" is net of the raw-material reserve, matching Laporan Bagian —
+ * the reserve is the seller's own money set aside, and a gross figure here
+ * would say more is spendable than is.
+ *
+ * The sub-seller's rate is worked out from this shop's own figures rather than
+ * read from the settings: the setting is what should apply, and if a rate was
+ * changed mid-month the frozen amounts are what actually happened.
+ */
+function ShopPayoutBlock({ row, loading }: { row?: ShopPayout; loading: boolean }) {
+  if (loading) {
+    return <div className="mt-3 text-xs text-ink-3">Menghitung pencairan…</div>;
+  }
+  if (!row || row.credit === 0) {
+    return (
+      <div className="mt-3 rounded-md bg-canvas px-3 py-2 text-xs text-ink-3">
+        Belum ada pencairan di {MONTH_LABEL}.
+      </div>
+    );
+  }
+  const commission = row.subSeller + row.subSubSeller;
+  const rate = row.credit > 0 ? (commission / row.credit) * 100 : 0;
+  return (
+    <div className="mt-3 rounded-md bg-canvas px-3 py-2 space-y-1">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs text-ink-2">Pencairan {MONTH_LABEL}</span>
+        <span className="text-sm text-ink tabular-nums">{rupiah(row.credit)}</span>
+      </div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs text-ink-2">Bagian Anda (bersih)</span>
+        <span className="text-xs text-ink tabular-nums">{rupiah(row.sellerNet)}</span>
+      </div>
+      {commission > 0 && (
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-xs text-ink-2 truncate">
+            Bagian {row.owner ?? "sub-seller"}{" "}
+            <span className="text-ink-3 tabular-nums">({rate.toFixed(1)}%)</span>
+          </span>
+          <span className="text-xs text-ink tabular-nums">{rupiah(commission)}</span>
+        </div>
+      )}
+      <div className="text-[11px] text-ink-3">
+        {row.mutations} kali pencairan
+        {!row.owner && commission === 0 ? " · toko sendiri" : ""}
+      </div>
+    </div>
+  );
+}
+
 export function Toko() {
   const toast = useToast();
   const { data, loading, reload } = useFetch<Shop[]>("/shops");
+  // Reuses the payout report rather than a second aggregation: one definition
+  // of "seller net" for the whole app, and this page cannot drift from the
+  // Laporan Bagian page while both read the same numbers.
+  const payout = useFetch<PayoutReport>(
+    `/payout/profit?from=${monthStart()}&to=${TODAY_ISO}`,
+  );
+  const payoutByShop = new Map<string, ShopPayout>(
+    (payout.data?.byShop ?? []).map((r) => [r.id, r]),
+  );
   const categories = useFetch<ShopCategory[]>("/shops/categories");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [managingCategories, setManagingCategories] = useState(false);
@@ -90,6 +173,17 @@ export function Toko() {
         });
       }
       buckets.get(key)!.shops.push(s);
+    }
+    // Busiest first, inside each category. A shop that paid out nothing this
+    // month sorts to the bottom rather than being hidden — it is still a shop,
+    // and "which of mine went quiet" is worth seeing at a glance.
+    for (const b of buckets.values()) {
+      b.shops.sort((a, z) => {
+        const ca = payoutByShop.get(a.id)?.credit ?? 0;
+        const cz = payoutByShop.get(z.id)?.credit ?? 0;
+        if (cz !== ca) return cz - ca;
+        return shopLabel(a).localeCompare(shopLabel(z));
+      });
     }
     // Ungrouped last: it is a leftover pile, not a group anyone chose.
     return [...buckets.entries()].sort((a, b) => {
@@ -320,6 +414,13 @@ export function Toko() {
                     </div>
                   </div>
                 )}
+
+                {/* What this shop actually produced this month, and who
+                    ends up with it. Both sides shown rather than only the
+                    owner's: the seller earns from a sub-seller's shop too, and
+                    a single "profit" figure would have to silently pick one of
+                    them to mean. */}
+                <ShopPayoutBlock row={payoutByShop.get(s.id)} loading={payout.loading} />
 
                 <div className="flex flex-wrap gap-2 mt-4">
                   {isPlaceholder ? (
