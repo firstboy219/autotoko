@@ -15,6 +15,7 @@ import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, TenantOwnerOnly, type JwtPayload } from "../auth/jwt-auth.guard.js";
 import { MaterialsService } from "./materials.service.js";
 import {
+  CreateMaterialDto,
   CreatePurchaseDto,
   ParseReceiptDto,
   UpdateMaterialDto,
@@ -34,6 +35,11 @@ export class MaterialsController {
   @Get()
   async list(@Req() req: FastifyRequest) {
     return ok(await this.materials.list(uid(req)));
+  }
+
+  @Post()
+  async create(@Req() req: FastifyRequest, @Body() dto: CreateMaterialDto) {
+    return ok(await this.materials.createMaterial(uid(req), dto));
   }
 
   @Patch(":id")

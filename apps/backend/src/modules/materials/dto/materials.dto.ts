@@ -21,6 +21,14 @@ import {
  */
 export const STOCK_LEVELS = ["habis", "hampir_habis", "cukup", "normal", "banyak"] as const;
 
+export class CreateMaterialDto {
+  @IsString() @MaxLength(255) name!: string;
+  @IsOptional() @IsString() @MaxLength(32) unit?: string;
+  @IsOptional() @IsNumber() @Min(0) unitCost?: number;
+  @IsOptional() @IsNumber() @Min(0) currentStock?: number;
+  @IsOptional() @IsNumber() @Min(0) minimumThreshold?: number;
+}
+
 export class UpdateMaterialDto {
   @IsOptional() @IsString() @MaxLength(255) name?: string;
   @IsOptional() @IsString() @MaxLength(32) unit?: string;

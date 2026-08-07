@@ -261,6 +261,57 @@ export class MaterialsService {
     return { ok: true as const, name: material.name, moved };
   }
 
+  /**
+   * Create a material, or hand back the one that already answers to that name.
+   *
+   * Find-or-create rather than insert-or-409, matching what the HPP page does.
+   * Somebody scanning a shelf has no way to know whether "Lakban" is already in
+   * the catalogue, and refusing them with a constraint error would teach them
+   * to invent "Lakban 2" — which is exactly the duplicate the unique index
+   * exists to prevent.
+   */
+  async createMaterial(
+    userId: string,
+    dto: {
+      name: string;
+      unit?: string;
+      unitCost?: number;
+      currentStock?: number;
+      minimumThreshold?: number;
+    },
+  ) {
+    const name = dto.name.trim();
+    if (!name) throw new BadRequestException("Nama bahan tidak boleh kosong.");
+    const normalized = name.toLowerCase().replace(/\s+/g, " ");
+
+    const [found] = await this.db
+      .select()
+      .from(materials)
+      .where(and(eq(materials.userId, userId), eq(materials.normalizedName, normalized)))
+      .limit(1);
+    if (found) {
+      return { created: false as const, id: found.id, name: found.name, unit: found.unit };
+    }
+
+    const [made] = await this.db
+      .insert(materials)
+      .values({
+        userId,
+        name,
+        normalizedName: normalized,
+        unit: dto.unit?.trim() || null,
+        unitCost: (dto.unitCost ?? 0).toFixed(2),
+        // A price given now IS the moment it was set; without this the BOM page
+        // reports "belum pernah diisi" beside a figure just typed in.
+        unitCostUpdatedAt: dto.unitCost != null ? new Date() : null,
+        currentStock: (dto.currentStock ?? 0).toFixed(3),
+        minimumThreshold: (dto.minimumThreshold ?? 0).toFixed(3),
+      })
+      .returning();
+    if (!made) throw new Error("Insert materials returned no row");
+    return { created: true as const, id: made.id, name: made.name, unit: made.unit };
+  }
+
   async updateMaterial(userId: string, id: string, dto: UpdateMaterialDto) {
     await this.getOrThrow(userId, id);
     const set: Record<string, unknown> = { updatedAt: new Date() };

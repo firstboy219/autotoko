@@ -117,6 +117,47 @@ public final class Api {
         call("POST", session.baseUrl() + "/api/resi/scan", session.token(), payload, cb);
     }
 
+    /**
+     * Create a master product from text read off a package.
+     *
+     * SKU is required by the API and nobody standing at a shelf has one in
+     * mind, so the caller generates a readable one from the name — see
+     * TextScanActivity.suggestSku.
+     */
+    public void createProduct(String name, String sku, String price, Cb cb) {
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("sku", sku);
+            payload.put("name", name);
+            payload.put("status", "active");
+            if (price != null && !price.isEmpty()) payload.put("basePrice", price);
+        } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/products", session.token(), payload, cb);
+    }
+
+    /** Replace a product's alias block. The caller appends; this only stores. */
+    public void setProductAliases(String productId, String aliases, Cb cb) {
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("marketplaceAliases", aliases);
+        } catch (Exception ignored) {}
+        call("PATCH", session.baseUrl() + "/api/products/" + productId,
+                session.token(), payload, cb);
+    }
+
+    /** Create a raw material, or get back the one already named that. */
+    public void createMaterial(String name, String unit, String unitCost, Cb cb) {
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("name", name);
+            if (unit != null && !unit.isEmpty()) payload.put("unit", unit);
+            if (unitCost != null && !unitCost.isEmpty()) {
+                payload.put("unitCost", Double.parseDouble(unitCost));
+            }
+        } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/materials", session.token(), payload, cb);
+    }
+
     /** The seller's raw materials, for the stock screen. */
     public void materials(Cb cb) {
         call("GET", session.baseUrl() + "/api/materials", session.token(), null, cb);

@@ -110,11 +110,20 @@
             android:layout_marginTop="2dp"
             android:layout_marginBottom="10dp" />
 
+        <!-- Two rows: five buttons on one line leaves each of them too narrow
+             to read on a phone. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:layout_marginTop="8dp">
+
+            <Button android:id="@+id/textscan"
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_input"
+                android:text="Scan Teks" android:textAllCaps="false"
+                android:textColor="@color/ink" android:textSize="13sp" />
 
             <Button android:id="@+id/manual"
                 android:layout_width="0dp" android:layout_weight="1"
