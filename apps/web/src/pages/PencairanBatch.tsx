@@ -59,7 +59,7 @@ interface Disbursement {
   payoutMutationId: string | null;
   shopName: string | null;
   marketplace: string | null;
-  recipientType: "sedekah" | "sub_seller" | "sub_sub_seller";
+  recipientType: "sedekah" | "sub_seller" | "sub_sub_seller" | "bahan_baku";
   recipientName: string;
   recipientChain: string | null;
   expectedAmount: string;
@@ -394,9 +394,10 @@ function BatchProgress({ batch, onDone }: { batch: BatchDetail; onDone: () => vo
                 {[
                   ["Total Kredit", totals.credit],
                   ["Sedekah", totals.sedekah],
-                  ["Seller", totals.seller],
+                  // Net, for the same reason as the Ringkasan Total below.
+                  ["Seller (bersih)", totals.seller - totals.material],
                   ...(totals.material > 0
-                    ? ([["- Bahan baku", totals.material]] as [string, number][])
+                    ? ([["Bahan Baku", totals.material]] as [string, number][])
                     : []),
                   ...(totals.sub > 0 ? ([["Sub-seller", totals.sub]] as [string, number][]) : []),
                 ].map(([label, val]) => (
@@ -727,11 +728,34 @@ function MutationForm({
   );
 }
 
-function SplitCell({ label, value }: { label: string; value: number }) {
+/**
+ * One figure from the split, with what share of the payout it is.
+ *
+ * The percentage is the point of the whole row: it is how someone checks that
+ * what came out matches what was configured, without dividing anything by hand
+ * or trusting that the rates were applied.
+ */
+function SplitCell({
+  label,
+  value,
+  ofCents,
+  note,
+}: {
+  label: string;
+  value: number;
+  /** Denominator for the share. Omit to show no percentage. */
+  ofCents?: number;
+  note?: string;
+}) {
+  const pct = ofCents && ofCents > 0 ? (value / ofCents) * 100 : null;
   return (
     <div className="bg-white rounded-lg border border-line px-3 py-2.5">
       <div className="text-xs text-ink-3 truncate">{label}</div>
       <div className="text-sm text-ink tabular-nums mt-0.5">{rupiah(value / 100)}</div>
+      {pct != null && (
+        <div className="text-[11px] text-ink-3 tabular-nums">{pct.toFixed(1)}% dari kredit</div>
+      )}
+      {note && <div className="text-[11px] text-ink-3">{note}</div>}
     </div>
   );
 }
@@ -913,13 +937,48 @@ function MutationList({
               <div className="text-xs font-medium text-ink-2 mb-3">
                 Ringkasan Total ({batch.mutations.length} toko)
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              {/* Seller is shown NET. The reserve is carved out of the
+                  seller's own cut, so a gross figure here overstated what
+                  actually reaches them by the whole reserve — 50% of it, for
+                  this tenant. Net + reserve + everyone else still adds up to
+                  the credit, which is what the percentages let you check. */}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <SplitCell label="Total Kredit" value={cents(totals.credit)} />
-                <SplitCell label="Sedekah" value={cents(totals.sedekah)} />
-                <SplitCell label="Seller" value={cents(totals.seller)} />
-                {totals.subSeller > 0 && <SplitCell label="Sub-seller" value={cents(totals.subSeller)} />}
+                <SplitCell
+                  label="Sedekah"
+                  value={cents(totals.sedekah)}
+                  ofCents={cents(totals.credit)}
+                />
+                <SplitCell
+                  label="Seller (bersih)"
+                  value={cents(totals.seller - totals.material)}
+                  ofCents={cents(totals.credit)}
+                />
+                {totals.material > 0 && (
+                  <SplitCell
+                    label="Bahan Baku"
+                    value={cents(totals.material)}
+                    ofCents={cents(totals.credit)}
+                    note={
+                      totals.seller > 0
+                        ? `${((totals.material / totals.seller) * 100).toFixed(0)}% dari seller`
+                        : undefined
+                    }
+                  />
+                )}
+                {totals.subSeller > 0 && (
+                  <SplitCell
+                    label="Sub-seller"
+                    value={cents(totals.subSeller)}
+                    ofCents={cents(totals.credit)}
+                  />
+                )}
                 {totals.subSubSeller > 0 && (
-                  <SplitCell label="Sub-sub-seller" value={cents(totals.subSubSeller)} />
+                  <SplitCell
+                    label="Sub-sub-seller"
+                    value={cents(totals.subSubSeller)}
+                    ofCents={cents(totals.credit)}
+                  />
                 )}
               </div>
             </div>
@@ -1050,24 +1109,29 @@ function MutationList({
 function DisbursementRekap({ batch, onChange }: { batch: BatchDetail; onChange: () => void }) {
   const [showDone, setShowDone] = useState(false);
 
-  const sedekahRows = useMemo(
-    () => batch.disbursements.filter((d) => d.recipientType === "sedekah"),
+  /**
+   * Transfers that cover the whole batch rather than one shop.
+   *
+   * Detected by having no mutation to belong to, which is what "consolidated"
+   * actually means here — rather than by naming sedekah, as this did when
+   * sedekah was the only one. The material reserve is the second, and anything
+   * later gets its card for free.
+   */
+  const consolidated = useMemo(
+    () => batch.disbursements.filter((d) => d.payoutMutationId == null),
     [batch.disbursements],
   );
-  const consolidatedSedekah =
-    sedekahRows.length === 1 && sedekahRows[0]!.payoutMutationId == null ? sedekahRows[0]! : null;
 
   const groups = useMemo(() => {
     const byMutation = new Map<string, Disbursement[]>();
     for (const d of batch.disbursements) {
-      if (consolidatedSedekah && d.id === consolidatedSedekah.id) continue;
       if (!d.payoutMutationId) continue;
       const arr = byMutation.get(d.payoutMutationId) ?? [];
       arr.push(d);
       byMutation.set(d.payoutMutationId, arr);
     }
     return [...byMutation.entries()];
-  }, [batch.disbursements, consolidatedSedekah]);
+  }, [batch.disbursements]);
 
   const all = batch.disbursements;
   const doneCount = all.filter((d) => READY.includes(d.validationStatus)).length;
@@ -1084,7 +1148,6 @@ function DisbursementRekap({ batch, onChange }: { batch: BatchDetail; onChange: 
     .map(([id, rows]) => [id, rows.filter(isDone)] as const)
     .filter(([, rows]) => rows.length > 0);
 
-  const sedekahDone = consolidatedSedekah ? isDone(consolidatedSedekah) : true;
 
   return (
     <div className="space-y-4">
@@ -1110,13 +1173,17 @@ function DisbursementRekap({ batch, onChange }: { batch: BatchDetail; onChange: 
         </div>
       </Card>
 
-      {consolidatedSedekah && (
-        <Card padded={false}>
+      {consolidated.map((d) => (
+        <Card padded={false} key={d.id}>
           <CardHeader
-            title="Sedekah"
-            subtitle={`Gabungan ${batch.mutations.length} toko — cukup 1 transfer`}
+            title={RECIPIENT_LABEL[d.recipientType]}
+            subtitle={
+              d.recipientType === "bahan_baku"
+                ? `Gabungan ${batch.mutations.length} toko — porsi bahan baku dari bagian seller`
+                : `Gabungan ${batch.mutations.length} toko — cukup 1 transfer`
+            }
             action={
-              sedekahDone ? (
+              isDone(d) ? (
                 <Badge tone="success" icon="check">
                   Selesai
                 </Badge>
@@ -1126,10 +1193,10 @@ function DisbursementRekap({ batch, onChange }: { batch: BatchDetail; onChange: 
             }
           />
           <div className="p-4">
-            <DisbursementRow d={consolidatedSedekah} onChange={onChange} />
+            <DisbursementRow d={d} onChange={onChange} />
           </div>
         </Card>
-      )}
+      ))}
 
       <Card padded={false}>
         <CardHeader
@@ -1203,6 +1270,7 @@ const RECIPIENT_LABEL: Record<Disbursement["recipientType"], string> = {
   sedekah: "Sedekah",
   sub_seller: "Sub-seller",
   sub_sub_seller: "Sub-sub-seller",
+  bahan_baku: "Bahan Baku",
 };
 const VALIDATION_TONE: Record<ValidationStatus, "neutral" | "success" | "danger" | "info"> = {
   belum_upload: "neutral",
@@ -1260,7 +1328,9 @@ function DisbursementRow({ d, onChange }: { d: Disbursement; onChange: () => voi
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-ink">{RECIPIENT_LABEL[d.recipientType]}</span>
             {d.recipientChain && <span className="text-sm text-ink-2">({d.recipientChain})</span>}
-            {!d.recipientChain && d.recipientType !== "sedekah" && (
+            {!d.recipientChain &&
+              d.recipientType !== "sedekah" &&
+              d.recipientType !== "bahan_baku" && (
               <span className="text-sm text-ink-2">({d.recipientName})</span>
             )}
             <Badge

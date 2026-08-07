@@ -91,7 +91,9 @@ export class DisbursementsService {
       recipientName:
         r.disbursement.recipientType === "sedekah"
           ? "Sedekah"
-          : (r.subSubSeller?.name ?? r.subSeller?.name ?? "-"),
+          : r.disbursement.recipientType === "bahan_baku"
+            ? "Bahan Baku"
+            : (r.subSubSeller?.name ?? r.subSeller?.name ?? "-"),
       // Full chain for a sub-sub-seller recipient, per MAPPING_DAN_SELFSERVICE_TOKO.md.
       recipientChain: r.subSubSeller ? `${r.subSubSeller.name} › ${r.subSeller?.name ?? "-"}` : null,
       expectedAmount: r.disbursement.expectedAmount,

@@ -106,8 +106,10 @@ export class PayoutBatchService {
 
     const toInsert: (typeof payoutDisbursements.$inferInsert)[] = [];
     let sedekahTotalCents = 0;
+    let materialTotalCents = 0;
     for (const m of mutations) {
       sedekahTotalCents += toCents(m.sedekahAmount);
+      materialTotalCents += toCents(m.sellerMaterialAmount);
       if (m.subSellerId && toCents(m.subSellerAmount) > 0) {
         toInsert.push({
           payoutMutationId: m.id,
@@ -139,6 +141,23 @@ export class PayoutBatchService {
         recipientType: "sedekah",
         expectedAmount: (sedekahTotalCents / 100).toFixed(2),
         recordedAccount: settings?.sedekahBankAccount ?? null,
+      });
+    }
+
+    // The material reserve, as one transfer for the whole batch.
+    //
+    // Set aside out of the seller's own cut rather than paid to anyone else,
+    // so nothing here changes who is owed what — the money was already
+    // subtracted when the mutation was recorded. What this adds is the
+    // evidence: "budgeted for restock" and "actually moved to the restock
+    // account" are different claims, and only the second one can be checked.
+    if (materialTotalCents > 0) {
+      toInsert.push({
+        batchId: id,
+        userId,
+        recipientType: "bahan_baku",
+        expectedAmount: (materialTotalCents / 100).toFixed(2),
+        recordedAccount: settings?.materialBankAccount ?? null,
       });
     }
 

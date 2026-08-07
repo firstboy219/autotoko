@@ -218,6 +218,34 @@
       "when": 1786109847239,
       "tag": "0030_device_reading",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1786113943918,
+      "tag": "0031_bahan_baku_transfer",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786116443273,
+      "tag": "0032_product_aliases",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786117030717,
+      "tag": "0033_resi_pages",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786117030718,
+      "tag": "0034_stock_level",
+      "breakpoints": true
     }
   ]
 }

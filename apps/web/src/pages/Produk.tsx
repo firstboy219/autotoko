@@ -32,6 +32,8 @@ interface Master {
   id: string;
   sku: string;
   name: string;
+  /** Other names this is sold under, one per line. */
+  marketplaceAliases: string | null;
   basePrice: string | null;
   status: string;
   postingCount?: number;
@@ -259,6 +261,7 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [status, setStatus] = useState("active");
+  const [aliases, setAliases] = useState("");
 
   // add-posting form state
   const [showAdd, setShowAdd] = useState(false);
@@ -270,13 +273,20 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
 
   function startEdit() {
     if (!data) return;
-    setName(data.name); setPrice(data.basePrice ?? ""); setStatus(data.status); setEditing(true);
+    setName(data.name); setPrice(data.basePrice ?? ""); setStatus(data.status);
+    setAliases(data.marketplaceAliases ?? "");
+    setEditing(true);
   }
 
   async function saveEdit(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setErr(null);
     try {
-      await api.patch(`/products/${id}`, { name, basePrice: price || undefined, status });
+      await api.patch(`/products/${id}`, {
+        name,
+        basePrice: price || undefined,
+        status,
+        marketplaceAliases: aliases,
+      });
       setEditing(false); reload(); onChanged();
       toast("Produk diperbarui", "success");
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
@@ -384,6 +394,18 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
                       </Select>
                     </Field>
                   </div>
+                  <Field
+                    label="Nama di Marketplace (alias)"
+                    hint="Satu nama per baris. Dipakai aplikasi scan untuk mengenali produk ini dari judul iklan yang tercetak di resi — judul iklan jarang sama dengan nama master."
+                  >
+                    <textarea
+                      value={aliases}
+                      onChange={(e) => setAliases(e.target.value)}
+                      rows={3}
+                      placeholder={"Renature Cool Mint Mouthspray\nMouthspray Cool Mint 100ml"}
+                      className="w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink placeholder:text-ink-3"
+                    />
+                  </Field>
                   <div className="flex gap-2">
                     <Button type="submit" variant="filled" size="sm" loading={busy}>
                       Simpan

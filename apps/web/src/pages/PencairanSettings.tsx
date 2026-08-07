@@ -23,6 +23,7 @@ interface Settings {
   materialReserveRate: string;
   sedekahBasis: SedekahBasis;
   sedekahBankAccount: string | null;
+  materialBankAccount: string | null;
 }
 
 /**
@@ -68,6 +69,7 @@ export function PencairanSettings() {
   const [materialRate, setMaterialRate] = useState("0");
   const [basis, setBasis] = useState<SedekahBasis>("total_credit");
   const [bank, setBank] = useState("");
+  const [materialBank, setMaterialBank] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -78,6 +80,7 @@ export function PencairanSettings() {
     setMaterialRate((Number(data.materialReserveRate ?? 0) * 100).toString());
     setBasis(data.sedekahBasis);
     setBank(data.sedekahBankAccount ?? "");
+    setMaterialBank(data.materialBankAccount ?? "");
   }, [data]);
 
   const sedekahNum = Number(rate);
@@ -121,6 +124,7 @@ export function PencairanSettings() {
         materialReserveRate: materialNum / 100,
         sedekahBasis: basis,
         sedekahBankAccount: bank || undefined,
+        materialBankAccount: materialBank || undefined,
       });
       toast("Pengaturan tersimpan", "success");
       reload();
@@ -314,17 +318,30 @@ export function PencairanSettings() {
           </Card>
 
           <Card>
-            <Field
-              label="Rekening Tujuan Sedekah"
-              hint="Dipakai sebagai rekening tujuan pada rekap transfer sedekah."
-            >
-              <Input
-                value={bank}
-                onChange={(e) => setBank(e.target.value)}
-                placeholder="Nomor rekening + bank"
-                className="font-mono"
-              />
-            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Rekening Tujuan Sedekah"
+                hint="Dipakai sebagai rekening tujuan pada rekap transfer sedekah."
+              >
+                <Input
+                  value={bank}
+                  onChange={(e) => setBank(e.target.value)}
+                  placeholder="Nomor rekening + bank"
+                  className="font-mono"
+                />
+              </Field>
+              <Field
+                label="Rekening Tujuan Bahan Baku"
+                hint="Porsi bahan baku ditransfer ke sini, satu kali per batch, dengan bukti transfer seperti sedekah."
+              >
+                <Input
+                  value={materialBank}
+                  onChange={(e) => setMaterialBank(e.target.value)}
+                  placeholder="Nomor rekening + bank"
+                  className="font-mono"
+                />
+              </Field>
+            </div>
           </Card>
 
           {err && <InlineAlert tone="danger">{err}</InlineAlert>}

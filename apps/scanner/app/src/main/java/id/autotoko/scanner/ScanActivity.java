@@ -247,6 +247,8 @@ public class ScanActivity extends AppCompatActivity {
         detail = findViewById(R.id.courier);
         counter = findViewById(R.id.counter);
         hint = findViewById(R.id.hint);
+        findViewById(R.id.stock).setOnClickListener(v ->
+                startActivity(new Intent(this, StockActivity.class)));
         clarityBar = findViewById(R.id.clarityBar);
         clarityText = findViewById(R.id.clarityText);
         liveRead = findViewById(R.id.liveRead);
@@ -316,7 +318,11 @@ public class ScanActivity extends AppCompatActivity {
                 if (o == null) continue;
                 String id = o.optString("id", "");
                 if (id.isEmpty()) continue;
-                next.add(new ProductMatcher.Product(id, o.optString("name", ""), o.optString("sku", "")));
+                next.add(new ProductMatcher.Product(
+                        id,
+                        o.optString("name", ""),
+                        o.optString("sku", ""),
+                        o.optString("marketplaceAliases", "")));
             }
             catalogue.clear();
             catalogue.addAll(next);
@@ -979,7 +985,17 @@ public class ScanActivity extends AppCompatActivity {
                     sb.append(" - ").append(device);
                 }
                 showBanner(false, resi, sb.toString());
-                idle();
+
+                // A refused duplicate is often not a mistake: some orders print
+                // across two or three sheets that all carry the same waybill,
+                // and the pages holding the rest of the product table were
+                // never photographed because the guard turned them away. Ask.
+                String scanId = r.body.optString("scanId", "");
+                if (!scanId.isEmpty() && photoBase64 != null) {
+                    offerExtraPage(scanId, resi, photoBase64);
+                } else {
+                    idle();
+                }
                 return;
             }
 
@@ -997,6 +1013,40 @@ public class ScanActivity extends AppCompatActivity {
             showBanner(false, resi, r.message("Gagal menyimpan (kode " + r.code + ")"));
             idle();
         });
+    }
+
+    /**
+     * Offer to file the just-rejected photo as another sheet of the same
+     * waybill.
+     *
+     * The photo is the one already taken. Asking the packer to aim at the same
+     * sheet a second time, right after being told the parcel is a duplicate,
+     * is how a feature ends up never being used.
+     */
+    private void offerExtraPage(String scanId, String resi, String photoBase64) {
+        new AlertDialog.Builder(this)
+                .setTitle("Halaman lain dari resi ini?")
+                .setMessage("Resi " + resi + " sudah pernah discan.\n\n"
+                        + "Kalau lembar ini adalah halaman lanjutan dari resi yang sama, "
+                        + "fotonya bisa ditambahkan supaya isinya ikut terbaca.")
+                .setCancelable(false)
+                .setPositiveButton("Ya, tambah halaman", (d, w) -> {
+                    hint.setText("Menambah halaman...");
+                    api.addPage(scanId, photoBase64, reader.rawText(), r2 -> {
+                        if (r2.ok()) {
+                            feedback(true);
+                            int page = r2.data() != null ? r2.data().optInt("pageNo", 0) : 0;
+                            showBanner(true, resi,
+                                    page > 0 ? "Halaman " + page + " ditambahkan" : "Halaman ditambahkan");
+                        } else {
+                            feedback(false);
+                            showBanner(false, resi, r2.message("Gagal menambah halaman"));
+                        }
+                        idle();
+                    });
+                })
+                .setNegativeButton("Bukan", (d, w) -> idle())
+                .show();
     }
 
     private void idle() {

@@ -67,6 +67,8 @@ export class MaterialsService {
       currentStock: num(m.currentStock),
       unitCost: num(m.unitCost),
       unitCostUpdatedAt: m.unitCostUpdatedAt,
+      stockLevel: m.stockLevel,
+      stockLevelAt: m.stockLevelAt,
       minimumThreshold: num(m.minimumThreshold),
       stockValue: num(m.currentStock) * num(m.unitCost),
       usedByProducts: usedBy.get(m.id) ?? 0,
@@ -280,6 +282,12 @@ export class MaterialsService {
     // record every purchase have no other way to state a price, and a stock
     // count has to be enterable somewhere. The page says the next purchase
     // will recompute the average.
+    // Stamped so a list of levels can say how old it is. A stock reading
+    // nobody has touched for a month is not a stock reading.
+    if (dto.stockLevel != null) {
+      set.stockLevel = dto.stockLevel;
+      set.stockLevelAt = new Date();
+    }
     if (dto.unitCost != null) {
       set.unitCost = dto.unitCost.toFixed(2);
       set.unitCostUpdatedAt = new Date();

@@ -338,6 +338,9 @@ export class PayoutSellersService {
           ? { defaultSubSellerRate: rate(dto.defaultSubSellerRate) }
           : {}),
         ...(dto.sedekahBasis != null ? { sedekahBasis: dto.sedekahBasis } : {}),
+        ...(dto.materialBankAccount != null
+          ? { materialBankAccount: dto.materialBankAccount }
+          : {}),
         ...(dto.sedekahBankAccount != null
           ? { sedekahBankAccount: dto.sedekahBankAccount }
           : {}),

@@ -114,6 +114,14 @@ class ScannedItemDto {
   matchScore?: number;
 }
 
+class AddPageDto {
+  @IsString() @MaxLength(12_000_000)
+  photoBase64!: string;
+
+  @IsOptional() @IsString() @MaxLength(20_000)
+  deviceText?: string;
+}
+
 class LinkDto {
   @IsUUID()
   orderId!: string;
@@ -475,6 +483,27 @@ export class ResiController {
         limit: dto.limit,
       }),
     };
+  }
+
+  /** Another sheet of the same waybill; triggers a re-read of the whole set. */
+  @Post("scans/:id/pages")
+  async addPage(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: AddPageDto,
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.resi.addPage(uid(req), id, dto.photoBase64, dto.deviceText),
+    };
+  }
+
+  @Get("scans/:id/pages")
+  async listPages(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.listPages(uid(req), id) };
   }
 
   @Delete("scans/:id")

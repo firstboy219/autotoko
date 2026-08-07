@@ -123,6 +123,14 @@
                 android:text="Input Manual" android:textAllCaps="false"
                 android:textColor="@color/ink" android:textSize="13sp" />
 
+            <Button android:id="@+id/stock"
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_input"
+                android:text="Stok" android:textAllCaps="false"
+                android:textColor="@color/ink" android:textSize="13sp"
+                android:layout_marginLeft="8dp" />
+
             <Button android:id="@+id/history"
                 android:layout_width="0dp" android:layout_weight="1"
                 android:layout_height="wrap_content"

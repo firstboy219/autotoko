@@ -100,6 +100,41 @@ export const resiScanItems = pgTable(
   }),
 );
 
+/**
+ * Extra sheets of one waybill.
+ *
+ * Some orders print across two or three pages — the courier's label, then a
+ * continuation carrying the rest of the product table. They share one waybill
+ * number, so the duplicate guard correctly refuses the second sheet as an
+ * already-scanned parcel, and the pages holding half the products were never
+ * photographed at all.
+ *
+ * Page 1 stays on resi_scans.photoUrl. Moving it here would rewrite every read
+ * path for no gain: one page is still the ordinary case, and this table is
+ * simply empty for it.
+ */
+export const resiScanPhotos = pgTable(
+  "resi_scan_photos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    resiScanId: uuid("resi_scan_id")
+      .notNull()
+      .references(() => resiScans.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    photoUrl: varchar("photo_url", { length: 255 }).notNull(),
+    /** 2 for the first extra sheet; page 1 is the photo on the scan itself. */
+    pageNo: integer("page_no").notNull().default(2),
+    /** What the phone read off THIS sheet, if it read anything. */
+    deviceText: text("device_text"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    scanIdx: index("resi_scan_photos_scan_idx").on(t.resiScanId),
+  }),
+);
+
 export const resiScans = pgTable(
   "resi_scans",
   {

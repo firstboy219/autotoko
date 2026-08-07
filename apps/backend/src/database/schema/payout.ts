@@ -124,6 +124,8 @@ export const payoutSettings = pgTable("payout_settings", {
     .notNull()
     .default("0.2000"),
   sedekahBankAccount: varchar("sedekah_bank_account", { length: 255 }),
+  /** Where the material reserve is transferred. A different pot from sedekah. */
+  materialBankAccount: varchar("material_bank_account", { length: 255 }),
   /**
    * Share of the SELLER's own cut to set aside for buying raw materials.
    *

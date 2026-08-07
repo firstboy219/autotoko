@@ -52,11 +52,23 @@ public final class ProductMatcher {
         final Set<String> sizes;
 
         public Product(String id, String name, String sku) {
+            this(id, name, sku, null);
+        }
+
+        /**
+         * @param aliases other names this is sold under, one per line. They
+         *     join the product's own words rather than being matched
+         *     separately: a label carrying either the master name or a listing
+         *     title should find the same product, and scoring them apart would
+         *     mean picking a winner between two descriptions of one thing.
+         */
+        public Product(String id, String name, String sku, String aliases) {
             this.id = id;
             this.name = name == null ? "" : name;
             this.sku = sku == null ? "" : sku;
-            this.tokens = tokensOf(this.name + " " + this.sku);
-            this.sizes = sizesOf(this.name + " " + this.sku);
+            String all = this.name + " " + this.sku + " " + (aliases == null ? "" : aliases);
+            this.tokens = tokensOf(all);
+            this.sizes = sizesOf(all);
         }
     }
 

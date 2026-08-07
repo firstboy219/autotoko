@@ -2,6 +2,7 @@ import { Type } from "class-transformer";
 import {
   IsArray,
   IsDateString,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -11,10 +12,22 @@ import {
   ValidateNested,
 } from "class-validator";
 
+/**
+ * Five buckets, ordered from empty to plenty.
+ *
+ * Five and not three because the middle is where the decision lives:
+ * "cukup" means order now but the slow cheap way, "normal" means do nothing
+ * this week. Collapsing those two turns every reading into panic or silence.
+ */
+export const STOCK_LEVELS = ["habis", "hampir_habis", "cukup", "normal", "banyak"] as const;
+
 export class UpdateMaterialDto {
   @IsOptional() @IsString() @MaxLength(255) name?: string;
   @IsOptional() @IsString() @MaxLength(32) unit?: string;
   @IsOptional() @IsNumber() @Min(0) minimumThreshold?: number;
+  /** What the shelf looks like, as opposed to what the books say. */
+  @IsOptional() @IsIn(STOCK_LEVELS) stockLevel?: (typeof STOCK_LEVELS)[number];
+
   /** Overrides the weighted average until the next purchase recomputes it. */
   @IsOptional() @IsNumber() @Min(0) unitCost?: number;
   /** Manual stock adjustment, e.g. after a stock count. */

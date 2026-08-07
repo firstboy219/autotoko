@@ -13,6 +13,7 @@ import {
   orders,
   packingSettings,
   resiScanItems,
+  resiScanPhotos,
   resiScans,
   shops,
 } from "../../database/schema/index.js";
@@ -62,6 +63,9 @@ export function detectCourier(normalized: string): string | null {
 
 /** Accepted provenance values; anything else is recorded as a barcode scan. */
 const SOURCES = ["barcode", "ocr", "manual"];
+
+/** Beyond this a "waybill" is somebody photographing the whole desk. */
+const MAX_EXTRA_PAGES = 5;
 
 const MIN_RESI_LEN = 6;
 const MAX_RESI_LEN = 64;
@@ -184,6 +188,9 @@ export class ResiService {
       throw new ConflictException({
         code: "DUPLICATE",
         message: "Resi ini sudah pernah discan.",
+        // The app needs this to offer "another sheet of the same waybill":
+        // without an id it can only tell the packer to give up.
+        scanId: existing.id,
         resi,
         firstScannedAt: existing.scannedAt,
         deviceLabel: existing.deviceLabel,
@@ -339,6 +346,72 @@ export class ResiService {
       photoUrl: inserted.photoUrl,
       scannedAt: inserted.scannedAt,
     };
+  }
+
+  /**
+   * Add another sheet of the same waybill.
+   *
+   * Reached from the duplicate warning rather than from a menu, because that
+   * is the moment the packer discovers the parcel has two labels: they scan
+   * the second sheet, the guard refuses it, and the honest answer is not "you
+   * already did this one" but "is this another page of it?".
+   *
+   * The scan itself is untouched. Nothing about which parcel this is changes;
+   * only how much of it has been photographed.
+   */
+  async addPage(userId: string, scanId: string, photoBase64: string, deviceText?: string) {
+    const scan = await this.getScanOrThrow(userId, scanId);
+
+    const [counted] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(resiScanPhotos)
+      .where(eq(resiScanPhotos.resiScanId, scanId));
+    const count = counted?.count ?? 0;
+    if (count >= MAX_EXTRA_PAGES) {
+      throw new BadRequestException(
+        `Sudah ada ${MAX_EXTRA_PAGES} halaman tambahan untuk resi ini.`,
+      );
+    }
+
+    const saved = await this.uploads.saveImage(photoBase64, "jpg");
+
+    const [row] = await this.db
+      .insert(resiScanPhotos)
+      .values({
+        resiScanId: scanId,
+        userId,
+        photoUrl: saved.url,
+        pageNo: count + 2,
+        deviceText: deviceText?.slice(0, 20_000) ?? null,
+      })
+      .returning();
+
+    // Read the whole parcel again now there is more of it to read. Attempts go
+    // back to zero so a scan that had already given up gets a fresh look at
+    // what it could not see before.
+    await this.db
+      .update(resiScans)
+      .set({ ocrStatus: "pending", ocrAttempts: 0 })
+      .where(eq(resiScans.id, scanId));
+
+    this.logger.log(`Page ${row!.pageNo} added to ${scan.id}`);
+    return { ok: true as const, pageNo: row!.pageNo, photoUrl: row!.photoUrl };
+  }
+
+  /** Every sheet of one waybill, page 1 first. */
+  async listPages(userId: string, scanId: string) {
+    await this.getScanOrThrow(userId, scanId);
+    const rows = await this.db
+      .select()
+      .from(resiScanPhotos)
+      .where(eq(resiScanPhotos.resiScanId, scanId))
+      .orderBy(asc(resiScanPhotos.pageNo));
+    return rows.map((r) => ({
+      id: r.id,
+      pageNo: r.pageNo,
+      photoUrl: r.photoUrl,
+      createdAt: r.createdAt,
+    }));
   }
 
   /**

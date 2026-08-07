@@ -144,7 +144,9 @@ export const payoutForwardStatusEnum = pgEnum("payout_forward_status", [
 // Replaces the old per-mutation forward-status concept entirely.
 export const payoutDisbursementRecipientTypeEnum = pgEnum(
   "payout_disbursement_recipient_type",
-  ["sedekah", "sub_seller", "sub_sub_seller"],
+  // bahan_baku is a batch-level row like sedekah: one consolidated transfer,
+  // no single mutation to hang it on.
+  ["sedekah", "sub_seller", "sub_sub_seller", "bahan_baku"],
 );
 
 export const payoutDisbursementValidationStatusEnum = pgEnum(

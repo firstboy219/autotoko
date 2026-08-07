@@ -9,7 +9,12 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { TenantService } from "../../database/tenant.service.js";
-import { orders, resiScanItems, resiScans } from "../../database/schema/index.js";
+import {
+  orders,
+  resiScanItems,
+  resiScanPhotos,
+  resiScans,
+} from "../../database/schema/index.js";
 import { UploadsService } from "../uploads/uploads.service.js";
 import { mergeLabelColumns, parseShippingLabel } from "./label-parser.js";
 
@@ -99,7 +104,17 @@ export class ResiOcrTask {
     let reading: { text: string; confidence: number | null } | null = null;
 
     try {
-      reading = await this.readText(scan.photoUrl!);
+      // Every sheet, not just the first. A parcel whose product table runs onto
+      // a second page has half its contents on a photo the old single-URL read
+      // never opened.
+      const extra = await this.tenant.runBypass(() =>
+        this.db
+          .select({ photoUrl: resiScanPhotos.photoUrl })
+          .from(resiScanPhotos)
+          .where(eq(resiScanPhotos.resiScanId, scan.id))
+          .orderBy(asc(resiScanPhotos.pageNo)),
+      );
+      reading = await this.readAll([scan.photoUrl!, ...extra.map((e) => e.photoUrl)]);
     } catch (e) {
       this.logger.warn(`OCR threw for scan ${scan.id}: ${(e as Error).message}`);
     }
@@ -219,6 +234,32 @@ export class ResiOcrTask {
         `Auto-linked ${scan.resi} to order ${orderNo} (${order.fulfillmentStatus} -> dikirim) from the label`,
       );
     });
+  }
+
+  /**
+   * Read every sheet and join what they said.
+   *
+   * Joined rather than parsed separately because the fields are spread across
+   * the pages: the waybill and addresses on the first, the rest of the product
+   * table on the second. One text means one parse, and the parser's own rule —
+   * take only what an anchor supports — still decides what survives.
+   *
+   * A page that fails to read is skipped rather than failing the set. Losing
+   * page two should not throw away page one.
+   */
+  private async readAll(
+    photoUrls: string[],
+  ): Promise<{ text: string; confidence: number | null } | null> {
+    const parts: string[] = [];
+    let best: number | null = null;
+    for (const url of photoUrls) {
+      const one = await this.readText(url);
+      if (!one) continue;
+      parts.push(one.text);
+      if (one.confidence != null && (best == null || one.confidence > best)) best = one.confidence;
+    }
+    if (!parts.length) return null;
+    return { text: parts.join("\n"), confidence: best };
   }
 
   /**

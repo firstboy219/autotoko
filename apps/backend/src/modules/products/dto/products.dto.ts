@@ -56,6 +56,8 @@ export class CreateMasterDto {
 
 export class UpdateMasterDto {
   @IsOptional() @IsString() @MaxLength(255) name?: string;
+  /** One alias per line; 2000 chars is far more than any real list. */
+  @IsOptional() @IsString() @MaxLength(2000) marketplaceAliases?: string;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsInt() categoryId?: number;
   @IsOptional() @IsNumberString() basePrice?: string;

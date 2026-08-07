@@ -32,6 +32,15 @@ export const masterProducts = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     sku: varchar("sku", { length: 128 }).notNull(), // primary SKU — links to postings
     name: varchar("name", { length: 255 }).notNull(),
+    /**
+     * Other names this product is sold under, one per line.
+     *
+     * A shipping label carries the marketplace listing title, not this name,
+     * and the scanner matches the two on shared words. Where the listing is
+     * named something else entirely there are no shared words to find, and an
+     * alias is the only thing that can bridge it.
+     */
+    marketplaceAliases: text("marketplace_aliases"),
     description: text("description"),
     categoryId: integer("category_id"),
     basePrice: numeric("base_price", { precision: 15, scale: 2 }),
@@ -95,6 +104,17 @@ export const materials = pgTable(
      * price still current? Null means never priced.
      */
     unitCostUpdatedAt: timestamp("unit_cost_updated_at", { withTimezone: true }),
+    /**
+     * What the shelf looks like: habis | hampir_habis | cukup | normal | banyak.
+     *
+     * Beside currentStock, not instead of it. That one is what the books say
+     * and is only as good as the counting behind it; nobody weighs the
+     * glycerine before packing. This is what somebody standing at the rack can
+     * state without counting anything, which is why it is the reading that
+     * actually gets kept up to date.
+     */
+    stockLevel: varchar("stock_level", { length: 16 }),
+    stockLevelAt: timestamp("stock_level_at", { withTimezone: true }),
     minimumThreshold: numeric("minimum_threshold", { precision: 14, scale: 3 })
       .notNull()
       .default("0"),

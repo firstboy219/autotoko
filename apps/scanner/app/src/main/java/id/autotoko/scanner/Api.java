@@ -117,6 +117,38 @@ public final class Api {
         call("POST", session.baseUrl() + "/api/resi/scan", session.token(), payload, cb);
     }
 
+    /** The seller's raw materials, for the stock screen. */
+    public void materials(Cb cb) {
+        call("GET", session.baseUrl() + "/api/materials", session.token(), null, cb);
+    }
+
+    /** One material's shelf reading: habis / hampir_habis / cukup / normal / banyak. */
+    public void setStockLevel(String materialId, String level, Cb cb) {
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("stockLevel", level);
+        } catch (Exception ignored) {}
+        call("PATCH", session.baseUrl() + "/api/materials/" + materialId,
+                session.token(), payload, cb);
+    }
+
+    /**
+     * Another sheet of a waybill already scanned.
+     *
+     * Carries the photo that was just rejected as a duplicate rather than
+     * taking a new one — the packer has already aimed at the sheet, and asking
+     * them to do it twice for the same picture is how a feature goes unused.
+     */
+    public void addPage(String scanId, String photoBase64, String deviceText, Cb cb) {
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("photoBase64", photoBase64);
+            if (deviceText != null && !deviceText.isEmpty()) payload.put("deviceText", deviceText);
+        } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/resi/scans/" + scanId + "/pages",
+                session.token(), payload, cb);
+    }
+
     public void history(Cb cb) {
         call("GET", session.baseUrl() + "/api/resi/scans?limit=100", session.token(), null, cb);
     }

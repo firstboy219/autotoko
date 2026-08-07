@@ -67,6 +67,7 @@ export class UpdatePayoutSettingsDto {
   @IsOptional() @IsNumber() @Min(0) @Max(1) defaultSubSellerRate?: number;
   @IsOptional() @IsIn(SEDEKAH_BASES) sedekahBasis?: (typeof SEDEKAH_BASES)[number];
   @IsOptional() @IsString() @MaxLength(255) sedekahBankAccount?: string;
+  @IsOptional() @IsString() @MaxLength(255) materialBankAccount?: string;
 }
 
 // --- Mutation (Tahap 1 — one record per shop's pencairan) ---
