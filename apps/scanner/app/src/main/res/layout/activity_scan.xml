@@ -89,6 +89,17 @@
             android:textSize="13sp"
             android:visibility="gone" />
 
+        <!-- What the phone is reading right now. The packer can see the
+             guess forming and stop pointing when it is right. -->
+        <TextView
+            android:id="@+id/liveRead"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/ink2"
+            android:textSize="12sp"
+            android:lineSpacingExtra="1dp"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/hint"
             android:layout_width="match_parent"

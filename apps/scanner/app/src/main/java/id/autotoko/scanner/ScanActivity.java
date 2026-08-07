@@ -24,8 +24,13 @@ import android.os.Vibrator;
 import android.text.InputType;
 import android.util.Base64;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -54,9 +59,16 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions;
 import com.google.mlkit.vision.barcode.BarcodeScanning;
 import com.google.mlkit.vision.barcode.common.Barcode;
 import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.TextRecognition;
+import com.google.mlkit.vision.text.TextRecognizer;
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -156,8 +168,32 @@ public class ScanActivity extends AppCompatActivity {
     /** Fraction of the frame measured, centred: where the label is aimed. */
     private static final float CLARITY_REGION = 0.55f;
 
+    /**
+     * Resolution the analyser runs at.
+     *
+     * CameraX defaults to about 640x480, which is plenty for a barcode — big,
+     * high-contrast, error-corrected — and hopeless for 6pt print. Reading the
+     * label's text at that size was never going to work regardless of which
+     * OCR engine looked at it. 1080p puts the product table and the order
+     * number back above the size where characters are distinguishable.
+     */
+    private static final android.util.Size ANALYSIS_SIZE = new android.util.Size(1920, 1080);
+
+    /**
+     * Keep gathering frames for at least this long once a barcode is found,
+     * even if the picture is already sharp.
+     *
+     * A single frame is a guess; several frames disagreeing in different places
+     * is a correction. Under a second of standing still buys the difference
+     * between reading an order number and not.
+     */
+    private static final long READ_MIN_MS = 700;
+
+    /** ...and at least this many readings, if they arrive faster than that. */
+    private static final int READ_MIN_FRAMES = 3;
+
     private PreviewView preview;
-    private TextView status, detail, counter, hint, clarityText;
+    private TextView status, detail, counter, hint, clarityText, liveRead;
     private android.widget.ProgressBar clarityBar;
     private View banner;
     private TextView bannerText;
@@ -182,6 +218,16 @@ public class ScanActivity extends AppCompatActivity {
     private volatile long clarityAt = 0;
     /** Set when a photo was taken below CLARITY_MIN, to say so afterwards. */
     private boolean tookBlurred = false;
+
+    private TextRecognizer textRecognizer;
+    /** Accumulates readings of the label across frames; see LabelReader. */
+    private final LabelReader reader = new LabelReader();
+    /** The seller's own products, fetched once, matched against on every scan. */
+    private final List<ProductMatcher.Product> catalogue = new ArrayList<>();
+    /** True between finding the barcode and taking the photo: gather text now. */
+    private volatile boolean collecting = false;
+    /** One text recognition at a time; they take longer than a frame. */
+    private volatile boolean readingText = false;
     private String mutedResi = null;
     private long mutedUntil = 0;
 
@@ -203,6 +249,10 @@ public class ScanActivity extends AppCompatActivity {
         hint = findViewById(R.id.hint);
         clarityBar = findViewById(R.id.clarityBar);
         clarityText = findViewById(R.id.clarityText);
+        liveRead = findViewById(R.id.liveRead);
+
+        textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+        loadCatalogue();
         banner = findViewById(R.id.banner);
         bannerText = findViewById(R.id.bannerText);
 
@@ -248,6 +298,31 @@ public class ScanActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * The seller's products, so a marketing title on a label can be named.
+     *
+     * Failure is silent and harmless: with no catalogue the scanner still reads
+     * the order number and still records the parcel, it just cannot say which
+     * product the label describes. That is the same place the app was before.
+     */
+    private void loadCatalogue() {
+        api.products(r -> {
+            if (!r.ok() || r.body == null) return;
+            JSONArray arr = r.body.optJSONArray("data");
+            if (arr == null) return;
+            List<ProductMatcher.Product> next = new ArrayList<>();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                String id = o.optString("id", "");
+                if (id.isEmpty()) continue;
+                next.add(new ProductMatcher.Product(id, o.optString("name", ""), o.optString("sku", "")));
+            }
+            catalogue.clear();
+            catalogue.addAll(next);
+        });
+    }
+
     private void startCamera() {
         ListenableFuture<ProcessCameraProvider> future = ProcessCameraProvider.getInstance(this);
         future.addListener(() -> {
@@ -258,6 +333,14 @@ public class ScanActivity extends AppCompatActivity {
                 p.setSurfaceProvider(preview.getSurfaceProvider());
 
                 ImageAnalysis analysis = new ImageAnalysis.Builder()
+                        .setResolutionSelector(
+                                new androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
+                                        .setResolutionStrategy(
+                                                new androidx.camera.core.resolutionselector.ResolutionStrategy(
+                                                        ANALYSIS_SIZE,
+                                                        androidx.camera.core.resolutionselector.ResolutionStrategy
+                                                                .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                                        .build())
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
                 analysis.setAnalyzer(cameraExecutor, this::analyse);
@@ -323,13 +406,31 @@ public class ScanActivity extends AppCompatActivity {
             main.post(this::renderClarity);
         }
 
+        // Rotation is needed by BOTH passes now, so it is worked out before
+        // either of them rather than on the way into the barcode path.
+        int rot = proxy.getImageInfo().getRotationDegrees();
+
+        // While the shutter waits, spend the frames on reading the label. This
+        // is the window the whole design turns on: the packer is holding still
+        // for the photo anyway, and every frame that passes is another vote.
         if (busy) {
-            proxy.close();
+            if (collecting && !readingText) {
+                readingText = true;
+                textRecognizer.process(InputImage.fromMediaImage(media, rot))
+                        .addOnSuccessListener(t -> {
+                            reader.addFrame(t.getText());
+                            main.post(this::renderLive);
+                        })
+                        .addOnCompleteListener(t -> {
+                            readingText = false;
+                            proxy.close();
+                        });
+            } else {
+                proxy.close();
+            }
             return;
         }
         analysing = true;
-
-        int rot = proxy.getImageInfo().getRotationDegrees();
         // ML Kit reports boxes in the UPRIGHT frame, so at 90/270 the sides swap.
         boolean swapped = rot == 90 || rot == 270;
         frameWidth = swapped ? proxy.getHeight() : proxy.getWidth();
@@ -459,6 +560,8 @@ public class ScanActivity extends AppCompatActivity {
                 box.bottom / (float) frameHeight);
 
         mute(resi);
+        reader.reset();
+        collecting = true;
         focusThenCapture(resi, best.getRawValue(), formatName(best.getFormat()));
     }
 
@@ -506,17 +609,22 @@ public class ScanActivity extends AppCompatActivity {
     private void waitForClarity(String resi, String raw, String format, long startedAt) {
         if (isFinishing() || isDestroyed()) return;
 
-        if (clarity >= CLARITY_MIN) {
+        long elapsed = android.os.SystemClock.uptimeMillis() - startedAt;
+        boolean readEnough = elapsed >= READ_MIN_MS || reader.frames() >= READ_MIN_FRAMES;
+
+        if (clarity >= CLARITY_MIN && readEnough) {
             tookBlurred = false;
             capture(resi, raw, format);
             return;
         }
-        if (android.os.SystemClock.uptimeMillis() - startedAt >= CLARITY_WAIT_MS) {
-            tookBlurred = true;
+        if (elapsed >= CLARITY_WAIT_MS) {
+            tookBlurred = clarity < CLARITY_MIN;
             capture(resi, raw, format);
             return;
         }
-        hint.setText("Tahan agak diam - kejelasan " + clarity + "%, perlu " + CLARITY_MIN + "%");
+        hint.setText(clarity >= CLARITY_MIN
+                ? "Membaca label... " + reader.frames() + " frame"
+                : "Tahan agak diam - kejelasan " + clarity + "%, perlu " + CLARITY_MIN + "%");
         main.postDelayed(() -> waitForClarity(resi, raw, format, startedAt), 100);
     }
 
@@ -525,8 +633,9 @@ public class ScanActivity extends AppCompatActivity {
         busy = true;
         hint.setText("Memotret label...");
 
+        collecting = false;
         if (imageCapture == null) {
-            submit(resi, raw, format, null);
+            resolve(resi, raw, format, null);
             return;
         }
 
@@ -542,11 +651,11 @@ public class ScanActivity extends AppCompatActivity {
                     image.close();
                 }
                 final String payload = b64;
-                main.post(() -> submit(resi, raw, format, payload));
+                main.post(() -> resolve(resi, raw, format, payload));
             }
 
             @Override public void onError(@NonNull ImageCaptureException e) {
-                main.post(() -> submit(resi, raw, format, null));
+                main.post(() -> resolve(resi, raw, format, null));
             }
         });
     }
@@ -649,9 +758,194 @@ public class ScanActivity extends AppCompatActivity {
         return out;
     }
 
-    private void submit(String resi, String raw, String format, String photoBase64) {
+    /** One product line the label appears to carry, and what it might be. */
+    private static final class Candidate {
+        final String rawText;
+        final List<ProductMatcher.Match> ranked;
+        /** Index into ranked, or -1 for "not one of my products". */
+        int chosen = 0;
+        double qty = 1;
+        EditText qtyField;
+
+        Candidate(String rawText, List<ProductMatcher.Match> ranked) {
+            this.rawText = rawText;
+            this.ranked = ranked;
+        }
+    }
+
+    /**
+     * Turn what was read into products, asking the packer only where the
+     * reading cannot settle it.
+     *
+     * The asking threshold is the whole safety argument. This catalogue holds
+     * "Cool Mint 100ml" beside "Cool Mint Spray 50ml" and "Refill Anti Ngantuk"
+     * beside "Inhaler Anti Ngantuk" — pairs that differ in exactly the
+     * characters OCR gets wrong. A confident-looking wrong product is worse
+     * than an empty line, because nobody re-checks a filled-in field.
+     */
+    private void resolve(String resi, String raw, String format, String photoBase64) {
+        collecting = false;
+        List<Candidate> candidates = new ArrayList<>();
+        boolean unsure = false;
+
+        for (LabelReader.Line line : reader.productLines()) {
+            List<ProductMatcher.Match> ranked = ProductMatcher.rank(line.text, catalogue, 5);
+            if (ranked.isEmpty()) continue;
+            candidates.add(new Candidate(line.text, ranked));
+            if (!ranked.get(0).confident) unsure = true;
+            if (candidates.size() >= 6) break;
+        }
+
+        if (candidates.isEmpty() || !unsure) {
+            submit(resi, raw, format, photoBase64, reading(candidates, false));
+            return;
+        }
+        ask(resi, raw, format, photoBase64, candidates);
+    }
+
+    /** The sheet shown when the phone will not guess on its own. */
+    private void ask(String resi, String raw, String format, String photoBase64,
+                     List<Candidate> candidates) {
+        float d = getResources().getDisplayMetrics().density;
+        int pad = (int) (16 * d);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(pad, pad, pad, pad);
+
+        for (final Candidate c : candidates) {
+            TextView label = new TextView(this);
+            String shown = c.rawText.length() > 90 ? c.rawText.substring(0, 90) + "…" : c.rawText;
+            label.setText("Di resi: " + shown);
+            label.setTextSize(11);
+            label.setPadding(0, (int) (10 * d), 0, (int) (2 * d));
+            root.addView(label);
+
+            List<String> options = new ArrayList<>();
+            for (ProductMatcher.Match m : c.ranked) {
+                options.add(m.product.name + "  (" + Math.round(m.score * 100) + "%)");
+            }
+            options.add("— bukan produk saya —");
+
+            Spinner spinner = new Spinner(this);
+            spinner.setAdapter(new ArrayAdapter<>(
+                    this, android.R.layout.simple_spinner_dropdown_item, options));
+            spinner.setSelection(0);
+            spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                    c.chosen = pos < c.ranked.size() ? pos : -1;
+                }
+                @Override public void onNothingSelected(AdapterView<?> p) {}
+            });
+            root.addView(spinner);
+
+            EditText qty = new EditText(this);
+            qty.setInputType(InputType.TYPE_CLASS_NUMBER);
+            qty.setText("1");
+            qty.setHint("Jumlah");
+            c.qtyField = qty;
+            root.addView(qty);
+        }
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(root);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Cocokkan isi paket")
+                .setView(scroll)
+                // Not cancellable by tapping away: the scan is already held
+                // open and a dismissed dialog would leave the parcel unsaved
+                // with nothing on screen to say so.
+                .setCancelable(false)
+                .setPositiveButton("Simpan", (dlg, w) -> {
+                    for (Candidate c : candidates) {
+                        try {
+                            double v = Double.parseDouble(c.qtyField.getText().toString().trim());
+                            if (v > 0 && v <= 9999) c.qty = v;
+                        } catch (Exception ignored) {
+                            // Left at 1, which is what almost every parcel holds.
+                        }
+                    }
+                    submit(resi, raw, format, photoBase64, reading(candidates, true));
+                })
+                .setNegativeButton("Lewati", (dlg, w) ->
+                        submit(resi, raw, format, photoBase64, reading(new ArrayList<>(), true)))
+                .show();
+    }
+
+    /**
+     * The phone's reading, as the payload the server stores.
+     *
+     * The label's own wording travels with every line rather than being
+     * replaced by the product name. When a match turns out wrong, that text is
+     * the only way to see what the machine was looking at.
+     */
+    private JSONObject reading(List<Candidate> candidates, boolean confirmed) {
+        JSONObject out = new JSONObject();
+        try {
+            String orderNo = reader.orderNo();
+            if (orderNo != null) out.put("labelOrderNo", orderNo);
+
+            String text = reader.rawText();
+            if (text != null && !text.isEmpty()) {
+                out.put("deviceText", text.length() > 20000 ? text.substring(0, 20000) : text);
+            }
+            out.put("deviceClarity", clarity);
+
+            JSONArray items = new JSONArray();
+            for (Candidate c : candidates) {
+                if (c.chosen < 0 || c.chosen >= c.ranked.size()) continue;
+                ProductMatcher.Match m = c.ranked.get(c.chosen);
+                JSONObject item = new JSONObject();
+                item.put("masterProductId", m.product.id);
+                item.put("rawName",
+                        c.rawText.length() > 255 ? c.rawText.substring(0, 255) : c.rawText);
+                item.put("qty", c.qty);
+                item.put("source", confirmed ? "device_confirmed" : "device_auto");
+                item.put("matchScore", Math.round(m.score * 1000) / 1000.0);
+                items.put(item);
+            }
+            if (items.length() > 0) out.put("items", items);
+        } catch (Exception ignored) {
+            // A malformed extra must never cost the scan; the resi still goes.
+        }
+        return out;
+    }
+
+    /** What the phone has worked out so far, while the packer is still aiming. */
+    private void renderLive() {
+        if (liveRead == null) return;
+        StringBuilder sb = new StringBuilder();
+
+        String orderNo = reader.orderNo();
+        if (orderNo != null) {
+            sb.append("Pesanan ").append(orderNo)
+              .append("  (").append(reader.orderSightings()).append(" frame)");
+        }
+
+        int shown = 0;
+        for (LabelReader.Line line : reader.productLines()) {
+            ProductMatcher.Match m = ProductMatcher.best(line.text, catalogue);
+            if (m == null) continue;
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(m.confident ? "\u2713 " : "? ")
+              .append(m.product.name)
+              .append("  ").append(Math.round(m.score * 100)).append('%');
+            if (++shown >= 3) break;
+        }
+
+        if (sb.length() == 0) {
+            liveRead.setVisibility(View.GONE);
+            return;
+        }
+        liveRead.setText(sb.toString());
+        liveRead.setVisibility(View.VISIBLE);
+    }
+
+    private void submit(String resi, String raw, String format, String photoBase64,
+                        JSONObject reading) {
         hint.setText("Menyimpan...");
-        api.scan(resi, raw, "barcode", format, photoBase64, r -> {
+        api.scan(resi, raw, "barcode", format, photoBase64, reading, r -> {
             busy = false;
 
             if (r.ok()) {
@@ -710,6 +1004,9 @@ public class ScanActivity extends AppCompatActivity {
         status.setTextColor(Color.parseColor("#6B7178"));
         detail.setVisibility(View.GONE);
         tookBlurred = false;
+        collecting = false;
+        reader.reset();
+        if (liveRead != null) liveRead.setVisibility(View.GONE);
         hint.setText("Arahkan kamera ke barcode pada resi. Tersimpan otomatis.");
     }
 
@@ -725,7 +1022,9 @@ public class ScanActivity extends AppCompatActivity {
                     String v = input.getText().toString().trim();
                     if (v.isEmpty()) return;
                     busy = true;
-                    submit(ResiExtractor.normalize(v), v, null, null);
+                    // Typed in by hand: no photo and nothing was read, so
+                    // there is no reading to carry.
+                    submit(ResiExtractor.normalize(v), v, null, null, null);
                 })
                 .setNegativeButton("Batal", null)
                 .show();

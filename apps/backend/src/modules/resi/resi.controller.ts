@@ -23,6 +23,7 @@ import {
   MaxLength,
   Min,
   Matches,
+  ValidateNested,
 } from "class-validator";
 import { Type } from "class-transformer";
 import type { FastifyRequest } from "fastify";
@@ -64,6 +65,53 @@ class ScanDto {
 
   @IsOptional() @IsString() @MaxLength(32)
   barcodeFormat?: string;
+
+  // --- What the phone made of the label while the packer held it.
+  //
+  // Sent alongside the photo rather than instead of it. The photo is still the
+  // record and the server still reads it, but the phone had dozens of frames
+  // at full sensor resolution and the server has one JPEG, so where the two
+  // disagree the phone is usually the one that saw more.
+
+  /** Read off the label. There is no order list to check it against. */
+  @IsOptional() @IsString() @MaxLength(128)
+  labelOrderNo?: string;
+
+  /** Everything ML Kit read, for comparing the two engines. */
+  @IsOptional() @IsString() @MaxLength(20_000)
+  deviceText?: string;
+
+  /** The scanner's own sharpness meter at the moment of capture. */
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(100)
+  deviceClarity?: number;
+
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ScannedItemDto)
+  items?: ScannedItemDto[];
+}
+
+/**
+ * One product line as the scanner app resolved it.
+ *
+ * masterProductId is what the packer's phone matched or the packer confirmed;
+ * rawName is the label's own wording, kept beside it rather than replaced, so
+ * a bad match stays visible.
+ */
+class ScannedItemDto {
+  @IsOptional() @IsUUID()
+  masterProductId?: string;
+
+  @IsOptional() @IsString() @MaxLength(255)
+  rawName?: string;
+
+  @Type(() => Number) @IsNumber() @Min(0.01) @Max(9999)
+  qty!: number;
+
+  /** device_auto when the phone was sure, device_confirmed when it asked. */
+  @IsOptional() @IsIn(["device_auto", "device_confirmed", "manual"])
+  source?: "device_auto" | "device_confirmed" | "manual";
+
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(1)
+  matchScore?: number;
 }
 
 class LinkDto {

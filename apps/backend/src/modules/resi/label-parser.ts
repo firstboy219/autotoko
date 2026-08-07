@@ -386,6 +386,31 @@ export function labelColumns(parsed: ParsedLabel) {
   };
 }
 
+/**
+ * A later reading may only ADD to an earlier one.
+ *
+ * The background reader now runs after the scanner app has already had a go,
+ * from dozens of live frames at full sensor resolution against one JPEG — so
+ * it routinely finds less. Overwriting column by column would mean the
+ * server's thinner pass erased the phone's order number every time. A machine
+ * re-read that finds nothing should change nothing.
+ *
+ * Clearing a wrong value is still possible: the operator's own edit form
+ * writes nulls directly and is not routed through here.
+ */
+export function mergeLabelColumns(
+  existing: Record<string, unknown>,
+  parsed: ParsedLabel,
+): Record<string, unknown> {
+  const fresh = labelColumns(parsed) as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fresh)) {
+    const had = existing[key];
+    out[key] = value == null && had != null ? had : value;
+  }
+  return out;
+}
+
 export function parseShippingLabel(text: string): ParsedLabel {
   if (!text || !text.trim()) return { ...EMPTY_LABEL };
 

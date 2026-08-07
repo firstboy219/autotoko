@@ -140,6 +140,16 @@ export class ResiService {
       deviceLabel?: string;
       photoBase64?: string;
       barcodeFormat?: string;
+      labelOrderNo?: string;
+      deviceText?: string;
+      deviceClarity?: number;
+      items?: {
+        masterProductId?: string;
+        rawName?: string;
+        qty: number;
+        source?: string;
+        matchScore?: number;
+      }[];
     },
   ): Promise<ScanResult> {
     const resi = normalizeResi(input.resi);
@@ -240,6 +250,25 @@ export class ResiService {
       }
     }
 
+    // Which of the phone's product lines point at a product this tenant
+    // actually owns.
+    //
+    // Read BEFORE the insert, and filtered rather than rejected. A stale
+    // product id — deleted since the phone last synced — must not cost the
+    // whole scan: the packer is standing at the bench and the waybill is the
+    // part they are waiting for. The line survives with its label wording and
+    // no mapping, which is a state the Produksi & Packing page already handles.
+    const sentItems = (input.items ?? []).slice(0, 40);
+    let ownedProducts = new Set<string>();
+    if (sentItems.some((i) => i.masterProductId)) {
+      const ids = sentItems.map((i) => i.masterProductId).filter((i): i is string => !!i);
+      const rows = await this.db
+        .select({ id: masterProducts.id })
+        .from(masterProducts)
+        .where(and(eq(masterProducts.userId, userId), inArray(masterProducts.id, ids)));
+      ownedProducts = new Set(rows.map((r) => r.id));
+    }
+
     // Store the photo before inserting, so a row never claims to have one it
     // does not. A failed upload must not sink the scan either: the barcode
     // already identified the parcel, and that is the part the packer is
@@ -268,6 +297,9 @@ export class ResiService {
         deviceLabel: input.deviceLabel?.slice(0, 64) ?? null,
         photoUrl,
         barcodeFormat: input.barcodeFormat?.slice(0, 32) ?? null,
+        labelOrderNo: input.labelOrderNo?.trim().slice(0, 128) || null,
+        deviceText: input.deviceText?.slice(0, 20_000) ?? null,
+        deviceClarity: input.deviceClarity != null ? input.deviceClarity.toFixed(2) : null,
         // "pending" only when there is something to read. The background task
         // polls on this, so a photoless scan must not sit in its queue.
         ocrStatus: photoUrl ? "pending" : "none",
@@ -277,6 +309,26 @@ export class ResiService {
       })
       .returning();
     if (!inserted) throw new Error("Insert resi_scans returned no row");
+
+    // The parcel's contents, as the phone resolved them. Seeded here rather
+    // than left to the background reader because the phone saw the label in
+    // person: dozens of frames at full sensor resolution, against the tenant's
+    // own product list. The server's later pass finds these lines already
+    // present and leaves them alone.
+    if (sentItems.length) {
+      await this.db.insert(resiScanItems).values(
+        sentItems.map((i) => ({
+          resiScanId: inserted.id,
+          masterProductId:
+            i.masterProductId && ownedProducts.has(i.masterProductId) ? i.masterProductId : null,
+          rawName: i.rawName?.slice(0, 255) ?? null,
+          rawQty: String(i.qty),
+          qty: String(i.qty),
+          source: i.source?.slice(0, 16) ?? "device_auto",
+          matchScore: i.matchScore != null ? i.matchScore.toFixed(3) : null,
+        })),
+      );
+    }
 
     return {
       id: inserted.id,

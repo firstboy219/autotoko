@@ -79,6 +79,17 @@ export const resiScanItems = pgTable(
     }),
     /** Exactly what OCR read, kept for comparison. Null for a hand-added line. */
     rawName: varchar("raw_name", { length: 255 }),
+    /** device_auto | device_confirmed | manual — how this line was decided. */
+    source: varchar("source", { length: 16 }),
+    /**
+     * 0-1, how close the label's wording was to the master product's name.
+     *
+     * Kept because the dangerous failure here is a confident wrong match:
+     * "Cool Mint 100ml" and "Cool Mint Spray 50ml" differ by a few characters
+     * that OCR routinely swaps. A score on the row makes a bad auto-match
+     * findable afterwards instead of invisible.
+     */
+    matchScore: numeric("match_score", { precision: 4, scale: 3 }),
     rawQty: numeric("raw_qty", { precision: 10, scale: 2 }),
     /** The quantity the operator stands behind. */
     qty: numeric("qty", { precision: 10, scale: 2 }).notNull().default("1"),
@@ -122,6 +133,17 @@ export const resiScans = pgTable(
     ocrAttempts: integer("ocr_attempts").notNull().default(0),
     ocrAt: timestamp("ocr_at", { withTimezone: true }),
     ocrText: text("ocr_text"),
+
+    // --- What the PHONE read, kept apart from the server's reading.
+    //
+    // Two engines see the same label: ML Kit on the handset across dozens of
+    // live frames, and tesseract on the server from one JPEG. One column for
+    // both would destroy the comparison, and the comparison is the point — it
+    // is how we find out whether reading on the device is actually better,
+    // rather than assuming it.
+    deviceText: text("device_text"),
+    /** Sharpness the scanner's own meter reported at capture, 0-100. */
+    deviceClarity: numeric("device_clarity", { precision: 5, scale: 2 }),
     /** 0-100, as tesseract reported it. On these photos it runs 32-50. */
     ocrConfidence: numeric("ocr_confidence", { precision: 5, scale: 2 }),
 

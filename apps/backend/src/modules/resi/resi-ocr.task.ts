@@ -11,7 +11,7 @@ import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { TenantService } from "../../database/tenant.service.js";
 import { orders, resiScanItems, resiScans } from "../../database/schema/index.js";
 import { UploadsService } from "../uploads/uploads.service.js";
-import { labelColumns, parseShippingLabel } from "./label-parser.js";
+import { mergeLabelColumns, parseShippingLabel } from "./label-parser.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -135,7 +135,7 @@ export class ResiOcrTask {
           ocrAt: new Date(),
           ocrText: reading!.text.slice(0, 20_000),
           ocrConfidence: reading!.confidence != null ? reading!.confidence.toFixed(2) : null,
-          ...(keepManual ? {} : labelColumns(parsed)),
+          ...(keepManual ? {} : mergeLabelColumns(scan, parsed)),
         })
         .where(eq(resiScans.id, scan.id)),
     );

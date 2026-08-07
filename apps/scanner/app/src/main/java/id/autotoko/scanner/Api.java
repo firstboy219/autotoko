@@ -80,8 +80,20 @@ public final class Api {
      * photoBase64 may be null: a scan whose photo failed to encode is still a
      * scan, and losing the parcel would be far worse than losing the picture.
      */
+    /**
+     * The seller's own products, so the scanner can name what it reads.
+     *
+     * Matching against a closed list is what makes reading a marketing title
+     * off a label workable at all: the phone does not have to spell
+     * "Mouthspray Siwak 100ml" correctly, it only has to pick it out of
+     * twenty-five.
+     */
+    public void products(Cb cb) {
+        call("GET", session.baseUrl() + "/api/products", session.token(), null, cb);
+    }
+
     public void scan(String resi, String raw, String source, String barcodeFormat,
-                     String photoBase64, Cb cb) {
+                     String photoBase64, JSONObject reading, Cb cb) {
         JSONObject payload = new JSONObject();
         try {
             payload.put("resi", resi);
@@ -90,6 +102,17 @@ public final class Api {
             payload.put("deviceLabel", session.device());
             if (barcodeFormat != null) payload.put("barcodeFormat", barcodeFormat);
             if (photoBase64 != null) payload.put("photoBase64", photoBase64);
+            // What the phone made of the label, sent alongside the photo rather
+            // than instead of it. The server still reads the picture; where the
+            // two disagree, the phone had dozens of frames and the server has
+            // one JPEG.
+            if (reading != null) {
+                java.util.Iterator<String> keys = reading.keys();
+                while (keys.hasNext()) {
+                    String k = keys.next();
+                    payload.put(k, reading.get(k));
+                }
+            }
         } catch (Exception ignored) {}
         call("POST", session.baseUrl() + "/api/resi/scan", session.token(), payload, cb);
     }
