@@ -50,6 +50,9 @@ interface Mutation {
   sellerMaterialAmount: string | null;
   subSellerAmount: string | null;
   subSubSellerAmount: string | null;
+  /** Who this shop's commission belongs to; the API already sends both. */
+  subSellerId: string | null;
+  subSubSellerId: string | null;
 }
 type ValidationStatus = "belum_upload" | "cocok_otomatis" | "tidak_cocok" | "override_manual";
 interface Disbursement {
@@ -60,6 +63,10 @@ interface Disbursement {
   shopName: string | null;
   marketplace: string | null;
   recipientType: "sedekah" | "sub_seller" | "sub_sub_seller" | "bahan_baku";
+  /** Part of expectedAmount that came from earlier batches. */
+  carryoverAmount: string;
+  recipientSubSellerId?: string | null;
+  recipientSubSubSellerId?: string | null;
   recipientName: string;
   recipientChain: string | null;
   expectedAmount: string;
@@ -146,7 +153,9 @@ export function PencairanBatch() {
               <MutationList batch={batch} shops={shops} onChange={reload} />
             </>
           )}
-          {batch.status !== "berjalan" && <DisbursementRekap batch={batch} onChange={reload} />}
+          {batch.status !== "berjalan" && (
+            <DisbursementRekap batch={batch} shops={shops ?? []} onChange={reload} />
+          )}
         </div>
       )}
     </Layout>
@@ -1106,8 +1115,58 @@ function MutationList({
 // lose data from view. "Consolidated" is detected as exactly one sedekah row
 // with no mutation link; anything else falls back to the old per-shop path.
 
-function DisbursementRekap({ batch, onChange }: { batch: BatchDetail; onChange: () => void }) {
+interface Carryover {
+  name: string;
+  type: string;
+  amount: number;
+  ids: string[];
+  since: string;
+}
+
+function DisbursementRekap({
+  batch,
+  shops,
+  onChange,
+}: {
+  batch: BatchDetail;
+  shops: ShopOpt[];
+  onChange: () => void;
+}) {
   const [showDone, setShowDone] = useState(false);
+  const toast = useToast();
+  const held = useFetch<Carryover[]>("/payout/carryovers");
+  const [releasing, setReleasing] = useState<string | null>(null);
+
+  /**
+   * Send a held amount now regardless of the minimum.
+   *
+   * Deliberately per recipient rather than a single "release everything":
+   * paying out a balance below the bank's floor is a decision about one
+   * person's money, usually because they have stopped selling, and it should
+   * not happen to three other people as a side effect.
+   */
+  async function release(c: Carryover) {
+    if (
+      !window.confirm(
+        `Cairkan sisa ${c.name} sebesar ${rupiah(c.amount)} sekarang?\n\n` +
+          "Nominalnya di bawah minimum transfer, jadi bank mungkin menolak. " +
+          "Pakai ini kalau kamu memang akan mentransfernya dengan cara lain.",
+      )
+    ) {
+      return;
+    }
+    setReleasing(c.name);
+    try {
+      await api.post(`/payout/batches/${batch.id}/release-carryovers`, { ids: c.ids });
+      toast(`Sisa ${c.name} masuk ke daftar transfer batch ini.`, "success");
+      held.reload();
+      onChange();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setReleasing(null);
+    }
+  }
 
   /**
    * Transfers that cover the whole batch rather than one shop.
@@ -1173,6 +1232,36 @@ function DisbursementRekap({ batch, onChange }: { batch: BatchDetail; onChange: 
         </div>
       </Card>
 
+      {(held.data?.length ?? 0) > 0 && (
+        <Card padded={false}>
+          <CardHeader
+            title="Sisa Tertahan"
+            subtitle="Di bawah minimum transfer, jadi belum dibuatkan transfer. Otomatis ikut batch berikutnya."
+          />
+          <ul className="divide-y divide-line">
+            {(held.data ?? []).map((c) => (
+              <li key={c.name} className="px-5 py-3 flex flex-wrap items-center gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm text-ink">{c.name}</div>
+                  <div className="text-[11px] text-ink-3">
+                    tertahan sejak {dateShort(c.since)}
+                  </div>
+                </div>
+                <div className="ml-auto text-sm text-ink tabular-nums">{rupiah(c.amount)}</div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => release(c)}
+                  disabled={releasing !== null || batch.status !== "siap_distribusi"}
+                >
+                  Cairkan sekarang
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
       {consolidated.map((d) => (
         <Card padded={false} key={d.id}>
           <CardHeader
@@ -1194,10 +1283,12 @@ function DisbursementRekap({ batch, onChange }: { batch: BatchDetail; onChange: 
           />
           <div className="p-4">
             <DisbursementRow d={d} onChange={onChange} />
+            <ShopBreakdown batch={batch} shops={shops} d={d} />
           </div>
         </Card>
       ))}
 
+      {(pendingGroups.length > 0 || doneGroups.length > 0) && (
       <Card padded={false}>
         <CardHeader
           title="Perlu Ditransfer"
@@ -1231,6 +1322,7 @@ function DisbursementRekap({ batch, onChange }: { batch: BatchDetail; onChange: 
           </ul>
         )}
       </Card>
+      )}
 
       {doneGroups.length > 0 && (
         <Card padded={false}>
@@ -1261,6 +1353,66 @@ function DisbursementRekap({ batch, onChange }: { batch: BatchDetail; onChange: 
             </ul>
           )}
         </Card>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Which shops make up one consolidated transfer, and how much of it was held
+ * over from before.
+ *
+ * A sub-seller's transfer is now one figure covering every shop of theirs in
+ * the batch. Without the breakdown that figure cannot be checked against
+ * anything, and a number nobody can check is a number nobody trusts.
+ */
+function ShopBreakdown({
+  batch,
+  shops,
+  d,
+}: {
+  batch: BatchDetail;
+  shops: ShopOpt[];
+  d: Disbursement;
+}) {
+  // Falls back to a short id: a shop deleted since the batch closed still has
+  // a line here, and showing nothing would make the figures stop adding up.
+  const nameOf = (id: string) => shops.find((s) => s.id === id)?.shopName ?? id.slice(0, 8);
+  const carried = Number(d.carryoverAmount) || 0;
+  const rows =
+    d.recipientType === "sub_seller" || d.recipientType === "sub_sub_seller"
+      ? batch.mutations
+          .filter((m) =>
+            d.recipientType === "sub_seller"
+              ? m.subSellerId === d.recipientSubSellerId
+              : m.subSubSellerId === d.recipientSubSubSellerId,
+          )
+          .map((m) => ({
+            id: m.id,
+            shopId: m.shopId,
+            amount:
+              Number(
+                d.recipientType === "sub_seller" ? m.subSellerAmount : m.subSubSellerAmount,
+              ) || 0,
+          }))
+          .filter((r) => r.amount > 0)
+      : [];
+
+  if (!rows.length && carried <= 0) return null;
+
+  return (
+    <div className="mt-3 pt-3 border-t border-line text-[11px] text-ink-2 space-y-1">
+      {rows.map((r) => (
+        <div key={r.id} className="flex justify-between gap-3">
+          <span className="truncate">{nameOf(r.shopId)}</span>
+          <span className="tabular-nums">{rupiah(r.amount)}</span>
+        </div>
+      ))}
+      {carried > 0 && (
+        <div className="flex justify-between gap-3 text-ink-3">
+          <span>sisa batch sebelumnya</span>
+          <span className="tabular-nums">{rupiah(carried)}</span>
+        </div>
       )}
     </div>
   );

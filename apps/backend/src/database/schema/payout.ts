@@ -107,6 +107,46 @@ export const subSubSellers = pgTable(
 );
 
 // Per-tenant payout configuration (Bagian 3). One row per tenant.
+/**
+ * Commission too small to send, held until it is worth a transfer.
+ *
+ * Held against the PERSON, not the shop. The bank transfer goes to a person,
+ * and a shop that pays out once and then goes quiet would otherwise leave its
+ * small change stranded — which is exactly what the per-shop version of this
+ * idea would have done to three of the four cases that prompted it.
+ */
+export const payoutCarryovers = pgTable(
+  "payout_carryovers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recipientType: payoutDisbursementRecipientTypeEnum("recipient_type").notNull(),
+    recipientSubSellerId: uuid("recipient_sub_seller_id").references(() => subSellers.id, {
+      onDelete: "cascade",
+    }),
+    recipientSubSubSellerId: uuid("recipient_sub_sub_seller_id").references(
+      () => subSubSellers.id,
+      { onDelete: "cascade" },
+    ),
+    amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+    /** Deleting the batch it came from takes the debt with it. */
+    sourceBatchId: uuid("source_batch_id")
+      .notNull()
+      .references(() => payoutBatches.id, { onDelete: "cascade" }),
+    /** The batch that finally paid it. Null while still waiting. */
+    appliedBatchId: uuid("applied_batch_id").references(() => payoutBatches.id, {
+      onDelete: "set null",
+    }),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    outstandingIdx: index("payout_carryovers_outstanding_idx").on(t.userId, t.appliedAt),
+  }),
+);
+
 export const payoutSettings = pgTable("payout_settings", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
@@ -126,6 +166,14 @@ export const payoutSettings = pgTable("payout_settings", {
   sedekahBankAccount: varchar("sedekah_bank_account", { length: 255 }),
   /** Where the material reserve is transferred. A different pot from sedekah. */
   materialBankAccount: varchar("material_bank_account", { length: 255 }),
+  /**
+   * Below this, no transfer is generated and the amount waits for the next
+   * batch. Banks refuse under 10.000; e-wallets often allow less, which is why
+   * this is a setting rather than a constant.
+   */
+  minTransferAmount: numeric("min_transfer_amount", { precision: 15, scale: 2 })
+    .notNull()
+    .default("10000"),
   /**
    * Share of the SELLER's own cut to set aside for buying raw materials.
    *
@@ -324,6 +372,16 @@ export const payoutDisbursements = pgTable(
     // change to the entity's master bank account doesn't retroactively alter
     // historical disbursement records.
     recordedAccount: varchar("recorded_account", { length: 255 }),
+
+    /**
+     * How much of expectedAmount was carried in from earlier batches.
+     *
+     * Kept so a transfer whose figure does not match this batch's own
+     * commission can say why, instead of looking like an arithmetic error.
+     */
+    carryoverAmount: numeric("carryover_amount", { precision: 15, scale: 2 })
+      .notNull()
+      .default("0"),
 
     proofUrl: text("proof_url"),
     ocrAmount: numeric("ocr_amount", { precision: 15, scale: 2 }),

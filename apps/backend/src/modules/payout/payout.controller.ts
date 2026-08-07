@@ -35,6 +35,7 @@ import {
   OcrExtractDto,
   ReopenBatchDto,
   ProfitQueryDto,
+  ReleaseCarryoversDto,
 } from "./dto.js";
 
 function uid(req: FastifyRequest): string {
@@ -65,6 +66,28 @@ export class PayoutController {
    * in so many words that it is takings before cost of goods — a payout row
    * carries no link to the products in it, so there is nothing to subtract.
    */
+  /** Commission held back because it was under the bank's minimum. */
+  @Get("carryovers")
+  async carryovers(@Req() req: FastifyRequest) {
+    return ok(await this.batches.listCarryovers(uid(req)));
+  }
+
+  /**
+   * Send held amounts now anyway.
+   *
+   * The way out for money that will never reach the minimum on its own — a
+   * sub-seller who stops selling would otherwise be owed a few thousand
+   * rupiah with no way to close it from inside the system.
+   */
+  @Post("batches/:id/release-carryovers")
+  async releaseCarryovers(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: ReleaseCarryoversDto,
+  ) {
+    return ok(await this.batches.releaseCarryovers(uid(req), id, dto.ids));
+  }
+
   @Get("profit")
   async profitReport(@Req() req: FastifyRequest, @Query() q: ProfitQueryDto) {
     return ok(

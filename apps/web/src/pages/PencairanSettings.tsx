@@ -24,6 +24,7 @@ interface Settings {
   sedekahBasis: SedekahBasis;
   sedekahBankAccount: string | null;
   materialBankAccount: string | null;
+  minTransferAmount: string;
 }
 
 /**
@@ -70,6 +71,7 @@ export function PencairanSettings() {
   const [basis, setBasis] = useState<SedekahBasis>("total_credit");
   const [bank, setBank] = useState("");
   const [materialBank, setMaterialBank] = useState("");
+  const [minTransfer, setMinTransfer] = useState("10000");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -81,6 +83,7 @@ export function PencairanSettings() {
     setBasis(data.sedekahBasis);
     setBank(data.sedekahBankAccount ?? "");
     setMaterialBank(data.materialBankAccount ?? "");
+    setMinTransfer(String(Number(data.minTransferAmount ?? 10000)));
   }, [data]);
 
   const sedekahNum = Number(rate);
@@ -125,6 +128,7 @@ export function PencairanSettings() {
         sedekahBasis: basis,
         sedekahBankAccount: bank || undefined,
         materialBankAccount: materialBank || undefined,
+        minTransferAmount: Number(minTransfer) || 0,
       });
       toast("Pengaturan tersimpan", "success");
       reload();
@@ -328,6 +332,17 @@ export function PencairanSettings() {
                   onChange={(e) => setBank(e.target.value)}
                   placeholder="Nomor rekening + bank"
                   className="font-mono"
+                />
+              </Field>
+              <Field
+                label="Minimum Transfer"
+                hint="Di bawah ini transfer tidak dibuat — nominalnya ditahan dan ikut batch berikutnya. Bank umumnya menolak di bawah 10.000."
+              >
+                <Input
+                  inputMode="numeric"
+                  value={minTransfer ? Number(minTransfer).toLocaleString("id-ID") : ""}
+                  onChange={(e) => setMinTransfer(e.target.value.replace(/\D/g, ""))}
+                  className="tabular-nums"
                 />
               </Field>
               <Field

@@ -68,6 +68,7 @@ export class UpdatePayoutSettingsDto {
   @IsOptional() @IsIn(SEDEKAH_BASES) sedekahBasis?: (typeof SEDEKAH_BASES)[number];
   @IsOptional() @IsString() @MaxLength(255) sedekahBankAccount?: string;
   @IsOptional() @IsString() @MaxLength(255) materialBankAccount?: string;
+  @IsOptional() @IsNumber() @Min(0) @Max(10_000_000) minTransferAmount?: number;
 }
 
 // --- Mutation (Tahap 1 — one record per shop's pencairan) ---
@@ -101,6 +102,12 @@ export class UpdateMutationDto {
 }
 
 /** Date range for the profit report; both ends optional and inclusive. */
+/** Which held-over amounts to send now, regardless of the minimum. */
+export class ReleaseCarryoversDto {
+  @IsArray() @IsUUID("4", { each: true })
+  ids!: string[];
+}
+
 export class ProfitQueryDto {
   @IsOptional() @IsDateString() from?: string;
   @IsOptional() @IsDateString() to?: string;
