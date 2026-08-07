@@ -18,6 +18,7 @@ import { PayoutBatchService } from "./batch.service.js";
 import { PayoutMutationService } from "./mutation.service.js";
 import { DisbursementsService } from "./disbursements.service.js";
 import { OcrService } from "./ocr.service.js";
+import { PayoutProfitService } from "./profit.service.js";
 import {
   CreateSubSellerDto,
   UpdateSubSellerDto,
@@ -33,6 +34,7 @@ import {
   OverrideDisbursementDto,
   OcrExtractDto,
   ReopenBatchDto,
+  ProfitQueryDto,
 } from "./dto.js";
 
 function uid(req: FastifyRequest): string {
@@ -53,7 +55,26 @@ export class PayoutController {
     private readonly mutations: PayoutMutationService,
     private readonly disbursements: DisbursementsService,
     private readonly ocr: OcrService,
+    private readonly profit: PayoutProfitService,
   ) {}
+
+  /**
+   * What each party ended up with over a date range, from the payout ledger.
+   *
+   * Named "profit" because that is what it is asked for, and the payload says
+   * in so many words that it is takings before cost of goods — a payout row
+   * carries no link to the products in it, so there is nothing to subtract.
+   */
+  @Get("profit")
+  async profitReport(@Req() req: FastifyRequest, @Query() q: ProfitQueryDto) {
+    return ok(
+      await this.profit.report(uid(req), {
+        from: q.from,
+        to: q.to,
+        onlySettled: q.onlySettled === "1" || q.onlySettled === "true",
+      }),
+    );
+  }
 
   // --- Sub-sellers ---
   @Get("sub-sellers")

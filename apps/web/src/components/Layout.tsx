@@ -24,6 +24,7 @@ export const NAV: NavItem[] = [
   { to: "/hpp", label: "HPP & Harga Jual", icon: "tag" },
   { to: "/wallet", label: "Wallet", icon: "wallet" },
   { to: "/pencairan", label: "Pencairan Dana", icon: "banknote" },
+  { to: "/laporan-bagian", label: "Laporan Bagian", icon: "trending" },
   { to: "/notifikasi", label: "Notifikasi", icon: "bell" },
 ];
 

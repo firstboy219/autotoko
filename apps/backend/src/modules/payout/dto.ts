@@ -100,6 +100,20 @@ export class UpdateMutationDto {
   @IsOptional() @IsString() note?: string;
 }
 
+/** Date range for the profit report; both ends optional and inclusive. */
+export class ProfitQueryDto {
+  @IsOptional() @IsDateString() from?: string;
+  @IsOptional() @IsDateString() to?: string;
+
+  /**
+   * Count only batches that were closed out.
+   *
+   * A string, not a boolean: this arrives in a query string, where every value
+   * is text and `false` would be a non-empty string and therefore truthy.
+   */
+  @IsOptional() @IsIn(["1", "0", "true", "false"]) onlySettled?: string;
+}
+
 export class ListMutationQueryDto {
   @IsOptional() @IsUUID() batchId?: string;
   @IsOptional() @IsUUID() shopId?: string;

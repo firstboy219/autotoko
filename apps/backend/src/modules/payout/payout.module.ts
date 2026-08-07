@@ -11,6 +11,7 @@ import { DisbursementsService } from "./disbursements.service.js";
 import { OcrService } from "./ocr.service.js";
 import { PayoutPortalAuthService } from "./portal-auth.service.js";
 import { PortalDataService } from "./portal-data.service.js";
+import { PayoutProfitService } from "./profit.service.js";
 
 @Module({
   imports: [AuthModule, UploadsModule, ShopsModule], // JwtAuthGuard, OcrService's local file reads, ShopsService for self-service connect
@@ -23,6 +24,7 @@ import { PortalDataService } from "./portal-data.service.js";
     OcrService,
     PayoutPortalAuthService,
     PortalDataService,
+    PayoutProfitService,
   ],
   exports: [PayoutSellersService, PayoutBatchService, PayoutMutationService, DisbursementsService, OcrService],
 })
