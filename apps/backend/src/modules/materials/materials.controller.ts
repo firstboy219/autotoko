@@ -100,6 +100,39 @@ export class MaterialsController {
     return ok(await this.materials.getPurchase(uid(req), id));
   }
 
+  /** Everything that has moved this material, with a running balance. */
+  @Get(":id/movements")
+  async movements(@Req() req: FastifyRequest, @Param("id") id: string) {
+    return ok(await this.materials.listMovements(uid(req), id));
+  }
+
+  /** A stocktake, a breakage, a sample taken — anything with no document. */
+  @Post(":id/movements")
+  async addMovement(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: { quantity: number; note?: string },
+  ) {
+    return ok(await this.materials.addMovement(uid(req), id, dto));
+  }
+
+  @Patch("movements/:movementId")
+  async updateMovement(
+    @Req() req: FastifyRequest,
+    @Param("movementId") movementId: string,
+    @Body() dto: { quantity?: number; note?: string },
+  ) {
+    return ok(await this.materials.updateMovement(uid(req), movementId, dto));
+  }
+
+  @Delete("movements/:movementId")
+  async deleteMovement(
+    @Req() req: FastifyRequest,
+    @Param("movementId") movementId: string,
+  ) {
+    return ok(await this.materials.deleteMovement(uid(req), movementId));
+  }
+
   /** Correct a recorded purchase; sending `items` rewrites its lines. */
   @Patch("purchases/:id")
   async updatePurchase(

@@ -57,26 +57,62 @@ export class CostingService {
     if (!products.length) return [];
 
     const ids = products.map((p) => p.id);
-    const [materials, costings] = await Promise.all([
-      this.db.select().from(bomItems).where(inArray(bomItems.masterProductId, ids)),
+    // The same four inputs the detail page uses, fetched once for every
+    // product rather than per row. The catalogue is joined in because it — not
+    // the copy on bom_items — is the price of record for a linked line.
+    const [recipe, costings, sharedPacking, overrides] = await Promise.all([
+      this.db
+        .select({ bom: bomItems, catalogCost: materials.unitCost, catalogId: materials.id })
+        .from(bomItems)
+        .leftJoin(materials, eq(bomItems.materialId, materials.id))
+        .where(inArray(bomItems.masterProductId, ids)),
       this.db.select().from(productCosting).where(inArray(productCosting.masterProductId, ids)),
+      this.listPackingMaterials(userId),
+      this.db
+        .select()
+        .from(productPackingQuantities)
+        .where(inArray(productPackingQuantities.masterProductId, ids)),
     ]);
 
-    const matByProduct = new Map<string, typeof materials>();
-    for (const m of materials) {
-      const arr = matByProduct.get(m.masterProductId) ?? [];
-      arr.push(m);
-      matByProduct.set(m.masterProductId, arr);
+    /** Effective cost per recipe line, resolved the way detail() resolves it. */
+    const matByProduct = new Map<string, { quantity: number; unitCost: number }[]>();
+    for (const r of recipe) {
+      const linked = r.bom.materialId != null && r.catalogId != null;
+      const arr = matByProduct.get(r.bom.masterProductId) ?? [];
+      arr.push({
+        quantity: num(r.bom.quantity),
+        unitCost: linked ? num(r.catalogCost) : num(r.bom.unitCost),
+      });
+      matByProduct.set(r.bom.masterProductId, arr);
     }
     const costByProduct = new Map(costings.map((c) => [c.masterProductId, c]));
+
+    // Packing quantities are per product only where somebody overrode them;
+    // otherwise the shared default applies. Same rule as packingForProduct.
+    const overrideByProduct = new Map<string, Map<string, number>>();
+    for (const o of overrides) {
+      const m = overrideByProduct.get(o.masterProductId) ?? new Map<string, number>();
+      m.set(o.packingMaterialId, num(o.quantity));
+      overrideByProduct.set(o.masterProductId, m);
+    }
+    const packingFor = (productId: string) => {
+      const ov = overrideByProduct.get(productId);
+      return sharedPacking.map((m) => ({
+        quantity: ov?.get(m.id) ?? m.defaultQuantity,
+        unitCost: m.unitCost,
+      }));
+    };
 
     return products.map((p) => {
       const mats = matByProduct.get(p.id) ?? [];
       const cfg = costByProduct.get(p.id);
       const hpp = calculateHpp({
-        materials: mats.map((m) => ({ quantity: num(m.quantity), unitCost: num(m.unitCost) })),
+        materials: mats,
         serviceCostPerPcs: num(cfg?.serviceCostPerPcs),
         packingCostPerOrder: num(cfg?.packingCostPerOrder),
+        // Was missing entirely. Dus, lakban and label are on every shipment,
+        // so leaving them out understated every row in this table.
+        packingMaterials: packingFor(p.id),
         avgUnitsPerOrder: cfg ? num(cfg.avgUnitsPerOrder) : 1,
       });
       const publishPrice = cfg?.publishPrice != null ? num(cfg.publishPrice) : null;
@@ -92,7 +128,7 @@ export class CostingService {
         materialCount: mats.length,
         // Flagged so the UI can tell "no materials yet" apart from "materials
         // exist but nobody has priced them".
-        missingCost: mats.some((m) => num(m.unitCost) <= 0),
+        missingCost: mats.some((m) => m.unitCost <= 0),
         hpp: rupiah(hpp.hppCents),
         publishPrice,
         netProfit: pricing ? rupiah(pricing.netProfitCents) : null,

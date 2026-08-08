@@ -6,7 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   bomItems,
@@ -1023,6 +1023,221 @@ export class MaterialsService {
 
     this.logger.log(`Purchase ${purchase!.id} recorded for user ${userId} (${dto.items.length} lines)`);
     return this.getPurchase(userId, purchase!.id);
+  }
+
+  /**
+   * Every movement of one material, newest first, with a running balance.
+   *
+   * The balance is computed forwards from the oldest row and attached to each,
+   * so a reader can point at any line and say what the shelf held immediately
+   * after it. Working backwards from the current total would give the same
+   * numbers and would also quietly hide a disagreement between the total and
+   * the ledger, which is the one thing this page exists to expose.
+   */
+  async listMovements(userId: string, materialId: string, limit = 200) {
+    const [material] = await this.db
+      .select({
+        id: materials.id,
+        name: materials.name,
+        unit: materials.unit,
+        currentStock: materials.currentStock,
+      })
+      .from(materials)
+      .where(and(eq(materials.id, materialId), eq(materials.userId, userId)))
+      .limit(1);
+    if (!material) throw new NotFoundException("Bahan baku tidak ditemukan");
+
+    const rows = await this.db
+      .select({
+        id: materialMovements.id,
+        quantity: materialMovements.quantity,
+        reason: materialMovements.reason,
+        refTable: materialMovements.refTable,
+        refId: materialMovements.refId,
+        note: materialMovements.note,
+        createdAt: materialMovements.createdAt,
+      })
+      .from(materialMovements)
+      .where(
+        and(
+          eq(materialMovements.userId, userId),
+          eq(materialMovements.materialId, materialId),
+        ),
+      )
+      .orderBy(asc(materialMovements.createdAt))
+      .limit(limit);
+
+    let running = 0;
+    const withBalance = rows.map((r) => {
+      const qty = num(r.quantity);
+      running += qty;
+      return {
+        ...r,
+        quantity: qty,
+        balance: running,
+        /**
+         * Only what a person entered by hand can be changed by hand.
+         *
+         * A delivery's movement is the arithmetic of a purchase line; editing
+         * it here would leave the two saying different things with no way to
+         * tell which was meant. Correct those on the purchase itself, where
+         * the reversal is done properly.
+         */
+        editable: r.reason === "adjustment",
+      };
+    });
+
+    const ledgerTotal = running;
+    const total = num(material.currentStock);
+
+    return {
+      material: { ...material, currentStock: total },
+      /**
+       * True when the running total and the ledger disagree.
+       *
+       * Should never happen. Surfaced rather than reconciled silently, because
+       * the difference is evidence of a bug and papering over it would destroy
+       * the only trace of one.
+       */
+      outOfSync: Math.abs(ledgerTotal - total) > 0.0005,
+      ledgerTotal,
+      movements: withBalance.reverse(),
+    };
+  }
+
+  /**
+   * A stock change somebody entered themselves.
+   *
+   * A stocktake finds more or less than the books say; a bottle is dropped;
+   * something is taken for a sample. None of these has a document behind it,
+   * and until now the only way to record one was to overwrite the stock figure
+   * — which changes the number and destroys the reason.
+   */
+  async addMovement(
+    userId: string,
+    materialId: string,
+    dto: { quantity: number; note?: string },
+  ) {
+    const [material] = await this.db
+      .select({ id: materials.id })
+      .from(materials)
+      .where(and(eq(materials.id, materialId), eq(materials.userId, userId)))
+      .limit(1);
+    if (!material) throw new NotFoundException("Bahan baku tidak ditemukan");
+
+    const qty = Number(dto.quantity);
+    if (!Number.isFinite(qty) || qty === 0) {
+      throw new BadRequestException("Jumlah harus diisi dan tidak boleh nol.");
+    }
+
+    const [row] = await this.db
+      .insert(materialMovements)
+      .values({
+        userId,
+        materialId,
+        quantity: qty.toFixed(3),
+        reason: "adjustment",
+        refTable: null,
+        refId: null,
+        note: dto.note?.trim().slice(0, 500) || null,
+      })
+      .returning();
+
+    await this.db
+      .update(materials)
+      .set({
+        currentStock: sql`${materials.currentStock} + ${qty.toFixed(3)}`,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(materials.id, materialId), eq(materials.userId, userId)));
+
+    this.logger.log(`Manual stock movement ${qty} on ${materialId} by ${userId}`);
+    return row;
+  }
+
+  /**
+   * Correct a hand-entered movement.
+   *
+   * The running total moves by the difference rather than being recomputed,
+   * so a correction cannot silently discard a movement written between the
+   * read and the write.
+   */
+  async updateMovement(
+    userId: string,
+    movementId: string,
+    dto: { quantity?: number; note?: string },
+  ) {
+    const [row] = await this.db
+      .select()
+      .from(materialMovements)
+      .where(
+        and(eq(materialMovements.id, movementId), eq(materialMovements.userId, userId)),
+      )
+      .limit(1);
+    if (!row) throw new NotFoundException("Mutasi tidak ditemukan");
+    if (row.reason !== "adjustment") {
+      throw new BadRequestException(
+        "Mutasi ini berasal dari pembelian atau scan resi. Ubah di dokumen asalnya " +
+          "supaya keduanya tetap sama.",
+      );
+    }
+
+    const set: Record<string, unknown> = {};
+    let delta = 0;
+    if (dto.quantity !== undefined) {
+      const qty = Number(dto.quantity);
+      if (!Number.isFinite(qty) || qty === 0) {
+        throw new BadRequestException("Jumlah harus diisi dan tidak boleh nol.");
+      }
+      delta = qty - num(row.quantity);
+      set.quantity = qty.toFixed(3);
+    }
+    if (dto.note !== undefined) set.note = dto.note?.trim().slice(0, 500) || null;
+    if (!Object.keys(set).length) throw new BadRequestException("Tidak ada perubahan.");
+
+    await this.db
+      .update(materialMovements)
+      .set(set)
+      .where(eq(materialMovements.id, movementId));
+
+    if (delta !== 0) {
+      await this.db
+        .update(materials)
+        .set({
+          currentStock: sql`${materials.currentStock} + ${delta.toFixed(3)}`,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(materials.id, row.materialId), eq(materials.userId, userId)));
+    }
+    return { ok: true as const };
+  }
+
+  /** Remove a hand-entered movement and take its effect off the shelf. */
+  async deleteMovement(userId: string, movementId: string) {
+    const [row] = await this.db
+      .select()
+      .from(materialMovements)
+      .where(
+        and(eq(materialMovements.id, movementId), eq(materialMovements.userId, userId)),
+      )
+      .limit(1);
+    if (!row) throw new NotFoundException("Mutasi tidak ditemukan");
+    if (row.reason !== "adjustment") {
+      throw new BadRequestException(
+        "Mutasi ini berasal dari pembelian atau scan resi dan tidak bisa dihapus di sini.",
+      );
+    }
+
+    await this.db.delete(materialMovements).where(eq(materialMovements.id, movementId));
+    await this.db
+      .update(materials)
+      .set({
+        currentStock: sql`${materials.currentStock} - ${num(row.quantity).toFixed(3)}`,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(materials.id, row.materialId), eq(materials.userId, userId)));
+
+    return { deleted: movementId };
   }
 
   async listPurchases(userId: string) {

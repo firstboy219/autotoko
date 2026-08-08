@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../lib/api";
 import { useFetch } from "../lib/useFetch";
+import { StockMovements } from "./StockMovements";
 import { rupiah, dateShort } from "../lib/fmt";
 import { Icon } from "./Icon";
 import {
@@ -54,6 +55,8 @@ export function MaterialsCatalogCard() {
   const list = useFetch<Material[]>("/materials");
   const [editing, setEditing] = useState<Material | null>(null);
   const [deleting, setDeleting] = useState<Material | null>(null);
+  /** The material whose ledger is open, or null. */
+  const [movements, setMovements] = useState<Material | null>(null);
 
   const rows = list.data ?? [];
 
@@ -95,7 +98,15 @@ export function MaterialsCatalogCard() {
                     {m.unit && <div className="text-[11px] text-ink-3">satuan: {m.unit}</div>}
                   </TD>
                   <TD className="text-right tabular-nums">
-                    {m.currentStock}
+                    {/* The number is a link to its own explanation. A total
+                        nobody can account for is a total nobody argues with. */}
+                    <button
+                      onClick={() => setMovements(m)}
+                      className="underline decoration-dotted underline-offset-2 hover:text-brand-ink"
+                      title="Lihat mutasi stok"
+                    >
+                      {m.currentStock}
+                    </button>
                     {m.isLow && (
                       <span className="ml-1.5 inline-block">
                         <Badge tone="warning">menipis</Badge>
@@ -117,6 +128,9 @@ export function MaterialsCatalogCard() {
                     {m.usedByProducts} produk
                   </TD>
                   <TD className="text-right whitespace-nowrap">
+                    <Button variant="text" onClick={() => setMovements(m)}>
+                      Mutasi
+                    </Button>
                     <Button variant="text" onClick={() => setEditing(m)}>
                       Ubah
                     </Button>
@@ -130,6 +144,16 @@ export function MaterialsCatalogCard() {
           </tbody>
         </Table>
       </TableWrap>
+
+      {movements && (
+        <StockMovements
+          materialId={movements.id}
+          onClose={() => setMovements(null)}
+          // The stock column is what a movement changes, so the table behind
+          // has to follow or it shows a number the ledger has moved past.
+          onChanged={() => list.reload()}
+        />
+      )}
 
       {editing && (
         <EditMaterialModal

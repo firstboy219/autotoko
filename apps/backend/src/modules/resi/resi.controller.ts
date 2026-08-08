@@ -36,6 +36,7 @@ import {
 } from "../auth/jwt-auth.guard.js";
 import { ResiService } from "./resi.service.js";
 import { CourierTrackingService } from "./courier-tracking.service.js";
+import { AppReleasesService } from "./app-releases.service.js";
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
@@ -266,6 +267,7 @@ export class ResiController {
   constructor(
     private readonly resi: ResiService,
     private readonly tracking: CourierTrackingService,
+    private readonly appReleases: AppReleasesService,
   ) {}
 
   /** 201 on a new resi; 409 with the earlier scan's details on a repeat. */
@@ -285,6 +287,19 @@ export class ResiController {
         linked: q.linked,
       }),
     };
+  }
+
+  /**
+   * Every build handed out, newest first, with only the current one carrying
+   * a download link.
+   *
+   * An older APK still sitting on disk is a support problem waiting to
+   * happen: it talks to an API that has moved on, and the failure reaches the
+   * seller as "the app is broken" rather than "you are on last month's build".
+   */
+  @Get("app/releases")
+  async releases(): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.appReleases.list() };
   }
 
   /** Where to get the scanner APK, or null when none is published. */
