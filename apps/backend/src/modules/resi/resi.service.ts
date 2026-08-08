@@ -19,6 +19,7 @@ import {
 } from "../../database/schema/index.js";
 import { UploadsService } from "../uploads/uploads.service.js";
 import { CourierTrackingService } from "./courier-tracking.service.js";
+import { MaterialConsumptionService } from "../materials/material-consumption.service.js";
 import { ConfigService } from "@nestjs/config";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -82,6 +83,15 @@ export interface ScanResult {
   linkedOrder: { id: string; marketplaceOrderId: string; from: string; to: string } | null;
   photoUrl: string | null;
   scannedAt: Date;
+  /**
+   * Recipe lines whose stock could not be adjusted, in words for the packer.
+   *
+   * Empty on almost every scan. When it is not, something is misconfigured in
+   * a way only a person can settle — a recipe measured in ml against a
+   * catalogue measured in gram — and the bench is where somebody is actually
+   * in a position to notice.
+   */
+  stockWarnings: string[];
 }
 
 @Injectable()
@@ -93,6 +103,7 @@ export class ResiService {
     private readonly uploads: UploadsService,
     private readonly config: ConfigService,
     private readonly tracking: CourierTrackingService,
+    private readonly consumption: MaterialConsumptionService,
   ) {}
 
   /**
@@ -317,24 +328,43 @@ export class ResiService {
       .returning();
     if (!inserted) throw new Error("Insert resi_scans returned no row");
 
+    const stockWarnings: string[] = [];
+
     // The parcel's contents, as the phone resolved them. Seeded here rather
     // than left to the background reader because the phone saw the label in
     // person: dozens of frames at full sensor resolution, against the tenant's
     // own product list. The server's later pass finds these lines already
     // present and leaves them alone.
     if (sentItems.length) {
-      await this.db.insert(resiScanItems).values(
-        sentItems.map((i) => ({
-          resiScanId: inserted.id,
-          masterProductId:
-            i.masterProductId && ownedProducts.has(i.masterProductId) ? i.masterProductId : null,
-          rawName: i.rawName?.slice(0, 255) ?? null,
-          rawQty: String(i.qty),
-          qty: String(i.qty),
-          source: i.source?.slice(0, 16) ?? "device_auto",
-          matchScore: i.matchScore != null ? i.matchScore.toFixed(3) : null,
-        })),
-      );
+      const written = await this.db
+        .insert(resiScanItems)
+        .values(
+          sentItems.map((i) => ({
+            resiScanId: inserted.id,
+            masterProductId:
+              i.masterProductId && ownedProducts.has(i.masterProductId) ? i.masterProductId : null,
+            rawName: i.rawName?.slice(0, 255) ?? null,
+            rawQty: String(i.qty),
+            qty: String(i.qty),
+            source: i.source?.slice(0, 16) ?? "device_auto",
+            matchScore: i.matchScore != null ? i.matchScore.toFixed(3) : null,
+          })),
+        )
+        .returning();
+
+      // The parcel has left the building, so the raw materials in it have left
+      // the shelf. Until now nothing said so: deliveries added to stock and
+      // nothing ever subtracted, and the BOM page showed what had been bought
+      // rather than what was left.
+      for (const row of written) {
+        const r = await this.consumption.syncScanItem(
+          userId,
+          row.id,
+          row.masterProductId,
+          Number(row.qty),
+        );
+        for (const s of r.skipped) stockWarnings.push(s);
+      }
     }
 
     return {
@@ -342,6 +372,14 @@ export class ResiService {
       resi: inserted.resi,
       courier: inserted.courier,
       orderId: inserted.orderId,
+      /**
+       * Recipe lines whose stock could not be touched, named on the phone.
+       *
+       * A recipe in ml against a catalogue in gram cannot be converted without
+       * a density nobody recorded. Saying so at the bench is the only moment
+       * anybody is in a position to fix it; a server log is not.
+       */
+      stockWarnings,
       linkedOrder,
       photoUrl: inserted.photoUrl,
       scannedAt: inserted.scannedAt,
@@ -708,6 +746,12 @@ export class ResiService {
         qty: input.qty.toFixed(2),
       })
       .returning();
+    await this.consumption.syncScanItem(
+      userId,
+      row!.id,
+      row!.masterProductId,
+      Number(row!.qty),
+    );
     return row;
   }
 
@@ -737,11 +781,25 @@ export class ResiService {
       .where(and(eq(resiScanItems.id, itemId), eq(resiScanItems.resiScanId, scanId)))
       .returning();
     if (!row) throw new NotFoundException("Baris isi paket tidak ditemukan.");
+    // Re-mapping is the common case, not the exception: the phone's best guess
+    // is wrong often enough that this runs several times a shift. syncScanItem
+    // puts back what the previous mapping took before taking anything new, so
+    // a corrected line leaves the shelf as if only the correction had happened.
+    await this.consumption.syncScanItem(
+      userId,
+      row.id,
+      row.masterProductId,
+      Number(row.qty),
+    );
     return row;
   }
 
   async removeItem(userId: string, scanId: string, itemId: string) {
     await this.getScanOrThrow(userId, scanId);
+    // Before the row goes, because the ledger is keyed on it and a cascade
+    // would take the movements with it — leaving the running total holding a
+    // subtraction with nothing left to explain it.
+    await this.consumption.syncScanItem(userId, itemId, null, 0);
     const [row] = await this.db
       .delete(resiScanItems)
       .where(and(eq(resiScanItems.id, itemId), eq(resiScanItems.resiScanId, scanId)))
@@ -1150,6 +1208,19 @@ export class ResiService {
       .limit(1);
     if (!scan) throw new NotFoundException("Data scan tidak ditemukan.");
     if (scan.orderId) await this.unlink(userId, id);
+
+    // Give back every raw material this parcel took, before the rows that
+    // recorded it are gone. The delete below cascades to resi_scan_items, and
+    // a cascade happens in the database where no application code runs — so
+    // waiting until after would leave the shelf permanently short with nothing
+    // left to explain why.
+    const lines = await this.db
+      .select({ id: resiScanItems.id })
+      .from(resiScanItems)
+      .where(eq(resiScanItems.resiScanId, id));
+    for (const line of lines) {
+      await this.consumption.syncScanItem(userId, line.id, null, 0);
+    }
 
     const [row] = await this.db
       .delete(resiScans)

@@ -45,6 +45,16 @@ public final class Api {
             return body == null ? null : body.optJSONObject("data");
         }
 
+        /**
+         * The same envelope when the payload is a list rather than an object.
+         *
+         * Some endpoints return `data: [...]` and data() quietly gives null
+         * for those, which reads at the call site as a failed request.
+         */
+        public org.json.JSONArray dataArray() {
+            return body == null ? null : body.optJSONArray("data");
+        }
+
         /** Best human-readable line we can offer, whatever shape the error took. */
         public String message(String fallback) {
             if (transportError != null) return transportError;
@@ -212,6 +222,23 @@ public final class Api {
         } catch (Exception ignored) {}
         call("POST", session.baseUrl() + "/api/resi/scans/" + scanId + "/pages",
                 session.token(), payload, cb);
+    }
+
+    /** Raw-material parcels reported from this phone, newest first. */
+    public void purchases(Cb cb) {
+        call("GET", session.baseUrl() + "/api/materials/purchases", session.token(), null, cb);
+    }
+
+    /**
+     * Delete a reported parcel and give back what it added to the shelf.
+     *
+     * The server reverses the stock; this is not a hide. A parcel scanned
+     * twice or scanned by mistake otherwise had to be corrected by somebody
+     * editing the stock figure by hand to a number they worked out themselves.
+     */
+    public void deletePurchase(String id, Cb cb) {
+        call("DELETE", session.baseUrl() + "/api/materials/purchases/" + id,
+                session.token(), null, cb);
     }
 
     public void history(Cb cb) {

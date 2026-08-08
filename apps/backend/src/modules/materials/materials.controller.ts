@@ -18,6 +18,7 @@ import {
   CreateMaterialDto,
   CreatePurchaseDto,
   RecordDeliveryDto,
+  UpdatePurchaseDto,
   ParseReceiptDto,
   UpdateMaterialDto,
 } from "./dto/materials.dto.js";
@@ -97,6 +98,28 @@ export class MaterialsController {
   @Get("purchases/:id")
   async getPurchase(@Req() req: FastifyRequest, @Param("id") id: string) {
     return ok(await this.materials.getPurchase(uid(req), id));
+  }
+
+  /** Correct a recorded purchase; sending `items` rewrites its lines. */
+  @Patch("purchases/:id")
+  async updatePurchase(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: UpdatePurchaseDto,
+  ) {
+    return ok(await this.materials.updatePurchase(uid(req), id, dto));
+  }
+
+  /**
+   * Delete a purchase and give back what it put on the shelf.
+   *
+   * The packer scans the wrong parcel, or the same one twice. Without this the
+   * only correction was somebody editing the stock figure by hand to a number
+   * they worked out themselves.
+   */
+  @Delete("purchases/:id")
+  async deletePurchase(@Req() req: FastifyRequest, @Param("id") id: string) {
+    return ok(await this.materials.deletePurchase(uid(req), id));
   }
 
   @Post("purchases")

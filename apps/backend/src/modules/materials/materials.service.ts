@@ -6,16 +6,18 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   bomItems,
   masterProducts,
+  materialMovements,
   materialPurchaseItems,
   materialPurchases,
   materials,
   packingMaterials,
 } from "../../database/schema/index.js";
+import { convertUnit } from "@autotoko/shared";
 import { UploadsService } from "../uploads/uploads.service.js";
 import { OcrService } from "../payout/ocr.service.js";
 import type { CreatePurchaseDto, UpdateMaterialDto } from "./dto/materials.dto.js";
@@ -407,6 +409,9 @@ export class MaterialsService {
     materialId: string,
     qty: number,
     lineTotal: number | null,
+    /** The purchase line this came from, so deleting it can give it back. */
+    refId: string | null = null,
+    reason: string = "purchase",
   ): Promise<void> {
     const [current] = await this.db
       .select({ stock: materials.currentStock, cost: materials.unitCost })
@@ -435,6 +440,257 @@ export class MaterialsService {
     set.updatedAt = new Date();
 
     await this.db.update(materials).set(set).where(eq(materials.id, materialId));
+
+    // The total and the row that explains it, always together. A total nobody
+    // can account for is the thing that makes a stocktake unarguable-with.
+    if (refId) {
+      await this.db.insert(materialMovements).values({
+        userId,
+        materialId,
+        quantity: qty.toFixed(3),
+        reason,
+        refTable: "material_purchase_items",
+        refId,
+        note: lineTotal != null ? `Harga baris Rp ${lineTotal}` : "Tanpa harga",
+      });
+    }
+  }
+
+  /**
+   * Give back everything a purchase ever put on the shelf.
+   *
+   * Compensating rows rather than deleted ones: the ledger is what explains
+   * the running total, and one that can lose entries explains nothing.
+   *
+   * The weighted-average cost is recomputed from the purchases that remain
+   * rather than reversed. An average cannot be unwound from its result — and
+   * leaving it alone would keep costing every product from a receipt the
+   * seller has just said was wrong.
+   */
+  private async reversePurchaseStock(userId: string, purchaseId: string) {
+    const items = await this.db
+      .select({ id: materialPurchaseItems.id, materialId: materialPurchaseItems.materialId })
+      .from(materialPurchaseItems)
+      .where(
+        and(
+          eq(materialPurchaseItems.purchaseId, purchaseId),
+          eq(materialPurchaseItems.userId, userId),
+        ),
+      );
+    if (!items.length) return;
+
+    const touched = new Set<string>();
+    for (const item of items) {
+      const [prior] = await this.db
+        .select({ net: sql<string>`coalesce(sum(${materialMovements.quantity}), 0)` })
+        .from(materialMovements)
+        .where(
+          and(
+            eq(materialMovements.userId, userId),
+            eq(materialMovements.refTable, "material_purchase_items"),
+            eq(materialMovements.refId, item.id),
+          ),
+        );
+      const net = num(prior?.net ?? "0");
+      touched.add(item.materialId);
+      if (net === 0) continue;
+
+      await this.db.insert(materialMovements).values({
+        userId,
+        materialId: item.materialId,
+        quantity: (-net).toFixed(3),
+        reason: "reversal",
+        refTable: "material_purchase_items",
+        refId: item.id,
+        note: "Pembelian dihapus atau diubah",
+      });
+      await this.db
+        .update(materials)
+        .set({
+          currentStock: sql`${materials.currentStock} - ${net.toFixed(3)}`,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(materials.id, item.materialId), eq(materials.userId, userId)));
+    }
+
+    for (const materialId of touched) {
+      await this.recomputeUnitCost(userId, materialId, purchaseId);
+    }
+  }
+
+  /**
+   * The average price of what is on the shelf, from the receipts that remain.
+   *
+   * `excludePurchaseId` is the one being deleted or rewritten: its rows are
+   * still in the table at this point and must not be counted.
+   */
+  private async recomputeUnitCost(userId: string, materialId: string, excludePurchaseId?: string) {
+    const [agg] = await this.db
+      .select({
+        qty: sql<string>`coalesce(sum(${materialPurchaseItems.quantity}), 0)`,
+        cost: sql<string>`coalesce(sum(${materialPurchaseItems.totalCost}), 0)`,
+      })
+      .from(materialPurchaseItems)
+      .where(
+        and(
+          eq(materialPurchaseItems.userId, userId),
+          eq(materialPurchaseItems.materialId, materialId),
+          isNotNull(materialPurchaseItems.totalCost),
+          excludePurchaseId
+            ? ne(materialPurchaseItems.purchaseId, excludePurchaseId)
+            : sql`true`,
+        ),
+      );
+
+    const qty = num(agg?.qty ?? "0");
+    const cost = num(agg?.cost ?? "0");
+    // No priced purchase left to average. Leaving the last known cost standing
+    // beats writing zero, which would silently price every product at nothing.
+    if (qty <= 0 || cost <= 0) return;
+
+    await this.db
+      .update(materials)
+      .set({ unitCost: (cost / qty).toFixed(2), unitCostUpdatedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(materials.id, materialId), eq(materials.userId, userId)));
+  }
+
+  /**
+   * Remove a purchase and everything it did.
+   *
+   * The packer scans the wrong parcel, or scans the right one twice. Until now
+   * the only fix was somebody editing stock by hand to a number they worked
+   * out themselves, which is how a shelf and its record stop matching.
+   */
+  async deletePurchase(userId: string, id: string) {
+    const [p] = await this.db
+      .select()
+      .from(materialPurchases)
+      .where(and(eq(materialPurchases.id, id), eq(materialPurchases.userId, userId)))
+      .limit(1);
+    if (!p) throw new NotFoundException("Pembelian tidak ditemukan");
+
+    await this.reversePurchaseStock(userId, id);
+    await this.db.delete(materialPurchases).where(eq(materialPurchases.id, id));
+
+    this.logger.log(`Purchase ${id} deleted and stock reversed for user ${userId}`);
+    return { deleted: id, resi: p.resi };
+  }
+
+  /**
+   * Correct a purchase after the fact.
+   *
+   * Everything it did is undone first and the new version applied from
+   * scratch, rather than the difference being worked out. A diff has to be
+   * right about the previous state; a reversal only has to be right about what
+   * is written down.
+   */
+  async updatePurchase(
+    userId: string,
+    id: string,
+    dto: {
+      purchasedAt?: string;
+      supplierName?: string | null;
+      note?: string | null;
+      isCod?: boolean;
+      codAmount?: number | null;
+      items?: {
+        materialId: string;
+        qtyPcs?: number;
+        contentPerPcs?: number;
+        contentUnit?: string;
+        totalCost?: number;
+      }[];
+    },
+  ) {
+    const [p] = await this.db
+      .select()
+      .from(materialPurchases)
+      .where(and(eq(materialPurchases.id, id), eq(materialPurchases.userId, userId)))
+      .limit(1);
+    if (!p) throw new NotFoundException("Pembelian tidak ditemukan");
+
+    const header: Record<string, unknown> = {};
+    // undefined means "not sent". Only an explicit null or empty string clears
+    // a field -- the same distinction a PATCH of the label fields once got
+    // wrong, emptying every column the form had not included.
+    if (dto.purchasedAt !== undefined) header.purchasedAt = dto.purchasedAt;
+    if (dto.supplierName !== undefined) header.supplierName = dto.supplierName?.trim() || null;
+    if (dto.note !== undefined) header.note = dto.note?.trim() || null;
+    if (dto.isCod !== undefined) header.isCod = dto.isCod;
+    if (dto.codAmount !== undefined) {
+      header.codAmount = dto.codAmount != null ? dto.codAmount.toFixed(2) : null;
+    }
+    if (Object.keys(header).length) {
+      await this.db.update(materialPurchases).set(header).where(eq(materialPurchases.id, id));
+    }
+
+    if (dto.items) {
+      await this.reversePurchaseStock(userId, id);
+      await this.db
+        .delete(materialPurchaseItems)
+        .where(eq(materialPurchaseItems.purchaseId, id));
+
+      const owned = await this.db
+        .select({ id: materials.id, unit: materials.unit, name: materials.name })
+        .from(materials)
+        .where(
+          and(
+            eq(materials.userId, userId),
+            inArray(materials.id, dto.items.map((i) => i.materialId)),
+          ),
+        );
+      const ownedById = new Map(owned.map((m) => [m.id, m]));
+
+      let grandTotal = 0;
+      for (const i of dto.items) {
+        const material = ownedById.get(i.materialId);
+        if (!material) continue;
+        const pcs = Number(i.qtyPcs ?? 1);
+        if (!Number.isFinite(pcs) || pcs <= 0) continue;
+        const entered = Number.isFinite(Number(i.contentPerPcs)) && Number(i.contentPerPcs) > 0
+          ? Number(i.contentPerPcs)
+          : 1;
+        const enteredUnit = i.contentUnit?.trim() || null;
+        const content = convertUnit(entered, enteredUnit ?? material.unit, material.unit);
+        if (content === null) {
+          throw new BadRequestException(
+            `${material.name}: "${enteredUnit}" tidak bisa dikonversi ke "${material.unit}"`,
+          );
+        }
+        const qty = pcs * content;
+        const cost = i.totalCost != null && Number.isFinite(Number(i.totalCost))
+          ? Number(i.totalCost)
+          : null;
+        if (cost != null) grandTotal += cost;
+
+        const [row] = await this.db
+          .insert(materialPurchaseItems)
+          .values({
+            purchaseId: id,
+            userId,
+            materialId: material.id,
+            quantity: qty.toFixed(3),
+            qtyPcs: pcs.toFixed(3),
+            contentPerPcs: content.toFixed(3),
+            enteredContent: entered.toFixed(3),
+            enteredUnit: enteredUnit ?? material.unit ?? null,
+            totalCost: cost != null ? cost.toFixed(2) : null,
+            unitCost: cost != null && qty > 0 ? (cost / qty).toFixed(2) : null,
+            createdMaterial: false,
+          })
+          .returning();
+
+        await this.applyStockIn(userId, material.id, qty, cost, row!.id, p.source === "delivery_scan" ? "delivery" : "purchase");
+      }
+
+      await this.db
+        .update(materialPurchases)
+        .set({ totalCost: grandTotal.toFixed(2) })
+        .where(eq(materialPurchases.id, id));
+    }
+
+    this.logger.log(`Purchase ${id} updated for user ${userId}`);
+    return this.getPurchase(userId, id);
   }
 
   /**
@@ -460,6 +716,8 @@ export class MaterialsService {
         qtyPcs: number;
         /** Optional: blank means one unit per package, handled below. */
         contentPerPcs?: number;
+        /** Unit of the line above; blank means the catalogue's own. */
+        contentUnit?: string;
         totalCost?: number;
       }[];
     },
@@ -537,6 +795,8 @@ export class MaterialsService {
 
     const lines: (typeof materialPurchaseItems.$inferInsert)[] = [];
     const applied: { name: string; qty: number; unit: string | null }[] = [];
+    /** Lines whose unit could not be converted; reported, never guessed at. */
+    const rejected: string[] = [];
     let grandTotal = 0;
 
     for (const i of wanted) {
@@ -547,7 +807,22 @@ export class MaterialsService {
       if (!Number.isFinite(pcs) || pcs <= 0) continue;
       // A blank content box means one unit per package, which is what "pcs"
       // materials always are; treating it as zero would add nothing at all.
-      const content = Number.isFinite(per) && per > 0 ? per : 1;
+      const entered = Number.isFinite(per) && per > 0 ? per : 1;
+
+      // The package is labelled in whatever the supplier uses; the shelf is
+      // counted in whatever a recipe consumes. Converting here rather than in
+      // the packer's head is the whole point of asking for the unit.
+      const enteredUnit = i.contentUnit?.trim() || null;
+      const content = convertUnit(entered, enteredUnit ?? material.unit, material.unit);
+      if (content === null) {
+        // Mass into volume needs a density nobody recorded. Refusing one line
+        // and naming it beats crediting the shelf with a number that is not
+        // the quantity of anything.
+        rejected.push(
+          `${material.name}: "${enteredUnit}" tidak bisa dikonversi ke "${material.unit}"`,
+        );
+        continue;
+      }
       const qty = pcs * content;
 
       // A COD parcel holding ONE material tells us exactly what that material
@@ -570,22 +845,40 @@ export class MaterialsService {
         quantity: qty.toFixed(3),
         qtyPcs: pcs.toFixed(3),
         contentPerPcs: content.toFixed(3),
+        enteredContent: entered.toFixed(3),
+        enteredUnit: enteredUnit ?? material.unit ?? null,
         totalCost: cost != null ? cost.toFixed(2) : null,
         unitCost: cost != null && qty > 0 ? (cost / qty).toFixed(2) : null,
         createdMaterial: false,
       });
-      await this.applyStockIn(userId, material.id, qty, cost);
+      // Stock is applied after the rows exist, below: a movement has to name
+      // the line it came from or deleting the parcel cannot give it back.
       applied.push({ name: material.name, qty, unit: material.unit });
     }
 
     if (!lines.length) {
       // Nothing survived validation — every line pointed at a material this
-      // tenant does not own. Leave no empty report behind.
+      // tenant does not own, or none could be converted. Leave no empty report
+      // behind, and say which it was.
       await this.db.delete(materialPurchases).where(eq(materialPurchases.id, purchase!.id));
-      throw new BadRequestException("Tidak ada bahan yang bisa dicatat dari laporan ini.");
+      throw new BadRequestException(
+        rejected.length
+          ? `Satuan tidak cocok: ${rejected.join("; ")}`
+          : "Tidak ada bahan yang bisa dicatat dari laporan ini.",
+      );
     }
 
-    await this.db.insert(materialPurchaseItems).values(lines);
+    const written = await this.db.insert(materialPurchaseItems).values(lines).returning();
+    for (const row of written) {
+      await this.applyStockIn(
+        userId,
+        row.materialId,
+        num(row.quantity),
+        row.totalCost != null ? num(row.totalCost) : null,
+        row.id,
+        "delivery",
+      );
+    }
     if (grandTotal > 0) {
       await this.db
         .update(materialPurchases)
@@ -603,6 +896,8 @@ export class MaterialsService {
       items: applied,
       isCod: dto.isCod === true,
       codAmount: dto.codAmount ?? null,
+      /** Named so the phone can show what did NOT go in, not just what did. */
+      rejected,
       /** True when the COD amount became a real unit cost rather than just a total. */
       costApplied: wanted.length === 1 && dto.codAmount != null,
     };
@@ -693,14 +988,29 @@ export class MaterialsService {
         })
         .where(eq(materials.id, materialId!));
 
-      await this.db.insert(materialPurchaseItems).values({
-        purchaseId: purchase!.id,
+      const [lineRow] = await this.db
+        .insert(materialPurchaseItems)
+        .values({
+          purchaseId: purchase!.id,
+          userId,
+          materialId: materialId!,
+          quantity: qty.toFixed(3),
+          totalCost: lineTotal.toFixed(2),
+          unitCost: lineUnitCost.toFixed(2),
+          createdMaterial: created,
+        })
+        .returning();
+
+      // The stock change above was written straight to the total. Record it
+      // here so this purchase can be deleted like any other.
+      await this.db.insert(materialMovements).values({
         userId,
         materialId: materialId!,
         quantity: qty.toFixed(3),
-        totalCost: lineTotal.toFixed(2),
-        unitCost: lineUnitCost.toFixed(2),
-        createdMaterial: created,
+        reason: "purchase",
+        refTable: "material_purchase_items",
+        refId: lineRow!.id,
+        note: `Harga baris Rp ${lineTotal}`,
       });
 
       grandTotal += lineTotal;
@@ -726,12 +1036,20 @@ export class MaterialsService {
     const ids = rows.map((r) => r.id);
     const counts = ids.length
       ? await this.db
-          .select({ purchaseId: materialPurchaseItems.purchaseId, n: sql<number>`count(*)::int` })
+          .select({
+            purchaseId: materialPurchaseItems.purchaseId,
+            n: sql<number>`count(*)::int`,
+            // What the seller counted off the trolley, summed. Shown beside
+            // the converted total so the row can be checked against a parcel
+            // without opening it.
+            pcs: sql<string>`coalesce(sum(${materialPurchaseItems.qtyPcs}), 0)`,
+          })
           .from(materialPurchaseItems)
           .where(inArray(materialPurchaseItems.purchaseId, ids))
           .groupBy(materialPurchaseItems.purchaseId)
       : [];
     const byId = new Map(counts.map((c) => [c.purchaseId, Number(c.n)]));
+    const pcsById = new Map(counts.map((c) => [c.purchaseId, num(c.pcs)]));
 
     return rows.map((p) => ({
       id: p.id,
@@ -741,6 +1059,8 @@ export class MaterialsService {
       receiptUrl: p.receiptUrl,
       totalCost: num(p.totalCost),
       itemCount: byId.get(p.id) ?? 0,
+      /** Total packages counted, null when nothing recorded one. */
+      totalPcs: pcsById.get(p.id) || null,
       /** Set when this came from the scanner rather than the form. */
       resi: p.resi,
       source: p.source,
@@ -764,6 +1084,11 @@ export class MaterialsService {
         materialName: materials.name,
         unit: materials.unit,
         quantity: materialPurchaseItems.quantity,
+        /** How the quantity was counted, kept beside what it became. */
+        qtyPcs: materialPurchaseItems.qtyPcs,
+        contentPerPcs: materialPurchaseItems.contentPerPcs,
+        enteredContent: materialPurchaseItems.enteredContent,
+        enteredUnit: materialPurchaseItems.enteredUnit,
         totalCost: materialPurchaseItems.totalCost,
         unitCost: materialPurchaseItems.unitCost,
         createdMaterial: materialPurchaseItems.createdMaterial,
@@ -779,9 +1104,17 @@ export class MaterialsService {
       note: p.note,
       receiptUrl: p.receiptUrl,
       totalCost: num(p.totalCost),
+      /** Present for a scanned parcel; the editor uses these to label it. */
+      resi: p.resi,
+      source: p.source,
+      isCod: p.isCod,
+      codAmount: p.codAmount != null ? num(p.codAmount) : null,
       items: items.map((i) => ({
         ...i,
         quantity: num(i.quantity),
+        qtyPcs: i.qtyPcs != null ? num(i.qtyPcs) : null,
+        contentPerPcs: i.contentPerPcs != null ? num(i.contentPerPcs) : null,
+        enteredContent: i.enteredContent != null ? num(i.enteredContent) : null,
         totalCost: num(i.totalCost),
         unitCost: num(i.unitCost),
       })),

@@ -42,6 +42,18 @@ export class DeliveryLineDto {
    */
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(1_000_000) contentPerPcs?: number;
 
+  /**
+   * The unit `contentPerPcs` was measured in, when it is not the catalogue's.
+   *
+   * A supplier ships glycerine in a 1 kg jug; the catalogue holds glycerine in
+   * grams. Without this the packer had to do that conversion in their head
+   * into a box labelled only "gram", and typing 1 for a 1 kg jug is the
+   * obvious reading — it understates the shelf a thousandfold and nothing
+   * downstream ever looks wrong. Omitted means it is already the catalogue's
+   * unit.
+   */
+  @IsOptional() @IsString() @MaxLength(32) contentUnit?: string;
+
   /** Omit when unknown. Zero would drag the weighted average down. */
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) totalCost?: number;
 }
@@ -65,6 +77,42 @@ export class RecordDeliveryDto {
 
   @IsArray() @ValidateNested({ each: true }) @Type(() => DeliveryLineDto)
   items!: DeliveryLineDto[];
+}
+
+/** One line of a purchase being corrected. */
+export class UpdatePurchaseLineDto {
+  @IsUUID() materialId!: string;
+
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0.001) @Max(1_000_000) qtyPcs?: number;
+
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(1_000_000) contentPerPcs?: number;
+
+  /** The unit the line above was measured in; blank means the catalogue's. */
+  @IsOptional() @IsString() @MaxLength(32) contentUnit?: string;
+
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) totalCost?: number;
+}
+
+/**
+ * A correction to a recorded purchase.
+ *
+ * Every field optional and every omission meaningful: sending only a note must
+ * not blank the supplier, and sending no items must not wipe the parcel's
+ * contents. Only `items` when present rewrites the lines.
+ */
+export class UpdatePurchaseDto {
+  @IsOptional() @IsDateString() purchasedAt?: string;
+
+  @IsOptional() @IsString() @MaxLength(255) supplierName?: string;
+
+  @IsOptional() @IsString() @MaxLength(500) note?: string;
+
+  @IsOptional() @IsBoolean() isCod?: boolean;
+
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(1_000_000_000) codAmount?: number;
+
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => UpdatePurchaseLineDto)
+  items?: UpdatePurchaseLineDto[];
 }
 
 export class CreateMaterialDto {

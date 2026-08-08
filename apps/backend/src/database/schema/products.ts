@@ -197,6 +197,16 @@ export const materialPurchaseItems = pgTable(
     qtyPcs: numeric("qty_pcs", { precision: 14, scale: 3 }),
     contentPerPcs: numeric("content_per_pcs", { precision: 14, scale: 3 }),
     /**
+     * What the packer typed, before it was converted into the line above.
+     *
+     * contentPerPcs is in the material's unit because that is the only thing
+     * stock can move by. But "1" against a catalogue in grams reads afterwards
+     * as either a 1 gram sachet or a mis-entered 1 kg jug, and nobody can tell
+     * which. Keeping the entry as made is what makes a wrong one findable.
+     */
+    enteredContent: numeric("entered_content", { precision: 14, scale: 3 }),
+    enteredUnit: varchar("entered_unit", { length: 32 }),
+    /**
      * Total paid for this line; unitCost is derived as total / quantity.
      *
      * NULL means nobody said — the person receiving a parcel at the door does
@@ -292,6 +302,42 @@ export const productPackingQuantities = pgTable(
       t.packingMaterialId,
     ),
     productIdx: index("product_packing_qty_product_idx").on(t.masterProductId),
+  }),
+);
+
+/**
+ * Every change to a material's stock, signed, in the material's own unit.
+ *
+ * current_stock is a running total and a running total cannot be corrected.
+ * A packer re-maps a wrongly matched product several times a shift, and each
+ * time the shelf has to give back exactly what that line took — which is only
+ * knowable if it was written down. The total is maintained beside the ledger
+ * for speed; the ledger is what makes it auditable.
+ */
+export const materialMovements = pgTable(
+  "material_movements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    materialId: uuid("material_id")
+      .notNull()
+      .references(() => materials.id, { onDelete: "cascade" }),
+    /** Positive arrived, negative shipped. */
+    quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+    /** purchase | delivery | resi_scan | adjustment | reversal */
+    reason: varchar("reason", { length: 24 }).notNull(),
+    /** What caused it, so it can be found again and undone. */
+    refTable: varchar("ref_table", { length: 32 }),
+    refId: uuid("ref_id"),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("material_movements_user_idx").on(t.userId),
+    materialIdx: index("material_movements_material_idx").on(t.materialId, t.createdAt),
+    refIdx: index("material_movements_ref_idx").on(t.refTable, t.refId),
   }),
 );
 

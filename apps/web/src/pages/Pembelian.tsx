@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Layout } from "../components/Layout";
 import { FileUpload } from "../components/FileUpload";
+import { PurchaseEditor } from "../components/PurchaseEditor";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
 import { rupiah, dateShort } from "../lib/fmt";
@@ -43,6 +44,8 @@ interface PurchaseRow {
   supplierName: string | null;
   totalCost: number;
   itemCount: number;
+  /** Packages counted off the trolley, summed across the lines. */
+  totalPcs: number | null;
   receiptUrl: string | null;
   /** Null for purchases typed into the form. */
   resi: string | null;
@@ -85,6 +88,8 @@ export function Pembelian() {
   const [supplier, setSupplier] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /** The purchase being corrected, or null when the list is just a list. */
+  const [editing, setEditing] = useState<string | null>(null);
 
   const catalog = materials.data ?? [];
 
@@ -397,7 +402,7 @@ export function Pembelian() {
                 <TR className="border-t-0">
                   <TH>Tanggal</TH>
                   <TH>Supplier</TH>
-                  <TH align="right">Item</TH>
+                  <TH align="right">Item / pcs</TH>
                   <TH align="right">Total</TH>
                   <TH align="right">Bukti</TH>
                 </TR>
@@ -413,7 +418,11 @@ export function Pembelian() {
                   </TR>
                 ) : (
                   purchases.data.map((p) => (
-                    <TR key={p.id}>
+                    <TR
+                      key={p.id}
+                      onClick={() => setEditing(p.id)}
+                      className="cursor-pointer hover:bg-canvas"
+                    >
                       <TD className="text-ink">{dateShort(p.purchasedAt)}</TD>
                       <TD className="text-ink-2">
                         {p.supplierName ?? (p.resi ? "Bahan datang" : "—")}
@@ -431,7 +440,17 @@ export function Pembelian() {
                           </span>
                         )}
                       </TD>
-                      <TD align="right" className="text-ink-2 tabular-nums">{p.itemCount}</TD>
+                      <TD align="right" className="text-ink-2 tabular-nums">
+                        {p.itemCount}
+                        {/* 6000 gram is what stock moved by; "2 pcs" is what
+                            somebody counted off the trolley. Only the second
+                            can be checked against the parcel. */}
+                        {p.totalPcs ? (
+                          <div className="text-[11px] text-ink-3">
+                            {p.totalPcs.toLocaleString("id-ID")} pcs
+                          </div>
+                        ) : null}
+                      </TD>
                       <TD align="right" className="text-ink tabular-nums">{rupiah(p.totalCost)}</TD>
                       <TD align="right">
                         {p.receiptUrl ? (
@@ -455,6 +474,19 @@ export function Pembelian() {
           </TableWrap>
         </Card>
       </div>
+
+      {editing && (
+        <PurchaseEditor
+          purchaseId={editing}
+          onClose={() => setEditing(null)}
+          onChanged={() => {
+            // Both lists move: the purchase list loses or changes a row, and
+            // the catalogue's stock figures are what the correction was for.
+            void purchases.reload();
+            void materials.reload();
+          }}
+        />
+      )}
     </Layout>
   );
 }

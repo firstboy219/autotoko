@@ -24,6 +24,7 @@ import android.os.Vibrator;
 import android.text.InputType;
 import android.util.Base64;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -37,6 +38,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import androidx.camera.core.CameraSelector;
 import android.util.Range;
@@ -915,6 +917,13 @@ public class ScanActivity extends AppCompatActivity {
         int n = 0;
         for (final Candidate c : candidates) {
             n++;
+            final LinearLayout block = new LinearLayout(this);
+            block.setOrientation(LinearLayout.VERTICAL);
+            root.addView(block);
+
+            LinearLayout head = new LinearLayout(this);
+            head.setOrientation(LinearLayout.HORIZONTAL);
+
             TextView label = new TextView(this);
             String shown = c.rawText == null
                     ? "(ditambahkan manual)"
@@ -924,7 +933,25 @@ public class ScanActivity extends AppCompatActivity {
             label.setTextSize(11);
             label.setTextColor(Color.parseColor(sure ? "#1B7F4B" : "#6B7178"));
             label.setPadding(0, (int) (10 * d), 0, (int) (2 * d));
-            root.addView(label);
+            head.addView(label, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            // The reader invents lines from shadows and from the courier's own
+            // small print. Marking one "not mine" already dropped it, but it
+            // left the row on screen looking like an entry, which on a parcel
+            // with several of them buries the ones that are real.
+            MaterialButton del = new MaterialButton(this, null,
+                    com.google.android.material.R.attr.materialButtonOutlinedStyle);
+            del.setText("Hapus");
+            del.setAllCaps(false);
+            del.setTextSize(11);
+            del.setOnClickListener(v -> {
+                c.chosen = -1;
+                c.qtyField = null;
+                root.removeView(block);
+            });
+            head.addView(del);
+            block.addView(head);
 
             List<String> options = new ArrayList<>();
             for (ProductMatcher.Match m : c.ranked) {
@@ -942,14 +969,14 @@ public class ScanActivity extends AppCompatActivity {
                 }
                 @Override public void onNothingSelected(AdapterView<?> p) {}
             });
-            root.addView(spinner);
+            block.addView(spinner);
 
             EditText qty = new EditText(this);
             qty.setInputType(InputType.TYPE_CLASS_NUMBER);
             qty.setText("1");
             qty.setHint("Jumlah");
             c.qtyField = qty;
-            root.addView(qty);
+            block.addView(qty);
         }
 
         // Add a product by hand. The whole catalogue, not just what was read:
@@ -983,6 +1010,24 @@ public class ScanActivity extends AppCompatActivity {
             List<String> names = new ArrayList<>();
             for (ProductMatcher.Match m : all) names.add(m.product.name);
 
+            final LinearLayout mBlock = new LinearLayout(this);
+            mBlock.setOrientation(LinearLayout.VERTICAL);
+            manualRows.addView(mBlock);
+
+            // Adding a line and then not being able to take it back is how a
+            // mis-tap becomes a stock movement.
+            MaterialButton mDel = new MaterialButton(this, null,
+                    com.google.android.material.R.attr.materialButtonOutlinedStyle);
+            mDel.setText("Hapus baris ini");
+            mDel.setAllCaps(false);
+            mDel.setTextSize(11);
+            mDel.setOnClickListener(v2 -> {
+                c.chosen = -1;
+                c.qtyField = null;
+                manual.remove(c);
+                manualRows.removeView(mBlock);
+            });
+
             Spinner sp = new Spinner(this);
             sp.setAdapter(new ArrayAdapter<>(
                     this, android.R.layout.simple_spinner_dropdown_item, names));
@@ -992,14 +1037,15 @@ public class ScanActivity extends AppCompatActivity {
                 }
                 @Override public void onNothingSelected(AdapterView<?> p) {}
             });
-            manualRows.addView(sp);
+            mBlock.addView(sp);
 
             EditText q = new EditText(this);
             q.setInputType(InputType.TYPE_CLASS_NUMBER);
             q.setText("1");
             q.setHint("Jumlah");
             c.qtyField = q;
-            manualRows.addView(q);
+            mBlock.addView(q);
+            mBlock.addView(mDel);
         });
         root.addView(addBtn);
 
@@ -1018,6 +1064,10 @@ public class ScanActivity extends AppCompatActivity {
                 .setPositiveButton("Simpan", (dlg, w) -> {
                     candidates.addAll(manual);
                     for (Candidate c : candidates) {
+                        // Null once the row was deleted; chosen is -1 by then
+                        // so the line is dropped anyway, but reading a field
+                        // that is gone would take the whole save down with it.
+                        if (c.qtyField == null) continue;
                         try {
                             double v = Double.parseDouble(c.qtyField.getText().toString().trim());
                             if (v > 0 && v <= 9999) c.qty = v;

@@ -27,5 +27,6 @@ export interface BrandingConfig {
 }
 
 export * from "./payout";
+export * from "./units";
 
 export * from "./costing";

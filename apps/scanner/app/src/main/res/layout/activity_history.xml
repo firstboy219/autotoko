@@ -35,6 +35,39 @@
             android:textStyle="bold" />
     </LinearLayout>
 
+    <!--
+        Both lists are the same act - point the camera at a waybill and commit
+        something - so they belong on one screen. A packer looking for "the one
+        I just did" should not have to know which of two places to look.
+    -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingLeft="@dimen/space_lg"
+        android:paddingRight="@dimen/space_lg"
+        android:paddingTop="@dimen/space_md">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/tabScans"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:layout_marginRight="@dimen/space_xs"
+            android:textAllCaps="false"
+            android:text="Scan Resi" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/tabDeliveries"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:textAllCaps="false"
+            android:text="Bahan Datang" />
+    </LinearLayout>
+
     <TextView
         android:id="@+id/subhead"
         style="@style/Text.Caption"

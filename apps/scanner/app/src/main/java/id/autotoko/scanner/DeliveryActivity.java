@@ -7,7 +7,9 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.os.Bundle;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.util.Base64;
 import android.view.View;
 import android.view.ViewGroup;
@@ -450,7 +452,14 @@ public class DeliveryActivity extends AppCompatActivity {
         int chosen = 0;
         EditText pcsField;
         EditText contentField;
-        TextView unitLabel;
+        /** Which unit the CONTENT box is measured in — the packer's choice. */
+        Spinner unitSpinner;
+        /** "2 pcs x 1 kg = 2.000 gram", recomputed as either box changes. */
+        TextView preview;
+        /** The whole block, so deleting the line can take all of it away. */
+        View container;
+        /** Set when the packer removed the line; submit skips it. */
+        boolean removed = false;
 
         Row(String rawName, List<ProductMatcher.Product> options) {
             this.rawName = rawName;
@@ -578,19 +587,43 @@ public class DeliveryActivity extends AppCompatActivity {
                 .show();
     }
 
-    private void addRow(LinearLayout box, List<Row> rows, String rawName,
-                        List<ProductMatcher.Product> options, float d) {
+    private void addRow(final LinearLayout box, List<Row> rows, String rawName,
+                        List<ProductMatcher.Product> options, final float d) {
         final Row row = new Row(rawName, new ArrayList<>(options));
         rows.add(row);
 
-        if (rawName != null) {
-            TextView label = new TextView(this);
-            label.setText("Di resi: " + (rawName.length() > 70 ? rawName.substring(0, 70) + "…" : rawName));
-            label.setTextSize(11);
-            label.setTextColor(Color.parseColor("#6B7178"));
-            label.setPadding(0, (int) (10 * d), 0, 0);
-            box.addView(label);
-        }
+        final LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(0, (int) (10 * d), 0, (int) (10 * d));
+        row.container = block;
+        box.addView(block);
+
+        // The label and the way out of it on the same line. A line the reader
+        // invented from a shadow, or a second entry for a material already
+        // listed, previously had to be neutralised by setting its count to
+        // something harmless — which is a trick, not a control.
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+
+        TextView label = new TextView(this);
+        label.setText(rawName == null
+                ? "Ditambahkan sendiri"
+                : "Di resi: " + (rawName.length() > 70 ? rawName.substring(0, 70) + "…" : rawName));
+        label.setTextSize(11);
+        label.setTextColor(Color.parseColor("#6B7178"));
+        head.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        MaterialButton del = new MaterialButton(this, null,
+                com.google.android.material.R.attr.materialButtonOutlinedStyle);
+        del.setText("Hapus");
+        del.setAllCaps(false);
+        del.setTextSize(11);
+        del.setOnClickListener(v -> {
+            row.removed = true;
+            box.removeView(block);
+        });
+        head.addView(del);
+        block.addView(head);
 
         List<String> names = new ArrayList<>();
         for (ProductMatcher.Product p : row.options) names.add(p.name);
@@ -599,11 +632,13 @@ public class DeliveryActivity extends AppCompatActivity {
         sp.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
                 row.chosen = pos;
-                if (row.unitLabel != null) row.unitLabel.setText(unitOf(row));
+                // A different material can be held in a different unit, so the
+                // picker beside the content box has to follow the choice.
+                refreshUnits(row, d);
             }
             @Override public void onNothingSelected(AdapterView<?> p) {}
         });
-        box.addView(sp);
+        block.addView(sp);
 
         LinearLayout qtyRow = new LinearLayout(this);
         qtyRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -621,26 +656,102 @@ public class DeliveryActivity extends AppCompatActivity {
         row.contentField = content;
         qtyRow.addView(content, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView unit = new TextView(this);
-        unit.setText(unitOf(row));
-        unit.setTextSize(12);
-        unit.setPadding((int) (6 * d), 0, 0, 0);
-        row.unitLabel = unit;
-        qtyRow.addView(unit);
+        // The unit the BOX is labelled in, which is not always the unit the
+        // catalogue counts in. Asking is the whole fix: a 1 kg jug typed into
+        // a field labelled "gram" adds one gram and looks entirely normal.
+        Spinner unitSp = new Spinner(this);
+        row.unitSpinner = unitSp;
+        qtyRow.addView(unitSp, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        block.addView(qtyRow);
 
-        box.addView(qtyRow);
+        TextView preview = new TextView(this);
+        preview.setTextSize(11);
+        preview.setPadding(0, (int) (4 * d), 0, 0);
+        row.preview = preview;
+        block.addView(preview);
+
+        TextWatcher watch = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b2, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b2, int c) {}
+            @Override public void afterTextChanged(Editable s) { refreshPreview(row); }
+        };
+        pcs.addTextChangedListener(watch);
+        content.addTextChangedListener(watch);
+
+        refreshUnits(row, d);
     }
 
+    /** The catalogue's unit for whichever material this row currently names. */
     private String unitOf(Row row) {
         if (row.chosen < 0 || row.chosen >= row.options.size()) return "";
         String u = units.get(row.options.get(row.chosen).id);
         return u == null || u.isEmpty() ? "" : u;
     }
 
+    /** What the packer says the content box is measured in. */
+    private String enteredUnitOf(Row row) {
+        if (row.unitSpinner == null) return unitOf(row);
+        Object sel = row.unitSpinner.getSelectedItem();
+        return sel == null ? unitOf(row) : sel.toString();
+    }
+
+    /**
+     * Rebuild the unit picker after the material changes.
+     *
+     * The catalogue's own unit is offered first and preselected, because most
+     * deliveries really do arrive in it and the common case should be the one
+     * that needs no thought.
+     */
+    private void refreshUnits(Row row, float d) {
+        if (row.unitSpinner == null) return;
+        String target = unitOf(row);
+        List<String> opts = Units.compatible(target);
+        if (opts.isEmpty()) opts = new ArrayList<>(List.of(target.isEmpty() ? "satuan" : target));
+        row.unitSpinner.setAdapter(new ArrayAdapter<>(
+                this, android.R.layout.simple_spinner_dropdown_item, opts));
+        row.unitSpinner.setSelection(0);
+        row.unitSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                refreshPreview(row);
+            }
+            @Override public void onNothingSelected(AdapterView<?> p) {}
+        });
+        refreshPreview(row);
+    }
+
+    /**
+     * Say what will actually reach the shelf, before it does.
+     *
+     * The arithmetic is not hard, but it is invisible, and an invisible
+     * thousandfold error is exactly the kind that survives to the stocktake.
+     */
+    private void refreshPreview(Row row) {
+        if (row.preview == null) return;
+        String target = unitOf(row);
+        String from = enteredUnitOf(row);
+        double pcs = parse(row.pcsField, 0);
+        double content = parse(row.contentField, 1);
+        if (content <= 0) content = 1;
+
+        Double per = Units.convert(content, from, target);
+        if (per == null) {
+            row.preview.setText("Satuan \"" + from + "\" tidak bisa diubah ke \"" + target + "\".");
+            row.preview.setTextColor(Color.parseColor("#B3261E"));
+            return;
+        }
+        if (pcs <= 0) {
+            row.preview.setText("");
+            return;
+        }
+        row.preview.setText("= " + Units.describe(pcs * per, target) + " masuk ke stok");
+        row.preview.setTextColor(Color.parseColor("#1B7F4B"));
+    }
+
     private void submit(String resi, String photoBase64, List<Row> rows,
                         boolean isCod, double codAmount) {
         JSONArray items = new JSONArray();
         for (Row r : rows) {
+            if (r.removed) continue;
             if (r.chosen < 0 || r.chosen >= r.options.size()) continue;
             double pcs = parse(r.pcsField, 0);
             if (pcs <= 0) continue;
@@ -654,6 +765,10 @@ public class DeliveryActivity extends AppCompatActivity {
                 if (r.rawName != null) o.put("rawName", r.rawName);
                 o.put("qtyPcs", pcs);
                 o.put("contentPerPcs", content);
+                // The server converts rather than the phone, so a phone that
+                // has not been updated cannot quietly write a wrong figure —
+                // and the entry as typed is what gets stored beside it.
+                o.put("contentUnit", enteredUnitOf(r));
                 items.put(o);
             } catch (Exception ignored) {}
         }
