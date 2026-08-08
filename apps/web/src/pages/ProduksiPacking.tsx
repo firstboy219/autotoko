@@ -45,6 +45,11 @@ interface Scan {
   /** Null until a person says the contents are right. */
   itemsConfirmedAt?: string | null;
   itemsConfirmedBy?: string | null;
+  shopId?: string | null;
+  mappedShopName?: string | null;
+  marketplace?: string | null;
+  courierConfirmed?: string | null;
+  mappingConfirmedAt?: string | null;
   resi: string;
   courier: string | null;
   source: string;
@@ -325,6 +330,7 @@ export function ProduksiPacking() {
                 <TH>Resi</TH>
                 <TH>Waktu</TH>
                 <TH>Isi Label (hasil OCR)</TH>
+                <TH>Asal</TH>
                 <TH>Isi Paket</TH>
                 <TH>Order</TH>
                 <TH className="text-right">Aksi</TH>
@@ -332,10 +338,10 @@ export function ProduksiPacking() {
             </THead>
             <tbody>
               {scans.loading ? (
-                <SkeletonRows n={5} cols={7} />
+                <SkeletonRows n={5} cols={8} />
               ) : rows.length === 0 ? (
                 <TR>
-                  <TD colSpan={7}>
+                  <TD colSpan={8}>
                     <EmptyState
                       icon="package"
                       title="Belum ada resi yang discan"
@@ -394,6 +400,23 @@ export function ProduksiPacking() {
 
                     <TD>
                       <LabelCell scan={s} />
+                    </TD>
+
+                    {/* Which shop, as decided on the phone. Blank is not a
+                        cosmetic gap: an unmapped parcel is invisible to every
+                        per-shop figure on the dashboard. */}
+                    <TD className="whitespace-nowrap">
+                      {s.mappedShopName ? (
+                        <>
+                          <div className="text-[13px] text-ink">{s.mappedShopName}</div>
+                          <div className="text-[11px] text-ink-2">
+                            {s.marketplace ?? "-"}
+                            {s.courierConfirmed ? ` · ${s.courierConfirmed}` : ""}
+                          </div>
+                        </>
+                      ) : (
+                        <Badge tone="warning">belum dipetakan</Badge>
+                      )}
                     </TD>
 
                     {/* The question a supervisor is actually scanning this
@@ -487,14 +510,14 @@ export function ProduksiPacking() {
                   </TR>
                   {openLabel === s.id && (
                     <TR>
-                      <TD colSpan={7}>
+                      <TD colSpan={8}>
                         <ScanLabelEditor scanId={s.id} onSaved={refresh} />
                       </TD>
                     </TR>
                   )}
                   {openItems === s.id && (
                     <TR>
-                      <TD colSpan={7}>
+                      <TD colSpan={8}>
                         <ScanItemsEditor
                           scanId={s.id}
                           confirmedAt={s.itemsConfirmedAt ?? null}

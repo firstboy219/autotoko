@@ -88,6 +88,21 @@ class ScanDto {
 
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ScannedItemDto)
   items?: ScannedItemDto[];
+
+  /**
+   * Where the parcel came from, as the packer confirmed it on the sheet.
+   *
+   * Optional throughout: a manual entry sends none of it and the scan is then
+   * unmapped, which the pending-task list is there to surface.
+   */
+  @IsOptional() @IsUUID()
+  shopId?: string;
+
+  @IsOptional() @IsString() @MaxLength(24)
+  marketplace?: string;
+
+  @IsOptional() @IsString() @MaxLength(32)
+  courierConfirmed?: string;
 }
 
 /**
@@ -449,6 +464,42 @@ export class ResiController {
    * editor saves as you type and none of those saves is a person declaring
    * they are finished.
    */
+  /**
+   * The shops, couriers and marketplaces to choose from, plus a guess.
+   *
+   * Ranked on the server because the label text it is matched against was read
+   * there too; matching again on the handset would give two answers to one
+   * question with no way to tell which was shown.
+   */
+  /**
+   * The lists alone, with no scan to guess against.
+   *
+   * The phone's mapping sheet opens before the parcel is saved, so there is no
+   * id yet — it needs the choices, not a suggestion.
+   */
+  @Get("mapping-options")
+  async mappingLists(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.mappingOptions(uid(req)) };
+  }
+
+  @Get("scans/:id/mapping-options")
+  async mappingOptions(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.mappingOptions(uid(req), id) };
+  }
+
+  /** Where the parcel came from — shop, marketplace, courier — as decided. */
+  @Post("scans/:id/mapping")
+  async confirmMapping(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() body: { shopId?: string | null; marketplace?: string | null; courier?: string | null; by?: string },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.confirmMapping(uid(req), id, body) };
+  }
+
   @Post("scans/:id/items/confirm")
   async confirmItems(
     @Req() req: FastifyRequest,

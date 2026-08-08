@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { orders } from "./orders";
+import { shops } from "./shops.js";
 import { masterProducts } from "./products";
 
 /**
@@ -194,6 +195,31 @@ export const resiScans = pgTable(
      * scan's contents on the strength of an OCR match alone, because the
      * dangerous failure here is a confident wrong one.
      */
+    /**
+     * Which of the seller's shops this parcel went out from.
+     *
+     * Null while nobody has said. Kept apart from labelSenderName, which is
+     * what OCR read off the label — when a mapping turns out wrong that text
+     * is the only way to see what the machine was looking at.
+     */
+    shopId: uuid("shop_id").references(() => shops.id, { onDelete: "set null" }),
+    /**
+     * Confirmed marketplace. Redundant when shopId is set, and not redundant
+     * when the shop is one the seller never registered — which on a channel
+     * they sell through by hand is most of them.
+     */
+    marketplace: varchar("marketplace", { length: 24 }),
+    /** What a person says the courier is; `courier` above is the guess. */
+    courierConfirmed: varchar("courier_confirmed", { length: 32 }),
+    /**
+     * When somebody said where this parcel came from.
+     *
+     * Separate from itemsConfirmedAt: checking the contents happens at the
+     * bench, and knowing which of four Shopee accounts a label belongs to may
+     * not. One flag for both would let either stand in for the other.
+     */
+    mappingConfirmedAt: timestamp("mapping_confirmed_at", { withTimezone: true }),
+    mappingConfirmedBy: varchar("mapping_confirmed_by", { length: 64 }),
     itemsConfirmedAt: timestamp("items_confirmed_at", { withTimezone: true }),
     /** Which phone or operator confirmed it; a floor runs several. */
     itemsConfirmedBy: varchar("items_confirmed_by", { length: 64 }),

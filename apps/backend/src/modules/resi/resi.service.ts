@@ -19,6 +19,12 @@ import {
 } from "../../database/schema/index.js";
 import { UploadsService } from "../uploads/uploads.service.js";
 import { CourierTrackingService } from "./courier-tracking.service.js";
+import {
+  COURIER_NAMES,
+  MARKETPLACES,
+  matchShop,
+  normaliseMarketplace,
+} from "./scan-mapping.js";
 import { MaterialConsumptionService } from "../materials/material-consumption.service.js";
 import { ConfigService } from "@nestjs/config";
 import { readdir, stat } from "node:fs/promises";
@@ -165,6 +171,14 @@ export class ResiService {
         source?: string;
         matchScore?: number;
       }[];
+      /**
+       * Where the parcel came from, decided by the packer on the same sheet
+       * that confirmed the contents. All three optional: a manual entry or an
+       * older build sends none, and the scan is then simply unmapped.
+       */
+      shopId?: string;
+      marketplace?: string;
+      courierConfirmed?: string;
     },
   ): Promise<ScanResult> {
     const resi = normalizeResi(input.resi);
@@ -223,6 +237,41 @@ export class ResiService {
       .from(orders)
       .where(and(eq(orders.userId, userId), eq(orders.trackingNumber, resi)))
       .limit(1);
+
+    /**
+     * Where the phone says this parcel came from.
+     *
+     * Nothing is trusted blind: a shop id is checked against this tenant's own
+     * shops, and the marketplace is taken from the shop rather than from the
+     * request, so the two can never end up disagreeing about a scan.
+     */
+    const mapping: {
+      shopId: string | null;
+      marketplace: string | null;
+      courier: string | null;
+      confirmed: boolean;
+    } = { shopId: null, marketplace: null, courier: null, confirmed: false };
+
+    if (input.shopId) {
+      const [shop] = await this.db
+        .select({ id: shops.id, marketplace: shops.marketplace })
+        .from(shops)
+        .where(and(eq(shops.id, input.shopId), eq(shops.userId, userId)))
+        .limit(1);
+      if (shop) {
+        mapping.shopId = shop.id;
+        mapping.marketplace = shop.marketplace;
+      }
+    }
+    if (!mapping.marketplace && input.marketplace) {
+      mapping.marketplace = normaliseMarketplace(input.marketplace);
+    }
+    if (input.courierConfirmed) {
+      mapping.courier = input.courierConfirmed.trim().slice(0, 32) || null;
+    }
+    // Confirmed only when a person actually answered: a courier alone is what
+    // the barcode already told us and is nobody's decision.
+    mapping.confirmed = Boolean((mapping.shopId || mapping.marketplace) && mapping.courier);
 
     let linkedOrder: ScanResult["linkedOrder"] = null;
     if (match && match.fulfillmentStatus !== SHIPPED) {
@@ -321,6 +370,14 @@ export class ResiService {
         // "pending" only when there is something to read. The background task
         // polls on this, so a photoless scan must not sit in its queue.
         ocrStatus: photoUrl ? "pending" : "none",
+        // From the same sheet that confirmed the contents. Absent for a manual
+        // entry or an older build, which leaves the scan unmapped and so
+        // visible in the pending-task list — the honest state, not a guess.
+        shopId: mapping.shopId,
+        marketplace: mapping.marketplace,
+        courierConfirmed: mapping.courier,
+        mappingConfirmedAt: mapping.confirmed ? new Date() : null,
+        mappingConfirmedBy: mapping.confirmed ? (input.deviceLabel?.slice(0, 64) ?? null) : null,
         trackingStatus,
         trackingCategory,
         trackingCheckedAt,
@@ -599,6 +656,14 @@ export class ResiService {
         )`,
         itemsConfirmedAt: resiScans.itemsConfirmedAt,
         itemsConfirmedBy: resiScans.itemsConfirmedBy,
+        shopId: resiScans.shopId,
+        mappedShopName: sql<string | null>`(
+          select coalesce(s.display_name, s.shop_name)
+          from shops s where s.id = ${resiScans.shopId}
+        )`,
+        marketplace: resiScans.marketplace,
+        courierConfirmed: resiScans.courierConfirmed,
+        mappingConfirmedAt: resiScans.mappingConfirmedAt,
         trackingStatus: resiScans.trackingStatus,
         trackingCategory: resiScans.trackingCategory,
         packerPaidAt: resiScans.packerPaidAt,
@@ -852,6 +917,143 @@ export class ResiService {
       id: row!.id,
       itemsConfirmedAt: row!.itemsConfirmedAt,
       itemCount: lines.length,
+    };
+  }
+
+  /**
+   * The seller's shops and the courier list, with a guess for one scan.
+   *
+   * The phone asks for this when a mapping sheet opens. The guess is ranked
+   * server-side because the label text it is matched against was read by the
+   * server too, and duplicating the matching on the handset would give two
+   * answers to the same question with no way to tell which was shown.
+   */
+  async mappingOptions(userId: string, scanId?: string) {
+    const shopRows = await this.db
+      .select({
+        id: shops.id,
+        name: shops.displayName,
+        shopName: shops.shopName,
+        marketplace: shops.marketplace,
+        categoryId: shops.categoryId,
+      })
+      .from(shops)
+      .where(eq(shops.userId, userId))
+      .orderBy(asc(shops.shopName));
+
+    const shopList = shopRows.map((s) => ({
+      id: s.id,
+      name: s.name || s.shopName || "(tanpa nama)",
+      marketplace: s.marketplace,
+      categoryId: s.categoryId,
+    }));
+
+    let suggestion: {
+      shopId: string | null;
+      marketplace: string | null;
+      courier: string | null;
+      fromLabel: { sender: string | null; marketplace: string | null; courier: string | null };
+    } | null = null;
+
+    if (scanId) {
+      const [scan] = await this.db
+        .select({
+          labelSenderName: resiScans.labelSenderName,
+          labelMarketplace: resiScans.labelMarketplace,
+          courier: resiScans.courier,
+          shopId: resiScans.shopId,
+          marketplace: resiScans.marketplace,
+          courierConfirmed: resiScans.courierConfirmed,
+        })
+        .from(resiScans)
+        .where(and(eq(resiScans.id, scanId), eq(resiScans.userId, userId)))
+        .limit(1);
+
+      if (scan) {
+        // An existing decision always wins over a fresh guess: re-opening the
+        // sheet to change one field must not silently re-guess the others.
+        const guessedMarketplace =
+          scan.marketplace ?? normaliseMarketplace(scan.labelMarketplace);
+        const guessedShop =
+          scan.shopId ?? matchShop(scan.labelSenderName, guessedMarketplace, shopList);
+
+        suggestion = {
+          shopId: guessedShop,
+          marketplace:
+            guessedMarketplace ??
+            (guessedShop ? shopList.find((s) => s.id === guessedShop)?.marketplace ?? null : null),
+          courier: scan.courierConfirmed ?? scan.courier ?? null,
+          fromLabel: {
+            sender: scan.labelSenderName,
+            marketplace: scan.labelMarketplace,
+            courier: scan.courier,
+          },
+        };
+      }
+    }
+
+    return { shops: shopList, couriers: COURIER_NAMES, marketplaces: MARKETPLACES, suggestion };
+  }
+
+  /**
+   * Record where a parcel came from.
+   *
+   * Every field is the operator's decision. OCR put a suggestion in front of
+   * them and that is all it did — the dangerous failure on this screen is a
+   * confident wrong match, and a shop is the key the whole dashboard groups by.
+   */
+  async confirmMapping(
+    userId: string,
+    scanId: string,
+    input: { shopId?: string | null; marketplace?: string | null; courier?: string | null; by?: string },
+  ) {
+    await this.getScanOrThrow(userId, scanId);
+
+    let marketplace = input.marketplace?.trim() || null;
+
+    if (input.shopId) {
+      const [shop] = await this.db
+        .select({ id: shops.id, marketplace: shops.marketplace })
+        .from(shops)
+        .where(and(eq(shops.id, input.shopId), eq(shops.userId, userId)))
+        .limit(1);
+      // Without this a request could file a scan against another tenant's
+      // shop; no RLS policy on resi_scans would catch it, because the scan
+      // being written is legitimately theirs.
+      if (!shop) throw new NotFoundException("Toko tidak ditemukan.");
+      // A shop IS its marketplace. Taking the client's word for it would let
+      // the two disagree, and every grouping downstream would then depend on
+      // which one it happened to read.
+      marketplace = shop.marketplace;
+    }
+
+    if (!input.shopId && !marketplace) {
+      throw new BadRequestException(
+        "Pilih tokonya, atau minimal marketplace-nya kalau toko itu belum terdaftar.",
+      );
+    }
+
+    const courier = input.courier?.trim() || null;
+    if (!courier) throw new BadRequestException("Pilih kurirnya.");
+
+    const [row] = await this.db
+      .update(resiScans)
+      .set({
+        shopId: input.shopId ?? null,
+        marketplace,
+        courierConfirmed: courier,
+        mappingConfirmedAt: new Date(),
+        mappingConfirmedBy: input.by?.slice(0, 64) ?? null,
+      })
+      .where(and(eq(resiScans.id, scanId), eq(resiScans.userId, userId)))
+      .returning();
+
+    return {
+      id: row!.id,
+      shopId: row!.shopId,
+      marketplace: row!.marketplace,
+      courier: row!.courierConfirmed,
+      mappingConfirmedAt: row!.mappingConfirmedAt,
     };
   }
 

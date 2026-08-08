@@ -4,7 +4,9 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -60,7 +62,7 @@ public class HistoryActivity extends AppCompatActivity {
         // was reported missing, which is the same thing when the only way to
         // reach it is a gesture nothing on screen mentions.
         list.setOnItemClickListener((AdapterView<?> p, View v, int pos, long id) ->
-                confirmDelete(pos));
+                rowActions(pos));
         list.setOnItemLongClickListener((AdapterView<?> p, View v, int pos, long id) -> {
             confirmDelete(pos);
             return true;
@@ -213,6 +215,121 @@ public class HistoryActivity extends AppCompatActivity {
             tail.setVisibility(row.trailing.isEmpty() ? View.GONE : View.VISIBLE);
             return v;
         }
+    }
+
+    /**
+     * What a tap can mean now that it can mean more than one thing.
+     *
+     * Origin editing is only offered for packing scans: a raw-material parcel
+     * has no shop or courier of the seller's to map, and offering the choice
+     * anyway would be a dead end dressed as a feature.
+     */
+    private void rowActions(int pos) {
+        if (pos < 0 || pos >= ids.size()) return;
+        if (showingDeliveries) {
+            confirmDelete(pos);
+            return;
+        }
+        final String id = ids.get(pos);
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(rows.get(pos).resi)
+                .setItems(new String[]{"Ubah asal paket (toko & kurir)", "Hapus scan ini"},
+                        (d, which) -> {
+                            if (which == 0) editMapping(id, pos);
+                            else confirmDelete(pos);
+                        })
+                .setNegativeButton("Batal", null)
+                .show();
+    }
+
+    /**
+     * Re-map a parcel after the fact.
+     *
+     * The lists and the current answer come from the server together, so the
+     * sheet opens showing what was chosen rather than a blank picker that
+     * quietly discards the previous decision if the packer taps Save.
+     */
+    private void editMapping(String scanId, int pos) {
+        api.mappingOptions(r -> {
+            if (!r.ok() || r.data() == null) {
+                Toast.makeText(this, r.message("Gagal memuat daftar toko."),
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            final List<String[]> shops = new ArrayList<>();
+            JSONArray sa = r.data().optJSONArray("shops");
+            if (sa != null) {
+                for (int i = 0; i < sa.length(); i++) {
+                    JSONObject o = sa.optJSONObject(i);
+                    if (o != null) {
+                        shops.add(new String[]{o.optString("id"), o.optString("name"),
+                                o.optString("marketplace")});
+                    }
+                }
+            }
+            final List<String> couriers = new ArrayList<>();
+            JSONArray ca = r.data().optJSONArray("couriers");
+            if (ca != null) for (int i = 0; i < ca.length(); i++) couriers.add(ca.optString(i));
+
+            float d = getResources().getDisplayMetrics().density;
+            int pad = (int) (20 * d);
+            LinearLayout root = new LinearLayout(this);
+            root.setOrientation(LinearLayout.VERTICAL);
+            root.setPadding(pad, pad, pad, pad);
+
+            TextView l1 = new TextView(this);
+            l1.setText("Toko");
+            l1.setTextSize(11);
+            root.addView(l1);
+
+            List<String> shopNames = new ArrayList<>();
+            shopNames.add("— pilih toko —");
+            for (String[] sh : shops) shopNames.add(sh[1] + "  (" + sh[2] + ")");
+            final Spinner shopSpinner = new Spinner(this);
+            shopSpinner.setAdapter(new ArrayAdapter<>(this,
+                    android.R.layout.simple_spinner_dropdown_item, shopNames));
+            root.addView(shopSpinner);
+
+            TextView l2 = new TextView(this);
+            l2.setText("Kurir");
+            l2.setTextSize(11);
+            l2.setPadding(0, (int) (12 * d), 0, 0);
+            root.addView(l2);
+
+            List<String> courierNames = new ArrayList<>();
+            courierNames.add("— pilih kurir —");
+            courierNames.addAll(couriers);
+            final Spinner courierSpinner = new Spinner(this);
+            courierSpinner.setAdapter(new ArrayAdapter<>(this,
+                    android.R.layout.simple_spinner_dropdown_item, courierNames));
+            root.addView(courierSpinner);
+
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle("Asal paket")
+                    .setView(root)
+                    .setPositiveButton("Simpan", (dlg, w) -> {
+                        int si = shopSpinner.getSelectedItemPosition();
+                        int ci = courierSpinner.getSelectedItemPosition();
+                        if (ci <= 0) {
+                            Toast.makeText(this, "Pilih kurirnya.", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        String shopId = si > 0 ? shops.get(si - 1)[0] : null;
+                        String mp = si > 0 ? shops.get(si - 1)[2] : null;
+                        api.confirmMapping(scanId, shopId, mp, courierNames.get(ci), rr -> {
+                            if (rr.ok()) {
+                                Toast.makeText(this, "Asal paket disimpan.",
+                                        Toast.LENGTH_SHORT).show();
+                                switchTo(false);
+                            } else {
+                                Toast.makeText(this, rr.message("Gagal menyimpan."),
+                                        Toast.LENGTH_LONG).show();
+                            }
+                        });
+                    })
+                    .setNegativeButton("Batal", null)
+                    .show();
+        });
     }
 
     private void confirmDelete(int pos) {

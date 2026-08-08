@@ -26,6 +26,7 @@ export const NAV: NavItem[] = [
   { to: "/pencairan", label: "Pencairan Dana", icon: "banknote" },
   { to: "/laporan-bagian", label: "Laporan Bagian", icon: "trending" },
   { to: "/notifikasi", label: "Notifikasi", icon: "bell" },
+  { to: "/pending", label: "Data Belum Lengkap", icon: "warning" },
   { to: "/aplikasi", label: "Versi Aplikasi", icon: "download" },
 ];
 

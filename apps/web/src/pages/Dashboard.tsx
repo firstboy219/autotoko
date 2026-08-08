@@ -2,6 +2,8 @@ import { useCallback } from "react";
 import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
+import { PendingTasksAlert } from "../components/PendingTasks";
+import { ShopHealth } from "../components/ShopHealth";
 import { useRealtime } from "../lib/realtime";
 import { rupiah, dateShort } from "../lib/fmt";
 import { Icon, type IconName } from "../components/Icon";
@@ -161,6 +163,9 @@ export function Dashboard() {
 
   return (
     <Layout title="Dashboard">
+      {/* First thing on the page, and absent entirely when there is nothing
+          wrong. An alert that is always there stops being an alert. */}
+      <PendingTasksAlert />
       <PageHeader
         title="Dashboard"
         subtitle="Ringkasan performa toko dan order terbaru."
@@ -181,6 +186,12 @@ export function Dashboard() {
           </Button>
         }
       />
+
+      {/* The question this page is opened for. Above the summary tiles,
+          which answer a narrower one. */}
+      <div className="mb-6">
+        <ShopHealth />
+      </div>
 
       <AlertCards a={alerts.data} />
 

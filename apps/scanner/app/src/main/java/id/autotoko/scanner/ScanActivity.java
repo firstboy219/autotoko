@@ -228,6 +228,12 @@ public class ScanActivity extends AppCompatActivity {
 
     private androidx.camera.core.Camera camera;
     /** Barcode position as a fraction of the upright frame, for cropping. */
+    /** The seller's shops, for the mapping sheet. Loaded once at launch. */
+    private final List<String[]> shopList = new ArrayList<>();   // {id, name, marketplace}
+    private final List<String> courierList = new ArrayList<>();
+    /** Remembered between parcels: a bench usually packs one shop all morning. */
+    private int lastShopIndex = -1;
+    private int lastCourierIndex = -1;
     private boolean torchOn = false;
     private volatile RectF lastBarcodeBox = null;
 
@@ -279,6 +285,7 @@ public class ScanActivity extends AppCompatActivity {
 
         textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
         loadCatalogue();
+        loadMappingOptions();
         banner = findViewById(R.id.banner);
         bannerText = findViewById(R.id.bannerText);
 
@@ -1057,6 +1064,56 @@ public class ScanActivity extends AppCompatActivity {
         });
         root.addView(addBtn);
 
+        // Where the parcel came from. Below the contents because that is the
+        // order the packer works in — what is in the box, then whose box it is
+        // — and because the shop usually stays the same for a whole session
+        // while the contents change every parcel.
+        TextView originLabel = new TextView(this);
+        originLabel.setText("Asal paket");
+        originLabel.setTextSize(11);
+        originLabel.setPadding(0, (int) (18 * d), 0, (int) (4 * d));
+        root.addView(originLabel);
+
+        final Spinner shopSpinner = new Spinner(this);
+        List<String> shopNames = new ArrayList<>();
+        shopNames.add("— pilih toko —");
+        for (String[] sh : shopList) shopNames.add(sh[1] + "  (" + sh[2] + ")");
+        shopSpinner.setAdapter(new ArrayAdapter<>(
+                this, android.R.layout.simple_spinner_dropdown_item, shopNames));
+        // Carried over from the last parcel, not guessed from the label: a
+        // bench packs one shop at a time, and the previous answer is a better
+        // prior than OCR on a sender line the courier prints in 6pt.
+        if (lastShopIndex > 0 && lastShopIndex < shopNames.size()) {
+            shopSpinner.setSelection(lastShopIndex);
+        }
+        root.addView(shopSpinner);
+
+        final Spinner courierSpinner = new Spinner(this);
+        List<String> courierNames = new ArrayList<>();
+        courierNames.add("— pilih kurir —");
+        courierNames.addAll(courierList);
+        courierSpinner.setAdapter(new ArrayAdapter<>(
+                this, android.R.layout.simple_spinner_dropdown_item, courierNames));
+        // The barcode already told us the carrier more reliably than any
+        // guess, so it is preselected — and still shown, so a wrong read is
+        // visible rather than filed silently.
+        String detected = guessCourier(reader.rawText());
+        int courierGuess = detected == null ? -1 : courierNames.indexOf(detected);
+        if (courierGuess > 0) courierSpinner.setSelection(courierGuess);
+        else if (lastCourierIndex > 0 && lastCourierIndex < courierNames.size()) {
+            courierSpinner.setSelection(lastCourierIndex);
+        }
+        root.addView(courierSpinner);
+
+        final TextView originNote = new TextView(this);
+        originNote.setTextSize(11);
+        originNote.setTextColor(Color.parseColor("#6B7178"));
+        originNote.setPadding(0, (int) (6 * d), 0, 0);
+        originNote.setText(shopList.isEmpty()
+                ? "Master toko belum termuat — asal paket bisa diisi nanti lewat web."
+                : "Tanpa toko, paket ini tidak masuk hitungan penjualan toko mana pun.");
+        root.addView(originNote);
+
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
 
@@ -1119,8 +1176,22 @@ public class ScanActivity extends AppCompatActivity {
                                 Toast.LENGTH_LONG).show();
                         return;
                     }
+                    lastShopIndex = shopSpinner.getSelectedItemPosition();
+                    lastCourierIndex = courierSpinner.getSelectedItemPosition();
+
+                    JSONObject payload = reading(candidates, true);
+                    try {
+                        int si = shopSpinner.getSelectedItemPosition();
+                        if (si > 0 && si - 1 < shopList.size()) {
+                            payload.put("shopId", shopList.get(si - 1)[0]);
+                            payload.put("marketplace", shopList.get(si - 1)[2]);
+                        }
+                        int ci = courierSpinner.getSelectedItemPosition();
+                        if (ci > 0) payload.put("courierConfirmed", courierNames.get(ci));
+                    } catch (Exception ignored) {}
+
                     dialog.dismiss();
-                    submit(resi, raw, format, photoBase64, reading(candidates, true));
+                    submit(resi, raw, format, photoBase64, payload);
             });
 
             dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(bv ->
@@ -1520,6 +1591,57 @@ public class ScanActivity extends AppCompatActivity {
                 })
                 .setNegativeButton("Batal", null)
                 .show();
+    }
+
+    /**
+     * The shops and couriers to choose between.
+     *
+     * Fetched once rather than per parcel: the list changes when a shop is
+     * added, which is a monthly event, and a request per scan would put a
+     * round trip in front of the sheet the packer is waiting on.
+     */
+    /**
+     * The carrier, from the words on the label.
+     *
+     * Mirrors label-parser's COURIERS on the server. Duplicated deliberately:
+     * the sheet opens before anything is uploaded, so asking the server would
+     * put a round trip in front of the packer, and the cost of being wrong is
+     * one tap on a picker they are looking at anyway.
+     */
+    private String guessCourier(String text) {
+        if (text == null || text.isEmpty()) return null;
+        String t = text.toLowerCase(java.util.Locale.ROOT);
+        if (t.contains("j&t") || t.contains("jnt")) return "J&T";
+        if (t.contains("jne")) return "JNE";
+        if (t.contains("spx") || t.contains("shopee express")) return "SPX";
+        if (t.contains("sicepat")) return "SiCepat";
+        if (t.contains("anteraja")) return "Anteraja";
+        if (t.contains("ninja")) return "Ninja";
+        if (t.contains("lion")) return "Lion Parcel";
+        if (t.contains("id express")) return "ID Express";
+        if (t.contains("pos indonesia")) return "POS";
+        return null;
+    }
+
+    private void loadMappingOptions() {
+        api.mappingOptions(r -> {
+            if (!r.ok() || r.data() == null) return;
+            shopList.clear();
+            courierList.clear();
+            JSONArray shops = r.data().optJSONArray("shops");
+            if (shops != null) {
+                for (int i = 0; i < shops.length(); i++) {
+                    JSONObject o = shops.optJSONObject(i);
+                    if (o == null) continue;
+                    shopList.add(new String[]{
+                            o.optString("id"), o.optString("name"), o.optString("marketplace")});
+                }
+            }
+            JSONArray couriers = r.data().optJSONArray("couriers");
+            if (couriers != null) {
+                for (int i = 0; i < couriers.length(); i++) courierList.add(couriers.optString(i));
+            }
+        });
     }
 
     private void showMenu() {

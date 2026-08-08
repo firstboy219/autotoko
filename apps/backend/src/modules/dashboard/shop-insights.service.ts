@@ -1,0 +1,379 @@
+import { Inject, Injectable } from "@nestjs/common";
+import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { DRIZZLE, type Database } from "../../database/database.module.js";
+import { resiScans, resiScanItems } from "../../database/schema/resi.js";
+import { masterProducts } from "../../database/schema/products.js";
+import { shopCategories, shops } from "../../database/schema/shops.js";
+import { payoutBatches, payoutMutations } from "../../database/schema/payout.js";
+import { subSellers } from "../../database/schema/payout.js";
+
+/**
+ * The questions a person who owns these shops actually asks.
+ *
+ * Two sources, and they answer different things. Money comes from
+ * payout_mutations, because that is what was actually released — an order
+ * marked shipped is a promise and a payout is a fact. Movement comes from resi
+ * scans, because the marketplace APIs are not connected and the scan is the
+ * only record that a parcel really left the building.
+ *
+ * That split is why the shop mapping on a scan matters: without it, every
+ * per-shop figure below can only be built from payouts, which arrive in
+ * fortnightly lumps and say nothing about whether a shop shipped anything this
+ * week.
+ */
+
+export interface ShopInsightsRange {
+  from: string;
+  to: string;
+  days: number;
+}
+
+@Injectable()
+export class ShopInsightsService {
+  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+
+  /** Inclusive day count, so a single-day range divides by 1 rather than 0. */
+  private static days(from: string, to: string): number {
+    const ms = new Date(to).getTime() - new Date(from).getTime();
+    return Math.max(1, Math.round(ms / 86_400_000) + 1);
+  }
+
+  private static shiftBack(from: string, to: string): { from: string; to: string } {
+    const n = ShopInsightsService.days(from, to);
+    const prevTo = new Date(new Date(from).getTime() - 86_400_000);
+    const prevFrom = new Date(prevTo.getTime() - (n - 1) * 86_400_000);
+    return { from: prevFrom.toISOString().slice(0, 10), to: prevTo.toISOString().slice(0, 10) };
+  }
+
+  async overview(
+    userId: string,
+    opts: { from?: string; to?: string; categoryId?: string | null } = {},
+  ) {
+    const to = opts.to ?? new Date().toISOString().slice(0, 10);
+    const from =
+      opts.from ??
+      new Date(Date.now() - 29 * 86_400_000).toISOString().slice(0, 10);
+    const days = ShopInsightsService.days(from, to);
+    const prev = ShopInsightsService.shiftBack(from, to);
+
+    // The shops in scope. Category is a filter on this list and nothing else,
+    // so every figure below is consistently "these shops" rather than some
+    // totals being filtered and others not.
+    const shopRows = await this.db
+      .select({
+        id: shops.id,
+        name: sql<string>`coalesce(${shops.displayName}, ${shops.shopName}, '(tanpa nama)')`,
+        marketplace: shops.marketplace,
+        categoryId: shops.categoryId,
+        categoryName: shopCategories.name,
+        categoryColor: shopCategories.color,
+      })
+      .from(shops)
+      .leftJoin(shopCategories, eq(shops.categoryId, shopCategories.id))
+      .where(
+        opts.categoryId
+          ? and(eq(shops.userId, userId), eq(shops.categoryId, opts.categoryId))
+          : eq(shops.userId, userId),
+      );
+
+    const shopIds = shopRows.map((s) => s.id);
+    const byId = new Map(shopRows.map((s) => [s.id, s]));
+
+    const [money, moneyPrev, activity, activityPrev, products, owners] = await Promise.all([
+      this.moneyByShop(userId, from, to, shopIds),
+      this.moneyByShop(userId, prev.from, prev.to, shopIds),
+      this.activityByShop(userId, from, to, shopIds),
+      this.activityByShop(userId, prev.from, prev.to, shopIds),
+      this.topProducts(userId, from, to, shopIds),
+      this.ownerEarnings(userId, from, to, shopIds),
+    ]);
+
+    const lastShipped = await this.lastShippedByShop(userId, shopIds);
+    const today = new Date();
+
+    const perShop = shopRows
+      .map((s) => {
+        const m = money.get(s.id) ?? { credit: 0, seller: 0, subSeller: 0, subSubSeller: 0 };
+        const mPrev = moneyPrev.get(s.id)?.credit ?? 0;
+        const a = activity.get(s.id) ?? { parcels: 0, units: 0 };
+        const aPrev = activityPrev.get(s.id)?.parcels ?? 0;
+        const last = lastShipped.get(s.id) ?? null;
+
+        const idleDays =
+          last == null
+            ? null
+            : Math.floor((today.getTime() - last.getTime()) / 86_400_000);
+
+        /**
+         * Said in words, not scored out of a hundred.
+         *
+         * A composite number would rank shops against each other and explain
+         * nothing; what an owner wants to know is whether a shop has stopped,
+         * and how long ago.
+         */
+        const status: "aktif" | "melambat" | "vakum" | "belum ada data" =
+          idleDays == null ? "belum ada data" : idleDays <= 7 ? "aktif" : idleDays <= 30 ? "melambat" : "vakum";
+
+        return {
+          id: s.id,
+          name: s.name,
+          marketplace: s.marketplace,
+          categoryId: s.categoryId,
+          categoryName: s.categoryName,
+          categoryColor: s.categoryColor,
+          status,
+          idleDays,
+          lastShippedAt: last,
+          credit: m.credit,
+          creditPrev: mPrev,
+          creditTrendPct: mPrev > 0 ? Math.round(((m.credit - mPrev) / mPrev) * 100) : null,
+          creditPerDay: Math.round(m.credit / days),
+          sellerShare: m.seller,
+          subSellerShare: m.subSeller + m.subSubSeller,
+          parcels: a.parcels,
+          parcelsPrev: aPrev,
+          units: a.units,
+          topProducts: (products.byShop.get(s.id) ?? []).slice(0, 3),
+        };
+      })
+      .sort((a, b) => b.credit - a.credit || b.parcels - a.parcels);
+
+    const totalCredit = perShop.reduce((n, s) => n + s.credit, 0);
+    const totalParcels = perShop.reduce((n, s) => n + s.parcels, 0);
+    const totalUnits = perShop.reduce((n, s) => n + s.units, 0);
+
+    // Ranked separately on purpose: the shop that ships most is often not the
+    // one that earns most, and collapsing them into one "best" hides exactly
+    // the case worth looking at — high volume, thin margin.
+    const busiest = [...perShop].sort((a, b) => b.parcels - a.parcels)[0] ?? null;
+    const richest = perShop[0] ?? null;
+
+    return {
+      range: { from, to, days },
+      totals: {
+        credit: totalCredit,
+        creditPerDay: Math.round(totalCredit / days),
+        creditPerMonth: Math.round((totalCredit / days) * 30),
+        parcels: totalParcels,
+        parcelsPerDay: Math.round((totalParcels / days) * 10) / 10,
+        units: totalUnits,
+        shops: perShop.length,
+        activeShops: perShop.filter((s) => s.status === "aktif").length,
+        idleShops: perShop.filter((s) => s.status === "vakum").length,
+      },
+      /** Who took home what, averaged over the range. */
+      owners,
+      highlights: {
+        busiestShop: busiest ? { id: busiest.id, name: busiest.name, parcels: busiest.parcels } : null,
+        topEarningShop: richest ? { id: richest.id, name: richest.name, credit: richest.credit } : null,
+        topProducts: products.overall.slice(0, 8),
+      },
+      shops: perShop,
+    };
+  }
+
+  /** Money released per shop, from the payout ledger rather than from orders. */
+  private async moneyByShop(userId: string, from: string, to: string, shopIds: string[]) {
+    const out = new Map<string, { credit: number; seller: number; subSeller: number; subSubSeller: number }>();
+    if (!shopIds.length) return out;
+
+    const rows = await this.db
+      .select({
+        shopId: payoutMutations.shopId,
+        credit: sql<string>`coalesce(sum(${payoutMutations.creditAmount}), 0)`,
+        seller: sql<string>`coalesce(sum(${payoutMutations.sellerAmount}), 0)`,
+        subSeller: sql<string>`coalesce(sum(${payoutMutations.subSellerAmount}), 0)`,
+        subSubSeller: sql<string>`coalesce(sum(${payoutMutations.subSubSellerAmount}), 0)`,
+      })
+      .from(payoutMutations)
+      .innerJoin(payoutBatches, eq(payoutMutations.batchId, payoutBatches.id))
+      .where(
+        and(
+          eq(payoutMutations.userId, userId),
+          inArray(payoutMutations.shopId, shopIds),
+          gte(payoutMutations.payoutDate, from),
+          lte(payoutMutations.payoutDate, to),
+        ),
+      )
+      .groupBy(payoutMutations.shopId);
+
+    for (const r of rows) {
+      if (!r.shopId) continue;
+      out.set(r.shopId, {
+        credit: Number(r.credit),
+        seller: Number(r.seller),
+        subSeller: Number(r.subSeller),
+        subSubSeller: Number(r.subSubSeller),
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Parcels and units shipped per shop, from scans.
+   *
+   * Only mapped scans can appear here, which is the whole reason the pending
+   * task about unmapped scans is worth chasing: an unmapped parcel is invisible
+   * to every figure in this column.
+   */
+  private async activityByShop(userId: string, from: string, to: string, shopIds: string[]) {
+    const out = new Map<string, { parcels: number; units: number }>();
+    if (!shopIds.length) return out;
+
+    const rows = await this.db
+      .select({
+        shopId: resiScans.shopId,
+        parcels: sql<number>`count(distinct ${resiScans.id})::int`,
+        units: sql<string>`coalesce(sum(${resiScanItems.qty}), 0)`,
+      })
+      .from(resiScans)
+      .leftJoin(resiScanItems, eq(resiScanItems.resiScanId, resiScans.id))
+      .where(
+        and(
+          eq(resiScans.userId, userId),
+          inArray(resiScans.shopId, shopIds),
+          gte(resiScans.scannedAt, new Date(from + "T00:00:00Z")),
+          lte(resiScans.scannedAt, new Date(to + "T23:59:59Z")),
+        ),
+      )
+      .groupBy(resiScans.shopId);
+
+    for (const r of rows) {
+      if (!r.shopId) continue;
+      out.set(r.shopId, { parcels: Number(r.parcels), units: Number(r.units) });
+    }
+    return out;
+  }
+
+  /** When each shop last shipped anything at all — the basis for "vakum". */
+  private async lastShippedByShop(userId: string, shopIds: string[]) {
+    const out = new Map<string, Date>();
+    if (!shopIds.length) return out;
+    const rows = await this.db
+      .select({ shopId: resiScans.shopId, last: sql<string>`max(${resiScans.scannedAt})` })
+      .from(resiScans)
+      .where(and(eq(resiScans.userId, userId), inArray(resiScans.shopId, shopIds)))
+      .groupBy(resiScans.shopId);
+    for (const r of rows) {
+      if (r.shopId && r.last) out.set(r.shopId, new Date(r.last));
+    }
+    return out;
+  }
+
+  /** What actually shipped, overall and per shop. */
+  private async topProducts(userId: string, from: string, to: string, shopIds: string[]) {
+    const empty = { overall: [] as { id: string; name: string; units: number; parcels: number }[], byShop: new Map<string, { id: string; name: string; units: number }[]>() };
+    if (!shopIds.length) return empty;
+
+    const rows = await this.db
+      .select({
+        shopId: resiScans.shopId,
+        productId: resiScanItems.masterProductId,
+        name: masterProducts.name,
+        units: sql<string>`coalesce(sum(${resiScanItems.qty}), 0)`,
+        parcels: sql<number>`count(distinct ${resiScans.id})::int`,
+      })
+      .from(resiScanItems)
+      .innerJoin(resiScans, eq(resiScanItems.resiScanId, resiScans.id))
+      .innerJoin(masterProducts, eq(resiScanItems.masterProductId, masterProducts.id))
+      .where(
+        and(
+          eq(resiScans.userId, userId),
+          inArray(resiScans.shopId, shopIds),
+          gte(resiScans.scannedAt, new Date(from + "T00:00:00Z")),
+          lte(resiScans.scannedAt, new Date(to + "T23:59:59Z")),
+        ),
+      )
+      .groupBy(resiScans.shopId, resiScanItems.masterProductId, masterProducts.name);
+
+    const byShop = new Map<string, { id: string; name: string; units: number }[]>();
+    const overallMap = new Map<string, { id: string; name: string; units: number; parcels: number }>();
+
+    for (const r of rows) {
+      if (!r.productId) continue;
+      const units = Number(r.units);
+      if (r.shopId) {
+        const arr = byShop.get(r.shopId) ?? [];
+        arr.push({ id: r.productId, name: r.name, units });
+        byShop.set(r.shopId, arr);
+      }
+      const o = overallMap.get(r.productId) ?? { id: r.productId, name: r.name, units: 0, parcels: 0 };
+      o.units += units;
+      o.parcels += Number(r.parcels);
+      overallMap.set(r.productId, o);
+    }
+
+    for (const [k, v] of byShop) byShop.set(k, v.sort((a, b) => b.units - a.units));
+
+    return {
+      overall: [...overallMap.values()].sort((a, b) => b.units - a.units),
+      byShop,
+    };
+  }
+
+  /**
+   * What each person earned across the range, and per day.
+   *
+   * The seller is one row because there is one; sub-sellers are named, because
+   * "sub-seller earnings" as a single number answers nobody's question about
+   * which of them is actually selling.
+   */
+  private async ownerEarnings(userId: string, from: string, to: string, shopIds: string[]) {
+    const days = ShopInsightsService.days(from, to);
+    if (!shopIds.length) {
+      return { seller: { total: 0, perDay: 0, perMonth: 0 }, subSellers: [] };
+    }
+
+    const [totals] = await this.db
+      .select({
+        seller: sql<string>`coalesce(sum(${payoutMutations.sellerAmount}), 0)`,
+      })
+      .from(payoutMutations)
+      .where(
+        and(
+          eq(payoutMutations.userId, userId),
+          inArray(payoutMutations.shopId, shopIds),
+          gte(payoutMutations.payoutDate, from),
+          lte(payoutMutations.payoutDate, to),
+        ),
+      );
+
+    const subs = await this.db
+      .select({
+        id: payoutMutations.subSellerId,
+        name: subSellers.name,
+        total: sql<string>`coalesce(sum(${payoutMutations.subSellerAmount} + ${payoutMutations.subSubSellerAmount}), 0)`,
+      })
+      .from(payoutMutations)
+      .leftJoin(subSellers, eq(payoutMutations.subSellerId, subSellers.id))
+      .where(
+        and(
+          eq(payoutMutations.userId, userId),
+          inArray(payoutMutations.shopId, shopIds),
+          gte(payoutMutations.payoutDate, from),
+          lte(payoutMutations.payoutDate, to),
+        ),
+      )
+      .groupBy(payoutMutations.subSellerId, subSellers.name);
+
+    const sellerTotal = Number(totals?.seller ?? 0);
+
+    return {
+      seller: {
+        total: sellerTotal,
+        perDay: Math.round(sellerTotal / days),
+        perMonth: Math.round((sellerTotal / days) * 30),
+      },
+      subSellers: subs
+        .filter((s) => s.id)
+        .map((s) => ({
+          id: s.id!,
+          name: s.name ?? "(tanpa nama)",
+          total: Number(s.total),
+          perDay: Math.round(Number(s.total) / days),
+          perMonth: Math.round((Number(s.total) / days) * 30),
+        }))
+        .sort((a, b) => b.total - a.total),
+    };
+  }
+}

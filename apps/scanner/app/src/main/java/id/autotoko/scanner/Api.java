@@ -255,6 +255,25 @@ public final class Api {
         call("POST", session.baseUrl() + "/api/products", session.token(), body, cb);
     }
 
+    /** The seller's shops and the courier list, for the mapping sheet. */
+    public void mappingOptions(Cb cb) {
+        call("GET", session.baseUrl() + "/api/resi/mapping-options", session.token(), null, cb);
+    }
+
+    /** Change where an already-saved scan came from, from the history screen. */
+    public void confirmMapping(String scanId, String shopId, String marketplace,
+                               String courier, Cb cb) {
+        JSONObject body = new JSONObject();
+        try {
+            if (shopId != null) body.put("shopId", shopId);
+            if (marketplace != null) body.put("marketplace", marketplace);
+            body.put("courier", courier);
+            body.put("by", android.os.Build.MODEL);
+        } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/resi/scans/" + scanId + "/mapping",
+                session.token(), body, cb);
+    }
+
     /**
      * Has today's stock round been done? Asked by the daily reminder.
      *
