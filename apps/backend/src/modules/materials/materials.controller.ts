@@ -17,6 +17,7 @@ import { MaterialsService } from "./materials.service.js";
 import {
   CreateMaterialDto,
   CreatePurchaseDto,
+  RecordDeliveryDto,
   ParseReceiptDto,
   UpdateMaterialDto,
 } from "./dto/materials.dto.js";
@@ -69,6 +70,18 @@ export class MaterialsController {
     @Query("replaceWith") replaceWith?: string,
   ) {
     return ok(await this.materials.deleteMaterial(uid(req), id, replaceWith || null));
+  }
+
+  /**
+   * Report a parcel of raw materials arriving at the packing room.
+   *
+   * Same shape as the packing scan on purpose: one waybill, a photo, and the
+   * mapping of what was inside. The difference is that this adds to stock
+   * instead of taking it away.
+   */
+  @Post("deliveries")
+  async recordDelivery(@Req() req: FastifyRequest, @Body() dto: RecordDeliveryDto) {
+    return ok(await this.materials.recordDelivery(uid(req), dto));
   }
 
   @Post("purchases/parse")

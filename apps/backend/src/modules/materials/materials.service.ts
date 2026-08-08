@@ -393,6 +393,221 @@ export class MaterialsService {
    * stock actually on hand cost — buying 1 unit at a spike price should not
    * reprice 500 units already in the warehouse.
    */
+  /**
+   * Add stock to one material, and move its average cost only if a cost was given.
+   *
+   * The cost guard is the whole reason this is shared. Stock coming in from a
+   * delivery report carries no price, and running it through the averaging
+   * formula as zero would pull the material's unit cost toward nothing — which
+   * is not a visible error anywhere, it just quietly understates the HPP of
+   * every product built from it.
+   */
+  private async applyStockIn(
+    userId: string,
+    materialId: string,
+    qty: number,
+    lineTotal: number | null,
+  ): Promise<void> {
+    const [current] = await this.db
+      .select({ stock: materials.currentStock, cost: materials.unitCost })
+      .from(materials)
+      .where(and(eq(materials.id, materialId), eq(materials.userId, userId)))
+      .limit(1);
+    if (!current) return;
+
+    const oldStock = num(current.stock);
+    const oldCost = num(current.cost);
+    const newStock = oldStock + qty;
+
+    const set: Record<string, unknown> = { currentStock: newStock.toFixed(3) };
+
+    if (lineTotal != null) {
+      const lineUnitCost = qty > 0 ? lineTotal / qty : 0;
+      // Guard the divide: nothing to average against means the price paid
+      // simply becomes the cost.
+      const newCost =
+        newStock > 0 && oldStock > 0
+          ? (oldStock * oldCost + qty * lineUnitCost) / newStock
+          : lineUnitCost;
+      set.unitCost = newCost.toFixed(2);
+      set.unitCostUpdatedAt = new Date();
+    }
+    set.updatedAt = new Date();
+
+    await this.db.update(materials).set(set).where(eq(materials.id, materialId));
+  }
+
+  /**
+   * A parcel of raw materials arriving at the packing room.
+   *
+   * Deliberately the same record as a purchase — stock arriving against a
+   * document — so there is one way stock goes up rather than two that drift.
+   * What it does not have is prices, and the line below leaves the averages
+   * alone rather than guessing at them.
+   */
+  async recordDelivery(
+    userId: string,
+    dto: {
+      resi: string;
+      photoBase64?: string;
+      deviceText?: string;
+      note?: string;
+      isCod?: boolean;
+      codAmount?: number;
+      items: {
+        materialId: string;
+        rawName?: string;
+        qtyPcs: number;
+        /** Optional: blank means one unit per package, handled below. */
+        contentPerPcs?: number;
+        totalCost?: number;
+      }[];
+    },
+  ) {
+    const resi = (dto.resi ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (resi.length < 6) {
+      throw new BadRequestException({
+        code: "INVALID",
+        message: "Nomor resi terlalu pendek.",
+      });
+    }
+
+    // Read before writing. The unique index is the real guard — two phones can
+    // scan the same parcel at once — but a request inside one transaction can
+    // no longer read anything after a constraint violation aborts it, so the
+    // details of the earlier report have to be fetched first or not at all.
+    const [existing] = await this.db
+      .select()
+      .from(materialPurchases)
+      .where(and(eq(materialPurchases.userId, userId), eq(materialPurchases.resi, resi)))
+      .limit(1);
+    if (existing) {
+      throw new ConflictException({
+        code: "DUPLICATE",
+        message: "Resi ini sudah pernah dilaporkan.",
+        resi,
+        firstReportedAt: existing.createdAt,
+      });
+    }
+
+    const wanted = dto.items.filter((i) => i.materialId);
+    if (!wanted.length) throw new BadRequestException("Belum ada bahan yang dipetakan.");
+
+    // Only this tenant's materials, checked in one query rather than per line:
+    // a stale id from a phone that synced yesterday must not touch somebody
+    // else's stock, and must not cost the whole report either.
+    const owned = await this.db
+      .select({ id: materials.id, unit: materials.unit, name: materials.name })
+      .from(materials)
+      .where(
+        and(
+          eq(materials.userId, userId),
+          inArray(materials.id, wanted.map((i) => i.materialId)),
+        ),
+      );
+    const ownedById = new Map(owned.map((m) => [m.id, m]));
+
+    // Stored before the report exists, so a row never claims a photo it has
+    // not got. A failed upload must not sink the report either: the stock
+    // really did arrive, and that is the part worth keeping.
+    let receiptUrl: string | null = null;
+    if (dto.photoBase64) {
+      try {
+        receiptUrl = (await this.uploads.saveImage(dto.photoBase64, "jpg")).url;
+      } catch (e) {
+        this.logger.warn(`Delivery photo for ${resi} not stored: ${(e as Error).message}`);
+      }
+    }
+
+    const [purchase] = await this.db
+      .insert(materialPurchases)
+      .values({
+        userId,
+        purchasedAt: new Date().toISOString().slice(0, 10),
+        note: dto.note?.trim() || null,
+        receiptUrl,
+        ocrRawResult: dto.deviceText ? { deviceText: dto.deviceText.slice(0, 20_000) } : null,
+        resi,
+        source: "delivery_scan",
+        isCod: dto.isCod === true,
+        codAmount: dto.codAmount != null ? dto.codAmount.toFixed(2) : null,
+        totalCost: dto.codAmount != null ? dto.codAmount.toFixed(2) : "0",
+      })
+      .returning();
+
+    const lines: (typeof materialPurchaseItems.$inferInsert)[] = [];
+    const applied: { name: string; qty: number; unit: string | null }[] = [];
+    let grandTotal = 0;
+
+    for (const i of wanted) {
+      const material = ownedById.get(i.materialId);
+      if (!material) continue;
+      const pcs = Number(i.qtyPcs);
+      const per = Number(i.contentPerPcs);
+      if (!Number.isFinite(pcs) || pcs <= 0) continue;
+      // A blank content box means one unit per package, which is what "pcs"
+      // materials always are; treating it as zero would add nothing at all.
+      const content = Number.isFinite(per) && per > 0 ? per : 1;
+      const qty = pcs * content;
+
+      // A COD parcel holding ONE material tells us exactly what that material
+      // cost, and the weighted average should learn from it. Two or more and
+      // the amount belongs to the parcel, not to any one of them — see the
+      // note on codAmount. Guessing a split there would be worse than not
+      // knowing, because nothing downstream would ever show it was a guess.
+      const soleLineCost =
+        wanted.length === 1 && dto.codAmount != null ? dto.codAmount : null;
+
+      const cost = i.totalCost != null && Number.isFinite(Number(i.totalCost))
+        ? Number(i.totalCost)
+        : soleLineCost;
+      if (cost != null) grandTotal += cost;
+
+      lines.push({
+        purchaseId: purchase!.id,
+        userId,
+        materialId: material.id,
+        quantity: qty.toFixed(3),
+        qtyPcs: pcs.toFixed(3),
+        contentPerPcs: content.toFixed(3),
+        totalCost: cost != null ? cost.toFixed(2) : null,
+        unitCost: cost != null && qty > 0 ? (cost / qty).toFixed(2) : null,
+        createdMaterial: false,
+      });
+      await this.applyStockIn(userId, material.id, qty, cost);
+      applied.push({ name: material.name, qty, unit: material.unit });
+    }
+
+    if (!lines.length) {
+      // Nothing survived validation — every line pointed at a material this
+      // tenant does not own. Leave no empty report behind.
+      await this.db.delete(materialPurchases).where(eq(materialPurchases.id, purchase!.id));
+      throw new BadRequestException("Tidak ada bahan yang bisa dicatat dari laporan ini.");
+    }
+
+    await this.db.insert(materialPurchaseItems).values(lines);
+    if (grandTotal > 0) {
+      await this.db
+        .update(materialPurchases)
+        .set({ totalCost: grandTotal.toFixed(2) })
+        .where(eq(materialPurchases.id, purchase!.id));
+    }
+
+    this.logger.log(
+      `Delivery ${resi} recorded: ${lines.length} material(s)` +
+        `${dto.isCod ? `, COD ${dto.codAmount ?? 0}` : ""} for user ${userId}`,
+    );
+    return {
+      id: purchase!.id,
+      resi,
+      items: applied,
+      isCod: dto.isCod === true,
+      codAmount: dto.codAmount ?? null,
+      /** True when the COD amount became a real unit cost rather than just a total. */
+      costApplied: wanted.length === 1 && dto.codAmount != null,
+    };
+  }
+
   async createPurchase(userId: string, dto: CreatePurchaseDto) {
     const [purchase] = await this.db
       .insert(materialPurchases)
@@ -526,6 +741,11 @@ export class MaterialsService {
       receiptUrl: p.receiptUrl,
       totalCost: num(p.totalCost),
       itemCount: byId.get(p.id) ?? 0,
+      /** Set when this came from the scanner rather than the form. */
+      resi: p.resi,
+      source: p.source,
+      isCod: p.isCod,
+      codAmount: p.codAmount != null ? num(p.codAmount) : null,
     }));
   }
 

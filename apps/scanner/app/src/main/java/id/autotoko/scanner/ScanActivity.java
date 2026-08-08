@@ -264,6 +264,8 @@ public class ScanActivity extends AppCompatActivity {
         detail = findViewById(R.id.courier);
         counter = findViewById(R.id.counter);
         hint = findViewById(R.id.hint);
+        findViewById(R.id.delivery).setOnClickListener(v ->
+                startActivity(new Intent(this, DeliveryActivity.class)));
         findViewById(R.id.textscan).setOnClickListener(v ->
                 startActivity(new Intent(this, TextScanActivity.class)));
         findViewById(R.id.stock).setOnClickListener(v ->

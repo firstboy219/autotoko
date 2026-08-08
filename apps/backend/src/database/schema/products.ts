@@ -140,6 +140,21 @@ export const materialPurchases = pgTable(
     note: text("note"),
     /** The screenshot this was recapped from, kept as the audit trail. */
     receiptUrl: text("receipt_url"),
+    /** Waybill of the parcel that arrived, when this came from the scanner. */
+    resi: varchar("resi", { length: 64 }),
+    /** manual | delivery_scan */
+    source: varchar("source", { length: 16 }).notNull().default("manual"),
+    /** Paid to the courier on arrival. */
+    isCod: boolean("is_cod").notNull().default(false),
+    /**
+     * What the courier was owed for the whole parcel.
+     *
+     * Deliberately not spread across the materials inside: no rule for that
+     * split exists, and a wrong one quietly mis-states the HPP of everything
+     * built from them. It reaches a line only when the parcel holds one
+     * material, where it is exact rather than apportioned.
+     */
+    codAmount: numeric("cod_amount", { precision: 15, scale: 2 }),
     /** Raw OCR text + parsed candidates, for correcting the parser later. */
     ocrRawResult: jsonb("ocr_raw_result"),
     totalCost: numeric("total_cost", { precision: 15, scale: 2 }).notNull().default("0"),
@@ -170,10 +185,27 @@ export const materialPurchaseItems = pgTable(
     materialId: uuid("material_id")
       .notNull()
       .references(() => materials.id, { onDelete: "cascade" }),
+    /** In the MATERIAL's unit — qtyPcs x contentPerPcs. What stock moves by. */
     quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
-    /** Total paid for this line; unitCost is derived as total / quantity. */
-    totalCost: numeric("total_cost", { precision: 15, scale: 2 }).notNull().default("0"),
-    unitCost: numeric("unit_cost", { precision: 15, scale: 2 }).notNull().default("0"),
+    /**
+     * How the quantity was arrived at, kept in both halves.
+     *
+     * A delivery is counted in packages while the catalogue holds millilitres,
+     * because that is what a recipe consumes. Storing only the product means a
+     * mis-typed content size can never be found again, only its wrong total.
+     */
+    qtyPcs: numeric("qty_pcs", { precision: 14, scale: 3 }),
+    contentPerPcs: numeric("content_per_pcs", { precision: 14, scale: 3 }),
+    /**
+     * Total paid for this line; unitCost is derived as total / quantity.
+     *
+     * NULL means nobody said — the person receiving a parcel at the door does
+     * not know what it cost. That is not the same as zero, and the difference
+     * matters: a zero would drag the weighted average down and quietly wreck
+     * the HPP of every product using the material.
+     */
+    totalCost: numeric("total_cost", { precision: 15, scale: 2 }).default("0"),
+    unitCost: numeric("unit_cost", { precision: 15, scale: 2 }).default("0"),
     /** True when this line created the material rather than topping one up. */
     createdMaterial: boolean("created_material").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

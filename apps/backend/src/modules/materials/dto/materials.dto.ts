@@ -1,12 +1,14 @@
 import { Type } from "class-transformer";
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -20,6 +22,50 @@ import {
  * this week. Collapsing those two turns every reading into panic or silence.
  */
 export const STOCK_LEVELS = ["habis", "hampir_habis", "cukup", "normal", "banyak"] as const;
+
+/** One material on an arriving parcel. */
+export class DeliveryLineDto {
+  @IsUUID() materialId!: string;
+
+  /** What the waybill called it, kept beside the mapping rather than replacing it. */
+  @IsOptional() @IsString() @MaxLength(255) rawName?: string;
+
+  /** Packages received — bottles, sacks, rolls. */
+  @Type(() => Number) @IsNumber() @Min(0.001) @Max(1_000_000) qtyPcs!: number;
+
+  /**
+   * How much of the material's OWN unit is in one package.
+   *
+   * A catalogue holding millilitres has to be told that a bottle is 100 of
+   * them; without it a delivery of three bottles would add three millilitres.
+   * 1 for anything already counted in pieces.
+   */
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(1_000_000) contentPerPcs?: number;
+
+  /** Omit when unknown. Zero would drag the weighted average down. */
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) totalCost?: number;
+}
+
+export class RecordDeliveryDto {
+  @IsString() @MaxLength(128) resi!: string;
+
+  /** JPEG of the waybill, base64. */
+  @IsOptional() @IsString() @MaxLength(12_000_000) photoBase64?: string;
+
+  /** Everything the phone read, for comparing against what was mapped. */
+  @IsOptional() @IsString() @MaxLength(20_000) deviceText?: string;
+
+  @IsOptional() @IsString() @MaxLength(500) note?: string;
+
+  /** Paid to the courier at the door. */
+  @IsOptional() @IsBoolean() isCod?: boolean;
+
+  /** Required by the app when isCod; the amount owed for the whole parcel. */
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(1_000_000_000) codAmount?: number;
+
+  @IsArray() @ValidateNested({ each: true }) @Type(() => DeliveryLineDto)
+  items!: DeliveryLineDto[];
+}
 
 export class CreateMaterialDto {
   @IsString() @MaxLength(255) name!: string;

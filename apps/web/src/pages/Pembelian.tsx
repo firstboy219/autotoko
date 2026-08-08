@@ -44,6 +44,11 @@ interface PurchaseRow {
   totalCost: number;
   itemCount: number;
   receiptUrl: string | null;
+  /** Null for purchases typed into the form. */
+  resi: string | null;
+  source: string;
+  isCod: boolean;
+  codAmount: number | null;
 }
 interface ParsedItem {
   materialName: string;
@@ -410,7 +415,22 @@ export function Pembelian() {
                   purchases.data.map((p) => (
                     <TR key={p.id}>
                       <TD className="text-ink">{dateShort(p.purchasedAt)}</TD>
-                      <TD className="text-ink-2">{p.supplierName ?? "—"}</TD>
+                      <TD className="text-ink-2">
+                        {p.supplierName ?? (p.resi ? "Bahan datang" : "—")}
+                        {/* A scanned delivery has no supplier typed in, so
+                            without the waybill it is an anonymous row nobody
+                            can trace back to a parcel. */}
+                        {p.resi && (
+                          <div className="text-[11px] font-mono text-ink-3">{p.resi}</div>
+                        )}
+                        {p.isCod && (
+                          <span className="inline-block mt-1">
+                            <Badge tone="warning">
+                              COD{p.codAmount ? ` ${rupiah(p.codAmount)}` : ""}
+                            </Badge>
+                          </span>
+                        )}
+                      </TD>
                       <TD align="right" className="text-ink-2 tabular-nums">{p.itemCount}</TD>
                       <TD align="right" className="text-ink tabular-nums">{rupiah(p.totalCost)}</TD>
                       <TD align="right">

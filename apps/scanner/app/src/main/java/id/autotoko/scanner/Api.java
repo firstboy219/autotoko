@@ -145,6 +145,30 @@ public final class Api {
                 session.token(), payload, cb);
     }
 
+    /**
+     * Report a parcel of raw materials that arrived.
+     *
+     * codAmount is passed as a negative when there is no COD, rather than as
+     * zero: zero is a real amount a courier could be owed, and the two must not
+     * collapse into each other on the way to the server.
+     */
+    public void recordDelivery(String resi, String photoBase64, String deviceText,
+                               org.json.JSONArray items, boolean isCod, double codAmount, Cb cb) {
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("resi", resi);
+            if (photoBase64 != null) payload.put("photoBase64", photoBase64);
+            if (deviceText != null && !deviceText.isEmpty()) {
+                payload.put("deviceText",
+                        deviceText.length() > 20000 ? deviceText.substring(0, 20000) : deviceText);
+            }
+            payload.put("items", items);
+            payload.put("isCod", isCod);
+            if (isCod && codAmount >= 0) payload.put("codAmount", codAmount);
+        } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/materials/deliveries", session.token(), payload, cb);
+    }
+
     /** Create a raw material, or get back the one already named that. */
     public void createMaterial(String name, String unit, String unitCost, Cb cb) {
         JSONObject payload = new JSONObject();
