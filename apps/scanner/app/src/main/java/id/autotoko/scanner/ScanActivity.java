@@ -1063,6 +1063,17 @@ public class ScanActivity extends AppCompatActivity {
                 .setCancelable(false)
                 .setPositiveButton("Simpan", null)
                 .setNeutralButton("Tambah produk baru", null)
+                // Not "skip": nothing is saved. A packer who scanned the
+                // carton's own barcode needs a way back to the camera, and
+                // that way must not be one that files an empty parcel.
+                .setNegativeButton("Batal, jangan simpan", (dlg, w) -> {
+                    Toast.makeText(this, "Scan dibatalkan, tidak disimpan.",
+                            Toast.LENGTH_SHORT).show();
+                    // Muted so the same code in frame is not read straight
+                    // back in; the packer is about to point at something else.
+                    mute(resi);
+                    idle();
+                })
                 .create();
 
         // Wired after show() so a refusal can keep the sheet open. Handing the
