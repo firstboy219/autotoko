@@ -39,6 +39,16 @@ final class TextCollector {
         int count;
     }
 
+    /**
+     * A hard ceiling on distinct lines held.
+     *
+     * The camera keeps reading while a mapping sheet is open, and every fresh
+     * misreading of a blurred edge became another cluster. On a parcel left in
+     * frame for a minute that is thousands of them, each compared against every
+     * new line — quadratic work and memory that only grows.
+     */
+    private static final int MAX_CLUSTERS = 80;
+
     private final List<Cluster> clusters = new ArrayList<>();
     private int frames = 0;
 
@@ -89,6 +99,19 @@ final class TextCollector {
                 }
                 return;
             }
+        }
+        if (clusters.size() >= MAX_CLUSTERS) {
+            // Full. Drop the weakest single-sighting cluster rather than the
+            // newest line: what has been seen once is what noise looks like.
+            int worst = -1;
+            for (int i = 0; i < clusters.size(); i++) {
+                if (clusters.get(i).count <= 1) {
+                    worst = i;
+                    break;
+                }
+            }
+            if (worst < 0) return;
+            clusters.remove(worst);
         }
         Cluster c = new Cluster();
         c.words = w;

@@ -3,68 +3,100 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#000000">
+    android:background="@color/canvas">
 
-    <androidx.camera.view.PreviewView
-        android:id="@+id/dlPreview"
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@color/brand"
+        android:paddingLeft="@dimen/space_lg"
+        android:paddingRight="@dimen/space_md">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="Bahan Baku Datang"
+            android:textColor="@color/on_brand"
+            android:textSize="@dimen/text_title"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1"
+        android:background="#000000">
+
+        <androidx.camera.view.PreviewView
+            android:id="@+id/dlPreview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </FrameLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:background="@color/white"
-        android:padding="14dp">
+        android:background="@color/surface"
+        android:padding="@dimen/space_lg">
 
         <TextView
             android:id="@+id/dlStatus"
+            style="@style/Text.Display"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="@color/ink"
-            android:textSize="15sp"
-            android:textStyle="bold"
             android:text="Siap" />
 
         <TextView
             android:id="@+id/dlHint"
+            style="@style/Text.Small"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="@color/ink2"
-            android:textSize="12sp"
-            android:layout_marginTop="2dp"
+            android:layout_marginTop="@dimen/space_xs"
             android:text="Arahkan ke barcode resi bahan baku yang datang." />
 
         <TextView
             android:id="@+id/dlRead"
+            style="@style/Text.Caption"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="@color/ink2"
-            android:textSize="11sp"
-            android:layout_marginTop="6dp"
+            android:layout_marginTop="@dimen/space_sm"
             android:visibility="gone" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="10dp">
+            android:layout_marginTop="@dimen/space_md">
 
-            <Button android:id="@+id/dlManual"
-                android:layout_width="0dp" android:layout_weight="1"
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/dlManual"
+                style="@style/Button.Secondary"
+                android:layout_width="0dp"
+                android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_input"
-                android:text="Input Resi Manual" android:textAllCaps="false"
-                android:textColor="@color/ink" android:textSize="13sp" />
+                android:text="Input Manual" />
 
-            <Button android:id="@+id/dlClose"
-                android:layout_width="0dp" android:layout_weight="1"
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/dlTorch"
+                style="@style/Button.Quiet"
+                android:layout_width="0dp"
+                android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_input"
-                android:text="Tutup" android:textAllCaps="false"
-                android:textColor="@color/ink2" android:textSize="13sp"
-                android:layout_marginLeft="8dp" />
+                android:layout_marginLeft="@dimen/space_sm"
+                android:text="Lampu" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/dlClose"
+                style="@style/Button.Quiet"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="@dimen/space_sm"
+                android:text="Tutup" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

@@ -33,6 +33,15 @@
 
         <!-- Today's count belongs up here: it is the one number the packer
              wants at a glance and never has to act on. -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/torch"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/on_brand"
+            android:textAllCaps="false"
+            android:text="Lampu" />
+
         <TextView
             android:id="@+id/counter"
             android:layout_width="wrap_content"

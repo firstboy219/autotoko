@@ -79,6 +79,10 @@ public class DeliveryActivity extends AppCompatActivity {
     private static final int REQ_CAMERA = 103;
     private static final android.util.Size ANALYSIS_SIZE = new android.util.Size(1920, 1080);
     private static final int PHOTO_MAX_EDGE = 1600;
+    /** Let autofocus settle before the shutter; see focusThenCapture. */
+    private static final long FOCUS_SETTLE_MS = 600;
+    /** After this long with nothing decoded, stop looking confident about it. */
+    private static final long NO_HIT_HINT_MS = 6000;
     private static final int PHOTO_QUALITY = 80;
 
     private PreviewView preview;
@@ -100,6 +104,9 @@ public class DeliveryActivity extends AppCompatActivity {
     private volatile boolean busy = false;
     private volatile boolean analysing = false;
     private volatile boolean readingText = false;
+    private androidx.camera.core.Camera camera;
+    private long lookingSince = 0;
+    private boolean torchOn = false;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -107,8 +114,27 @@ public class DeliveryActivity extends AppCompatActivity {
         api = new Api(session);
         cameraExecutor = Executors.newSingleThreadExecutor();
         recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+        // EVERY format, unlike the packing scan.
+        //
+        // That screen is restricted to CODE_128/39 for a good reason — Indonesian
+        // courier waybills use CODE_128, and accepting retail symbologies once
+        // recorded five parcels that did not exist. Copying the restriction here
+        // was the mistake: a supplier's parcel is a different population. Plenty
+        // arrive with a QR label, an ITF carton code or a plain EAN, and against
+        // those the scanner simply never fired — which is exactly the "nothing
+        // happens" that was reported.
+        //
+        // The risk that made the restriction worth it there does not apply here
+        // either: a wrong read cannot invent a shipment, because the packer
+        // still has to map the contents by hand, and the number is editable
+        // before anything is saved.
         barcodes = BarcodeScanning.getClient(new BarcodeScannerOptions.Builder()
-                .setBarcodeFormats(Barcode.FORMAT_CODE_128, Barcode.FORMAT_CODE_39)
+                .setBarcodeFormats(
+                        Barcode.FORMAT_CODE_128, Barcode.FORMAT_CODE_39, Barcode.FORMAT_CODE_93,
+                        Barcode.FORMAT_CODABAR, Barcode.FORMAT_ITF, Barcode.FORMAT_EAN_13,
+                        Barcode.FORMAT_EAN_8, Barcode.FORMAT_UPC_A, Barcode.FORMAT_UPC_E,
+                        Barcode.FORMAT_QR_CODE, Barcode.FORMAT_DATA_MATRIX, Barcode.FORMAT_PDF417,
+                        Barcode.FORMAT_AZTEC)
                 .build());
 
         setContentView(R.layout.activity_delivery);
@@ -117,6 +143,7 @@ public class DeliveryActivity extends AppCompatActivity {
         hint = findViewById(R.id.dlHint);
         read = findViewById(R.id.dlRead);
         findViewById(R.id.dlClose).setOnClickListener(v -> finish());
+        findViewById(R.id.dlTorch).setOnClickListener(v -> toggleTorch());
         findViewById(R.id.dlManual).setOnClickListener(v -> promptManual());
 
         loadMaterials();
@@ -192,8 +219,9 @@ public class DeliveryActivity extends AppCompatActivity {
                         .build();
 
                 provider.unbindAll();
-                provider.bindToLifecycle(
+                camera = provider.bindToLifecycle(
                         this, CameraSelector.DEFAULT_BACK_CAMERA, p, analysis, imageCapture);
+                lookingSince = android.os.SystemClock.uptimeMillis();
             } catch (Exception e) {
                 hint.setText("Kamera tidak bisa dibuka: " + e.getMessage());
             }
@@ -230,6 +258,7 @@ public class DeliveryActivity extends AppCompatActivity {
             proxy.close();
             return;
         }
+        main.post(this::renderLooking);
         analysing = true;
         barcodes.process(InputImage.fromMediaImage(media, rot))
                 .addOnSuccessListener(codes -> main.post(() -> onBarcodes(codes)))
@@ -237,6 +266,24 @@ public class DeliveryActivity extends AppCompatActivity {
                     analysing = false;
                     proxy.close();
                 });
+    }
+
+    /**
+     * Proof that the camera is working while it finds nothing.
+     *
+     * A still screen reads as a broken one, and this screen could sit
+     * unchanged for a minute against a label whose symbology it had been told
+     * to ignore. After a few seconds it also points at the way out.
+     */
+    private void renderLooking() {
+        if (busy || lookingSince == 0) return;
+        long waited = android.os.SystemClock.uptimeMillis() - lookingSince;
+        if (waited < NO_HIT_HINT_MS) {
+            hint.setText("Mencari barcode pada resi…");
+        } else {
+            hint.setText("Barcode belum terbaca. Dekatkan kamera, nyalakan lampu, "
+                    + "atau pakai Input Resi Manual.");
+        }
     }
 
     private void renderRead() {
@@ -254,19 +301,91 @@ public class DeliveryActivity extends AppCompatActivity {
         read.setVisibility(View.VISIBLE);
     }
 
+    /**
+     * Pick the code most likely to be the waybill.
+     *
+     * With every symbology accepted, a carton can present several at once — the
+     * courier's own label, a retail EAN printed on the box, a QR pointing at a
+     * catalogue page. CODE_128 and CODE_39 are what couriers actually print, so
+     * they win outright; among equals the longest value is taken, a retail EAN
+     * being both shorter and rarely the thing anyone means.
+     */
     private void onBarcodes(List<Barcode> codes) {
         if (busy || codes == null || codes.isEmpty()) return;
+
+        String best = null;
+        int bestRank = -1;
         for (Barcode c : codes) {
             String raw = c.getRawValue();
             if (raw == null) continue;
             String resi = ResiExtractor.normalize(raw);
             if (resi.length() < 6 || resi.length() > 32) continue;
-            busy = true;
-            status.setText(resi);
-            hint.setText("Memotret resi...");
-            capture(resi);
-            return;
+            int rank = (c.getFormat() == Barcode.FORMAT_CODE_128
+                    || c.getFormat() == Barcode.FORMAT_CODE_39) ? 2 : 1;
+            if (rank > bestRank || (rank == bestRank && best != null && resi.length() > best.length())) {
+                best = resi;
+                bestRank = rank;
+            }
         }
+        if (best == null) return;
+
+        busy = true;
+        feedback();
+        status.setText(best);
+        hint.setText("Memotret resi...");
+        focusThenCapture(best);
+    }
+
+    /**
+     * Say out loud that the code was read.
+     *
+     * The packing screen has done this from the start. Here there was nothing
+     * at all — no sound, no buzz, and a photo that takes a moment — so a
+     * successful scan and a scan that never fired looked identical.
+     */
+    private void feedback() {
+        try {
+            new android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 80)
+                    .startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 140);
+        } catch (Exception ignored) {
+        }
+        try {
+            android.os.Vibrator v = (android.os.Vibrator) getSystemService(VIBRATOR_SERVICE);
+            if (v != null && v.hasVibrator()) {
+                if (android.os.Build.VERSION.SDK_INT >= 26) {
+                    v.vibrate(android.os.VibrationEffect.createOneShot(
+                            60, android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+                } else {
+                    v.vibrate(60);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * Nudge autofocus before the shutter.
+     *
+     * The photo is the audit trail for a stock movement, and this screen was
+     * taking it the instant the barcode decoded — at whatever focus the camera
+     * happened to be at, which after a close-range barcode read is rarely the
+     * whole label.
+     */
+    private void focusThenCapture(String resi) {
+        try {
+            if (camera != null) {
+                androidx.camera.core.MeteringPoint point = preview.getMeteringPointFactory()
+                        .createPoint(preview.getWidth() / 2f, preview.getHeight() / 2f);
+                camera.getCameraControl().startFocusAndMetering(
+                        new androidx.camera.core.FocusMeteringAction.Builder(
+                                point, androidx.camera.core.FocusMeteringAction.FLAG_AF)
+                                .disableAutoCancel()
+                                .build());
+            }
+        } catch (Exception ignored) {
+            // Focus is an improvement, not a requirement.
+        }
+        main.postDelayed(() -> capture(resi), FOCUS_SETTLE_MS);
     }
 
     private void capture(String resi) {
@@ -361,6 +480,21 @@ public class DeliveryActivity extends AppCompatActivity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(pad, pad, pad, pad);
 
+        // Editable, because with every symbology now accepted a carton can
+        // offer several codes and the wrong one can win. Showing what was read
+        // and letting it be corrected costs one field; getting it wrong means a
+        // stock movement filed under a number that identifies nothing.
+        TextView resiLabel = new TextView(this);
+        resiLabel.setText("Nomor resi");
+        resiLabel.setTextSize(11);
+        resiLabel.setTextColor(Color.parseColor("#6B7178"));
+        root.addView(resiLabel);
+
+        final EditText resiField = new EditText(this);
+        resiField.setText(resi);
+        resiField.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        root.addView(resiField);
+
         final LinearLayout rowsBox = new LinearLayout(this);
         rowsBox.setOrientation(LinearLayout.VERTICAL);
         root.addView(rowsBox);
@@ -424,6 +558,12 @@ public class DeliveryActivity extends AppCompatActivity {
                 .setView(sv)
                 .setCancelable(false)
                 .setPositiveButton("Simpan", (d2, w) -> {
+                    String finalResi = ResiExtractor.normalize(resiField.getText().toString());
+                    if (finalResi.length() < 6) {
+                        Toast.makeText(this, "Nomor resi terlalu pendek.", Toast.LENGTH_LONG).show();
+                        map(resi, photoBase64);
+                        return;
+                    }
                     boolean isCod = cod.isChecked();
                     double amount = parse(codAmount, 0);
                     if (isCod && amount <= 0) {
@@ -432,7 +572,7 @@ public class DeliveryActivity extends AppCompatActivity {
                         map(resi, photoBase64);
                         return;
                     }
-                    submit(resi, photoBase64, rows, isCod, amount);
+                    submit(finalResi, photoBase64, rows, isCod, amount);
                 })
                 .setNegativeButton("Batal", (d2, w) -> reset())
                 .show();
@@ -557,7 +697,20 @@ public class DeliveryActivity extends AppCompatActivity {
                 return;
             }
             if (r.code == 409) {
-                Toast.makeText(this, "Resi ini sudah pernah dilaporkan.", Toast.LENGTH_LONG).show();
+                // "Already reported" with no date leaves the packer wondering
+                // whether they did it or somebody else did, an hour ago or last
+                // week — and the server already knows.
+                String when = r.body == null ? null
+                        : Format.humanTime(r.body.optString("firstReportedAt", null));
+                new MaterialAlertDialogBuilder(this)
+                        .setTitle("Sudah pernah dilaporkan")
+                        .setMessage("Resi " + resi + " sudah tercatat"
+                                + (when == null ? "" : " " + when)
+                                + ".\n\nStok tidak ditambahkan dua kali. Kalau ini paket yang "
+                                + "berbeda, periksa nomor resinya.")
+                        .setPositiveButton("Mengerti", (d, w2) -> reset())
+                        .show();
+                return;
             } else {
                 Toast.makeText(this, r.message("Gagal menyimpan laporan."), Toast.LENGTH_LONG).show();
             }
@@ -632,8 +785,26 @@ public class DeliveryActivity extends AppCompatActivity {
                 .show();
     }
 
+    /**
+     * The warehouse light is not always on the packer's side.
+     *
+     * Cheap to offer and it helps twice: the barcode decodes from a sharper
+     * image, and so does the text the material names are matched from.
+     */
+    private void toggleTorch() {
+        if (camera == null || !camera.getCameraInfo().hasFlashUnit()) {
+            Toast.makeText(this, "Lampu tidak tersedia di kamera ini.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        torchOn = !torchOn;
+        camera.getCameraControl().enableTorch(torchOn);
+        ((com.google.android.material.button.MaterialButton) findViewById(R.id.dlTorch))
+                .setText(torchOn ? "Lampu: Nyala" : "Lampu");
+    }
+
     private void reset() {
         busy = false;
+        lookingSince = android.os.SystemClock.uptimeMillis();
         collector.reset();
         status.setText("Siap");
         hint.setText("Arahkan ke barcode resi bahan baku yang datang.");

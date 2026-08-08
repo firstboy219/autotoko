@@ -225,6 +225,7 @@ public class ScanActivity extends AppCompatActivity {
 
     private androidx.camera.core.Camera camera;
     /** Barcode position as a fraction of the upright frame, for cropping. */
+    private boolean torchOn = false;
     private volatile RectF lastBarcodeBox = null;
 
     private volatile int frameWidth = 0;
@@ -246,6 +247,8 @@ public class ScanActivity extends AppCompatActivity {
     private volatile boolean collecting = false;
     /** One text recognition at a time; they take longer than a frame. */
     private volatile boolean readingText = false;
+    /** The pending hide for the banner on screen, so only it gets cancelled. */
+    private Runnable hideBanner = null;
     private String mutedResi = null;
     private long mutedUntil = 0;
 
@@ -266,6 +269,7 @@ public class ScanActivity extends AppCompatActivity {
         counter = findViewById(R.id.counter);
         hint = findViewById(R.id.hint);
         findViewById(R.id.menu).setOnClickListener(v -> showMenu());
+        findViewById(R.id.torch).setOnClickListener(v -> toggleTorch());
         clarityBar = findViewById(R.id.clarityBar);
         clarityText = findViewById(R.id.clarityText);
         liveRead = findViewById(R.id.liveRead);
@@ -1245,6 +1249,23 @@ public class ScanActivity extends AppCompatActivity {
      * made "Keluar" look exactly as inviting as the two actions used all day.
      * In a sheet each one has room to say what it is for.
      */
+    /**
+     * The one control that helps every other part of this screen.
+     *
+     * A dim bench costs the barcode a read, the clarity meter its score and the
+     * label reader its text; all three improve from the same switch.
+     */
+    private void toggleTorch() {
+        if (camera == null || !camera.getCameraInfo().hasFlashUnit()) {
+            Toast.makeText(this, "Lampu tidak tersedia di kamera ini.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        torchOn = !torchOn;
+        camera.getCameraControl().enableTorch(torchOn);
+        ((com.google.android.material.button.MaterialButton) findViewById(R.id.torch))
+                .setText(torchOn ? "Lampu ✓" : "Lampu");
+    }
+
     private void showMenu() {
         View sheet = getLayoutInflater().inflate(R.layout.sheet_menu, null);
         com.google.android.material.bottomsheet.BottomSheetDialog dialog =
@@ -1324,8 +1345,12 @@ public class ScanActivity extends AppCompatActivity {
         banner.setBackgroundResource(ok ? R.drawable.bg_ok : R.drawable.bg_warn);
         bannerText.setTextColor(Color.parseColor(ok ? "#1B7F4B" : "#B3261E"));
         banner.setVisibility(View.VISIBLE);
-        main.removeCallbacksAndMessages(null);
-        main.postDelayed(() -> banner.setVisibility(View.GONE), ok ? 2200 : 5000);
+        // Only the previous banner's own hide is cancelled. This used to clear
+        // EVERY pending main-thread callback, which on the wrong ordering would
+        // have taken the clarity poll or the scheduled return-to-ready with it.
+        if (hideBanner != null) main.removeCallbacks(hideBanner);
+        hideBanner = () -> banner.setVisibility(View.GONE);
+        main.postDelayed(hideBanner, ok ? 2200 : 5000);
     }
 
     /**
