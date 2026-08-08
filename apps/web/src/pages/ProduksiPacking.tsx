@@ -42,6 +42,9 @@ interface Scan {
   id: string;
   itemCount?: number;
   unmappedCount?: number;
+  /** Null until a person says the contents are right. */
+  itemsConfirmedAt?: string | null;
+  itemsConfirmedBy?: string | null;
   resi: string;
   courier: string | null;
   source: string;
@@ -322,16 +325,17 @@ export function ProduksiPacking() {
                 <TH>Resi</TH>
                 <TH>Waktu</TH>
                 <TH>Isi Label (hasil OCR)</TH>
+                <TH>Isi Paket</TH>
                 <TH>Order</TH>
                 <TH className="text-right">Aksi</TH>
               </TR>
             </THead>
             <tbody>
               {scans.loading ? (
-                <SkeletonRows n={5} cols={6} />
+                <SkeletonRows n={5} cols={7} />
               ) : rows.length === 0 ? (
                 <TR>
-                  <TD colSpan={6}>
+                  <TD colSpan={7}>
                     <EmptyState
                       icon="package"
                       title="Belum ada resi yang discan"
@@ -344,7 +348,13 @@ export function ProduksiPacking() {
                   // Two sibling rows per scan (the row and its expanded
                   // contents), so the key goes on the fragment.
                   <Fragment key={s.id}>
-                  <TR>
+                  <TR
+                    className={
+                      s.itemsConfirmedAt
+                        ? undefined
+                        : "bg-amber-50/40 dark:bg-amber-500/5"
+                    }
+                  >
                     <TD>
                       {s.photoUrl ? (
                         <button
@@ -386,6 +396,29 @@ export function ProduksiPacking() {
                       <LabelCell scan={s} />
                     </TD>
 
+                    {/* The question a supervisor is actually scanning this
+                        table for. It was reachable only by opening each row
+                        one at a time. */}
+                    <TD className="whitespace-nowrap">
+                      <button
+                        onClick={() => setOpenItems(openItems === s.id ? null : s.id)}
+                        className="text-left"
+                      >
+                        {s.itemsConfirmedAt ? (
+                          <Badge tone="success">
+                            {s.itemCount ?? 0} item ✓
+                          </Badge>
+                        ) : (
+                          <Badge tone="warning">belum dikonfirmasi</Badge>
+                        )}
+                        {s.unmappedCount ? (
+                          <div className="mt-0.5 text-[11px] text-ink-2">
+                            {s.unmappedCount} tanpa produk
+                          </div>
+                        ) : null}
+                      </button>
+                    </TD>
+
                     <TD>
                       {s.orderId ? (
                         <div>
@@ -407,7 +440,10 @@ export function ProduksiPacking() {
                     </TD>
 
                     <TD className="text-right">
-                      <div className="flex flex-col items-end gap-1">
+                      {/* Horizontal and compact. Stacked, these five made every
+                          row five lines tall regardless of content, which is
+                          what made a long list unreadable. */}
+                      <div className="flex flex-wrap items-center justify-end gap-1">
                         {s.orderId ? (
                           <Button variant="text" onClick={() => unlink(s)}>
                             Lepas
@@ -451,15 +487,19 @@ export function ProduksiPacking() {
                   </TR>
                   {openLabel === s.id && (
                     <TR>
-                      <TD colSpan={6}>
+                      <TD colSpan={7}>
                         <ScanLabelEditor scanId={s.id} onSaved={refresh} />
                       </TD>
                     </TR>
                   )}
                   {openItems === s.id && (
                     <TR>
-                      <TD colSpan={6}>
-                        <ScanItemsEditor scanId={s.id} />
+                      <TD colSpan={7}>
+                        <ScanItemsEditor
+                          scanId={s.id}
+                          confirmedAt={s.itemsConfirmedAt ?? null}
+                          onConfirmed={refresh}
+                        />
                       </TD>
                     </TR>
                   )}

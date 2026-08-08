@@ -427,6 +427,22 @@ export class ResiController {
     return { success: true, data: await this.resi.updateItem(uid(req), id, itemId, dto) };
   }
 
+  /**
+   * "This is what was in the parcel."
+   *
+   * Its own call rather than a side effect of editing a line, because the
+   * editor saves as you type and none of those saves is a person declaring
+   * they are finished.
+   */
+  @Post("scans/:id/items/confirm")
+  async confirmItems(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() body: { by?: string },
+  ) {
+    return { success: true, data: await this.resi.confirmItems(uid(req), id, body?.by) };
+  }
+
   @Delete("scans/:id/items/:itemId")
   async removeItem(
     @Req() req: FastifyRequest,

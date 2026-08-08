@@ -562,29 +562,37 @@ public class DeliveryActivity extends AppCompatActivity {
         ScrollView sv = new ScrollView(this);
         sv.addView(root);
 
-        new MaterialAlertDialogBuilder(this)
+        final androidx.appcompat.app.AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle("Bahan Datang — " + resi)
                 .setView(sv)
                 .setCancelable(false)
-                .setPositiveButton("Simpan", (d2, w) -> {
+                .setPositiveButton("Simpan", null)
+                .setNegativeButton("Batal", (d2, w) -> reset())
+                .create();
+
+        // Wired after show(), so a refusal leaves the sheet exactly as the
+        // packer left it. Handed to the builder, the dialog dismisses before
+        // the listener runs, and every failure path here had to rebuild the
+        // sheet from the reading -- discarding the mapping it claimed to save.
+        dialog.setOnShowListener(dd ->
+                dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(bv -> {
                     String finalResi = ResiExtractor.normalize(resiField.getText().toString());
                     if (finalResi.length() < 6) {
                         Toast.makeText(this, "Nomor resi terlalu pendek.", Toast.LENGTH_LONG).show();
-                        map(resi, photoBase64);
                         return;
                     }
                     boolean isCod = cod.isChecked();
                     double amount = parse(codAmount, 0);
                     if (isCod && amount <= 0) {
                         Toast.makeText(this, "Nominal COD wajib diisi.", Toast.LENGTH_LONG).show();
-                        // Re-open rather than lose the mapping they just did.
-                        map(resi, photoBase64);
                         return;
                     }
-                    submit(finalResi, photoBase64, rows, isCod, amount);
-                })
-                .setNegativeButton("Batal", (d2, w) -> reset())
-                .show();
+                    // Only a sheet the server will accept closes the dialog.
+                    if (submit(finalResi, photoBase64, rows, isCod, amount)) {
+                        dialog.dismiss();
+                    }
+                }));
+        dialog.show();
     }
 
     private void addRow(final LinearLayout box, List<Row> rows, String rawName,
@@ -747,9 +755,32 @@ public class DeliveryActivity extends AppCompatActivity {
         row.preview.setTextColor(Color.parseColor("#1B7F4B"));
     }
 
-    private void submit(String resi, String photoBase64, List<Row> rows,
+    /**
+     * Send the parcel, or refuse and say why.
+     *
+     * Returns false when the sheet is not ready, so the caller can keep the
+     * dialog open instead of dismissing it over a mistake the packer is
+     * standing right there to fix.
+     */
+    private boolean submit(String resi, String photoBase64, List<Row> rows,
                         boolean isCod, double codAmount) {
         JSONArray items = new JSONArray();
+        // A row left blank is not a row to be dropped silently. Until now a
+        // sheet with four lines and one filled in saved as a one-line parcel,
+        // and nothing said the other three had gone.
+        int blank = 0;
+        for (Row r : rows) {
+            if (r.removed) continue;
+            if (r.chosen < 0 || r.chosen >= r.options.size()) continue;
+            if (parse(r.pcsField, 0) <= 0) blank++;
+        }
+        if (blank > 0) {
+            Toast.makeText(this,
+                    blank + " baris belum diisi jumlahnya. Isi, atau hapus barisnya.",
+                    Toast.LENGTH_LONG).show();
+            return false;
+        }
+
         for (Row r : rows) {
             if (r.removed) continue;
             if (r.chosen < 0 || r.chosen >= r.options.size()) continue;
@@ -773,14 +804,20 @@ public class DeliveryActivity extends AppCompatActivity {
             } catch (Exception ignored) {}
         }
         if (items.length() == 0) {
-            Toast.makeText(this, "Belum ada bahan yang diisi jumlahnya.", Toast.LENGTH_LONG).show();
-            reset();
-            return;
+            // Not reset(): the sheet stays open. A parcel that reached this
+            // screen physically exists, and throwing the packer back to the
+            // camera loses the photo and the reading along with the mistake.
+            Toast.makeText(this,
+                    "Belum ada bahan yang dipetakan ke master. Pilih bahannya dulu.",
+                    Toast.LENGTH_LONG).show();
+            return false;
         }
 
         hint.setText("Menyimpan...");
         api.recordDelivery(resi, photoBase64, collector.lines().toString(), items,
                 isCod, isCod ? codAmount : -1, r -> {
+            // The reply names any line the server refused on units; without
+            // this the packer sees "saved" and a shelf short of one material.
             if (r.ok()) {
                 StringBuilder sb = new StringBuilder("Stok bertambah:");
                 final StringBuilder contents = new StringBuilder();
@@ -831,6 +868,9 @@ public class DeliveryActivity extends AppCompatActivity {
             }
             reset();
         });
+        // The sheet was complete and the request is away. Whether the server
+        // takes it is answered above, on screen, by the callback.
+        return true;
     }
 
     /**

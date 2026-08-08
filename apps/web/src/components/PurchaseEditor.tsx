@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { convertUnit, compatibleUnits } from "@autotoko/shared";
 import { api } from "../lib/api";
+import { useFetch } from "../lib/useFetch";
 import { rupiah } from "../lib/fmt";
 import { Badge, Button, Field, Input, InlineAlert, Modal, Select } from "./ui";
 
@@ -38,6 +39,12 @@ interface Detail {
   isCod: boolean;
   codAmount: number | null;
   items: Line[];
+}
+
+interface CatalogMaterial {
+  id: string;
+  name: string;
+  unit: string | null;
 }
 
 interface Draft {
@@ -79,6 +86,8 @@ export function PurchaseEditor({
   const [purchasedAt, setPurchasedAt] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /** The whole catalogue, so a line can be pointed somewhere else entirely. */
+  const catalog = useFetch<CatalogMaterial[]>("/materials");
 
   useEffect(() => {
     let alive = true;
@@ -99,6 +108,43 @@ export function PurchaseEditor({
 
   function patch(i: number, next: Partial<Draft>) {
     setDrafts((ds) => ds.map((d, n) => (n === i ? { ...d, ...next } : d)));
+  }
+
+  /**
+   * Repoint a line at a different material.
+   *
+   * The unit travels with it: glycerine is held in gram and jojoba oil in ml,
+   * so keeping the old unit would leave the line converting into something the
+   * new material is not measured in. The entered amount is kept — the packer
+   * counted that off the box and it is still true.
+   */
+  function repoint(i: number, materialId: string) {
+    const m = (catalog.data ?? []).find((x) => x.id === materialId);
+    if (!m) return;
+    patch(i, {
+      materialId: m.id,
+      materialName: m.name,
+      unit: m.unit,
+      contentUnit: m.unit ?? "",
+    });
+  }
+
+  /** A line the parcel held that nobody recorded. */
+  function addLine() {
+    const m = (catalog.data ?? [])[0];
+    if (!m) return;
+    setDrafts((ds) => [
+      ...ds,
+      {
+        materialId: m.id,
+        materialName: m.name,
+        unit: m.unit,
+        qtyPcs: "1",
+        content: "1",
+        contentUnit: m.unit ?? "",
+        totalCost: "",
+      },
+    ]);
   }
 
   /** What a line will actually put on the shelf, in the catalogue's unit. */
@@ -219,8 +265,24 @@ export function PurchaseEditor({
               const units = compatibleUnits(d.unit);
               return (
                 <div key={i} className="rounded-lg border border-line p-3">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="font-medium text-ink">{d.materialName}</div>
+                  <div className="mb-2 flex items-end justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <label className="mb-1 block text-xs text-ink-3">Bahan baku</label>
+                      {/* The mapping itself, editable. A phone offers five
+                          near-identical names and the wrong one gets tapped;
+                          without this the only fix was deleting the parcel. */}
+                      <Select
+                        value={d.materialId}
+                        onChange={(e) => repoint(i, e.target.value)}
+                      >
+                        {(catalog.data ?? []).map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                            {m.unit ? ` (${m.unit})` : ""}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
                     <Button
                       variant="text"
                       size="sm"
@@ -284,6 +346,10 @@ export function PurchaseEditor({
                 </div>
               );
             })}
+
+            <Button variant="outline" size="sm" onClick={addLine} disabled={!catalog.data?.length}>
+              + Tambah bahan
+            </Button>
 
             {!drafts.length && (
               <div className="rounded-lg border border-dashed border-line p-4 text-center text-sm text-ink-3">

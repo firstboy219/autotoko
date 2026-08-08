@@ -597,6 +597,8 @@ export class ResiService {
           select count(*)::int from resi_scan_items i
           where i.resi_scan_id = ${resiScans.id} and i.master_product_id is null
         )`,
+        itemsConfirmedAt: resiScans.itemsConfirmedAt,
+        itemsConfirmedBy: resiScans.itemsConfirmedBy,
         trackingStatus: resiScans.trackingStatus,
         trackingCategory: resiScans.trackingCategory,
         packerPaidAt: resiScans.packerPaidAt,
@@ -806,6 +808,51 @@ export class ResiService {
       .returning();
     if (!row) throw new NotFoundException("Baris isi paket tidak ditemukan.");
     return { ok: true as const };
+  }
+
+  /**
+   * Mark a parcel's contents as checked by a person.
+   *
+   * Refused while any line is unmapped, and refused when there are none at
+   * all. A parcel with nothing in it is the state a scan starts in, so
+   * accepting that as confirmation would make the flag mean nothing — and the
+   * empty case is exactly the one worth stopping on, because it is what a
+   * failed OCR read looks like.
+   */
+  async confirmItems(userId: string, scanId: string, by?: string) {
+    await this.getScanOrThrow(userId, scanId);
+
+    const lines = await this.db
+      .select({ id: resiScanItems.id, masterProductId: resiScanItems.masterProductId })
+      .from(resiScanItems)
+      .where(eq(resiScanItems.resiScanId, scanId));
+
+    if (!lines.length) {
+      throw new BadRequestException(
+        "Isi paket masih kosong. Tambahkan produknya dulu sebelum dikonfirmasi.",
+      );
+    }
+    const unmapped = lines.filter((l) => !l.masterProductId).length;
+    if (unmapped) {
+      throw new BadRequestException(
+        `Masih ada ${unmapped} baris yang belum dipilih produknya.`,
+      );
+    }
+
+    const [row] = await this.db
+      .update(resiScans)
+      .set({
+        itemsConfirmedAt: new Date(),
+        itemsConfirmedBy: by?.slice(0, 64) ?? null,
+      })
+      .where(and(eq(resiScans.id, scanId), eq(resiScans.userId, userId)))
+      .returning();
+
+    return {
+      id: row!.id,
+      itemsConfirmedAt: row!.itemsConfirmedAt,
+      itemCount: lines.length,
+    };
   }
 
   /** Ownership check: a scan id alone proves nothing about who owns it. */

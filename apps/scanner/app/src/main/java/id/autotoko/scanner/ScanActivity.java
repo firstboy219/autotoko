@@ -1052,7 +1052,7 @@ public class ScanActivity extends AppCompatActivity {
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
 
-        new MaterialAlertDialogBuilder(this)
+        final androidx.appcompat.app.AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle(candidates.isEmpty()
                         ? "Isi paket"
                         : "Cocokkan isi paket (" + candidates.size() + ")")
@@ -1061,7 +1061,16 @@ public class ScanActivity extends AppCompatActivity {
                 // open and a dismissed dialog would leave the parcel unsaved
                 // with nothing on screen to say so.
                 .setCancelable(false)
-                .setPositiveButton("Simpan", (dlg, w) -> {
+                .setPositiveButton("Simpan", null)
+                .setNeutralButton("Tambah produk baru", null)
+                .create();
+
+        // Wired after show() so a refusal can keep the sheet open. Handing the
+        // listener to the builder dismisses the dialog before it runs, which
+        // is exactly wrong here: the whole point is that an unanswered sheet
+        // does not go away.
+        dialog.setOnShowListener(dd -> {
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(bv -> {
                     candidates.addAll(manual);
                     for (Candidate c : candidates) {
                         // Null once the row was deleted; chosen is -1 by then
@@ -1075,10 +1084,85 @@ public class ScanActivity extends AppCompatActivity {
                             // Left at 1, which is what almost every parcel holds.
                         }
                     }
+                    // Nothing chosen is not an answer. The packer is
+                    // holding the parcel; if the label names something the
+                    // catalogue lacks, the neutral button adds it rather than
+                    // letting the contents be recorded as unknown.
+                    int chosen = 0;
+                    for (Candidate c : candidates) {
+                        if (c.chosen >= 0 && c.chosen < c.ranked.size()) chosen++;
+                    }
+                    if (chosen == 0) {
+                        candidates.removeAll(manual);
+                        Toast.makeText(this,
+                                "Pilih minimal satu produk. Kalau belum ada di master, "
+                                        + "pakai \"Tambah produk baru\".",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    dialog.dismiss();
                     submit(resi, raw, format, photoBase64, reading(candidates, true));
+            });
+
+            dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(bv ->
+                    promptNewProduct(name -> {
+                        List<ProductMatcher.Match> all = new ArrayList<>();
+                        for (ProductMatcher.Product p : catalogue) all.add(ProductMatcher.pick(p));
+                        final Candidate c = new Candidate(null, all);
+                        c.manual = true;
+                        // The one just created is last in the catalogue.
+                        c.chosen = all.size() - 1;
+                        manual.add(c);
+                        TextView added = new TextView(this);
+                        added.setText("Ditambahkan: " + name + "  (jumlah 1)");
+                        added.setTextSize(12);
+                        added.setTextColor(Color.parseColor("#1B7F4B"));
+                        manualRows.addView(added);
+                    }));
+        });
+        dialog.show();
+    }
+
+    /**
+     * Create a product without leaving the bench.
+     *
+     * The SKU is generated because nobody standing at a packing table has one
+     * to hand, and a blank would collide with the next blank. It is editable
+     * later on the web, where that is somebody's actual job.
+     */
+    private void promptNewProduct(java.util.function.Consumer<String> onCreated) {
+        final EditText input = new EditText(this);
+        input.setHint("Nama produk seperti di master");
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Produk baru")
+                .setMessage("Produk ini akan masuk ke master produk dan bisa dirapikan "
+                        + "lewat web nanti.")
+                .setView(input)
+                .setPositiveButton("Simpan", (d, w) -> {
+                    String name = input.getText().toString().trim();
+                    if (name.length() < 2) {
+                        Toast.makeText(this, "Nama produk terlalu pendek.", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    String sku = name.toUpperCase(java.util.Locale.ROOT)
+                            .replaceAll("[^A-Z0-9]", "")
+                            .replaceAll("^(.{0,12}).*$", "$1")
+                            + "-" + (System.currentTimeMillis() % 100000);
+                    api.createProduct(name, sku, r -> {
+                        if (!r.ok() || r.data() == null) {
+                            Toast.makeText(this, r.message("Gagal menambah produk."),
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        String id = r.data().optString("id");
+                        catalogue.add(new ProductMatcher.Product(id, name, sku));
+                        Toast.makeText(this, "Produk ditambahkan.", Toast.LENGTH_SHORT).show();
+                        onCreated.accept(name);
+                    });
                 })
-                .setNegativeButton("Lewati", (dlg, w) ->
-                        submit(resi, raw, format, photoBase64, reading(new ArrayList<>(), true)))
+                .setNegativeButton("Batal", null)
                 .show();
     }
 
@@ -1186,7 +1270,20 @@ public class ScanActivity extends AppCompatActivity {
                     showBanner(true, resi, extra);
                 }
                 refreshCounter();
-                done(resi);
+
+                // The parcel is saved; now record that its contents were
+                // checked by a person rather than matched by the phone. Only
+                // sent when there was something to check -- the server refuses
+                // an empty or half-mapped sheet, and a refusal here would be
+                // noise on a scan that is otherwise fine.
+                String scanId = r.data() != null ? r.data().optString("id", "") : "";
+                boolean hadItems = r.data() != null
+                        && r.data().optInt("itemCount", 1) != 0;
+                if (!scanId.isEmpty() && hadItems) {
+                    api.confirmItems(scanId, c -> done(resi));
+                } else {
+                    done(resi);
+                }
                 return;
             }
 

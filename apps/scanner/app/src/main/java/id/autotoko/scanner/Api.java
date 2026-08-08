@@ -224,6 +224,37 @@ public final class Api {
                 session.token(), payload, cb);
     }
 
+    /**
+     * Record that a person checked what was in the parcel.
+     *
+     * Separate from the scan itself: the scan says a waybill was photographed,
+     * this says somebody read the contents and stands behind them. Refused by
+     * the server while any line has no product, so a half-filled sheet cannot
+     * be passed off as checked.
+     */
+    public void confirmItems(String scanId, Cb cb) {
+        JSONObject body = new JSONObject();
+        try { body.put("by", android.os.Build.MODEL); } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/resi/scans/" + scanId + "/items/confirm",
+                session.token(), body, cb);
+    }
+
+    /**
+     * Create a master product from the bench.
+     *
+     * The label names something that is not in the catalogue, and the packer
+     * is standing there holding it. The alternative was to leave the line
+     * unmapped and hope somebody reconstructed it later from a photograph.
+     */
+    public void createProduct(String name, String sku, Cb cb) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("name", name);
+            body.put("sku", sku);
+        } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/products", session.token(), body, cb);
+    }
+
     /** Raw-material parcels reported from this phone, newest first. */
     public void purchases(Cb cb) {
         call("GET", session.baseUrl() + "/api/materials/purchases", session.token(), null, cb);

@@ -66,6 +66,14 @@ export const packingSettings = pgTable("packing_settings", {
  * rawName/rawQty keep what OCR read even after the mapping is corrected, so
  * the two can be compared later to see where the reading goes wrong.
  */
+/*
+ * Confirmation lives on the scan, not on its lines.
+ *
+ * "Every line has a product" is not the same statement as "somebody looked at
+ * this parcel and says that is what was in it" — the first is satisfied by a
+ * lucky OCR match nobody read.
+ */
+
 export const resiScanItems = pgTable(
   "resi_scan_items",
   {
@@ -179,6 +187,16 @@ export const resiScans = pgTable(
     deviceText: text("device_text"),
     /** Sharpness the scanner's own meter reported at capture, 0-100. */
     deviceClarity: numeric("device_clarity", { precision: 5, scale: 2 }),
+    /**
+     * When a person said what was in the parcel — not when a machine guessed.
+     *
+     * Null is the outstanding state. Nothing downstream consumes stock from a
+     * scan's contents on the strength of an OCR match alone, because the
+     * dangerous failure here is a confident wrong one.
+     */
+    itemsConfirmedAt: timestamp("items_confirmed_at", { withTimezone: true }),
+    /** Which phone or operator confirmed it; a floor runs several. */
+    itemsConfirmedBy: varchar("items_confirmed_by", { length: 64 }),
     /** 0-100, as tesseract reported it. On these photos it runs 32-50. */
     ocrConfidence: numeric("ocr_confidence", { precision: 5, scale: 2 }),
 
