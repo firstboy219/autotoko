@@ -28,6 +28,7 @@ import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -282,6 +283,13 @@ public class ScanActivity extends AppCompatActivity {
         bannerText = findViewById(R.id.bannerText);
 
         findViewById(R.id.manual).setOnClickListener(v -> promptManual());
+
+        // Re-booked on every launch, not only when the setting changes. A
+        // reboot, a force-stop or a cleared task can lose the pending work,
+        // and enqueueUniqueWork with REPLACE makes doing it again harmless.
+        StockReminder.ensureChannel(this);
+        StockReminder.schedule(this);
+        askNotificationPermission();
 
         // CODE_128 and CODE_39 only.
         //
@@ -1424,6 +1432,96 @@ public class ScanActivity extends AppCompatActivity {
                 .setText(torchOn ? "Lampu ✓" : "Lampu");
     }
 
+    /**
+     * Ask once, on Android 13+, and never insist.
+     *
+     * Refusing costs the reminder and nothing else, so there is no second
+     * prompt and no explanation screen: the setting in the menu says plainly
+     * that notifications are off, which is where somebody who changes their
+     * mind will actually look.
+     */
+    private void askNotificationPermission() {
+        if (Build.VERSION.SDK_INT < 33) return;
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+        try {
+            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 91);
+        } catch (Exception ignored) {}
+    }
+
+    /** What the menu row says without being opened. */
+    private String reminderSummary() {
+        if (!session.reminderEnabled()) return "Mati";
+        return String.format(java.util.Locale.ROOT,
+                "Aktif setiap hari jam %02d:00", session.reminderHour());
+    }
+
+    /**
+     * Switch the reminder off, or move it.
+     *
+     * The hour matters more than it looks: a reminder that lands after the
+     * suppliers stop taking orders tells somebody about a problem they can no
+     * longer do anything about today, which is how a notification becomes
+     * noise.
+     */
+    private void showReminderSettings() {
+        final boolean[] on = { session.reminderEnabled() };
+        final int[] hour = { session.reminderHour() };
+
+        float d = getResources().getDisplayMetrics().density;
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (20 * d);
+        root.setPadding(pad, pad, pad, pad);
+
+        final CheckBox enable = new CheckBox(this);
+        enable.setText("Ingatkan cek stok setiap hari");
+        enable.setChecked(on[0]);
+        root.addView(enable);
+
+        TextView label = new TextView(this);
+        label.setText("Jam pengingat");
+        label.setTextSize(12);
+        label.setPadding(0, (int) (14 * d), 0, (int) (4 * d));
+        root.addView(label);
+
+        final Spinner hours = new Spinner(this);
+        List<String> opts = new ArrayList<>();
+        for (int h = 0; h < 24; h++) opts.add(String.format(java.util.Locale.ROOT, "%02d:00", h));
+        hours.setAdapter(new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_dropdown_item, opts));
+        hours.setSelection(hour[0]);
+        root.addView(hours);
+
+        final TextView note = new TextView(this);
+        note.setTextSize(11);
+        note.setTextColor(Color.parseColor("#6B7178"));
+        note.setPadding(0, (int) (12 * d), 0, 0);
+        note.setText("Pengingat hanya muncul kalau masih ada bahan yang belum "
+                + "diperbarui hari itu. Kalau rekan sudah mengeceknya, tidak ada notifikasi.");
+        root.addView(note);
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Pengingat Stok Harian")
+                .setView(root)
+                .setPositiveButton("Simpan", (dlg, w) -> {
+                    session.setReminderEnabled(enable.isChecked());
+                    session.setReminderHour(hours.getSelectedItemPosition());
+                    // schedule() cancels when the setting is off, so one call
+                    // covers both directions.
+                    StockReminder.schedule(this);
+                    Toast.makeText(this,
+                            enable.isChecked()
+                                    ? "Pengingat aktif jam "
+                                        + String.format(java.util.Locale.ROOT, "%02d:00",
+                                            hours.getSelectedItemPosition())
+                                    : "Pengingat dimatikan.",
+                            Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Batal", null)
+                .show();
+    }
+
     private void showMenu() {
         View sheet = getLayoutInflater().inflate(R.layout.sheet_menu, null);
         com.google.android.material.bottomsheet.BottomSheetDialog dialog =
@@ -1450,6 +1548,13 @@ public class ScanActivity extends AppCompatActivity {
             dialog.dismiss();
             startActivity(new Intent(this, HistoryActivity.class));
         });
+        TextView reminderState = sheet.findViewById(R.id.menuReminderState);
+        reminderState.setText(reminderSummary());
+        sheet.findViewById(R.id.menuReminder).setOnClickListener(v -> {
+            dialog.dismiss();
+            showReminderSettings();
+        });
+
         sheet.findViewById(R.id.menuLogout).setOnClickListener(v -> {
             dialog.dismiss();
             session.clear();

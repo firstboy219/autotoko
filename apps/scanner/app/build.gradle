@@ -16,8 +16,8 @@ android {
         applicationId "id.autotoko.scanner"
         minSdk 21
         targetSdk 34
-        versionCode 16
-        versionName "2.5"
+        versionCode 17
+        versionName "2.6"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -52,6 +52,9 @@ android {
 
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
+    // Survives reboots and Doze, which a bare AlarmManager on a cheap Android
+    // with an aggressive battery saver does not.
+    implementation 'androidx.work:work-runtime:2.9.0'
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
 

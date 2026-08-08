@@ -100,6 +100,17 @@ export class MaterialsController {
     return ok(await this.materials.getPurchase(uid(req), id));
   }
 
+  /**
+   * Has today's stock check been done? Asked by the phone's daily reminder.
+   *
+   * Cheap and called once a day per device, so no caching: a stale "already
+   * done" would suppress the one reminder that mattered.
+   */
+  @Get("stock-freshness")
+  async stockFreshness(@Req() req: FastifyRequest) {
+    return ok(await this.materials.stockFreshness(uid(req)));
+  }
+
   /** Everything that has moved this material, with a running balance. */
   @Get(":id/movements")
   async movements(@Req() req: FastifyRequest, @Param("id") id: string) {

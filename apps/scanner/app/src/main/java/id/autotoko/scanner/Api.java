@@ -255,6 +255,17 @@ public final class Api {
         call("POST", session.baseUrl() + "/api/products", session.token(), body, cb);
     }
 
+    /**
+     * Has today's stock round been done? Asked by the daily reminder.
+     *
+     * The answer has to come from the server: several people share the shelf,
+     * and a phone only knows what its own owner did.
+     */
+    public void stockFreshness(Cb cb) {
+        call("GET", session.baseUrl() + "/api/materials/stock-freshness",
+                session.token(), null, cb);
+    }
+
     /** Raw-material parcels reported from this phone, newest first. */
     public void purchases(Cb cb) {
         call("GET", session.baseUrl() + "/api/materials/purchases", session.token(), null, cb);

@@ -1026,6 +1026,74 @@ export class MaterialsService {
   }
 
   /**
+   * Whether today's stock check has been done, and what is still outstanding.
+   *
+   * Answered here rather than on the phone because the shelf is shared: the
+   * packer asking may not be the person who already did it this morning, and a
+   * reminder that fires anyway is one people learn to swipe away.
+   *
+   * "Today" is the seller's day, not the server's. The server runs in UTC and
+   * Jakarta is seven hours ahead, so a naive comparison would treat everything
+   * done before 07:00 local as yesterday's work — every morning.
+   */
+  async stockFreshness(userId: string, timeZone = "Asia/Jakarta") {
+    const rows = await this.db
+      .select({
+        id: materials.id,
+        name: materials.name,
+        stockLevel: materials.stockLevel,
+        stockLevelAt: materials.stockLevelAt,
+      })
+      .from(materials)
+      .where(eq(materials.userId, userId));
+
+    /** The calendar date in the seller's zone, as YYYY-MM-DD. */
+    const dayIn = (d: Date) =>
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(d);
+
+    const today = dayIn(new Date());
+    let updatedToday = 0;
+    let newest: Date | null = null;
+    const stale: { id: string; name: string; lastAt: Date | null }[] = [];
+
+    for (const r of rows) {
+      const at = r.stockLevelAt ? new Date(r.stockLevelAt) : null;
+      if (at && (!newest || at > newest)) newest = at;
+      if (at && dayIn(at) === today) updatedToday++;
+      else stale.push({ id: r.id, name: r.name, lastAt: at });
+    }
+
+    // Oldest first: the material nobody has looked at for longest is the one
+    // worth naming in a one-line notification.
+    stale.sort((a, b) => {
+      if (!a.lastAt) return -1;
+      if (!b.lastAt) return 1;
+      return a.lastAt.getTime() - b.lastAt.getTime();
+    });
+
+    return {
+      total: rows.length,
+      updatedToday,
+      staleCount: stale.length,
+      /** Named so a notification can say what, not just how many. */
+      oldest: stale[0] ? { name: stale[0].name, lastAt: stale[0].lastAt } : null,
+      lastUpdatedAt: newest,
+      /**
+       * False when there is nothing to chase — no materials at all, or every
+       * one already seen today. A reminder that fires on a finished day is how
+       * a reminder stops being read.
+       */
+      due: rows.length > 0 && stale.length > 0,
+      today,
+    };
+  }
+
+  /**
    * Every movement of one material, newest first, with a running balance.
    *
    * The balance is computed forwards from the oldest row and attached to each,
