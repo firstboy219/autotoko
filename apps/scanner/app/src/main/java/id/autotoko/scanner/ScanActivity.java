@@ -37,6 +37,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import androidx.camera.core.CameraSelector;
 import android.util.Range;
 import androidx.camera.core.ExposureState;
@@ -264,12 +265,7 @@ public class ScanActivity extends AppCompatActivity {
         detail = findViewById(R.id.courier);
         counter = findViewById(R.id.counter);
         hint = findViewById(R.id.hint);
-        findViewById(R.id.delivery).setOnClickListener(v ->
-                startActivity(new Intent(this, DeliveryActivity.class)));
-        findViewById(R.id.textscan).setOnClickListener(v ->
-                startActivity(new Intent(this, TextScanActivity.class)));
-        findViewById(R.id.stock).setOnClickListener(v ->
-                startActivity(new Intent(this, StockActivity.class)));
+        findViewById(R.id.menu).setOnClickListener(v -> showMenu());
         clarityBar = findViewById(R.id.clarityBar);
         clarityText = findViewById(R.id.clarityText);
         liveRead = findViewById(R.id.liveRead);
@@ -280,9 +276,6 @@ public class ScanActivity extends AppCompatActivity {
         bannerText = findViewById(R.id.bannerText);
 
         findViewById(R.id.manual).setOnClickListener(v -> promptManual());
-        findViewById(R.id.history).setOnClickListener(v ->
-            startActivity(new Intent(this, HistoryActivity.class)));
-        findViewById(R.id.logout).setOnClickListener(v -> confirmLogout());
 
         // CODE_128 and CODE_39 only.
         //
@@ -1009,7 +1002,7 @@ public class ScanActivity extends AppCompatActivity {
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
 
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle(candidates.isEmpty()
                         ? "Isi paket"
                         : "Cocokkan isi paket (" + candidates.size() + ")")
@@ -1195,7 +1188,7 @@ public class ScanActivity extends AppCompatActivity {
      * is how a feature ends up never being used.
      */
     private void offerExtraPage(String scanId, String resi, String photoBase64) {
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("Halaman lain dari resi ini?")
                 .setMessage("Resi " + resi + " sudah pernah discan.\n\n"
                         + "Kalau lembar ini adalah halaman lanjutan dari resi yang sama, "
@@ -1245,6 +1238,48 @@ public class ScanActivity extends AppCompatActivity {
         main.postDelayed(this::idle, DONE_HOLD_MS);
     }
 
+    /**
+     * The errands that are not scanning.
+     *
+     * They used to sit on the scan screen as buttons of equal weight, which
+     * made "Keluar" look exactly as inviting as the two actions used all day.
+     * In a sheet each one has room to say what it is for.
+     */
+    private void showMenu() {
+        View sheet = getLayoutInflater().inflate(R.layout.sheet_menu, null);
+        com.google.android.material.bottomsheet.BottomSheetDialog dialog =
+                new com.google.android.material.bottomsheet.BottomSheetDialog(this);
+        dialog.setContentView(sheet);
+
+        TextView account = sheet.findViewById(R.id.menuAccount);
+        String who = session.email();
+        account.setText(who == null || who.isEmpty() ? "Keluar dari aplikasi" : who);
+
+        sheet.findViewById(R.id.menuDelivery).setOnClickListener(v -> {
+            dialog.dismiss();
+            startActivity(new Intent(this, DeliveryActivity.class));
+        });
+        sheet.findViewById(R.id.menuStock).setOnClickListener(v -> {
+            dialog.dismiss();
+            startActivity(new Intent(this, StockActivity.class));
+        });
+        sheet.findViewById(R.id.menuTextScan).setOnClickListener(v -> {
+            dialog.dismiss();
+            startActivity(new Intent(this, TextScanActivity.class));
+        });
+        sheet.findViewById(R.id.menuHistory).setOnClickListener(v -> {
+            dialog.dismiss();
+            startActivity(new Intent(this, HistoryActivity.class));
+        });
+        sheet.findViewById(R.id.menuLogout).setOnClickListener(v -> {
+            dialog.dismiss();
+            session.clear();
+            startActivity(new Intent(this, LoginActivity.class));
+            finish();
+        });
+        dialog.show();
+    }
+
     private void idle() {
         // The single place a parcel is let go of. Every path ends here, which
         // is what makes it safe for busy to be released only here.
@@ -1263,7 +1298,7 @@ public class ScanActivity extends AppCompatActivity {
         EditText input = new EditText(this);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
         input.setHint("Contoh: JX1234567890");
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("Input Manual")
                 .setMessage("Untuk label yang barcodenya rusak atau tidak terbaca.")
                 .setView(input)
@@ -1342,7 +1377,7 @@ public class ScanActivity extends AppCompatActivity {
     }
 
     private void confirmLogout() {
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("Keluar")
                 .setMessage("Keluar dari akun " + session.email() + "?")
                 .setPositiveButton("Keluar", (d, w) -> {

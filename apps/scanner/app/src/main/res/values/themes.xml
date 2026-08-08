@@ -1,8 +1,75 @@
-<resources>
-    <style name="Theme.Scanner" parent="Theme.MaterialComponents.Light.NoActionBar">
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+        Material 3 rather than Material 2.
+
+        Not a coat of paint: the theme is what every default widget reads its
+        shape, colour and typography from. Moving it means the dialogs this app
+        is mostly made of — the mapping sheets, the confirmations — stop looking
+        like a debug build without a single line of code in them changing.
+
+        Everything below is stated explicitly instead of inheriting a generated
+        palette, because the palette is not ours to generate: it has to match
+        the web app, and a seller who uses both should not feel handed to a
+        different company halfway through their day.
+    -->
+    <style name="Theme.Scanner" parent="Theme.Material3.Light.NoActionBar">
         <item name="colorPrimary">@color/brand</item>
-        <item name="colorPrimaryDark">@color/brand_dark</item>
-        <item name="colorAccent">@color/brand</item>
+        <item name="colorOnPrimary">@color/on_brand</item>
+        <item name="colorPrimaryContainer">@color/brand_tint</item>
+        <item name="colorOnPrimaryContainer">@color/brand_dark</item>
+
+        <item name="colorSecondary">@color/brand</item>
+        <item name="colorOnSecondary">@color/on_brand</item>
+        <item name="colorSecondaryContainer">@color/brand_tint</item>
+        <item name="colorOnSecondaryContainer">@color/brand_dark</item>
+
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/ink</item>
+        <item name="colorOnSurfaceVariant">@color/ink2</item>
+        <item name="colorOutline">@color/line</item>
+        <item name="colorOutlineVariant">@color/line</item>
+
+        <item name="colorError">@color/warn</item>
+        <item name="colorOnError">@color/white</item>
+
+        <item name="android:colorBackground">@color/canvas</item>
         <item name="android:windowBackground">@color/canvas</item>
+        <item name="android:statusBarColor">@color/brand_dark</item>
+        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
+
+        <item name="materialAlertDialogTheme">@style/Theme.Scanner.Dialog</item>
+        <item name="bottomSheetDialogTheme">@style/Theme.Scanner.BottomSheet</item>
+    </style>
+
+    <style name="Theme.Scanner.Dialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="alertDialogStyle">@style/Scanner.AlertDialog</item>
+        <item name="materialAlertDialogTitleTextStyle">@style/Scanner.DialogTitle</item>
+        <item name="buttonBarPositiveButtonStyle">@style/Widget.Material3.Button.TextButton.Dialog</item>
+        <item name="buttonBarNegativeButtonStyle">@style/Widget.Material3.Button.TextButton.Dialog</item>
+        <item name="buttonBarNeutralButtonStyle">@style/Widget.Material3.Button.TextButton.Dialog</item>
+    </style>
+
+    <style name="Scanner.AlertDialog" parent="MaterialAlertDialog.Material3">
+        <item name="shapeAppearanceOverlay">@style/Scanner.Shape.Dialog</item>
+    </style>
+
+    <style name="Scanner.Shape.Dialog" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">@dimen/radius_md</item>
+    </style>
+
+    <style name="Scanner.DialogTitle" parent="MaterialAlertDialog.Material3.Title.Text">
+        <item name="android:textColor">@color/ink</item>
+        <item name="android:textSize">@dimen/text_title</item>
+    </style>
+
+    <style name="Theme.Scanner.BottomSheet" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/Scanner.BottomSheet</item>
+    </style>
+
+    <style name="Scanner.BottomSheet" parent="Widget.Material3.BottomSheet.Modal">
+        <item name="backgroundTint">@color/surface</item>
     </style>
 </resources>

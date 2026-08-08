@@ -1,168 +1,170 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+    The scan screen does one thing, and now looks like it.
+
+    It used to end in six buttons of equal weight, so the two actions a packer
+    uses all day sat beside "Keluar" with nothing to tell them apart. The rest
+    moved behind a menu; what is left is the camera, what it just read, and
+    whether the picture is good enough.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000">
-
-    <androidx.camera.view.PreviewView
-        android:id="@+id/preview"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+    android:orientation="vertical"
+    android:background="@color/canvas">
 
     <LinearLayout
-        android:id="@+id/banner"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top"
-        android:layout_margin="14dp"
-        android:padding="14dp"
-        android:orientation="vertical"
-        android:visibility="gone">
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@color/brand"
+        android:paddingLeft="@dimen/space_lg"
+        android:paddingRight="@dimen/space_md">
+
         <TextView
-            android:id="@+id/bannerText"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:textSize="15sp"
+            android:text="Scan Resi"
+            android:textColor="@color/on_brand"
+            android:textSize="@dimen/text_title"
             android:textStyle="bold" />
+
+        <!-- Today's count belongs up here: it is the one number the packer
+             wants at a glance and never has to act on. -->
+        <TextView
+            android:id="@+id/counter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_pill"
+            android:paddingLeft="@dimen/space_md"
+            android:paddingRight="@dimen/space_md"
+            android:paddingTop="@dimen/space_xs"
+            android:paddingBottom="@dimen/space_xs"
+            android:textColor="@color/on_brand"
+            android:textSize="@dimen/text_small"
+            android:text="" />
     </LinearLayout>
 
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#000000">
+
+        <androidx.camera.view.PreviewView
+            android:id="@+id/preview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <LinearLayout
+            android:id="@+id/banner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:layout_margin="@dimen/space_md"
+            android:padding="@dimen/space_md"
+            android:orientation="vertical"
+            android:visibility="gone">
+            <TextView
+                android:id="@+id/bannerText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="@dimen/text_body"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </FrameLayout>
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
         android:orientation="vertical"
-        android:background="@color/white"
-        android:padding="16dp">
+        android:background="@color/surface"
+        android:padding="@dimen/space_lg">
 
-        <!-- Clarity, first thing in the panel: it is the one reading the
-             packer can act on while the parcel is still in their hand. -->
+        <!-- Sharpness first. It is the only thing on this panel the packer can
+             still do something about while the parcel is in their hand. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="6dp">
+            android:gravity="center_vertical">
 
-            <ProgressBar
+            <com.google.android.material.progressindicator.LinearProgressIndicator
                 android:id="@+id/clarityBar"
-                style="?android:attr/progressBarStyleHorizontal"
+                style="@style/Meter"
                 android:layout_width="0dp"
                 android:layout_weight="1"
-                android:layout_height="6dp"
+                android:layout_height="wrap_content"
                 android:max="100"
                 android:progress="0" />
 
             <TextView
                 android:id="@+id/clarityText"
+                style="@style/Text.Small"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginLeft="10dp"
-                android:textSize="12sp"
+                android:layout_marginLeft="@dimen/space_md"
                 android:textStyle="bold"
                 android:text="Kejelasan —" />
         </LinearLayout>
 
         <TextView
-            android:id="@+id/counter"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="@color/ink2"
-            android:textSize="12sp"
-            android:text="" />
-
-        <TextView
             android:id="@+id/detected"
+            style="@style/Text.Display"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="—"
-            android:textColor="@color/ink"
-            android:textSize="26sp"
-            android:textStyle="bold"
-            android:fontFamily="monospace"
-            android:layout_marginTop="6dp" />
+            android:layout_marginTop="@dimen/space_md"
+            android:text="Siap" />
 
         <TextView
             android:id="@+id/courier"
+            style="@style/Text.Small"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textColor="@color/brand"
-            android:textSize="13sp"
-            android:visibility="gone" />
-
-        <!-- What the phone is reading right now. The packer can see the
-             guess forming and stop pointing when it is right. -->
-        <TextView
-            android:id="@+id/liveRead"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="@color/ink2"
-            android:textSize="12sp"
-            android:lineSpacingExtra="1dp"
             android:visibility="gone" />
 
         <TextView
             android:id="@+id/hint"
+            style="@style/Text.Small"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Arahkan kamera ke nomor resi."
-            android:textColor="@color/ink2"
-            android:textSize="12sp"
-            android:layout_marginTop="2dp"
-            android:layout_marginBottom="10dp" />
+            android:layout_marginTop="@dimen/space_xs"
+            android:text="Arahkan kamera ke barcode pada resi. Tersimpan otomatis." />
 
-        <!-- Two rows: five buttons on one line leaves each of them too narrow
-             to read on a phone. -->
+        <TextView
+            android:id="@+id/liveRead"
+            style="@style/Text.Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:lineSpacingExtra="1dp"
+            android:visibility="gone" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="8dp">
+            android:layout_marginTop="@dimen/space_md">
 
-            <Button android:id="@+id/delivery"
-                android:layout_width="0dp" android:layout_weight="1"
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/manual"
+                style="@style/Button.Secondary"
+                android:layout_width="0dp"
+                android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_input"
-                android:text="Bahan Datang" android:textAllCaps="false"
-                android:textColor="@color/ink" android:textSize="13sp"
-                android:layout_marginRight="8dp" />
+                android:text="Input Manual" />
 
-            <Button android:id="@+id/textscan"
-                android:layout_width="0dp" android:layout_weight="1"
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/menu"
+                style="@style/Button.Quiet"
+                android:layout_width="0dp"
+                android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_input"
-                android:text="Scan Teks" android:textAllCaps="false"
-                android:textColor="@color/ink" android:textSize="13sp" />
-
-            <Button android:id="@+id/manual"
-                android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_input"
-                android:text="Input Manual" android:textAllCaps="false"
-                android:textColor="@color/ink" android:textSize="13sp" />
-
-            <Button android:id="@+id/stock"
-                android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_input"
-                android:text="Stok" android:textAllCaps="false"
-                android:textColor="@color/ink" android:textSize="13sp"
-                android:layout_marginLeft="8dp" />
-
-            <Button android:id="@+id/history"
-                android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_input"
-                android:text="Riwayat" android:textAllCaps="false"
-                android:textColor="@color/ink" android:textSize="13sp"
-                android:layout_marginLeft="8dp" />
-
-            <Button android:id="@+id/logout"
-                android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_input"
-                android:text="Keluar" android:textAllCaps="false"
-                android:textColor="@color/ink2" android:textSize="13sp"
-                android:layout_marginLeft="8dp" />
+                android:layout_marginLeft="@dimen/space_sm"
+                android:text="Menu Lainnya" />
         </LinearLayout>
     </LinearLayout>
-</FrameLayout>
+</LinearLayout>

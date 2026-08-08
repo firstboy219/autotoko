@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Everything the packer does occasionally.
+
+    A sheet rather than more buttons: these are five separate errands, not five
+    variations of one, and a list gives each of them room to say what it is for
+    instead of fitting into a word and a half.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingBottom="@dimen/space_lg">
+
+    <TextView
+        style="@style/Text.Title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="@dimen/space_lg"
+        android:text="Menu Lainnya" />
+
+    <LinearLayout
+        android:id="@+id/menuDelivery"
+        style="@style/SheetRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView style="@style/Text.Body" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Bahan Baku Datang" />
+        <TextView style="@style/Text.Caption" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Scan resi bahan yang masuk, stok BOM bertambah" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/menuStock"
+        style="@style/SheetRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView style="@style/Text.Body" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Kontrol Stok" />
+        <TextView style="@style/Text.Caption" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Isi kondisi tiap bahan, bagikan kebutuhan restock" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/menuTextScan"
+        style="@style/SheetRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView style="@style/Text.Body" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Scan Teks" />
+        <TextView style="@style/Text.Caption" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Buat produk, alias, atau bahan baku dari tulisan di kemasan" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/menuHistory"
+        style="@style/SheetRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView style="@style/Text.Body" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Riwayat Scan" />
+        <TextView style="@style/Text.Caption" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Lihat dan hapus resi yang sudah discan" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="@dimen/space_sm"
+        android:layout_marginBottom="@dimen/space_sm"
+        android:background="@color/line" />
+
+    <LinearLayout
+        android:id="@+id/menuLogout"
+        style="@style/SheetRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView style="@style/Text.Body" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textColor="@color/warn"
+            android:text="Keluar" />
+        <TextView android:id="@+id/menuAccount" style="@style/Text.Caption"
+            android:layout_width="match_parent" android:layout_height="wrap_content" />
+    </LinearLayout>
+</LinearLayout>

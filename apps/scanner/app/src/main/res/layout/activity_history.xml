@@ -7,43 +7,60 @@
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="56dp"
         android:orientation="horizontal"
-        android:background="@color/white"
-        android:padding="14dp"
-        android:gravity="center_vertical">
+        android:gravity="center_vertical"
+        android:background="@color/brand"
+        android:paddingLeft="@dimen/space_sm"
+        android:paddingRight="@dimen/space_lg">
 
-        <Button android:id="@+id/back"
-            android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:background="@drawable/bg_input"
-            android:text="Kembali" android:textAllCaps="false"
-            android:textColor="@color/ink" android:textSize="13sp" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/back"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/on_brand"
+            android:textAllCaps="false"
+            android:text="Kembali" />
 
-        <TextView android:id="@+id/header"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
+        <TextView
+            android:id="@+id/header"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="@dimen/space_xs"
             android:text="Riwayat Scan"
-            android:textColor="@color/ink" android:textSize="16sp"
-            android:textStyle="bold"
-            android:layout_marginLeft="12dp" />
+            android:textColor="@color/on_brand"
+            android:textSize="@dimen/text_title"
+            android:textStyle="bold" />
     </LinearLayout>
 
     <TextView
+        android:id="@+id/subhead"
+        style="@style/Text.Caption"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Tekan lama sebuah baris untuk menghapusnya."
-        android:textColor="@color/ink2"
-        android:textSize="11sp"
-        android:padding="12dp" />
+        android:paddingLeft="@dimen/space_lg"
+        android:paddingRight="@dimen/space_lg"
+        android:paddingTop="@dimen/space_md"
+        android:paddingBottom="@dimen/space_sm"
+        android:text="Ketuk sebuah baris untuk menghapusnya." />
 
-    <TextView android:id="@+id/empty"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
+    <TextView
+        android:id="@+id/empty"
+        style="@style/Text.Small"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
         android:text="Belum ada resi yang discan."
-        android:textColor="@color/ink2" android:textSize="14sp"
-        android:padding="24dp" android:gravity="center"
+        android:padding="@dimen/space_xl"
+        android:gravity="center"
         android:visibility="gone" />
 
-    <ListView android:id="@+id/list"
-        android:layout_width="match_parent" android:layout_height="match_parent"
-        android:divider="@color/line" android:dividerHeight="1dp"
-        android:padding="8dp" />
+    <ListView
+        android:id="@+id/list"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/surface"
+        android:divider="@color/line"
+        android:dividerHeight="1dp" />
 </LinearLayout>

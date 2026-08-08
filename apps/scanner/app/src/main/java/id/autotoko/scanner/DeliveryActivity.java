@@ -25,6 +25,8 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ExperimentalGetImage;
 import androidx.camera.core.ImageAnalysis;
@@ -372,7 +374,7 @@ public class DeliveryActivity extends AppCompatActivity {
             if (rows.size() >= 8) break;
         }
 
-        android.widget.Button add = new android.widget.Button(this);
+        MaterialButton add = new MaterialButton(this);
         add.setText("+ Tambah bahan");
         add.setAllCaps(false);
         add.setOnClickListener(v -> addRow(rowsBox, rows, null, catalogue, d));
@@ -417,7 +419,7 @@ public class DeliveryActivity extends AppCompatActivity {
         ScrollView sv = new ScrollView(this);
         sv.addView(root);
 
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("Bahan Datang — " + resi)
                 .setView(sv)
                 .setCancelable(false)
@@ -539,7 +541,7 @@ public class DeliveryActivity extends AppCompatActivity {
                     }
                 }
 
-                AlertDialog.Builder done = new AlertDialog.Builder(this)
+                AlertDialog.Builder done = new MaterialAlertDialogBuilder(this)
                         .setTitle("Tersimpan")
                         .setMessage(sb.toString())
                         .setPositiveButton("Lanjut", (d, w) -> reset());
@@ -613,7 +615,7 @@ public class DeliveryActivity extends AppCompatActivity {
         EditText input = new EditText(this);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
         input.setHint("Nomor resi bahan baku");
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("Input Resi Manual")
                 .setView(input)
                 .setPositiveButton("Lanjut", (d, w) -> {

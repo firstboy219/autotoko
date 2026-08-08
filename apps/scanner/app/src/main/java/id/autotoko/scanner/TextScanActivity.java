@@ -22,6 +22,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ExperimentalGetImage;
 import androidx.camera.core.ImageAnalysis;
@@ -242,7 +243,7 @@ public class TextScanActivity extends AppCompatActivity {
         box.addView(hint);
         box.addView(text);
 
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("Simpan sebagai")
                 .setView(box)
                 .setPositiveButton("Produk Baru", (d, w) -> askProduct(text.getText().toString().trim()))
@@ -299,7 +300,7 @@ public class TextScanActivity extends AppCompatActivity {
         ScrollView sv = new ScrollView(this);
         sv.addView(box);
 
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("Produk Baru")
                 .setView(sv)
                 .setPositiveButton("Simpan", (dl, w) -> {
@@ -357,7 +358,7 @@ public class TextScanActivity extends AppCompatActivity {
         box.addView(label("Tambahkan ke produk"));
         box.addView(sp);
 
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("Jadikan Alias")
                 .setView(box)
                 .setPositiveButton("Simpan", (d, w) -> {
@@ -417,7 +418,7 @@ public class TextScanActivity extends AppCompatActivity {
         ScrollView sv = new ScrollView(this);
         sv.addView(box);
 
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("Bahan Baku")
                 .setView(sv)
                 .setPositiveButton("Simpan", (dl, w) -> {

@@ -16,6 +16,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.material.button.MaterialButton;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -120,13 +121,13 @@ public class StockActivity extends AppCompatActivity {
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setPadding(pad, (int) (8 * d), pad, pad);
 
-        Button share = new Button(this);
+        MaterialButton share = new MaterialButton(this);
         share.setText("Bagikan ke WhatsApp");
         share.setAllCaps(false);
         share.setOnClickListener(v -> share());
         bar.addView(share, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        Button close = new Button(this);
+        MaterialButton close = new MaterialButton(this);
         close.setText("Tutup");
         close.setAllCaps(false);
         close.setOnClickListener(v -> finish());
@@ -184,22 +185,20 @@ public class StockActivity extends AppCompatActivity {
         int pad = (int) (16 * d);
 
         for (final Item it : items) {
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(pad, (int) (8 * d), pad, (int) (8 * d));
-
-            TextView name = new TextView(this);
-            name.setText(it.unit == null || it.unit.isEmpty() ? it.name : it.name + " (" + it.unit + ")");
-            name.setTextSize(13);
-            name.setTextColor(Color.parseColor("#1B1D1F"));
-            row.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            // Inflated rather than assembled by hand, so this list and the
+            // history list are laid out by the same file instead of by two
+            // sets of numbers that drifted apart.
+            View row = getLayoutInflater().inflate(R.layout.row_stock, list, false);
+            ((TextView) row.findViewById(R.id.stockName)).setText(it.name);
+            TextView unitLine = row.findViewById(R.id.stockUnit);
+            unitLine.setText(it.unit == null || it.unit.isEmpty() ? "" : "satuan: " + it.unit);
+            unitLine.setVisibility(it.unit == null || it.unit.isEmpty() ? View.GONE : View.VISIBLE);
 
             List<String> options = new ArrayList<>();
             options.add("— belum diisi —");
             for (String label : LEVEL_LABELS) options.add(label);
 
-            Spinner spinner = new Spinner(this);
+            Spinner spinner = row.findViewById(R.id.stockLevel);
             spinner.setAdapter(new ArrayAdapter<>(
                     this, android.R.layout.simple_spinner_dropdown_item, options));
             spinner.setSelection(it.level + 1);
@@ -212,10 +211,6 @@ public class StockActivity extends AppCompatActivity {
                 }
                 @Override public void onNothingSelected(AdapterView<?> p) {}
             });
-            LinearLayout.LayoutParams sp =
-                    new LinearLayout.LayoutParams((int) (150 * d), ViewGroup.LayoutParams.WRAP_CONTENT);
-            row.addView(spinner, sp);
-
             list.addView(row);
 
             View line = new View(this);

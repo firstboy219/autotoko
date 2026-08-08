@@ -1,0 +1,23 @@
+<resources>
+    <!-- One spacing scale, so nothing is aligned by eye. Every margin and pad
+         in the app is one of these; a value that is not here is a mistake. -->
+    <dimen name="space_xs">4dp</dimen>
+    <dimen name="space_sm">8dp</dimen>
+    <dimen name="space_md">12dp</dimen>
+    <dimen name="space_lg">16dp</dimen>
+    <dimen name="space_xl">24dp</dimen>
+
+    <dimen name="radius_sm">10dp</dimen>
+    <dimen name="radius_md">14dp</dimen>
+
+    <!-- Android's own minimum for anything a thumb has to hit. Warehouse hands
+         are often gloved, so nothing interactive goes below it. -->
+    <dimen name="touch_min">48dp</dimen>
+
+    <dimen name="text_caption">11sp</dimen>
+    <dimen name="text_small">13sp</dimen>
+    <dimen name="text_body">15sp</dimen>
+    <dimen name="text_title">18sp</dimen>
+    <!-- The scanned waybill. Read at arm's length while holding a parcel. -->
+    <dimen name="text_display">26sp</dimen>
+</resources>

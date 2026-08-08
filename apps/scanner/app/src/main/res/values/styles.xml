@@ -1,0 +1,104 @@
+<resources>
+
+    <!--
+        A type ramp with four steps and one job each.
+
+        The screens had every size between 11 and 26sp chosen line by line,
+        which is why nothing looked deliberate: when everything is slightly
+        different, nothing reads as more important than anything else.
+    -->
+    <!-- The base every step of the ramp inherits, which is also what makes
+         the dotted names legal: aapt reads "Text.Display" as "a Text". -->
+    <style name="Text">
+        <item name="android:textColor">@color/ink</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+
+    <style name="Text.Display">
+        <item name="android:textSize">@dimen/text_display</item>
+        <item name="android:textColor">@color/ink</item>
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="Text.Title">
+        <item name="android:textSize">@dimen/text_title</item>
+        <item name="android:textColor">@color/ink</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="Text.Body">
+        <item name="android:textSize">@dimen/text_body</item>
+        <item name="android:textColor">@color/ink</item>
+    </style>
+
+    <style name="Text.Small">
+        <item name="android:textSize">@dimen/text_small</item>
+        <item name="android:textColor">@color/ink2</item>
+    </style>
+
+    <style name="Text.Caption">
+        <item name="android:textSize">@dimen/text_caption</item>
+        <item name="android:textColor">@color/ink3</item>
+    </style>
+
+    <!-- Section label above a group of fields. Small, quiet, always there. -->
+    <style name="Text.Label" parent="Text.Caption">
+        <item name="android:textAllCaps">true</item>
+        <item name="android:letterSpacing">0.06</item>
+        <item name="android:paddingTop">@dimen/space_md</item>
+        <item name="android:paddingBottom">@dimen/space_xs</item>
+    </style>
+
+    <!--
+        Three button weights, so a screen can say which action it expects.
+
+        Every button in the app used the same custom background, which meant
+        "Keluar" looked exactly as inviting as "Simpan".
+    -->
+    <style name="Button.Primary" parent="Widget.Material3.Button">
+        <item name="android:minHeight">@dimen/touch_min</item>
+        <item name="android:textSize">@dimen/text_small</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
+    <style name="Button.Secondary" parent="Widget.Material3.Button.TonalButton">
+        <item name="android:minHeight">@dimen/touch_min</item>
+        <item name="android:textSize">@dimen/text_small</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
+    <style name="Button.Quiet" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:minHeight">@dimen/touch_min</item>
+        <item name="android:textSize">@dimen/text_small</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
+    <style name="Field" parent="Widget.Material3.TextInputLayout.OutlinedBox">
+        <item name="boxCornerRadiusTopStart">@dimen/radius_sm</item>
+        <item name="boxCornerRadiusTopEnd">@dimen/radius_sm</item>
+        <item name="boxCornerRadiusBottomStart">@dimen/radius_sm</item>
+        <item name="boxCornerRadiusBottomEnd">@dimen/radius_sm</item>
+    </style>
+
+    <!-- The clarity meter and any other inline progress. Thin on purpose: it
+         is a readout, not a task the packer is waiting on. -->
+    <style name="Meter" parent="Widget.Material3.LinearProgressIndicator">
+        <item name="trackThickness">6dp</item>
+        <item name="trackCornerRadius">3dp</item>
+    </style>
+
+    <!-- A row in the menu sheet: a title, a line saying what it is for, and a
+         target big enough for a gloved thumb. -->
+    <style name="SheetRow">
+        <item name="android:orientation">vertical</item>
+        <item name="android:minHeight">@dimen/touch_min</item>
+        <item name="android:paddingLeft">@dimen/space_lg</item>
+        <item name="android:paddingRight">@dimen/space_lg</item>
+        <item name="android:paddingTop">@dimen/space_md</item>
+        <item name="android:paddingBottom">@dimen/space_md</item>
+        <item name="android:background">?attr/selectableItemBackground</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+</resources>
