@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   calculateHpp,
   calculatePublishPricing,
@@ -48,11 +48,25 @@ export class CostingService {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
   /** Overview: every product with its HPP, publish price and projected profit. */
-  async list(userId: string) {
+  /** `brandId` narrows to one business; "none" is the unassigned ones. */
+  async list(userId: string, brandId?: string | null) {
+    // "none" is a real answer: unassigned products must stay reachable, or a
+    // filter quietly becomes a way to lose them.
+    const brandWhere =
+      brandId === "none"
+        ? isNull(masterProducts.shopCategoryId)
+        : brandId
+          ? eq(masterProducts.shopCategoryId, brandId)
+          : undefined;
+
     const products = await this.db
       .select()
       .from(masterProducts)
-      .where(eq(masterProducts.userId, userId))
+      .where(
+        brandWhere
+          ? and(eq(masterProducts.userId, userId), brandWhere)
+          : eq(masterProducts.userId, userId),
+      )
       .orderBy(asc(masterProducts.name));
     if (!products.length) return [];
 

@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -36,8 +37,11 @@ export class CostingController {
   constructor(private readonly costing: CostingService) {}
 
   @Get()
-  async list(@Req() req: FastifyRequest) {
-    return ok(await this.costing.list(uid(req)));
+  async list(
+    @Req() req: FastifyRequest,
+    @Query("brandId") brandId?: string,
+  ) {
+    return ok(await this.costing.list(uid(req), brandId || null));
   }
 
   // Declared BEFORE @Get(":productId") — otherwise "packing-materials" is

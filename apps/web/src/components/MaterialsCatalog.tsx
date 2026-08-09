@@ -33,6 +33,7 @@ interface Material {
   unitCost: number;
   unitCostUpdatedAt: string | null;
   minimumThreshold: number;
+  shopCategoryId?: string | null;
   usedByProducts: number;
   isLow: boolean;
 }
@@ -219,6 +220,8 @@ function EditMaterialModal({
   const [cost, setCost] = useState(String(material.unitCost));
   const [stock, setStock] = useState(String(material.currentStock));
   const [minimum, setMinimum] = useState(String(material.minimumThreshold));
+  const [brandId, setBrandId] = useState(material.shopCategoryId ?? "");
+  const brands = useFetch<{ id: string; name: string }[]>("/shops/categories");
   const [busy, setBusy] = useState(false);
 
   async function save() {
@@ -230,6 +233,9 @@ function EditMaterialModal({
         unitCost: Number(cost) || 0,
         currentStock: Number(stock) || 0,
         minimumThreshold: Number(minimum) || 0,
+        // "" means the seller chose "tanpa brand", which is a decision and
+        // clears the field; undefined would leave whatever was there.
+        shopCategoryId: brandId || null,
       });
       onDone();
     } catch (e) {
@@ -262,6 +268,19 @@ function EditMaterialModal({
             di HPP semuanya.
           </InlineAlert>
         )}
+        <Field
+          label="Brand / kategori bisnis"
+          hint="Menentukan di daftar brand mana bahan ini muncul."
+        >
+          <Select value={brandId} onChange={(e) => setBrandId(e.target.value)}>
+            <option value="">— tanpa brand —</option>
+            {(brands.data ?? []).map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
         <Field label="Nama" required>
           <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </Field>

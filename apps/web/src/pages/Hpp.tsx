@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
@@ -9,13 +10,14 @@ import {
   CardHeader,
   EmptyState,
   PageHeader,
+  Select,
   SkeletonRows,
-  Table,
-  TableWrap,
   TD,
   TH,
   THead,
   TR,
+  Table,
+  TableWrap,
 } from "../components/ui";
 import { PackingMaterialsCard } from "../components/PackingMaterials";
 
@@ -32,7 +34,12 @@ interface Row {
 }
 
 export function Hpp() {
-  const { data, loading } = useFetch<Row[]>("/costing");
+  /** "" every brand, "none" the unassigned ones. */
+  const [brand, setBrand] = useState("");
+  const brands = useFetch<{ id: string; name: string }[]>("/shops/categories");
+  const { data, loading } = useFetch<Row[]>(
+    brand ? `/costing?brandId=${brand}` : "/costing",
+  );
 
   return (
     <Layout title="HPP & Harga Jual">
@@ -47,6 +54,21 @@ export function Hpp() {
         <CardHeader
           title={loading ? "Memuat…" : `${data?.length ?? 0} produk`}
           subtitle="Pilih produk untuk mengatur takaran bahan, biaya jasa, dan komposisi harga."
+          action={
+            <Select
+              value={brand}
+              onChange={(e) => setBrand(e.target.value)}
+              className="min-w-[170px]"
+            >
+              <option value="">Semua brand</option>
+              {(brands.data ?? []).map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+              <option value="none">Tanpa brand</option>
+            </Select>
+          }
         />
         <TableWrap>
           <Table className="min-w-[820px]">

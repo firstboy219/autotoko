@@ -125,6 +125,7 @@ export class ProductsService {
     return { ...master, shops: [...byShop.values()] };
   }
 
+  /** `shopCategoryId` is handled below like every other optional field. */
   async updateMaster(userId: string, id: string, dto: UpdateMasterDto) {
     await this.requireMaster(userId, id);
     const [row] = await this.db

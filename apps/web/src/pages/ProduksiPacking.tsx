@@ -156,6 +156,15 @@ export function ProduksiPacking() {
   const [openOrigin, setOpenOrigin] = useState<Scan | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
+  /**
+   * The pending-task card links here with ?filter=belum-dipetakan.
+   *
+   * Read on mount only: after that the seller is driving, and re-applying it on
+   * every render would fight them the moment they cleared it.
+   */
+  const [onlyUnmapped, setOnlyUnmapped] = useState(
+    () => new URLSearchParams(window.location.search).get("filter") === "belum-dipetakan",
+  );
   const [openLabel, setOpenLabel] = useState<string | null>(null);
   const [rechecking, setRechecking] = useState(false);
   const [recheckingRow, setRecheckingRow] = useState<string | null>(null);
@@ -242,7 +251,8 @@ export function ProduksiPacking() {
     }
   }
 
-  const rows = scans.data?.rows ?? [];
+  const allRows = scans.data?.rows ?? [];
+  const rows = onlyUnmapped ? allRows.filter((r) => !r.mappedShopName) : allRows;
   const unlinked = summary.data?.unlinked ?? 0;
   const pending = summary.data?.ocrPending ?? 0;
 
@@ -324,6 +334,20 @@ export function ProduksiPacking() {
         {scans.error && (
           <div className="p-4">
             <InlineAlert tone="danger">{scans.error}</InlineAlert>
+          </div>
+        )}
+
+        {/* Visible and dismissible. A filter you cannot see is a table that
+            appears to have lost rows. */}
+        {onlyUnmapped && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-warning/5 px-4 py-2">
+            <div className="text-sm text-ink">
+              Menampilkan {rows.length} resi yang belum dipetakan ke toko
+              <span className="text-ink-3"> (dari {allRows.length})</span>
+            </div>
+            <Button variant="text" onClick={() => setOnlyUnmapped(false)}>
+              Tampilkan semua
+            </Button>
           </div>
         )}
 

@@ -114,6 +114,14 @@ export class PendingTasksService {
           eq(resiScans.userId, userId),
           or(
             isNull(resiScans.itemsConfirmedAt),
+            // Confirmed with nothing in it. These came from the 0038 backfill,
+            // which marked historic scans as checked so the genuinely
+            // outstanding ones would stand out — and a scan with no contents
+            // consumed no stock, so it is exactly as incomplete as one nobody
+            // confirmed. Without this they were invisible in both directions.
+            sql`not exists (
+              select 1 from resi_scan_items i where i.resi_scan_id = ${resiScans.id}
+            )`,
             sql`exists (
               select 1 from resi_scan_items i
               where i.resi_scan_id = ${resiScans.id} and i.master_product_id is null

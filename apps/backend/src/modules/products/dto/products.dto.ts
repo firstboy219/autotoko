@@ -5,6 +5,7 @@ import {
   IsNumberString,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   Min,
 } from "class-validator";
@@ -64,6 +65,9 @@ export class UpdateMasterDto {
   @IsOptional() @IsInt() @Min(0) weightGram?: number;
   @IsOptional() @IsArray() @IsString({ each: true }) images?: string[];
   @IsOptional() @IsEnum(PRODUCT_STATUS) status?: (typeof PRODUCT_STATUS)[number];
+  /** Which business this product belongs to; null clears it. */
+  @IsOptional() @IsUUID() shopCategoryId?: string | null;
+
 }
 
 export class CreatePostingDto {
