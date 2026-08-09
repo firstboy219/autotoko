@@ -288,6 +288,13 @@
       "when": 1786148727327,
       "tag": "0040_brand_category",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786148727328,
+      "tag": "0041_scan_codes",
+      "breakpoints": true
     }
   ]
 }

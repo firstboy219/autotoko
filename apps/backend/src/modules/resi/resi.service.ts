@@ -12,6 +12,7 @@ import {
   masterProducts,
   orders,
   packingSettings,
+  resiScanCodes,
   resiScanItems,
   resiScanPhotos,
   resiScans,
@@ -79,6 +80,11 @@ const MAX_RESI_LEN = 64;
 
 /** Where a scanned parcel lands in the order pipeline. */
 const SHIPPED: "dikirim" = "dikirim";
+
+/** Same shape as a resi: upper case, alphanumerics only. */
+function normaliseCode(v: string | null | undefined): string {
+  return (v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
 
 export interface ScanResult {
   id: string;
@@ -179,6 +185,13 @@ export class ResiService {
       shopId?: string;
       marketplace?: string;
       courierConfirmed?: string;
+      /**
+       * Every barcode the phone decoded while looking at this label.
+       *
+       * A courier label carries several and only one becomes the resi; the
+       * rest are what make a second scan of the same parcel recognisable.
+       */
+      codes?: { value: string; format?: string }[];
     },
   ): Promise<ScanResult> {
     const resi = normalizeResi(input.resi);
@@ -245,6 +258,59 @@ export class ResiService {
      * shops, and the marketplace is taken from the shop rather than from the
      * request, so the two can never end up disagreeing about a scan.
      */
+    /**
+     * Codes long enough to identify a parcel.
+     *
+     * Short ones are hub and destination codes shared by every parcel going the
+     * same way that day; matching on those would refuse the second real parcel
+     * of the morning. Ten characters is comfortably below the shortest waybill
+     * here (12) and above the sort codes.
+     */
+    const seenCodes = Array.from(
+      new Set(
+        [resi, ...(input.codes ?? []).map((c) => normaliseCode(c.value))]
+          .filter((c): c is string => Boolean(c) && c.length >= 10),
+      ),
+    );
+
+    // Checked BEFORE the insert, and before anything else writes: the
+    // TenantInterceptor runs the whole request in one transaction, so a
+    // constraint failure later would abort the reads this needs.
+    if (seenCodes.length) {
+      const [clash] = await this.db
+        .select({
+          scanId: resiScanCodes.scanId,
+          code: resiScanCodes.code,
+          resi: resiScans.resi,
+          scannedAt: resiScans.scannedAt,
+          deviceLabel: resiScans.deviceLabel,
+        })
+        .from(resiScanCodes)
+        .innerJoin(resiScans, eq(resiScans.id, resiScanCodes.scanId))
+        .where(
+          and(
+            eq(resiScanCodes.userId, userId),
+            inArray(resiScanCodes.code, seenCodes),
+          ),
+        )
+        .limit(1);
+
+      if (clash) {
+        throw new ConflictException({
+          code: "DUPLICATE",
+          message:
+            clash.resi === resi
+              ? "Resi ini sudah pernah discan."
+              : `Paket ini sudah discan sebagai ${clash.resi}. Label yang sama memuat beberapa barcode.`,
+          resi: clash.resi,
+          scanId: clash.scanId,
+          matchedCode: clash.code,
+          firstScannedAt: clash.scannedAt,
+          deviceLabel: clash.deviceLabel,
+        });
+      }
+    }
+
     const mapping: {
       shopId: string | null;
       marketplace: string | null;
@@ -386,6 +452,19 @@ export class ResiService {
     if (!inserted) throw new Error("Insert resi_scans returned no row");
 
     const stockWarnings: string[] = [];
+
+    // Written after the scan exists, so a code can never point at nothing.
+    if (seenCodes.length) {
+      const byValue = new Map((input.codes ?? []).map((c) => [normaliseCode(c.value), c.format]));
+      await this.db.insert(resiScanCodes).values(
+        seenCodes.map((code) => ({
+          userId,
+          scanId: inserted.id,
+          code,
+          format: byValue.get(code)?.slice(0, 32) ?? input.barcodeFormat?.slice(0, 32) ?? null,
+        })),
+      );
+    }
 
     // The parcel's contents, as the phone resolved them. Seeded here rather
     // than left to the background reader because the phone saw the label in

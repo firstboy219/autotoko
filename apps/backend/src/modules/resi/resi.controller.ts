@@ -42,6 +42,15 @@ function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
 }
 
+/** One barcode the phone decoded while looking at a label. */
+class ScanCodeDto {
+  @IsString() @MaxLength(64)
+  value!: string;
+
+  @IsOptional() @IsString() @MaxLength(32)
+  format?: string;
+}
+
 class ScanDto {
   // \S guards against a whitespace-only string sneaking past MaxLength — the
   // same hole a nameless material row got through on the catalog endpoint.
@@ -103,6 +112,15 @@ class ScanDto {
 
   @IsOptional() @IsString() @MaxLength(32)
   courierConfirmed?: string;
+
+  /**
+   * Every barcode seen on this label, not only the one that became the resi.
+   *
+   * A courier label carries several; the extras are what make a second scan of
+   * the same parcel recognisable when a different one wins.
+   */
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ScanCodeDto)
+  codes?: ScanCodeDto[];
 }
 
 /**

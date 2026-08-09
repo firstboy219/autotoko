@@ -234,6 +234,26 @@ public class ScanActivity extends AppCompatActivity {
     /** Remembered between parcels: a bench usually packs one shop all morning. */
     private int lastShopIndex = -1;
     private int lastCourierIndex = -1;
+    /**
+     * Every barcode decoded while looking at this one label.
+     *
+     * A courier label carries several — the waybill plus sort and reference
+     * codes — and only one becomes the resi. Sending the rest is what lets the
+     * server recognise a second scan of the same parcel when a different code
+     * happened to win. Insertion-ordered so the first seen stays first.
+     */
+    private final java.util.LinkedHashSet<String> seenCodes = new java.util.LinkedHashSet<>();
+    /**
+     * How close another barcode must be, as a fraction of the frame, to count
+     * as printed on the same label.
+     *
+     * Tight on purpose. Too small only weakens the duplicate guard; too large
+     * files a neighbour's code against this parcel and then refuses that
+     * neighbour when it is scanned for real.
+     */
+    private static final double SAME_LABEL_RADIUS = 0.30;
+    /** A label has a handful, not dozens; a runaway count means bad reads. */
+    private static final int MAX_CODES_PER_LABEL = 8;
     private boolean torchOn = false;
     private volatile RectF lastBarcodeBox = null;
 
@@ -589,6 +609,24 @@ public class ScanActivity extends AppCompatActivity {
             }
         }
         if (best == null) return;
+
+        // The other codes printed on the same label. Kept only when they sit
+        // close to the winner: see SAME_LABEL_RADIUS.
+        Rect bestBox = best.getBoundingBox();
+        for (Barcode code : codes) {
+            String raw = code.getRawValue();
+            if (raw == null) continue;
+            String other = ResiExtractor.normalize(raw);
+            if (other.length() < 10 || other.length() > 32) continue;
+            if (bestBox != null && frameWidth > 0) {
+                Rect b = code.getBoundingBox();
+                if (b == null) continue;
+                double dx = (b.exactCenterX() - bestBox.exactCenterX()) / frameWidth;
+                double dy = (b.exactCenterY() - bestBox.exactCenterY()) / frameHeight;
+                if (Math.sqrt(dx * dx + dy * dy) > SAME_LABEL_RADIUS) continue;
+            }
+            if (seenCodes.size() < MAX_CODES_PER_LABEL) seenCodes.add(other);
+        }
 
         String resi = ResiExtractor.normalize(best.getRawValue());
         if (resi.equals(mutedResi) && System.currentTimeMillis() < mutedUntil) return;
@@ -1266,6 +1304,15 @@ public class ScanActivity extends AppCompatActivity {
     private JSONObject reading(List<Candidate> candidates, boolean confirmed) {
         JSONObject out = new JSONObject();
         try {
+            if (!seenCodes.isEmpty()) {
+                JSONArray codes = new JSONArray();
+                for (String c : seenCodes) {
+                    JSONObject o = new JSONObject();
+                    o.put("value", c);
+                    codes.put(o);
+                }
+                out.put("codes", codes);
+            }
             String orderNo = reader.orderNo();
             if (orderNo != null) out.put("labelOrderNo", orderNo);
 
@@ -1695,6 +1742,9 @@ public class ScanActivity extends AppCompatActivity {
         detail.setVisibility(View.GONE);
         tookBlurred = false;
         collecting = false;
+        // Belongs to the parcel just finished with; carrying it into the next
+        // one would file this label's codes against the following parcel.
+        seenCodes.clear();
         reader.reset();
         if (liveRead != null) liveRead.setVisibility(View.GONE);
         hint.setText("Arahkan kamera ke barcode pada resi. Tersimpan otomatis.");

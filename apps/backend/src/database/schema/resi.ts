@@ -75,6 +75,36 @@ export const packingSettings = pgTable("packing_settings", {
  * lucky OCR match nobody read.
  */
 
+/**
+ * Every barcode seen while scanning one parcel.
+ *
+ * A courier label carries several. Whichever was in frame became the resi, so
+ * the same parcel could be recorded repeatedly under different numbers — and
+ * consume its raw materials each time. Two scans of one parcel overlap on at
+ * least one code even when the numbers they settled on differ, which is what
+ * makes this a workable identity where a single code is not.
+ */
+export const resiScanCodes = pgTable(
+  "resi_scan_codes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    scanId: uuid("scan_id")
+      .notNull()
+      .references(() => resiScans.id, { onDelete: "cascade" }),
+    /** Normalised like resi: upper case, alphanumerics only. */
+    code: varchar("code", { length: 64 }).notNull(),
+    format: varchar("format", { length: 32 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    lookupIdx: index("resi_scan_codes_lookup_idx").on(t.userId, t.code),
+    scanIdx: index("resi_scan_codes_scan_idx").on(t.scanId),
+  }),
+);
+
 export const resiScanItems = pgTable(
   "resi_scan_items",
   {
