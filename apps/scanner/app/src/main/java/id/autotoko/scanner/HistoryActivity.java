@@ -63,8 +63,10 @@ public class HistoryActivity extends AppCompatActivity {
         // reach it is a gesture nothing on screen mentions.
         list.setOnItemClickListener((AdapterView<?> p, View v, int pos, long id) ->
                 rowActions(pos));
+        // Same chooser as a tap. Two gestures that do different things on one
+        // list is how a packer deletes a parcel they meant to correct.
         list.setOnItemLongClickListener((AdapterView<?> p, View v, int pos, long id) -> {
-            confirmDelete(pos);
+            rowActions(pos);
             return true;
         });
 
@@ -168,6 +170,18 @@ public class HistoryActivity extends AppCompatActivity {
                     String device = clean(o.optString("deviceLabel", ""));
                     if (!courier.isEmpty()) meta.append("  ·  ").append(courier);
                     if (!device.isEmpty()) meta.append("  ·  ").append(device);
+
+                    // Which shop it came from, or that nobody has said.
+                    // Without this there was no way to see which rows needed
+                    // the edit — so the edit went unused.
+                    String shop = clean(o.optString("mappedShopName", ""));
+                    String courierOf = clean(o.optString("courierConfirmed", ""));
+                    if (!shop.isEmpty()) {
+                        meta.append("  ·  ").append(shop);
+                        if (!courierOf.isEmpty()) meta.append(" / ").append(courierOf);
+                    } else {
+                        meta.append("  ·  belum dipetakan");
+                    }
                     row.meta = meta.toString();
 
                     // The trailing column answers "is this one finished with?"

@@ -77,7 +77,7 @@
         android:paddingRight="@dimen/space_lg"
         android:paddingTop="@dimen/space_md"
         android:paddingBottom="@dimen/space_sm"
-        android:text="Ketuk sebuah baris untuk menghapusnya." />
+        android:text="Ketuk sebuah baris untuk mengubah toko/kurir atau menghapusnya." />
 
     <TextView
         android:id="@+id/empty"
