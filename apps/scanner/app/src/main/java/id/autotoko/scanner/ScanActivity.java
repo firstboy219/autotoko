@@ -1717,6 +1717,20 @@ public class ScanActivity extends AppCompatActivity {
             dialog.dismiss();
             startActivity(new Intent(this, HistoryActivity.class));
         });
+        sheet.findViewById(R.id.menuPending).setOnClickListener(v -> {
+            dialog.dismiss();
+            startActivity(new Intent(this, PendingActivity.class));
+        });
+
+        // The count on the row itself, so it is visible without opening
+        // anything — the whole reason the web version sits on the dashboard.
+        final TextView pendingTitle = sheet.findViewById(R.id.menuPendingTitle);
+        api.pendingTasks(r -> {
+            if (!r.ok() || r.data() == null) return;
+            int total = r.data().optInt("total", 0);
+            if (total > 0) pendingTitle.setText("Data Belum Lengkap (" + total + ")");
+        });
+
         TextView reminderState = sheet.findViewById(R.id.menuReminderState);
         reminderState.setText(reminderSummary());
         sheet.findViewById(R.id.menuReminder).setOnClickListener(v -> {

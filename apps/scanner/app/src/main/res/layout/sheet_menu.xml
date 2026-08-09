@@ -68,6 +68,20 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/menuPending"
+        style="@style/SheetRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView
+            android:id="@+id/menuPendingTitle"
+            style="@style/Text.Body" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Data Belum Lengkap" />
+        <TextView style="@style/Text.Caption" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Resi tanpa toko, isi paket yang belum dipastikan" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/menuReminder"
         style="@style/SheetRow"
         android:layout_width="match_parent"

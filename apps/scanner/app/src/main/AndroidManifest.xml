@@ -47,6 +47,11 @@
             android:name=".StockActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
+        <activity
+            android:name=".PendingActivity"
+            android:exported="false"
+            android:parentActivityName=".ScanActivity" />
+
 
         <activity
             android:name=".HistoryActivity"

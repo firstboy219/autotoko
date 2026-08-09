@@ -255,6 +255,16 @@ public final class Api {
         call("POST", session.baseUrl() + "/api/products", session.token(), body, cb);
     }
 
+    /**
+     * What is not finished, same list the web shows.
+     *
+     * One endpoint for both so the two screens cannot disagree about how much
+     * is outstanding — two numbers for one question is worse than one number.
+     */
+    public void pendingTasks(Cb cb) {
+        call("GET", session.baseUrl() + "/api/dashboard/pending-tasks", session.token(), null, cb);
+    }
+
     /** The seller's shops and the courier list, for the mapping sheet. */
     public void mappingOptions(Cb cb) {
         call("GET", session.baseUrl() + "/api/resi/mapping-options", session.token(), null, cb);

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/canvas">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@color/brand"
+        android:paddingLeft="@dimen/space_sm"
+        android:paddingRight="@dimen/space_lg">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/back"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/on_brand"
+            android:textAllCaps="false"
+            android:text="Kembali" />
+
+        <TextView
+            android:id="@+id/header"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="@dimen/space_xs"
+            android:text="Data Belum Lengkap"
+            android:textColor="@color/on_brand"
+            android:textSize="@dimen/text_title"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <TextView
+        style="@style/Text.Caption"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingLeft="@dimen/space_lg"
+        android:paddingRight="@dimen/space_lg"
+        android:paddingTop="@dimen/space_md"
+        android:paddingBottom="@dimen/space_sm"
+        android:text="Diurutkan dari yang paling merugikan kalau dibiarkan, bukan dari yang paling banyak." />
+
+    <TextView
+        android:id="@+id/empty"
+        style="@style/Text.Small"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Tidak ada data yang perlu dilengkapi."
+        android:padding="@dimen/space_xl"
+        android:gravity="center"
+        android:visibility="gone" />
+
+    <ListView
+        android:id="@+id/list"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/surface"
+        android:divider="@color/line"
+        android:dividerHeight="1dp" />
+</LinearLayout>
