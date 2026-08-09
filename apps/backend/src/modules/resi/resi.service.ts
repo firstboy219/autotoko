@@ -23,6 +23,7 @@ import { CourierTrackingService } from "./courier-tracking.service.js";
 import {
   COURIER_NAMES,
   MARKETPLACES,
+  guessFromText,
   matchShop,
   normaliseMarketplace,
 } from "./scan-mapping.js";
@@ -1043,6 +1044,10 @@ export class ResiService {
           shopId: resiScans.shopId,
           marketplace: resiScans.marketplace,
           courierConfirmed: resiScans.courierConfirmed,
+          // The parsed fields are filled on a small minority of scans; the raw
+          // text is there on nearly all of them and plainly carries the answer.
+          deviceText: resiScans.deviceText,
+          ocrText: resiScans.ocrText,
         })
         .from(resiScans)
         .where(and(eq(resiScans.id, scanId), eq(resiScans.userId, userId)))
@@ -1051,17 +1056,26 @@ export class ResiService {
       if (scan) {
         // An existing decision always wins over a fresh guess: re-opening the
         // sheet to change one field must not silently re-guess the others.
+        // Order matters: a decision already made, then the parsed field, then
+        // the raw text. Re-opening the sheet to change one field must not
+        // silently re-guess the others.
+        const fromText = guessFromText(scan.deviceText ?? scan.ocrText, shopList);
+
         const guessedMarketplace =
-          scan.marketplace ?? normaliseMarketplace(scan.labelMarketplace);
+          scan.marketplace ??
+          normaliseMarketplace(scan.labelMarketplace) ??
+          fromText.marketplace;
         const guessedShop =
-          scan.shopId ?? matchShop(scan.labelSenderName, guessedMarketplace, shopList);
+          scan.shopId ??
+          matchShop(scan.labelSenderName, guessedMarketplace, shopList) ??
+          fromText.shopId;
 
         suggestion = {
           shopId: guessedShop,
           marketplace:
             guessedMarketplace ??
             (guessedShop ? shopList.find((s) => s.id === guessedShop)?.marketplace ?? null : null),
-          courier: scan.courierConfirmed ?? scan.courier ?? null,
+          courier: scan.courierConfirmed ?? scan.courier ?? fromText.courier,
           fromLabel: {
             sender: scan.labelSenderName,
             marketplace: scan.labelMarketplace,

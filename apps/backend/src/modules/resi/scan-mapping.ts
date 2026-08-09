@@ -117,3 +117,67 @@ export function matchShop(
   if (best.score - runnerUp < 0.25) return null;
   return best.id;
 }
+
+/**
+ * The courier, from text OCR has mangled.
+ *
+ * Matched on fragments rather than brand names because the brand name is
+ * exactly what a bad photograph destroys: one label reads "JSTPRESS", another
+ * "J&TeRSS", a third "STEXPRESS" — all J&T Express. Anchored on pieces that
+ * survive, and ordered so the specific wins before the general.
+ */
+export function guessCourierFromText(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const t = text.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+  // SPX first: an SPX label also says "Shopee", and Shopee is a marketplace.
+  if (t.includes("SPXID") || t.includes("SPX")) return "SPX";
+  // J&T through OCR: the ampersand and vowels go, the consonant run survives.
+  if (/J.?T|JST|JNT|STEXPRESS|TEXPRESS|JETEXPRESS/.test(t)) return "J&T";
+  if (t.includes("JNE")) return "JNE";
+  if (t.includes("SICEPAT") || t.includes("SICEPA")) return "SiCepat";
+  if (t.includes("ANTERAJA") || t.includes("ANTERA")) return "Anteraja";
+  if (t.includes("NINJA")) return "Ninja";
+  if (t.includes("LIONPARCEL") || t.includes("LIONPAR")) return "Lion Parcel";
+  if (t.includes("IDEXPRESS")) return "ID Express";
+  if (t.includes("POSINDONESIA")) return "POS";
+  return null;
+}
+
+/**
+ * The marketplace, same treatment.
+ *
+ * "tokopedlo" is tokopedia with one letter lost; "SPXID" is Shopee's own
+ * carrier and says so more reliably than the word Shopee, which a J&T label
+ * also prints when the order came from there.
+ */
+export function guessMarketplaceFromText(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const t = text.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (t.includes("TOKOPEDIA") || t.includes("TOKOPEDL") || t.includes("TOKOPED")) return "tokopedia";
+  if (t.includes("SPXID") || t.includes("SHOPEE")) return "shopee";
+  if (t.includes("TIKTOK")) return "tiktok";
+  if (t.includes("LAZADA")) return "lazada";
+  if (t.includes("BUKALAPAK")) return "bukalapak";
+  return null;
+}
+
+/**
+ * Everything guessable about one label, in one call.
+ *
+ * Returns nulls freely. A field this cannot read is a field the operator has to
+ * answer, which is the arrangement the seller asked for — OCR proposes, they
+ * decide — and the whole point of the pending-task list is that the unanswered
+ * ones stay visible rather than being filled with something plausible.
+ */
+export function guessFromText(
+  text: string | null | undefined,
+  shops: { id: string; name: string; marketplace: string | null }[],
+): { courier: string | null; marketplace: string | null; shopId: string | null } {
+  const courier = guessCourierFromText(text);
+  const marketplace = guessMarketplaceFromText(text);
+  // Only after the marketplace is known, because it removes most of the field
+  // before any name is compared.
+  const shopId = matchShop(text ?? null, marketplace, shops);
+  return { courier, marketplace, shopId };
+}
