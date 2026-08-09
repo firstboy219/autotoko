@@ -52,7 +52,12 @@ interface Usage {
  */
 export function MaterialsCatalogCard() {
   const toast = useToast();
-  const list = useFetch<Material[]>("/materials");
+  /** "" is every brand, "none" is the ones nobody has assigned. */
+  const [brand, setBrand] = useState("");
+  const brands = useFetch<{ id: string; name: string }[]>("/shops/categories");
+  const list = useFetch<Material[]>(
+    brand ? `/materials?brandId=${brand}` : "/materials",
+  );
   const [editing, setEditing] = useState<Material | null>(null);
   const [deleting, setDeleting] = useState<Material | null>(null);
   /** The material whose ledger is open, or null. */
@@ -65,6 +70,24 @@ export function MaterialsCatalogCard() {
       <CardHeader
         title="Master Bahan Baku"
         subtitle="Dipakai bersama oleh semua produk. Mengubah harga di sini berlaku untuk semuanya."
+        action={
+          /* "Tanpa brand" is an option rather than a hidden bucket: a material
+             that vanishes from every view until somebody categorises it is a
+             filter that has quietly become data loss. */
+          <Select
+            value={brand}
+            onChange={(e) => setBrand(e.target.value)}
+            className="min-w-[170px]"
+          >
+            <option value="">Semua brand</option>
+            {(brands.data ?? []).map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+            <option value="none">Tanpa brand</option>
+          </Select>
+        }
       />
       <TableWrap>
         <Table>

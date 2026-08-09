@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { rupiah, dateShort } from "../lib/fmt";
 import { Icon } from "../components/Icon";
 import { ScanItemsEditor } from "../components/ScanItems";
+import { ScanOriginBulk, ScanOriginCell, ScanOriginEditor } from "../components/ScanOrigin";
 import { ScanLabelEditor } from "../components/ScanLabel";
 import {
   Badge,
@@ -151,6 +152,10 @@ export function ProduksiPacking() {
   // Only one open at a time: these editors each fetch the product list, and a
   // dozen expanded at once would be a dozen identical requests.
   const [openItems, setOpenItems] = useState<string | null>(null);
+  /** The scan whose origin is being set, and the backlog selection. */
+  const [openOrigin, setOpenOrigin] = useState<Scan | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [openLabel, setOpenLabel] = useState<string | null>(null);
   const [rechecking, setRechecking] = useState(false);
   const [recheckingRow, setRecheckingRow] = useState<string | null>(null);
@@ -322,6 +327,22 @@ export function ProduksiPacking() {
           </div>
         )}
 
+        {picked.size > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-brand/5 px-4 py-2">
+            <div className="text-sm text-ink">
+              {picked.size} resi dipilih
+            </div>
+            <div className="flex gap-2">
+              <Button variant="text" onClick={() => setPicked(new Set())}>
+                Batal pilih
+              </Button>
+              <Button variant="filled" onClick={() => setBulkOpen(true)}>
+                Petakan sekaligus
+              </Button>
+            </div>
+          </div>
+        )}
+
         <TableWrap>
           <Table>
             <THead>
@@ -406,17 +427,26 @@ export function ProduksiPacking() {
                         cosmetic gap: an unmapped parcel is invisible to every
                         per-shop figure on the dashboard. */}
                     <TD className="whitespace-nowrap">
-                      {s.mappedShopName ? (
-                        <>
-                          <div className="text-[13px] text-ink">{s.mappedShopName}</div>
-                          <div className="text-[11px] text-ink-2">
-                            {s.marketplace ?? "-"}
-                            {s.courierConfirmed ? ` · ${s.courierConfirmed}` : ""}
-                          </div>
-                        </>
-                      ) : (
-                        <Badge tone="warning">belum dipetakan</Badge>
-                      )}
+                      <div className="flex items-start gap-2">
+                        {/* Only the unmapped can be picked: a checkbox on a row
+                            that is already right invites overwriting it with a
+                            bulk answer meant for the backlog. */}
+                        {!s.mappedShopName && (
+                          <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={picked.has(s.id)}
+                            onChange={(e) => {
+                              const next = new Set(picked);
+                              if (e.target.checked) next.add(s.id);
+                              else next.delete(s.id);
+                              setPicked(next);
+                            }}
+                            aria-label={`Pilih ${s.resi} untuk dipetakan`}
+                          />
+                        )}
+                        <ScanOriginCell scan={s} onEdit={() => setOpenOrigin(s)} />
+                      </div>
                     </TD>
 
                     {/* The question a supervisor is actually scanning this
@@ -540,6 +570,27 @@ export function ProduksiPacking() {
           onClose={() => setLinking(null)}
           onDone={() => {
             setLinking(null);
+            refresh();
+          }}
+        />
+      )}
+
+      {openOrigin && (
+        <ScanOriginEditor
+          scanId={openOrigin.id}
+          resi={openOrigin.resi}
+          current={{ shopId: openOrigin.shopId, courier: openOrigin.courierConfirmed }}
+          onClose={() => setOpenOrigin(null)}
+          onSaved={refresh}
+        />
+      )}
+
+      {bulkOpen && (
+        <ScanOriginBulk
+          scanIds={[...picked]}
+          onClose={() => setBulkOpen(false)}
+          onSaved={() => {
+            setPicked(new Set());
             refresh();
           }}
         />

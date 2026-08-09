@@ -1057,6 +1057,54 @@ export class ResiService {
     };
   }
 
+  /**
+   * Map several scans at once.
+   *
+   * Deliberately explicit about which ids: no "apply to everything unmapped"
+   * shortcut. That would be one tap away from filing a month of mixed parcels
+   * under a single shop, and the mistake is invisible afterwards because the
+   * result looks exactly like careful work.
+   */
+  async confirmMappingBulk(
+    userId: string,
+    input: { scanIds: string[]; shopId?: string | null; marketplace?: string | null; courier?: string | null; by?: string },
+  ) {
+    const ids = (input.scanIds ?? []).filter(Boolean).slice(0, 500);
+    if (!ids.length) throw new BadRequestException("Belum ada resi yang dipilih.");
+
+    let marketplace = input.marketplace?.trim() || null;
+    if (input.shopId) {
+      const [shop] = await this.db
+        .select({ id: shops.id, marketplace: shops.marketplace })
+        .from(shops)
+        .where(and(eq(shops.id, input.shopId), eq(shops.userId, userId)))
+        .limit(1);
+      if (!shop) throw new NotFoundException("Toko tidak ditemukan.");
+      marketplace = shop.marketplace;
+    }
+    if (!input.shopId && !marketplace) {
+      throw new BadRequestException("Pilih tokonya, atau minimal marketplace-nya.");
+    }
+    const courier = input.courier?.trim() || null;
+    if (!courier) throw new BadRequestException("Pilih kurirnya.");
+
+    // Scoped by userId as well as by id: a list of ids from a client is not
+    // proof of ownership, and this writes to many rows at once.
+    const rows = await this.db
+      .update(resiScans)
+      .set({
+        shopId: input.shopId ?? null,
+        marketplace,
+        courierConfirmed: courier,
+        mappingConfirmedAt: new Date(),
+        mappingConfirmedBy: input.by?.slice(0, 64) ?? "web",
+      })
+      .where(and(eq(resiScans.userId, userId), inArray(resiScans.id, ids)))
+      .returning({ id: resiScans.id });
+
+    return { updated: rows.length, requested: ids.length };
+  }
+
   /** Ownership check: a scan id alone proves nothing about who owns it. */
   private async getScanOrThrow(userId: string, scanId: string) {
     const [row] = await this.db

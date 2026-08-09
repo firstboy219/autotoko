@@ -13,6 +13,7 @@ import {
   boolean,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
+import { shopCategories } from "./shops.js";
 import { shops } from "./shops";
 import {
   productStatusEnum,
@@ -32,6 +33,21 @@ export const masterProducts = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     sku: varchar("sku", { length: 128 }).notNull(), // primary SKU — links to postings
     name: varchar("name", { length: 255 }).notNull(),
+    /**
+     * Which business this belongs to.
+     *
+     * A shop category is a brand in the seller's own words — renature sells
+     * health and beauty, foodfarm sells food — and they do not share a
+     * cupboard or a catalogue. Null means unassigned, and those still show in
+     * the lists: something that vanishes because nobody categorised it is how
+     * a filter becomes data loss.
+     *
+     * NOT the existing categoryId on masterProducts, which is an integer
+     * marketplace taxonomy id from the posting flow with no foreign key here.
+     */
+    shopCategoryId: uuid("shop_category_id").references(() => shopCategories.id, {
+      onDelete: "set null",
+    }),
     /**
      * Other names this product is sold under, one per line.
      *
@@ -92,6 +108,21 @@ export const materials = pgTable(
     // near-duplicates like "Biji Kopi " vs "biji kopi".
     normalizedName: varchar("normalized_name", { length: 255 }).notNull(),
     unit: varchar("unit", { length: 32 }),
+    /**
+     * Which business this belongs to.
+     *
+     * A shop category is a brand in the seller's own words — renature sells
+     * health and beauty, foodfarm sells food — and they do not share a
+     * cupboard or a catalogue. Null means unassigned, and those still show in
+     * the lists: something that vanishes because nobody categorised it is how
+     * a filter becomes data loss.
+     *
+     * NOT the existing categoryId on masterProducts, which is an integer
+     * marketplace taxonomy id from the posting flow with no foreign key here.
+     */
+    shopCategoryId: uuid("shop_category_id").references(() => shopCategories.id, {
+      onDelete: "set null",
+    }),
     currentStock: numeric("current_stock", { precision: 14, scale: 3 }).notNull().default("0"),
     // Weighted-average cost, recomputed on every purchase so HPP reflects what
     // the stock on hand actually cost rather than only the latest price.
@@ -341,6 +372,8 @@ export const materialMovements = pgTable(
   }),
 );
 
+// masterProducts gains the same brand column; see materials above for why it
+// is not the existing categoryId, which is an integer marketplace taxonomy id.
 export const bomItems = pgTable("bom_items", {
   id: uuid("id").primaryKey().defaultRandom(),
   masterProductId: uuid("master_product_id")

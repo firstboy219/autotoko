@@ -6,7 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   bomItems,
@@ -41,11 +41,27 @@ export class MaterialsService {
 
   /* ------------------------------------------------------------ catalog */
 
-  async list(userId: string) {
+  /**
+   * `brandId` filters to one business; "none" is its own answer.
+   *
+   * Unassigned materials are reachable on purpose rather than being swept into
+   * whichever brand happens to be selected — a filter that silently hides rows
+   * is how a catalogue quietly loses things.
+   */
+  async list(userId: string, brandId?: string | null) {
+    // "none" is a real answer, not the absence of one: unassigned rows have to
+    // be reachable, or a catalogue quietly loses whatever nobody categorised.
+    const brandWhere =
+      brandId === "none"
+        ? isNull(materials.shopCategoryId)
+        : brandId
+          ? eq(materials.shopCategoryId, brandId)
+          : undefined;
+
     const rows = await this.db
       .select()
       .from(materials)
-      .where(eq(materials.userId, userId))
+      .where(brandWhere ? and(eq(materials.userId, userId), brandWhere) : eq(materials.userId, userId))
       .orderBy(materials.name);
 
     // Which products consume each material — the recipe side stays per-product.
@@ -71,6 +87,7 @@ export class MaterialsService {
       unitCostUpdatedAt: m.unitCostUpdatedAt,
       stockLevel: m.stockLevel,
       stockLevelAt: m.stockLevelAt,
+      shopCategoryId: m.shopCategoryId,
       minimumThreshold: num(m.minimumThreshold),
       stockValue: num(m.currentStock) * num(m.unitCost),
       usedByProducts: usedBy.get(m.id) ?? 0,
@@ -346,6 +363,10 @@ export class MaterialsService {
       set.unitCostUpdatedAt = new Date();
     }
     if (dto.currentStock != null) set.currentStock = dto.currentStock.toFixed(3);
+    // undefined leaves it alone; an explicit null clears the assignment. The
+    // same distinction a label PATCH once got wrong, emptying every column the
+    // form had not sent.
+    if (dto.shopCategoryId !== undefined) set.shopCategoryId = dto.shopCategoryId || null;
     await this.db.update(materials).set(set).where(eq(materials.id, id));
     return this.list(userId);
   }

@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -29,8 +30,11 @@ export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
   @Get()
-  async list(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.products.listMasters(uid(req)) };
+  async list(
+    @Req() req: FastifyRequest,
+    @Query("brandId") brandId?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.products.listMasters(uid(req), brandId || null) };
   }
 
   @Post()

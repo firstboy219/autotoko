@@ -490,6 +490,20 @@ export class ResiController {
     return { success: true, data: await this.resi.mappingOptions(uid(req), id) };
   }
 
+  /**
+   * Map several scans at once, for the backlog recorded before mapping existed.
+   *
+   * The phone can only reach what it recently scanned; everything older is
+   * only fixable from here.
+   */
+  @Post("scans/mapping-bulk")
+  async confirmMappingBulk(
+    @Req() req: FastifyRequest,
+    @Body() body: { scanIds: string[]; shopId?: string | null; marketplace?: string | null; courier?: string | null },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.confirmMappingBulk(uid(req), { ...body, by: "web" }) };
+  }
+
   /** Where the parcel came from — shop, marketplace, courier — as decided. */
   @Post("scans/:id/mapping")
   async confirmMapping(

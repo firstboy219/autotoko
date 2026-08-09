@@ -35,8 +35,8 @@ export class MaterialsController {
   constructor(private readonly materials: MaterialsService) {}
 
   @Get()
-  async list(@Req() req: FastifyRequest) {
-    return ok(await this.materials.list(uid(req)));
+  async list(@Req() req: FastifyRequest, @Query("brandId") brandId?: string) {
+    return ok(await this.materials.list(uid(req), brandId || null));
   }
 
   @Post()

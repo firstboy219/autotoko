@@ -4,7 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from "@nestjs/common";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   masterProducts,
@@ -52,11 +52,25 @@ export class ProductsService {
   }
 
   /** List masters with posting aggregates for the dashboard (PRD 6.2). */
-  async listMasters(userId: string) {
+  /** `brandId` narrows to one business; "none" means the unassigned ones. */
+  async listMasters(userId: string, brandId?: string | null) {
+    // "none" is a real answer, not the absence of one: unassigned rows have to
+    // be reachable, or a catalogue quietly loses whatever nobody categorised.
+    const brandWhere =
+      brandId === "none"
+        ? isNull(masterProducts.shopCategoryId)
+        : brandId
+          ? eq(masterProducts.shopCategoryId, brandId)
+          : undefined;
+
     const masters = await this.db
       .select()
       .from(masterProducts)
-      .where(eq(masterProducts.userId, userId));
+      .where(
+        brandWhere
+          ? and(eq(masterProducts.userId, userId), brandWhere)
+          : eq(masterProducts.userId, userId),
+      );
     if (masters.length === 0) return [];
 
     const ids = masters.map((m) => m.id);

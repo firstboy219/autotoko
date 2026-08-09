@@ -120,6 +120,9 @@ export class CreateMaterialDto {
   @IsOptional() @IsString() @MaxLength(32) unit?: string;
   @IsOptional() @IsNumber() @Min(0) unitCost?: number;
   @IsOptional() @IsNumber() @Min(0) currentStock?: number;
+
+  /** Which business this material belongs to; null clears it. */
+  @IsOptional() @IsUUID() shopCategoryId?: string | null;
   @IsOptional() @IsNumber() @Min(0) minimumThreshold?: number;
 }
 
@@ -134,6 +137,9 @@ export class UpdateMaterialDto {
   @IsOptional() @IsNumber() @Min(0) unitCost?: number;
   /** Manual stock adjustment, e.g. after a stock count. */
   @IsOptional() @IsNumber() @Min(0) currentStock?: number;
+  /** Which business this material belongs to; null clears the assignment. */
+  @IsOptional() @IsUUID() shopCategoryId?: string | null;
+
 }
 
 export class ParseReceiptDto {
