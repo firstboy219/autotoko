@@ -983,31 +983,23 @@ public class ScanActivity extends AppCompatActivity {
         String text = reader.rawText();
         if (text == null || text.length() < 8 || catalogue.isEmpty()) return out;
 
-        String hay = text.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", " ");
-        for (ProductMatcher.Product p : catalogue) {
-            String[] words = p.name.toLowerCase(java.util.Locale.ROOT)
-                    .replaceAll("[^a-z0-9]+", " ").trim().split("\\s+");
-            int need = 0, hit = 0;
-            for (String w : words) {
-                if (w.length() < 3) continue;
-                need++;
-                if (hay.contains(w)) hit++;
-            }
-            if (need > 0 && hit == need) {
-                List<ProductMatcher.Match> ranked = new ArrayList<>();
-                ranked.add(ProductMatcher.pick(p));
-                // Every other product stays reachable behind it: the guess is a
-                // starting point, and the packer must be able to move off it
-                // without leaving the sheet.
-                for (ProductMatcher.Product other : catalogue) {
-                    if (!other.id.equals(p.id)) ranked.add(ProductMatcher.pick(other));
-                }
-                Candidate c = new Candidate(null, ranked);
-                c.chosen = 0;
-                out.add(c);
-            }
-            if (out.size() >= 6) break;
+        // Character-level, because whole words do not survive: a real capture
+        // reads "Reralus Swak Spey Mih / 100ML" for "Mouthspray Siwak 100ml".
+        // The matcher returns null rather than a best-of-a-bad-lot, so an
+        // ambiguous label still opens the sheet empty rather than wrong.
+        FuzzyMatch.Scored best = FuzzyMatch.best(text, catalogue);
+        if (best == null) return out;
+
+        List<ProductMatcher.Match> ranked = new ArrayList<>();
+        ranked.add(ProductMatcher.pick(best.product));
+        // The rest of the catalogue stays behind it: a proposal the packer
+        // cannot move off is worse than no proposal.
+        for (ProductMatcher.Product other : catalogue) {
+            if (!other.id.equals(best.product.id)) ranked.add(ProductMatcher.pick(other));
         }
+        Candidate c = new Candidate(null, ranked);
+        c.chosen = 0;
+        out.add(c);
         return out;
     }
 
