@@ -1,5 +1,6 @@
 package id.autotoko.scanner;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.AdapterView;
@@ -45,6 +46,8 @@ public class HistoryActivity extends AppCompatActivity {
         String resi;
         String meta;
         String trailing;
+        /** Null when the scan was entered by hand rather than photographed. */
+        String photoUrl;
     }
 
     @Override protected void onCreate(Bundle b) {
@@ -168,6 +171,8 @@ public class HistoryActivity extends AppCompatActivity {
 
                     Row row = new Row();
                     row.resi = o.optString("resi");
+                    String pu = o.optString("photoUrl", "");
+                    row.photoUrl = pu.isEmpty() || "null".equals(pu) ? null : pu;
 
                     StringBuilder meta = new StringBuilder(Format.clock(o.optString("scannedAt", null)));
                     String courier = clean(o.optString("courier", ""));
@@ -252,12 +257,14 @@ public class HistoryActivity extends AppCompatActivity {
         new MaterialAlertDialogBuilder(this)
                 .setTitle(rows.get(pos).resi)
                 .setItems(new String[]{
+                                "Lihat foto resi",
                                 "Ubah isi paket (produk & jumlah)",
                                 "Ubah asal paket (toko & kurir)",
                                 "Hapus scan ini"},
                         (d, which) -> {
-                            if (which == 0) editItems(id);
-                            else if (which == 1) editMapping(id, pos);
+                            if (which == 0) showPhoto(pos);
+                            else if (which == 1) editItems(id, pos);
+                            else if (which == 2) editMapping(id, pos);
                             else confirmDelete(pos);
                         })
                 .setNegativeButton("Batal", null)
@@ -280,7 +287,21 @@ public class HistoryActivity extends AppCompatActivity {
      * wholesale delete-and-recreate would churn the ledger for lines nobody
      * touched.
      */
-    private void editItems(String scanId) {
+    /** The label as photographed, full screen and zoomable. */
+    private void showPhoto(int pos) {
+        if (pos < 0 || pos >= rows.size()) return;
+        Row row = rows.get(pos);
+        if (row.photoUrl == null) {
+            Toast.makeText(this, "Scan ini tidak ada fotonya.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Intent i = new Intent(this, PhotoActivity.class);
+        i.putExtra(PhotoActivity.EXTRA_URL, row.photoUrl);
+        i.putExtra(PhotoActivity.EXTRA_TITLE, row.resi);
+        startActivity(i);
+    }
+
+    private void editItems(String scanId, int pos) {
         api.scanItems(scanId, r -> {
             if (!r.ok() || r.dataArray() == null) {
                 Toast.makeText(this, r.message("Gagal memuat isi paket."), Toast.LENGTH_LONG).show();
@@ -374,6 +395,11 @@ public class HistoryActivity extends AppCompatActivity {
                 androidx.appcompat.app.AlertDialog dlg = new MaterialAlertDialogBuilder(this)
                         .setTitle("Isi paket")
                         .setView(sv)
+                        // Alongside Save rather than buried: the reason to open
+                        // the photo is to answer a question this sheet is
+                        // asking, so it has to be reachable without abandoning
+                        // the edit. The sheet stays open behind it.
+                        .setNeutralButton("Lihat foto", (dd, w) -> showPhoto(pos))
                         .setPositiveButton("Simpan", (dd, w) -> {
                             int changed = 0;
                             for (int i = 0; i < itemIds.size(); i++) {
@@ -478,6 +504,7 @@ public class HistoryActivity extends AppCompatActivity {
             new MaterialAlertDialogBuilder(this)
                     .setTitle("Asal paket")
                     .setView(root)
+                    .setNeutralButton("Lihat foto", (dd, w) -> showPhoto(pos))
                     .setPositiveButton("Simpan", (dlg, w) -> {
                         int si = shopSpinner.getSelectedItemPosition();
                         int ci = courierSpinner.getSelectedItemPosition();

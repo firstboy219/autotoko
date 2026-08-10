@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#101214">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@color/brand"
+        android:paddingLeft="@dimen/space_sm"
+        android:paddingRight="@dimen/space_lg">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/back"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/on_brand"
+            android:textAllCaps="false"
+            android:text="Kembali" />
+
+        <TextView
+            android:id="@+id/header"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="@dimen/space_xs"
+            android:text="Foto Resi"
+            android:textColor="@color/on_brand"
+            android:textSize="@dimen/text_title"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Dark behind the photo on purpose: a label is white, and a white frame
+         around it makes the edges impossible to find while zoomed. -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <id.autotoko.scanner.ZoomableImageView
+            android:id="@+id/photo"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="Foto label resi" />
+
+        <TextView
+            android:id="@+id/photoStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:textColor="#E8EAED"
+            android:text="Memuat foto…" />
+    </FrameLayout>
+
+    <TextView
+        style="@style/Text.Caption"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="@dimen/space_md"
+        android:gravity="center"
+        android:textColor="#9AA0A6"
+        android:text="Cubit untuk memperbesar · ketuk dua kali untuk zoom cepat" />
+</LinearLayout>

@@ -48,6 +48,11 @@
             android:exported="false"
             android:screenOrientation="portrait" />
         <activity
+            android:name=".PhotoActivity"
+            android:exported="false"
+            android:parentActivityName=".HistoryActivity" />
+
+        <activity
             android:name=".PendingActivity"
             android:exported="false"
             android:parentActivityName=".ScanActivity" />
