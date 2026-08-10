@@ -509,12 +509,36 @@ public class DeliveryActivity extends AppCompatActivity {
         root.addView(rowsBox);
 
         for (String line : collector.lines()) {
-            List<ProductMatcher.Match> ranked = ProductMatcher.rank(line, catalogue, 5);
-            if (ranked.isEmpty()) continue;
+            // Character-level first: whole words rarely survive these photos,
+            // and word matching is what left this sheet empty.
+            FuzzyMatch.Scored best = FuzzyMatch.best(line, catalogue);
             List<ProductMatcher.Product> opts = new ArrayList<>();
-            for (ProductMatcher.Match m : ranked) opts.add(m.product);
+            if (best != null) {
+                opts.add(best.product);
+                for (ProductMatcher.Product other : catalogue) {
+                    if (!other.id.equals(best.product.id)) opts.add(other);
+                }
+            } else {
+                List<ProductMatcher.Match> ranked = ProductMatcher.rank(line, catalogue, 5);
+                if (ranked.isEmpty()) continue;
+                for (ProductMatcher.Match m : ranked) opts.add(m.product);
+            }
             addRow(rowsBox, rows, line, opts, d);
             if (rows.size() >= 8) break;
+        }
+
+        // Nothing per line. Try the whole reading at once: a material named
+        // across two lines is invisible to line-by-line matching.
+        if (rows.isEmpty()) {
+            FuzzyMatch.Scored whole = FuzzyMatch.best(collector.lines().toString(), catalogue);
+            if (whole != null) {
+                List<ProductMatcher.Product> opts = new ArrayList<>();
+                opts.add(whole.product);
+                for (ProductMatcher.Product other : catalogue) {
+                    if (!other.id.equals(whole.product.id)) opts.add(other);
+                }
+                addRow(rowsBox, rows, null, opts, d);
+            }
         }
 
         MaterialButton add = new MaterialButton(this);
@@ -635,18 +659,20 @@ public class DeliveryActivity extends AppCompatActivity {
 
         List<String> names = new ArrayList<>();
         for (ProductMatcher.Product p : row.options) names.add(p.name);
-        Spinner sp = new Spinner(this);
-        sp.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, names));
-        sp.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                row.chosen = pos;
-                // A different material can be held in a different unit, so the
-                // picker beside the content box has to follow the choice.
-                refreshUnits(row, d);
-            }
-            @Override public void onNothingSelected(AdapterView<?> p) {}
+        // Searchable: this catalogue holds near-identical neighbours — "Label
+        // Sticker", "Label Stiker" and "Stiker" are three separate rows — and
+        // finding the right one by scrolling is guesswork.
+        Picker picker = Picker.create(this, names, "Pilih bahan baku", "— pilih bahan —");
+        picker.select(0);
+        picker.onPicked(idx -> {
+            row.chosen = idx;
+            // A different material can be held in a different unit, so the
+            // picker beside the content box has to follow the choice.
+            refreshUnits(row, d);
         });
-        block.addView(sp);
+        block.addView(picker.view(), new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout qtyRow = new LinearLayout(this);
         qtyRow.setOrientation(LinearLayout.HORIZONTAL);
