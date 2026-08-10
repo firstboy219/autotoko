@@ -314,6 +314,18 @@ public class ScanActivity extends AppCompatActivity {
         // Re-booked on every launch, not only when the setting changes. A
         // reboot, a force-stop or a cleared task can lose the pending work,
         // and enqueueUniqueWork with REPLACE makes doing it again harmless.
+        // Registered once, from the screen that owns the session. Any request
+        // on any screen that comes back unauthorised lands here.
+        Api.onUnauthorised(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            Toast.makeText(this, "Sesi berakhir. Silakan masuk lagi.", Toast.LENGTH_LONG).show();
+            session.clear();
+            Intent i = new Intent(this, LoginActivity.class);
+            i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            startActivity(i);
+            finish();
+        });
+
         StockReminder.ensureChannel(this);
         StockReminder.schedule(this);
         askNotificationPermission();
@@ -1028,8 +1040,14 @@ public class ScanActivity extends AppCompatActivity {
             qty.setInputType(InputType.TYPE_CLASS_NUMBER);
             qty.setText("1");
             qty.setHint("Jumlah");
+            qty.setSelectAllOnFocus(true);
             c.qtyField = qty;
-            block.addView(qty);
+            // Full width. Added with no layout params it took wrap_content —
+            // a box the width of the "1" inside it, which is a target nobody
+            // can reliably hit and which reads as not editable at all.
+            block.addView(qty, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
         }
 
         // Add a product by hand. The whole catalogue, not just what was read:
@@ -1096,8 +1114,11 @@ public class ScanActivity extends AppCompatActivity {
             q.setInputType(InputType.TYPE_CLASS_NUMBER);
             q.setText("1");
             q.setHint("Jumlah");
+            q.setSelectAllOnFocus(true);
             c.qtyField = q;
-            mBlock.addView(q);
+            mBlock.addView(q, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
             mBlock.addView(mDel);
         });
         root.addView(addBtn);
@@ -1183,6 +1204,13 @@ public class ScanActivity extends AppCompatActivity {
         // listener to the builder dismisses the dialog before it runs, which
         // is exactly wrong here: the whole point is that an unanswered sheet
         // does not go away.
+        if (dialog.getWindow() != null) {
+            // Without this the sheet keeps its height and the quantity box can
+            // sit behind the keyboard, which looks exactly like a field that
+            // will not accept typing.
+            dialog.getWindow().setSoftInputMode(
+                    android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        }
         dialog.setOnShowListener(dd -> {
             dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(bv -> {
                     candidates.addAll(manual);

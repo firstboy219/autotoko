@@ -28,6 +28,20 @@ public final class Api {
 
     public interface Cb { void done(Resp r); }
 
+    /**
+     * Told when a request comes back unauthorised.
+     *
+     * The token lasts twelve hours and nothing renews it, so every screen has
+     * to cope with it expiring mid-shift. Handling it in one place means a
+     * packer sees "sesi berakhir, masuk lagi" wherever they are, instead of a
+     * raw error on one screen and a silent empty list on another.
+     */
+    public interface OnUnauthorised { void expired(); }
+
+    private static volatile OnUnauthorised unauthorisedHandler = null;
+
+    public static void onUnauthorised(OnUnauthorised h) { unauthorisedHandler = h; }
+
     public static final class Resp {
         public final int code;
         public final JSONObject body;   // may be null on a transport error
@@ -265,6 +279,30 @@ public final class Api {
         call("GET", session.baseUrl() + "/api/dashboard/pending-tasks", session.token(), null, cb);
     }
 
+    /** What the parcel was recorded as containing. */
+    public void scanItems(String scanId, Cb cb) {
+        call("GET", session.baseUrl() + "/api/resi/scans/" + scanId + "/items",
+                session.token(), null, cb);
+    }
+
+    /** Point one recorded line at a different product, or change its count. */
+    public void updateScanItem(String scanId, String itemId, String masterProductId,
+                               Double qty, Cb cb) {
+        JSONObject body = new JSONObject();
+        try {
+            if (masterProductId != null) body.put("masterProductId", masterProductId);
+            if (qty != null) body.put("qty", qty);
+        } catch (Exception ignored) {}
+        call("PATCH", session.baseUrl() + "/api/resi/scans/" + scanId + "/items/" + itemId,
+                session.token(), body, cb);
+    }
+
+    /** Remove a line the reader invented, or one that was never in the box. */
+    public void deleteScanItem(String scanId, String itemId, Cb cb) {
+        call("DELETE", session.baseUrl() + "/api/resi/scans/" + scanId + "/items/" + itemId,
+                session.token(), null, cb);
+    }
+
     /** The seller's shops and the courier list, for the mapping sheet. */
     public void mappingOptions(Cb cb) {
         call("GET", session.baseUrl() + "/api/resi/mapping-options", session.token(), null, cb);
@@ -327,7 +365,16 @@ public final class Api {
     private void call(String method, String url, String token, JSONObject payload, Cb cb) {
         POOL.execute(() -> {
             Resp r = blocking(method, url, token, payload);
-            MAIN.post(() -> cb.done(r));
+            MAIN.post(() -> {
+                // Every screen, not just the one that happened to check. The
+                // token lasts twelve hours and nothing renews it, so this
+                // fires mid-shift and used to surface as a raw error here and
+                // an empty list there.
+                if (r.code == 401 && unauthorisedHandler != null) {
+                    unauthorisedHandler.expired();
+                }
+                cb.done(r);
+            });
         });
     }
 

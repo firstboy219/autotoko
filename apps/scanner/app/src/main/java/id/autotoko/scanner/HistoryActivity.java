@@ -4,7 +4,11 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.text.InputType;
+import android.view.ViewGroup;
+import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.ListView;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -247,9 +251,13 @@ public class HistoryActivity extends AppCompatActivity {
         final String id = ids.get(pos);
         new MaterialAlertDialogBuilder(this)
                 .setTitle(rows.get(pos).resi)
-                .setItems(new String[]{"Ubah asal paket (toko & kurir)", "Hapus scan ini"},
+                .setItems(new String[]{
+                                "Ubah isi paket (produk & jumlah)",
+                                "Ubah asal paket (toko & kurir)",
+                                "Hapus scan ini"},
                         (d, which) -> {
-                            if (which == 0) editMapping(id, pos);
+                            if (which == 0) editItems(id);
+                            else if (which == 1) editMapping(id, pos);
                             else confirmDelete(pos);
                         })
                 .setNegativeButton("Batal", null)
@@ -263,6 +271,155 @@ public class HistoryActivity extends AppCompatActivity {
      * sheet opens showing what was chosen rather than a blank picker that
      * quietly discards the previous decision if the packer taps Save.
      */
+    /**
+     * Re-map what was in the parcel, after the fact.
+     *
+     * Each recorded line becomes a product picker and a count. Saving walks the
+     * changes one call at a time rather than replacing the lot: the server
+     * reverses and re-applies the stock a line consumed on every change, so a
+     * wholesale delete-and-recreate would churn the ledger for lines nobody
+     * touched.
+     */
+    private void editItems(String scanId) {
+        api.scanItems(scanId, r -> {
+            if (!r.ok() || r.dataArray() == null) {
+                Toast.makeText(this, r.message("Gagal memuat isi paket."), Toast.LENGTH_LONG).show();
+                return;
+            }
+            final JSONArray items = r.dataArray();
+            if (items.length() == 0) {
+                Toast.makeText(this,
+                        "Paket ini belum punya isi. Tambahkan lewat web.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            api.products(pr -> {
+                if (!pr.ok() || pr.dataArray() == null) {
+                    Toast.makeText(this, pr.message("Master produk gagal dimuat."),
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                final List<String[]> products = new ArrayList<>();  // {id, name}
+                JSONArray pa = pr.dataArray();
+                for (int i = 0; i < pa.length(); i++) {
+                    JSONObject o = pa.optJSONObject(i);
+                    if (o != null) products.add(new String[]{o.optString("id"), o.optString("name")});
+                }
+
+                float d = getResources().getDisplayMetrics().density;
+                int pad = (int) (20 * d);
+                LinearLayout root = new LinearLayout(this);
+                root.setOrientation(LinearLayout.VERTICAL);
+                root.setPadding(pad, pad, pad, pad);
+
+                final List<String> itemIds = new ArrayList<>();
+                final List<Spinner> pickers = new ArrayList<>();
+                final List<EditText> qtys = new ArrayList<>();
+                final List<String> originalProduct = new ArrayList<>();
+                final List<String> originalQty = new ArrayList<>();
+
+                List<String> names = new ArrayList<>();
+                for (String[] p : products) names.add(p[1]);
+
+                for (int i = 0; i < items.length(); i++) {
+                    JSONObject it = items.optJSONObject(i);
+                    if (it == null) continue;
+                    itemIds.add(it.optString("id"));
+
+                    TextView raw = new TextView(this);
+                    String rawName = it.optString("rawName", "");
+                    raw.setText(rawName.isEmpty() || "null".equals(rawName)
+                            ? "Ditambahkan manual" : "Di resi: " + rawName);
+                    raw.setTextSize(11);
+                    raw.setPadding(0, (int) (12 * d), 0, (int) (2 * d));
+                    root.addView(raw);
+
+                    Spinner sp = new Spinner(this);
+                    sp.setAdapter(new ArrayAdapter<>(this,
+                            android.R.layout.simple_spinner_dropdown_item, names));
+                    String current = it.optString("masterProductId", "");
+                    int sel = -1;
+                    for (int k = 0; k < products.size(); k++) {
+                        if (products.get(k)[0].equals(current)) { sel = k; break; }
+                    }
+                    if (sel >= 0) sp.setSelection(sel);
+                    root.addView(sp);
+                    pickers.add(sp);
+                    originalProduct.add(current);
+
+                    EditText q = new EditText(this);
+                    q.setInputType(InputType.TYPE_CLASS_NUMBER);
+                    String qv = it.optString("qty", "1");
+                    q.setText(qv);
+                    q.setHint("Jumlah");
+                    q.setSelectAllOnFocus(true);
+                    root.addView(q, new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT));
+                    qtys.add(q);
+                    originalQty.add(qv);
+                }
+
+                TextView note = new TextView(this);
+                note.setTextSize(11);
+                note.setPadding(0, (int) (14 * d), 0, 0);
+                note.setText("Mengubah isi paket ikut menyesuaikan stok bahan baku "
+                        + "yang terpakai untuk paket ini.");
+                root.addView(note);
+
+                ScrollView sv = new ScrollView(this);
+                sv.addView(root);
+
+                androidx.appcompat.app.AlertDialog dlg = new MaterialAlertDialogBuilder(this)
+                        .setTitle("Isi paket")
+                        .setView(sv)
+                        .setPositiveButton("Simpan", (dd, w) -> {
+                            int changed = 0;
+                            for (int i = 0; i < itemIds.size(); i++) {
+                                int pi = pickers.get(i).getSelectedItemPosition();
+                                String newProduct = pi >= 0 && pi < products.size()
+                                        ? products.get(pi)[0] : null;
+                                String newQty = qtys.get(i).getText().toString().trim();
+
+                                boolean productMoved = newProduct != null
+                                        && !newProduct.equals(originalProduct.get(i));
+                                boolean qtyMoved = !newQty.isEmpty()
+                                        && !newQty.equals(originalQty.get(i));
+                                if (!productMoved && !qtyMoved) continue;
+
+                                Double qv = null;
+                                try { qv = Double.parseDouble(newQty); } catch (Exception ignored) {}
+                                if (qv != null && qv <= 0) continue;
+
+                                changed++;
+                                api.updateScanItem(scanId, itemIds.get(i),
+                                        productMoved ? newProduct : null,
+                                        qtyMoved ? qv : null,
+                                        rr -> {
+                                            if (!rr.ok()) {
+                                                Toast.makeText(this,
+                                                        rr.message("Sebagian baris gagal disimpan."),
+                                                        Toast.LENGTH_LONG).show();
+                                            }
+                                        });
+                            }
+                            Toast.makeText(this,
+                                    changed == 0 ? "Tidak ada perubahan."
+                                            : changed + " baris disimpan, stok disesuaikan.",
+                                    Toast.LENGTH_LONG).show();
+                        })
+                        .setNegativeButton("Batal", null)
+                        .create();
+                if (dlg.getWindow() != null) {
+                    dlg.getWindow().setSoftInputMode(
+                            android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+                }
+                dlg.show();
+            });
+        });
+    }
+
     private void editMapping(String scanId, int pos) {
         api.mappingOptions(r -> {
             if (!r.ok() || r.data() == null) {
