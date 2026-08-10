@@ -250,7 +250,18 @@ public class HistoryActivity extends AppCompatActivity {
     private void rowActions(int pos) {
         if (pos < 0 || pos >= ids.size()) return;
         if (showingDeliveries) {
-            confirmDelete(pos);
+            final String pid = ids.get(pos);
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(rows.get(pos).resi)
+                    .setItems(new String[]{
+                                    "Ubah bahan baku & jumlah",
+                                    "Hapus laporan ini"},
+                            (d, which) -> {
+                                if (which == 0) editDelivery(pid);
+                                else confirmDelete(pos);
+                            })
+                    .setNegativeButton("Batal", null)
+                    .show();
             return;
         }
         final String id = ids.get(pos);
@@ -287,6 +298,164 @@ public class HistoryActivity extends AppCompatActivity {
      * wholesale delete-and-recreate would churn the ledger for lines nobody
      * touched.
      */
+    /**
+     * Re-map a delivery's materials after the fact.
+     *
+     * Sends every line, changed or not: the server reverses the whole purchase
+     * and re-applies it, so a partial payload would silently drop the lines it
+     * left out along with the stock they added.
+     */
+    private void editDelivery(String purchaseId) {
+        api.purchase(purchaseId, r -> {
+            if (!r.ok() || r.data() == null) {
+                Toast.makeText(this, r.message("Gagal memuat laporan."), Toast.LENGTH_LONG).show();
+                return;
+            }
+            final JSONArray lines = r.data().optJSONArray("items");
+            if (lines == null || lines.length() == 0) {
+                Toast.makeText(this, "Laporan ini tidak punya baris bahan.", Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            api.materials(mr -> {
+                if (!mr.ok() || mr.dataArray() == null) {
+                    Toast.makeText(this, mr.message("Master bahan baku gagal dimuat."),
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                final List<String[]> mats = new ArrayList<>();   // {id, name, unit}
+                final List<String> matNames = new ArrayList<>();
+                JSONArray ma = mr.dataArray();
+                for (int i = 0; i < ma.length(); i++) {
+                    JSONObject o = ma.optJSONObject(i);
+                    if (o == null) continue;
+                    String unit = o.optString("unit", "");
+                    if ("null".equals(unit)) unit = "";
+                    mats.add(new String[]{o.optString("id"), o.optString("name"), unit});
+                    matNames.add(o.optString("name") + (unit.isEmpty() ? "" : "  (" + unit + ")"));
+                }
+
+                float d = getResources().getDisplayMetrics().density;
+                int pad = (int) (20 * d);
+                LinearLayout root = new LinearLayout(this);
+                root.setOrientation(LinearLayout.VERTICAL);
+                root.setPadding(pad, pad, pad, pad);
+
+                final List<Picker> pickers = new ArrayList<>();
+                final List<EditText> pcsFields = new ArrayList<>();
+                final List<EditText> contentFields = new ArrayList<>();
+
+                for (int i = 0; i < lines.length(); i++) {
+                    JSONObject it = lines.optJSONObject(i);
+                    if (it == null) continue;
+
+                    TextView label = new TextView(this);
+                    label.setText("Bahan " + (i + 1));
+                    label.setTextSize(11);
+                    label.setPadding(0, (int) (14 * d), 0, (int) (2 * d));
+                    root.addView(label);
+
+                    Picker p = Picker.create(this, matNames, "Pilih bahan baku", "— pilih bahan —");
+                    String currentId = it.optString("materialId", "");
+                    for (int k = 0; k < mats.size(); k++) {
+                        if (mats.get(k)[0].equals(currentId)) { p.select(k); break; }
+                    }
+                    root.addView(p.view(), new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT));
+                    pickers.add(p);
+
+                    LinearLayout qtyRow = new LinearLayout(this);
+                    qtyRow.setOrientation(LinearLayout.HORIZONTAL);
+
+                    EditText pcs = new EditText(this);
+                    pcs.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+                    pcs.setHint("jumlah pcs");
+                    pcs.setText(it.optString("qtyPcs", "1"));
+                    pcs.setSelectAllOnFocus(true);
+                    qtyRow.addView(pcs, new LinearLayout.LayoutParams(0,
+                            ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                    pcsFields.add(pcs);
+
+                    EditText content = new EditText(this);
+                    content.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+                    content.setHint("isi per pcs");
+                    // What was typed, not what it became: someone who entered
+                    // "1 kg" should see 1 when they come back, not 1000.
+                    String entered = it.optString("enteredContent", "");
+                    content.setText(entered.isEmpty() || "null".equals(entered)
+                            ? it.optString("contentPerPcs", "1") : entered);
+                    content.setSelectAllOnFocus(true);
+                    qtyRow.addView(content, new LinearLayout.LayoutParams(0,
+                            ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                    contentFields.add(content);
+
+                    root.addView(qtyRow);
+                }
+
+                TextView note = new TextView(this);
+                note.setTextSize(11);
+                note.setPadding(0, (int) (14 * d), 0, 0);
+                note.setText("Isi per pcs dihitung dalam satuan bahan di master. "
+                        + "Menyimpan akan menyesuaikan stok di menu BOM.");
+                root.addView(note);
+
+                ScrollView sv = new ScrollView(this);
+                sv.addView(root);
+
+                androidx.appcompat.app.AlertDialog dlg = new MaterialAlertDialogBuilder(this)
+                        .setTitle("Ubah bahan datang")
+                        .setView(sv)
+                        .setPositiveButton("Simpan", (dd, w) -> {
+                            JSONArray out = new JSONArray();
+                            for (int i = 0; i < pickers.size(); i++) {
+                                int mi = pickers.get(i).selectedIndex();
+                                if (mi < 0 || mi >= mats.size()) continue;
+                                try {
+                                    JSONObject o = new JSONObject();
+                                    o.put("materialId", mats.get(mi)[0]);
+                                    o.put("qtyPcs", parseOr(pcsFields.get(i), 1));
+                                    o.put("contentPerPcs", parseOr(contentFields.get(i), 1));
+                                    o.put("contentUnit", mats.get(mi)[2]);
+                                    out.put(o);
+                                } catch (Exception ignored) {}
+                            }
+                            if (out.length() == 0) {
+                                Toast.makeText(this, "Pilih bahannya dulu.", Toast.LENGTH_LONG).show();
+                                return;
+                            }
+                            api.updatePurchase(purchaseId, out, rr -> {
+                                if (rr.ok()) {
+                                    Toast.makeText(this, "Tersimpan, stok disesuaikan.",
+                                            Toast.LENGTH_LONG).show();
+                                    switchTo(true);
+                                } else {
+                                    Toast.makeText(this, rr.message("Gagal menyimpan."),
+                                            Toast.LENGTH_LONG).show();
+                                }
+                            });
+                        })
+                        .setNegativeButton("Batal", null)
+                        .create();
+                if (dlg.getWindow() != null) {
+                    dlg.getWindow().setSoftInputMode(
+                            android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+                }
+                dlg.show();
+            });
+        });
+    }
+
+    /** Blank or nonsense means the number it had; zero would erase the line. */
+    private static double parseOr(EditText f, double fallback) {
+        try {
+            double v = Double.parseDouble(f.getText().toString().trim());
+            return v > 0 ? v : fallback;
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
     /** The label as photographed, full screen and zoomable. */
     private void showPhoto(int pos) {
         if (pos < 0 || pos >= rows.size()) return;

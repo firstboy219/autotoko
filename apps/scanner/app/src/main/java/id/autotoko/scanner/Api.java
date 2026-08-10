@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -277,6 +278,26 @@ public final class Api {
      */
     public void pendingTasks(Cb cb) {
         call("GET", session.baseUrl() + "/api/dashboard/pending-tasks", session.token(), null, cb);
+    }
+
+    /** One recorded stock purchase, with its lines. */
+    public void purchase(String id, Cb cb) {
+        call("GET", session.baseUrl() + "/api/materials/purchases/" + id,
+                session.token(), null, cb);
+    }
+
+    /**
+     * Rewrite a purchase's lines.
+     *
+     * The server reverses everything the purchase put on the shelf and applies
+     * the new set, so this has to carry EVERY line — sending only the changed
+     * ones would delete the rest.
+     */
+    public void updatePurchase(String id, JSONArray items, Cb cb) {
+        JSONObject body = new JSONObject();
+        try { body.put("items", items); } catch (Exception ignored) {}
+        call("PATCH", session.baseUrl() + "/api/materials/purchases/" + id,
+                session.token(), body, cb);
     }
 
     /** What the parcel was recorded as containing. */

@@ -937,6 +937,14 @@ public class ScanActivity extends AppCompatActivity {
         List<LabelReader.Line> lines = reader.productLines();
         List<Candidate> candidates = buildCandidates(lines);
 
+        // Nothing clustered. productLines() wants a line seen twice before it
+        // will report it, and the product table gets one frame at most while
+        // the packer is aiming at the barcode — which is why every scan so far
+        // arrived with no proposed contents at all.
+        if (candidates.isEmpty()) {
+            candidates = guessFromRawText();
+        }
+
         // Confirmed on EVERY scan, however sure the phone is.
         //
         // It used to skip the sheet when every line matched confidently, on the
@@ -955,6 +963,52 @@ public class ScanActivity extends AppCompatActivity {
             return;
         }
         ask(resi, raw, format, photoBase64, candidates);
+    }
+
+    /**
+     * Products whose names appear in what the camera read.
+     *
+     * A product is proposed when every word of its name at least three letters
+     * long is somewhere in the text. Strict on purpose: this runs only when
+     * clustering found nothing, so its competition is an empty sheet, and a
+     * list of maybes would be worse than that — the packer would have to read
+     * and reject each one.
+     *
+     * The quantity is left at 1. The text rarely carries a count in a form
+     * worth trusting, and a wrong number that looks deliberate is worse than
+     * the number the packer would have typed anyway.
+     */
+    private List<Candidate> guessFromRawText() {
+        List<Candidate> out = new ArrayList<>();
+        String text = reader.rawText();
+        if (text == null || text.length() < 8 || catalogue.isEmpty()) return out;
+
+        String hay = text.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", " ");
+        for (ProductMatcher.Product p : catalogue) {
+            String[] words = p.name.toLowerCase(java.util.Locale.ROOT)
+                    .replaceAll("[^a-z0-9]+", " ").trim().split("\\s+");
+            int need = 0, hit = 0;
+            for (String w : words) {
+                if (w.length() < 3) continue;
+                need++;
+                if (hay.contains(w)) hit++;
+            }
+            if (need > 0 && hit == need) {
+                List<ProductMatcher.Match> ranked = new ArrayList<>();
+                ranked.add(ProductMatcher.pick(p));
+                // Every other product stays reachable behind it: the guess is a
+                // starting point, and the packer must be able to move off it
+                // without leaving the sheet.
+                for (ProductMatcher.Product other : catalogue) {
+                    if (!other.id.equals(p.id)) ranked.add(ProductMatcher.pick(other));
+                }
+                Candidate c = new Candidate(null, ranked);
+                c.chosen = 0;
+                out.add(c);
+            }
+            if (out.size() >= 6) break;
+        }
+        return out;
     }
 
     /** The sheet shown when the phone will not guess on its own. */
@@ -1024,17 +1078,14 @@ public class ScanActivity extends AppCompatActivity {
             }
             options.add("— bukan produk saya —");
 
-            Spinner spinner = new Spinner(this);
-            spinner.setAdapter(new ArrayAdapter<>(
-                    this, android.R.layout.simple_spinner_dropdown_item, options));
-            spinner.setSelection(0);
-            spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-                @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                    c.chosen = pos < c.ranked.size() ? pos : -1;
-                }
-                @Override public void onNothingSelected(AdapterView<?> p) {}
-            });
-            block.addView(spinner);
+            // Searchable: a catalogue of eighty is not a list to scroll on a
+            // phone with a parcel in the other hand.
+            Picker picker = Picker.create(this, options, "Pilih produk", "— pilih produk —");
+            picker.select(0);
+            picker.onPicked(idx -> c.chosen = idx < c.ranked.size() ? idx : -1);
+            block.addView(picker.view(), new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
 
             EditText qty = new EditText(this);
             qty.setInputType(InputType.TYPE_CLASS_NUMBER);
@@ -1099,16 +1150,11 @@ public class ScanActivity extends AppCompatActivity {
                 manualRows.removeView(mBlock);
             });
 
-            Spinner sp = new Spinner(this);
-            sp.setAdapter(new ArrayAdapter<>(
-                    this, android.R.layout.simple_spinner_dropdown_item, names));
-            sp.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-                @Override public void onItemSelected(AdapterView<?> p, View v2, int pos, long id) {
-                    c.chosen = pos;
-                }
-                @Override public void onNothingSelected(AdapterView<?> p) {}
-            });
-            mBlock.addView(sp);
+            Picker mPicker = Picker.create(this, names, "Pilih produk", "— pilih produk —");
+            mPicker.onPicked(idx -> c.chosen = idx);
+            mBlock.addView(mPicker.view(), new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
 
             EditText q = new EditText(this);
             q.setInputType(InputType.TYPE_CLASS_NUMBER);
