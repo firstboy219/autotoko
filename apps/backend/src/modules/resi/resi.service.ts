@@ -28,6 +28,7 @@ import {
   normaliseMarketplace,
 } from "./scan-mapping.js";
 import { MaterialConsumptionService } from "../materials/material-consumption.service.js";
+import { OcrMemoryService } from "./ocr-memory.service.js";
 import { ConfigService } from "@nestjs/config";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -117,6 +118,7 @@ export class ResiService {
     private readonly config: ConfigService,
     private readonly tracking: CourierTrackingService,
     private readonly consumption: MaterialConsumptionService,
+    private readonly memory: OcrMemoryService,
   ) {}
 
   /**
@@ -488,6 +490,18 @@ export class ResiService {
           })),
         )
         .returning();
+
+      // What the camera read beside what the packer stood behind. Recorded
+      // here rather than at guess time: the guess is a proposal, the
+      // confirmation is the answer, and only the answer is worth learning.
+      void this.memory.rememberScanItems(
+        userId,
+        written.map((w) => ({
+          rawName: w.rawName,
+          masterProductId: w.masterProductId,
+          source: w.source,
+        })),
+      );
 
       // The parcel has left the building, so the raw materials in it have left
       // the shelf. Until now nothing said so: deliveries added to stock and
@@ -920,6 +934,13 @@ export class ResiService {
       }
       set.qty = input.qty.toFixed(2);
     }
+
+    // Read before the update so the association being replaced is still known.
+    const [before] = await this.db
+      .select({ rawName: resiScanItems.rawName, masterProductId: resiScanItems.masterProductId })
+      .from(resiScanItems)
+      .where(and(eq(resiScanItems.id, itemId), eq(resiScanItems.resiScanId, scanId)))
+      .limit(1);
     if (!Object.keys(set).length) throw new BadRequestException("Tidak ada perubahan.");
 
     const [row] = await this.db
@@ -928,6 +949,16 @@ export class ResiService {
       .where(and(eq(resiScanItems.id, itemId), eq(resiScanItems.resiScanId, scanId)))
       .returning();
     if (!row) throw new NotFoundException("Baris isi paket tidak ditemukan.");
+    // The correction itself is the lesson: the packer has just told us this
+    // reading means something other than what was proposed.
+    if (
+      before?.masterProductId &&
+      before.masterProductId !== row.masterProductId
+    ) {
+      // The packer has just said it is not that one.
+      void this.memory.forget(userId, "product", before.rawName, before.masterProductId);
+    }
+    void this.memory.remember(userId, "product", row.rawName, row.masterProductId);
     // Re-mapping is the common case, not the exception: the phone's best guess
     // is wrong often enough that this runs several times a shift. syncScanItem
     // puts back what the previous mapping took before taking anything new, so

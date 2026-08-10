@@ -324,6 +324,17 @@ public final class Api {
                 session.token(), null, cb);
     }
 
+    /**
+     * Corrections this tenant has already made, for matching offline.
+     *
+     * Fetched once at launch with the catalogue. A tenant's vocabulary is
+     * small — it is their own labels, repeatedly — and asking per scan would
+     * put a round trip in front of the sheet the packer is waiting on.
+     */
+    public void ocrHints(Cb cb) {
+        call("GET", session.baseUrl() + "/api/resi/ocr-hints", session.token(), null, cb);
+    }
+
     /** The seller's shops and the courier list, for the mapping sheet. */
     public void mappingOptions(Cb cb) {
         call("GET", session.baseUrl() + "/api/resi/mapping-options", session.token(), null, cb);

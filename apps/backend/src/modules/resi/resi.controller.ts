@@ -37,6 +37,7 @@ import {
 import { ResiService } from "./resi.service.js";
 import { CourierTrackingService } from "./courier-tracking.service.js";
 import { AppReleasesService } from "./app-releases.service.js";
+import { OcrMemoryService } from "./ocr-memory.service.js";
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
@@ -301,6 +302,7 @@ export class ResiController {
     private readonly resi: ResiService,
     private readonly tracking: CourierTrackingService,
     private readonly appReleases: AppReleasesService,
+    private readonly memory: OcrMemoryService,
   ) {}
 
   /** 201 on a new resi; 409 with the earlier scan's details on a repeat. */
@@ -495,6 +497,17 @@ export class ResiController {
    * The phone's mapping sheet opens before the parcel is saved, so there is no
    * id yet — it needs the choices, not a suggestion.
    */
+  /**
+   * Everything learned from past corrections, for the phone to carry offline.
+   *
+   * Sent whole rather than queried per scan: the sheet opens in the moment
+   * after a barcode reads, and a round trip there is a delay the packer feels.
+   */
+  @Get("ocr-hints")
+  async ocrHints(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.memory.hints(uid(req)) };
+  }
+
   @Get("mapping-options")
   async mappingLists(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.resi.mappingOptions(uid(req)) };

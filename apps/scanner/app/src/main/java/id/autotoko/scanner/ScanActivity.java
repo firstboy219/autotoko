@@ -242,6 +242,13 @@ public class ScanActivity extends AppCompatActivity {
      * server recognise a second scan of the same parcel when a different code
      * happened to win. Insertion-ordered so the first seen stays first.
      */
+    /**
+     * Readings this tenant has already answered: normalised text to product id.
+     *
+     * Consulted before any scoring. A remembered answer is not a better guess,
+     * it is not a guess — the packer settled that exact reading themselves.
+     */
+    private final java.util.LinkedHashMap<String, String> ocrMemory = new java.util.LinkedHashMap<>();
     private final java.util.LinkedHashSet<String> seenCodes = new java.util.LinkedHashSet<>();
     /**
      * How close another barcode must be, as a fraction of the frame, to count
@@ -306,6 +313,7 @@ public class ScanActivity extends AppCompatActivity {
         textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
         loadCatalogue();
         loadMappingOptions();
+        loadOcrMemory();
         banner = findViewById(R.id.banner);
         bannerText = findViewById(R.id.bannerText);
 
@@ -995,6 +1003,21 @@ public class ScanActivity extends AppCompatActivity {
         // reads "Reralus Swak Spey Mih / 100ML" for "Mouthspray Siwak 100ml".
         // The matcher returns null rather than a best-of-a-bad-lot, so an
         // ambiguous label still opens the sheet empty rather than wrong.
+        // What has been answered before, first. No score beats the packer
+        // having already said what this reading means.
+        ProductMatcher.Product remembered = recall(text);
+        if (remembered != null) {
+            List<ProductMatcher.Match> ranked = new ArrayList<>();
+            ranked.add(ProductMatcher.pick(remembered));
+            for (ProductMatcher.Product other : catalogue) {
+                if (!other.id.equals(remembered.id)) ranked.add(ProductMatcher.pick(other));
+            }
+            Candidate c = new Candidate(text, ranked);
+            c.chosen = 0;
+            out.add(c);
+            return out;
+        }
+
         FuzzyMatch.Scored best = FuzzyMatch.best(text, catalogue);
         boolean sure = best != null;
         if (best == null) {
@@ -1012,7 +1035,10 @@ public class ScanActivity extends AppCompatActivity {
         for (ProductMatcher.Product other : catalogue) {
             if (!other.id.equals(best.product.id)) ranked.add(ProductMatcher.pick(other));
         }
-        Candidate c = new Candidate(sure ? null : UNSURE, ranked);
+        // The reading itself travels as rawName, which is what makes the
+        // packer's answer learnable. Sending the caveat instead, as an earlier
+        // build did, threw away the only thing worth remembering.
+        Candidate c = new Candidate(sure ? text : UNSURE + " | " + text, ranked);
         c.chosen = 0;
         out.add(c);
         return out;
@@ -1779,6 +1805,63 @@ public class ScanActivity extends AppCompatActivity {
         if (t.contains("lion")) return "Lion Parcel";
         if (t.contains("id express")) return "ID Express";
         if (t.contains("pos indonesia")) return "POS";
+        return null;
+    }
+
+    /** Corrections already made, newest and most-confirmed first. */
+    private void loadOcrMemory() {
+        api.ocrHints(r -> {
+            if (!r.ok() || r.dataArray() == null) return;
+            ocrMemory.clear();
+            JSONArray arr = r.dataArray();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null || !"product".equals(o.optString("kind"))) continue;
+                String raw = o.optString("raw", "");
+                String id = o.optString("targetId", "");
+                // Server sends strongest first, so the first answer for a
+                // reading wins and later, weaker ones do not overwrite it.
+                if (!raw.isEmpty() && !id.isEmpty() && !ocrMemory.containsKey(raw)) {
+                    ocrMemory.put(raw, id);
+                }
+            }
+        });
+    }
+
+    /** Same normalisation the server stores keys under. */
+    private static String normaliseForMemory(String raw) {
+        if (raw == null) return "";
+        return raw.toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim();
+    }
+
+    /**
+     * A product this exact reading has been answered with before.
+     *
+     * Exact key first, then close keys: the same label photographed twice
+     * rarely reads identically, but it reads nearly so, and "nearly" is what
+     * the similarity function is for. Null when nothing has been learned.
+     */
+    private ProductMatcher.Product recall(String rawLine) {
+        String key = normaliseForMemory(rawLine);
+        if (key.length() < 4 || ocrMemory.isEmpty()) return null;
+
+        String id = ocrMemory.get(key);
+        if (id == null) {
+            double bestSim = 0;
+            for (java.util.Map.Entry<String, String> e : ocrMemory.entrySet()) {
+                double sim = FuzzyMatch.similarity(key, e.getKey());
+                if (sim > bestSim) { bestSim = sim; id = e.getValue(); }
+            }
+            // High bar: a remembered reading is being trusted without any
+            // scoring against the catalogue, so it has to be nearly the same
+            // reading rather than merely a similar one.
+            if (bestSim < 0.85) return null;
+        }
+        for (ProductMatcher.Product p : catalogue) {
+            if (p.id.equals(id)) return p;
+        }
         return null;
     }
 

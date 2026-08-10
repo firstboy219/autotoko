@@ -9,10 +9,11 @@ import { ResiController } from "./resi.controller.js";
 import { ResiOcrTask } from "./resi-ocr.task.js";
 import { CourierTrackingService } from "./courier-tracking.service.js";
 import { AppReleasesService } from "./app-releases.service.js";
+import { OcrMemoryService } from "./ocr-memory.service.js";
 
 @Module({
   imports: [AuthModule, UploadsModule, AdminSettingsModule, MaterialsModule],
   controllers: [ResiController],
-  providers: [ResiService, ResiOcrTask, CourierTrackingService, AppReleasesService],
+  providers: [ResiService, ResiOcrTask, CourierTrackingService, AppReleasesService, OcrMemoryService],
 })
 export class ResiModule {}

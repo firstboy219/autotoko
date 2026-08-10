@@ -84,6 +84,40 @@ export const packingSettings = pgTable("packing_settings", {
  * least one code even when the numbers they settled on differ, which is what
  * makes this a workable identity where a single code is not.
  */
+/**
+ * What the camera read, and what a person said it was.
+ *
+ * A memory rather than a model. Similarity can reason its way from "Reralus
+ * Swak Spey Mih" to "Mouthspray Siwak"; nothing reasons its way from "Bagels
+ * Gyreani He" to "Inhaler Regular Peppermint", and a person has already
+ * answered that one.
+ */
+export const ocrCorrections = pgTable(
+  "ocr_corrections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** product | material */
+    kind: varchar("kind", { length: 16 }).notNull(),
+    /** Lower case, alphanumerics, single spaces. */
+    rawNorm: varchar("raw_norm", { length: 255 }).notNull(),
+    /** Kept readable: a normalised key cannot explain a guess to a person. */
+    rawText: text("raw_text"),
+    /** master_products.id or materials.id, per kind. */
+    targetId: uuid("target_id").notNull(),
+    /** Answering the same reading again strengthens it rather than duplicating. */
+    hits: integer("hits").notNull().default(1),
+    lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    lookupIdx: index("ocr_corrections_lookup_idx").on(t.userId, t.kind, t.hits),
+    uniq: unique("ocr_corrections_unique").on(t.userId, t.kind, t.rawNorm, t.targetId),
+  }),
+);
+
 export const resiScanCodes = pgTable(
   "resi_scan_codes",
   {

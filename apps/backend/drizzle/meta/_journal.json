@@ -295,6 +295,13 @@
       "when": 1786148727328,
       "tag": "0041_scan_codes",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1786148727329,
+      "tag": "0042_ocr_memory",
+      "breakpoints": true
     }
   ]
 }
