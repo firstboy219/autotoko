@@ -850,6 +850,14 @@ public class ScanActivity extends AppCompatActivity {
     }
 
     /** One product line the label appears to carry, and what it might be. */
+    /**
+     * Shown on a row whose product was picked with nothing to go on.
+     *
+     * Carried in rawText, which the sheet already prints under "Di resi:", so
+     * the caveat lands exactly where the packer is looking when they decide.
+     */
+    private static final String UNSURE = "belum yakin - pastikan produknya";
+
     private static final class Candidate {
         /** What the label said, or null when the packer added the line. */
         final String rawText;
@@ -988,6 +996,13 @@ public class ScanActivity extends AppCompatActivity {
         // The matcher returns null rather than a best-of-a-bad-lot, so an
         // ambiguous label still opens the sheet empty rather than wrong.
         FuzzyMatch.Scored best = FuzzyMatch.best(text, catalogue);
+        boolean sure = best != null;
+        if (best == null) {
+            // Asked for explicitly: a blank picker made the packer go looking
+            // before they could start. The row is marked below so a weak guess
+            // is not mistaken for a firm one.
+            best = FuzzyMatch.closest(text, catalogue);
+        }
         if (best == null) return out;
 
         List<ProductMatcher.Match> ranked = new ArrayList<>();
@@ -997,7 +1012,7 @@ public class ScanActivity extends AppCompatActivity {
         for (ProductMatcher.Product other : catalogue) {
             if (!other.id.equals(best.product.id)) ranked.add(ProductMatcher.pick(other));
         }
-        Candidate c = new Candidate(null, ranked);
+        Candidate c = new Candidate(sure ? null : UNSURE, ranked);
         c.chosen = 0;
         out.add(c);
         return out;
@@ -1180,8 +1195,16 @@ public class ScanActivity extends AppCompatActivity {
         // Carried over from the last parcel, not guessed from the label: a
         // bench packs one shop at a time, and the previous answer is a better
         // prior than OCR on a sender line the courier prints in 6pt.
-        if (lastShopIndex > 0 && lastShopIndex < shopNames.size()) {
+        // Order of preference: what the label says, then the shop the last
+        // parcel went to, then simply the first — never nothing, which is what
+        // was asked for. All three are one tap from being changed.
+        int shopGuess = guessShopIndex();
+        if (shopGuess > 0) {
+            shopSpinner.setSelection(shopGuess);
+        } else if (lastShopIndex > 0 && lastShopIndex < shopNames.size()) {
             shopSpinner.setSelection(lastShopIndex);
+        } else if (shopNames.size() > 1) {
+            shopSpinner.setSelection(1);
         }
         root.addView(shopSpinner);
 
@@ -1199,6 +1222,8 @@ public class ScanActivity extends AppCompatActivity {
         if (courierGuess > 0) courierSpinner.setSelection(courierGuess);
         else if (lastCourierIndex > 0 && lastCourierIndex < courierNames.size()) {
             courierSpinner.setSelection(lastCourierIndex);
+        } else if (courierNames.size() > 1) {
+            courierSpinner.setSelection(1);
         }
         root.addView(courierSpinner);
 
@@ -1713,6 +1738,27 @@ public class ScanActivity extends AppCompatActivity {
      * added, which is a monthly event, and a request per scan would put a
      * round trip in front of the sheet the packer is waiting on.
      */
+    /**
+     * Which shop the label's wording points at, as an index into shopSpinner.
+     *
+     * Zero means "no idea": the spinner's first entry is the placeholder, so
+     * the shop list is offset by one throughout.
+     */
+    private int guessShopIndex() {
+        String text = reader.rawText();
+        if (text == null || shopList.isEmpty()) return 0;
+        List<ProductMatcher.Product> asProducts = new ArrayList<>();
+        for (String[] sh : shopList) {
+            asProducts.add(new ProductMatcher.Product(sh[0], sh[1], ""));
+        }
+        FuzzyMatch.Scored s = FuzzyMatch.best(text, asProducts);
+        if (s == null) return 0;
+        for (int i = 0; i < shopList.size(); i++) {
+            if (shopList.get(i)[0].equals(s.product.id)) return i + 1;
+        }
+        return 0;
+    }
+
     /**
      * The carrier, from the words on the label.
      *

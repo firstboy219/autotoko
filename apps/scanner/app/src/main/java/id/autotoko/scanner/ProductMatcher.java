@@ -48,6 +48,15 @@ public final class ProductMatcher {
         public final String id;
         public final String name;
         public final String sku;
+        /**
+         * What the marketplace listing calls it, one per line.
+         *
+         * Folded into the token set below for word matching, and kept as text
+         * as well so the character-level matcher can score against it — the
+         * listing title is often nothing like the internal name, which is the
+         * whole reason this field exists.
+         */
+        public final String aliases;
         final Set<String> tokens;
         final Set<String> sizes;
 
@@ -63,6 +72,7 @@ public final class ProductMatcher {
          *     mean picking a winner between two descriptions of one thing.
          */
         public Product(String id, String name, String sku, String aliases) {
+            this.aliases = aliases == null ? "" : aliases;
             this.id = id;
             this.name = name == null ? "" : name;
             this.sku = sku == null ? "" : sku;

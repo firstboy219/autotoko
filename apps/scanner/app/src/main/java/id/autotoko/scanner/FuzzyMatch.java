@@ -115,6 +115,35 @@ public final class FuzzyMatch {
     }
 
     /**
+     * The closest entry regardless of how poor the fit is.
+     *
+     * Used where the seller has asked for a field never to be left blank: an
+     * unset picker meant the packer had to go looking for the product before
+     * they could even start, and on a bench that is worse than a wrong default
+     * they can see and change. Callers must show that it is a weak guess —
+     * best() is still the one to use when the answer has to be trustworthy.
+     */
+    public static Scored closest(String text, List<ProductMatcher.Product> catalogue) {
+        List<String> hay = tokens(text);
+        if (catalogue.isEmpty()) return null;
+        Scored top = null;
+        for (ProductMatcher.Product p : catalogue) {
+            double s = hay.isEmpty() ? 0 : coverage(p.name, hay);
+            if (p.aliases != null && !p.aliases.isEmpty()) {
+                for (String alias : p.aliases.split("\\r?\\n")) {
+                    if (alias.trim().length() < 3) continue;
+                    s = Math.max(s, coverage(alias, hay));
+                }
+            }
+            if (top == null || s > top.score) top = new Scored(p, s);
+        }
+        return top;
+    }
+
+    /** True when a score is firm enough to present without a caveat. */
+    public static boolean isConfident(double score) { return score >= NAME_COVERAGE; }
+
+    /**
      * The catalogue entry this text is about, or null when it is not clear.
      *
      * Null rather than the best of a bad lot: on this screen an empty field
@@ -127,7 +156,16 @@ public final class FuzzyMatch {
         Scored top = null;
         double second = 0;
         for (ProductMatcher.Product p : catalogue) {
+            // Best of the internal name and every marketplace alias. A listing
+            // title is often nothing like the name the seller uses internally,
+            // and it is the title that is printed on the label.
             double s = coverage(p.name, hay);
+            if (p.aliases != null && !p.aliases.isEmpty()) {
+                for (String alias : p.aliases.split("\\r?\\n")) {
+                    if (alias.trim().length() < 3) continue;
+                    s = Math.max(s, coverage(alias, hay));
+                }
+            }
             if (top == null || s > top.score) {
                 if (top != null) second = top.score;
                 top = new Scored(p, s);
