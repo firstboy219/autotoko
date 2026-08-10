@@ -511,7 +511,16 @@ public class DeliveryActivity extends AppCompatActivity {
         for (String line : collector.lines()) {
             // Character-level first: whole words rarely survive these photos,
             // and word matching is what left this sheet empty.
-            FuzzyMatch.Scored best = FuzzyMatch.best(line, catalogue);
+            // A supplier's wording repeats across their deliveries, so a
+            // material answered once is answered for good.
+            String rememberedId = FuzzyMatch.recall("material", line);
+            FuzzyMatch.Scored best = null;
+            if (rememberedId != null) {
+                for (ProductMatcher.Product p : catalogue) {
+                    if (p.id.equals(rememberedId)) { best = new FuzzyMatch.Scored(p, 1.0); break; }
+                }
+            }
+            if (best == null) best = FuzzyMatch.best(line, catalogue);
             List<ProductMatcher.Product> opts = new ArrayList<>();
             if (best != null) {
                 opts.add(best.product);

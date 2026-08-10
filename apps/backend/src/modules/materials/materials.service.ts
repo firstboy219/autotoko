@@ -18,6 +18,7 @@ import {
   packingMaterials,
 } from "../../database/schema/index.js";
 import { convertUnit } from "@autotoko/shared";
+import { OcrMemoryService } from "../resi/ocr-memory.service.js";
 import { UploadsService } from "../uploads/uploads.service.js";
 import { OcrService } from "../payout/ocr.service.js";
 import type { CreatePurchaseDto, UpdateMaterialDto } from "./dto/materials.dto.js";
@@ -37,6 +38,7 @@ export class MaterialsService {
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly uploads: UploadsService,
     private readonly ocr: OcrService,
+    private readonly memory: OcrMemoryService,
   ) {}
 
   /* ------------------------------------------------------------ catalog */
@@ -863,6 +865,7 @@ export class MaterialsService {
         purchaseId: purchase!.id,
         userId,
         materialId: material.id,
+        rawName: i.rawName?.slice(0, 255) ?? null,
         quantity: qty.toFixed(3),
         qtyPcs: pcs.toFixed(3),
         contentPerPcs: content.toFixed(3),
@@ -890,6 +893,13 @@ export class MaterialsService {
     }
 
     const written = await this.db.insert(materialPurchaseItems).values(lines).returning();
+    // What the supplier's resi said, beside the material the packer chose.
+    // Kept per line: a supplier's wording repeats across their deliveries.
+    for (const row of written) {
+      if (row.rawName) {
+        await this.memory.remember(userId, "material", row.rawName, { id: row.materialId });
+      }
+    }
     for (const row of written) {
       await this.applyStockIn(
         userId,

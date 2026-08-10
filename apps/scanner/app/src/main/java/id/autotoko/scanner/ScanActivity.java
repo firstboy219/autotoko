@@ -1243,7 +1243,9 @@ public class ScanActivity extends AppCompatActivity {
         // The barcode already told us the carrier more reliably than any
         // guess, so it is preselected — and still shown, so a wrong read is
         // visible rather than filed silently.
-        String detected = guessCourier(reader.rawText());
+        // "JSTPRESS" is J&T for ever once somebody has said so.
+        String detected = FuzzyMatch.recall("courier", reader.rawText());
+        if (detected == null) detected = guessCourier(reader.rawText());
         int courierGuess = detected == null ? -1 : courierNames.indexOf(detected);
         if (courierGuess > 0) courierSpinner.setSelection(courierGuess);
         else if (lastCourierIndex > 0 && lastCourierIndex < courierNames.size()) {
@@ -1773,6 +1775,14 @@ public class ScanActivity extends AppCompatActivity {
     private int guessShopIndex() {
         String text = reader.rawText();
         if (text == null || shopList.isEmpty()) return 0;
+
+        // What this sender line has been answered with before beats any score.
+        String remembered = FuzzyMatch.recall("shop", text);
+        if (remembered != null) {
+            for (int i = 0; i < shopList.size(); i++) {
+                if (shopList.get(i)[0].equals(remembered)) return i + 1;
+            }
+        }
         List<ProductMatcher.Product> asProducts = new ArrayList<>();
         for (String[] sh : shopList) {
             asProducts.add(new ProductMatcher.Product(sh[0], sh[1], ""));
@@ -1814,16 +1824,33 @@ public class ScanActivity extends AppCompatActivity {
             if (!r.ok() || r.dataArray() == null) return;
             ocrMemory.clear();
             JSONArray arr = r.dataArray();
+            java.util.HashMap<String, java.util.LinkedHashMap<String, String>> byKind =
+                    new java.util.HashMap<>();
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject o = arr.optJSONObject(i);
-                if (o == null || !"product".equals(o.optString("kind"))) continue;
+                if (o == null) continue;
+                String kind = o.optString("kind", "");
                 String raw = o.optString("raw", "");
-                String id = o.optString("targetId", "");
+                // A courier's answer is a name, not a row.
+                String target = "courier".equals(kind)
+                        ? o.optString("targetText", "")
+                        : o.optString("targetId", "");
+                if (kind.isEmpty() || raw.isEmpty() || target.isEmpty()) continue;
+
+                java.util.LinkedHashMap<String, String> m = byKind.get(kind);
+                if (m == null) { m = new java.util.LinkedHashMap<>(); byKind.put(kind, m); }
                 // Server sends strongest first, so the first answer for a
                 // reading wins and later, weaker ones do not overwrite it.
-                if (!raw.isEmpty() && !id.isEmpty() && !ocrMemory.containsKey(raw)) {
-                    ocrMemory.put(raw, id);
+                if (!m.containsKey(raw)) m.put(raw, target);
+                if ("product".equals(kind) && !ocrMemory.containsKey(raw)) {
+                    ocrMemory.put(raw, target);
                 }
+            }
+            // Shared with the delivery sheet and the history editors, which
+            // ask the same question of the same corrections.
+            for (java.util.Map.Entry<String, java.util.LinkedHashMap<String, String>> e
+                    : byKind.entrySet()) {
+                FuzzyMatch.setMemory(e.getKey(), e.getValue());
             }
         });
     }

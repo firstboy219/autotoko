@@ -3,6 +3,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { ocrCorrections } from "../../database/schema/resi.js";
 import { masterProducts, materials } from "../../database/schema/products.js";
+import { shops } from "../../database/schema/shops.js";
 
 /**
  * What the camera read, and what a person said it was.
@@ -17,6 +18,9 @@ import { masterProducts, materials } from "../../database/schema/products.js";
  * Learning happens on confirmation rather than on the guess: what is recorded
  * is what a person stood behind, which is the only signal here worth keeping.
  */
+/** What a remembered reading points at. */
+export type OcrKind = "product" | "material" | "shop" | "courier";
+
 @Injectable()
 export class OcrMemoryService {
   private readonly logger = new Logger(OcrMemoryService.name);
@@ -42,37 +46,50 @@ export class OcrMemoryService {
    */
   async remember(
     userId: string,
-    kind: "product" | "material",
+    kind: OcrKind,
     rawText: string | null | undefined,
-    targetId: string | null | undefined,
+    target: { id?: string | null; text?: string | null },
   ): Promise<void> {
     try {
       const key = OcrMemoryService.normalise(rawText);
       // Too short to identify anything. "bs i 8" is in the data and matches
       // half of everything; remembering it would poison every future guess.
-      if (key.length < 4 || !targetId) return;
+      // Courier tokens are shorter by nature — "jne", "spx" — so they get a
+      // lower floor rather than being excluded outright.
+      const floor = kind === "courier" ? 3 : 4;
+      if (key.length < floor) return;
+      if (!target.id && !target.text) return;
 
-      await this.db
-        .insert(ocrCorrections)
-        .values({
+      const sameTarget = target.id
+        ? eq(ocrCorrections.targetId, target.id)
+        : eq(ocrCorrections.targetText, target.text!);
+
+      // Bump first. A repeat should strengthen the lesson rather than add a
+      // second copy of it, and this is also what makes a mistaken correction
+      // recoverable: correcting it again outweighs the mistake.
+      const bumped = await this.db
+        .update(ocrCorrections)
+        .set({ hits: sql`${ocrCorrections.hits} + 1`, lastSeen: new Date() })
+        .where(
+          and(
+            eq(ocrCorrections.userId, userId),
+            eq(ocrCorrections.kind, kind),
+            eq(ocrCorrections.rawNorm, key),
+            sameTarget,
+          ),
+        )
+        .returning({ id: ocrCorrections.id });
+
+      if (!bumped.length) {
+        await this.db.insert(ocrCorrections).values({
           userId,
           kind,
           rawNorm: key,
           rawText: rawText?.slice(0, 2000) ?? null,
-          targetId,
-        })
-        .onConflictDoUpdate({
-          target: [
-            ocrCorrections.userId,
-            ocrCorrections.kind,
-            ocrCorrections.rawNorm,
-            ocrCorrections.targetId,
-          ],
-          // Repeats strengthen rather than duplicate, so a reading answered
-          // twice outranks one answered once — which is how a mistaken
-          // correction is undone: by correcting it again.
-          set: { hits: sql`${ocrCorrections.hits} + 1`, lastSeen: new Date() },
+          targetId: target.id ?? null,
+          targetText: target.text?.slice(0, 64) ?? null,
         });
+      }
     } catch (e) {
       this.logger.warn(`Tidak bisa menyimpan pelajaran OCR: ${(e as Error).message}`);
     }
@@ -88,13 +105,14 @@ export class OcrMemoryService {
    */
   async forget(
     userId: string,
-    kind: "product" | "material",
+    kind: OcrKind,
     rawText: string | null | undefined,
-    targetId: string | null | undefined,
+    target: { id?: string | null; text?: string | null },
   ): Promise<void> {
     try {
       const key = OcrMemoryService.normalise(rawText);
-      if (key.length < 4 || !targetId) return;
+      if (key.length < 3) return;
+      if (!target.id && !target.text) return;
       await this.db
         .delete(ocrCorrections)
         .where(
@@ -102,7 +120,9 @@ export class OcrMemoryService {
             eq(ocrCorrections.userId, userId),
             eq(ocrCorrections.kind, kind),
             eq(ocrCorrections.rawNorm, key),
-            eq(ocrCorrections.targetId, targetId),
+            target.id
+              ? eq(ocrCorrections.targetId, target.id)
+              : eq(ocrCorrections.targetText, target.text!),
           ),
         );
     } catch (e) {
@@ -127,26 +147,61 @@ export class OcrMemoryService {
         kind: ocrCorrections.kind,
         raw: ocrCorrections.rawNorm,
         targetId: ocrCorrections.targetId,
+        targetText: ocrCorrections.targetText,
         hits: ocrCorrections.hits,
         productName: masterProducts.name,
         materialName: materials.name,
+        shopName: sql<string | null>`coalesce(${shops.displayName}, ${shops.shopName})`,
       })
       .from(ocrCorrections)
       .leftJoin(masterProducts, eq(masterProducts.id, ocrCorrections.targetId))
       .leftJoin(materials, eq(materials.id, ocrCorrections.targetId))
+      .leftJoin(shops, eq(shops.id, ocrCorrections.targetId))
       .where(eq(ocrCorrections.userId, userId))
       .orderBy(desc(ocrCorrections.hits), desc(ocrCorrections.lastSeen))
       .limit(limit);
 
+    // A reading answered two different ways is noise, not a lesson. Label
+    // boilerplate gets picked up as a sender name — "an dapat dilihat pada
+    // website..." is on every J&T label — and without this the first shop it
+    // was seen with would claim every J&T parcel afterwards.
+    //
+    // Self-correcting by design: boilerplate disqualifies itself as soon as a
+    // second shop ships with the same courier, while a real sender line is
+    // answered the same way every time and survives.
+    const answers = new Map<string, Set<string>>();
+    for (const r of rows) {
+      const key = `${r.kind}|${r.raw}`;
+      const target = r.targetId ?? r.targetText ?? "";
+      const set = answers.get(key) ?? new Set<string>();
+      set.add(target);
+      answers.set(key, set);
+    }
+    const ambiguous = new Set(
+      [...answers.entries()].filter(([, v]) => v.size > 1).map(([k]) => k),
+    );
+
+    // A lesson whose target has been deleted is dropped rather than removed:
+    // a product removed and re-added keeps what was learned about it, and one
+    // pointing at nothing is simply not offered.
     return rows
-      .filter((r) => (r.kind === "product" ? r.productName : r.materialName))
+      .filter((r) => !ambiguous.has(`${r.kind}|${r.raw}`))
       .map((r) => ({
         kind: r.kind,
         raw: r.raw,
         targetId: r.targetId,
+        targetText: r.targetText,
         hits: r.hits,
-        name: r.kind === "product" ? r.productName : r.materialName,
-      }));
+        name:
+          r.kind === "product"
+            ? r.productName
+            : r.kind === "material"
+              ? r.materialName
+              : r.kind === "courier"
+                ? r.targetText
+                : r.shopName,
+      }))
+      .filter((r) => r.name);
   }
 
   /**
@@ -165,7 +220,7 @@ export class OcrMemoryService {
       // system its own guesses and then weigh them equally against the
       // corrections that overruled them — which is what happened in testing.
       if (line.source === "device_auto") continue;
-      await this.remember(userId, "product", line.rawName, line.masterProductId);
+      await this.remember(userId, "product", line.rawName, { id: line.masterProductId });
     }
   }
 }

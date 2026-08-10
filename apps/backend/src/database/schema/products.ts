@@ -225,6 +225,14 @@ export const materialPurchaseItems = pgTable(
      * because that is what a recipe consumes. Storing only the product means a
      * mis-typed content size can never be found again, only its wrong total.
      */
+    /**
+     * What the supplier's resi called it, beside the material it was mapped to.
+     *
+     * The same arrangement resi_scan_items has: when a mapping turns out
+     * wrong, the text the machine was looking at is the only way to see why —
+     * and it is what the OCR memory learns from.
+     */
+    rawName: varchar("raw_name", { length: 255 }),
     qtyPcs: numeric("qty_pcs", { precision: 14, scale: 3 }),
     contentPerPcs: numeric("content_per_pcs", { precision: 14, scale: 3 }),
     /**

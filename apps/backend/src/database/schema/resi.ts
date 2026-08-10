@@ -105,8 +105,15 @@ export const ocrCorrections = pgTable(
     rawNorm: varchar("raw_norm", { length: 255 }).notNull(),
     /** Kept readable: a normalised key cannot explain a guess to a person. */
     rawText: text("raw_text"),
-    /** master_products.id or materials.id, per kind. */
-    targetId: uuid("target_id").notNull(),
+    /** master_products.id or materials.id, per kind. Null for a courier. */
+    targetId: uuid("target_id"),
+    /**
+     * The answer when it is not a row.
+     *
+     * A courier is one of nine names and there is no table of them — the list
+     * is the same for every seller in the country, so it lives in code.
+     */
+    targetText: varchar("target_text", { length: 64 }),
     /** Answering the same reading again strengthens it rather than duplicating. */
     hits: integer("hits").notNull().default(1),
     lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),

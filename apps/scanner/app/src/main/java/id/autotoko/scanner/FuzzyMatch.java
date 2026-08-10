@@ -23,6 +23,53 @@ import java.util.Locale;
  */
 public final class FuzzyMatch {
 
+    /**
+     * What this tenant has already answered, by kind.
+     *
+     * Static because three screens need it and none of them owns it: the scan
+     * sheet, the delivery sheet and the history editors all ask the same
+     * question of the same corrections. Loaded once per launch.
+     */
+    private static final java.util.Map<String, java.util.LinkedHashMap<String, String>> MEMORY =
+            new java.util.HashMap<>();
+
+    /** Replace everything learned for one kind. */
+    public static void setMemory(String kind, java.util.LinkedHashMap<String, String> map) {
+        MEMORY.put(kind, map);
+    }
+
+    /** Lower case, alphanumerics, single spaces — the key the server stores. */
+    public static String memoryKey(String raw) {
+        if (raw == null) return "";
+        return raw.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
+    }
+
+    /**
+     * The answer already given to this reading, or null.
+     *
+     * Exact key first, then near keys: one label read twice is never
+     * byte-identical but is close. The bar is high because a remembered answer
+     * is trusted without any scoring against the catalogue.
+     */
+    public static String recall(String kind, String rawText) {
+        java.util.LinkedHashMap<String, String> map = MEMORY.get(kind);
+        if (map == null || map.isEmpty()) return null;
+        String key = memoryKey(rawText);
+        int floor = "courier".equals(kind) ? 3 : 4;
+        if (key.length() < floor) return null;
+
+        String exact = map.get(key);
+        if (exact != null) return exact;
+
+        String best = null;
+        double bestSim = 0;
+        for (java.util.Map.Entry<String, String> e : map.entrySet()) {
+            double sim = similarity(key, e.getKey());
+            if (sim > bestSim) { bestSim = sim; best = e.getValue(); }
+        }
+        return bestSim >= 0.85 ? best : null;
+    }
+
     /** How close two words must be to count as the same word. */
     private static final double WORD_SIMILARITY = 0.72;
     /** How much of a product's name must be found before it is worth proposing. */
@@ -111,7 +158,7 @@ public final class FuzzyMatch {
     public static final class Scored {
         public final ProductMatcher.Product product;
         public final double score;
-        Scored(ProductMatcher.Product p, double s) { this.product = p; this.score = s; }
+        public Scored(ProductMatcher.Product p, double s) { this.product = p; this.score = s; }
     }
 
     /**

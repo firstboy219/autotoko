@@ -494,7 +494,7 @@ export class ResiService {
       // What the camera read beside what the packer stood behind. Recorded
       // here rather than at guess time: the guess is a proposal, the
       // confirmation is the answer, and only the answer is worth learning.
-      void this.memory.rememberScanItems(
+      await this.memory.rememberScanItems(
         userId,
         written.map((w) => ({
           rawName: w.rawName,
@@ -956,9 +956,9 @@ export class ResiService {
       before.masterProductId !== row.masterProductId
     ) {
       // The packer has just said it is not that one.
-      void this.memory.forget(userId, "product", before.rawName, before.masterProductId);
+      await this.memory.forget(userId, "product", before.rawName, { id: before.masterProductId });
     }
-    void this.memory.remember(userId, "product", row.rawName, row.masterProductId);
+    await this.memory.remember(userId, "product", row.rawName, { id: row.masterProductId });
     // Re-mapping is the common case, not the exception: the phone's best guess
     // is wrong often enough that this runs several times a shift. syncScanItem
     // puts back what the previous mapping took before taking anything new, so
@@ -1171,6 +1171,17 @@ export class ResiService {
       })
       .where(and(eq(resiScans.id, scanId), eq(resiScans.userId, userId)))
       .returning();
+
+    // Keyed on the sender line and the carrier token rather than the whole
+    // reading: every parcel carries a different recipient, so a key built from
+    // the whole label would never match twice. A sender line repeats for every
+    // parcel that shop sends, and "JSTPRESS" is J&T for ever.
+    if (row!.shopId) {
+      await this.memory.remember(userId, "shop", row!.labelSenderName, { id: row!.shopId });
+    }
+    if (row!.courierConfirmed && row!.courier) {
+      await this.memory.remember(userId, "courier", row!.courier, { text: row!.courierConfirmed });
+    }
 
     return {
       id: row!.id,
