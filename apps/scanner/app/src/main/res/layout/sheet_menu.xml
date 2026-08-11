@@ -68,6 +68,18 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/menuRecap"
+        style="@style/SheetRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView style="@style/Text.Body" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Rekap Hari Ini" />
+        <TextView style="@style/Text.Caption" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Total packing, jumlah per kurir, dan yang belum dipetakan" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/menuPending"
         style="@style/SheetRow"
         android:layout_width="match_parent"

@@ -61,6 +61,63 @@ export class CostingService {
    * went out from, and requiring the mapping would understate every figure
    * while sixty-odd parcels sit unmapped.
    */
+  /**
+   * Apply one set of rates to many products.
+   *
+   * Every field optional and every omission meaningful: a bulk edit that sets
+   * the affiliator rate must not blank the ads rate on all forty products
+   * because the form did not include it. Only what was sent is written — the
+   * same rule a PATCH of the label fields once got wrong, emptying every
+   * column the form had not carried.
+   *
+   * Returns what changed rather than a bare ok. A bulk write nobody can audit
+   * is one nobody can undo, and the caller shows the count back.
+   */
+  async updateManyCosting(
+    userId: string,
+    productIds: string[],
+    dto: UpdateCostingDto,
+  ): Promise<{ updated: number; requested: number; fields: string[] }> {
+    const ids = (productIds ?? []).filter(Boolean).slice(0, 500);
+    if (!ids.length) throw new BadRequestException("Belum ada produk yang dipilih.");
+
+    const patch: Record<string, unknown> = {};
+    const rate = (v: number | undefined) => (v === undefined ? undefined : v.toFixed(4));
+    const money = (v: number | undefined) => (v === undefined ? undefined : v.toFixed(2));
+
+    if (dto.marketplaceFeeRate !== undefined) patch.marketplaceFeeRate = rate(dto.marketplaceFeeRate);
+    if (dto.eventRate !== undefined) patch.eventRate = rate(dto.eventRate);
+    if (dto.affiliatorRate !== undefined) patch.affiliatorRate = rate(dto.affiliatorRate);
+    if (dto.adsRate !== undefined) patch.adsRate = rate(dto.adsRate);
+    if (dto.sedekahRate !== undefined) patch.sedekahRate = rate(dto.sedekahRate);
+    if (dto.resellerRate !== undefined) patch.resellerRate = rate(dto.resellerRate);
+    if (dto.targetProfitRate !== undefined) patch.targetProfitRate = rate(dto.targetProfitRate);
+    if (dto.adsFixedPerPcs !== undefined) patch.adsFixedPerPcs = money(dto.adsFixedPerPcs);
+    if (dto.serviceCostPerPcs !== undefined) patch.serviceCostPerPcs = money(dto.serviceCostPerPcs);
+    if (dto.packingCostPerOrder !== undefined) patch.packingCostPerOrder = money(dto.packingCostPerOrder);
+    if (dto.avgUnitsPerOrder !== undefined) patch.avgUnitsPerOrder = dto.avgUnitsPerOrder.toFixed(2);
+
+    if (!Object.keys(patch).length) {
+      throw new BadRequestException("Tidak ada kolom yang diubah.");
+    }
+
+    // Products with no costing row yet need one, or a bulk edit silently skips
+    // exactly the products nobody has configured — which are the ones a bulk
+    // edit is for.
+    for (const id of ids) {
+      await this.getProductOrThrow(userId, id);
+      await this.getOrCreateCosting(userId, id);
+    }
+
+    const rows = await this.db
+      .update(productCosting)
+      .set(patch)
+      .where(inArray(productCosting.masterProductId, ids))
+      .returning({ id: productCosting.masterProductId });
+
+    return { updated: rows.length, requested: ids.length, fields: Object.keys(patch) };
+  }
+
   async list(
     userId: string,
     brandId?: string | null,

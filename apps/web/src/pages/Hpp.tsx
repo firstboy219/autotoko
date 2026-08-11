@@ -2,10 +2,12 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
+import { BulkCosting } from "../components/BulkCosting";
 import { rupiah } from "../lib/fmt";
 import { Icon } from "../components/Icon";
 import {
   Badge,
+  Button,
   Card,
   CardHeader,
   EmptyState,
@@ -39,6 +41,8 @@ export function Hpp() {
   /** "" every brand, "none" the unassigned ones. */
   const [brand, setBrand] = useState("");
   const brands = useFetch<{ id: string; name: string }[]>("/shops/categories");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [sort, setSort] = useState("nama");
   /** Only consulted when sorting by sales; see the control below. */
   const [days, setDays] = useState("30");
@@ -108,10 +112,37 @@ export function Hpp() {
             </div>
           }
         />
+        {picked.size > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-brand/5 px-4 py-2">
+            <div className="text-sm text-ink">{picked.size} produk dipilih</div>
+            <div className="flex gap-2">
+              <Button variant="text" onClick={() => setPicked(new Set())}>
+                Batal pilih
+              </Button>
+              <Button variant="filled" onClick={() => setBulkOpen(true)}>
+                Ubah komposisi harga
+              </Button>
+            </div>
+          </div>
+        )}
+
         <TableWrap>
           <Table className="min-w-[820px]">
             <THead>
               <TR className="border-t-0">
+                <TH>
+                  {/* Selects what is on screen, which after a filter is not
+                      the whole catalogue — and saying "all" while meaning
+                      "these" is how a bulk edit surprises somebody. */}
+                  <input
+                    type="checkbox"
+                    aria-label="Pilih semua yang tampil"
+                    checked={(data?.length ?? 0) > 0 && picked.size === (data?.length ?? 0)}
+                    onChange={(e) =>
+                      setPicked(e.target.checked ? new Set((data ?? []).map((r) => r.productId)) : new Set())
+                    }
+                  />
+                </TH>
                 <TH>Produk</TH>
                 <TH>Bahan Baku</TH>
                 <TH align="right">Terjual<div className="text-[10px] font-normal text-ink-3">{days === "30" ? "30 hari" : days === "90" ? "3 bulan" : days === "180" ? "6 bulan" : "1 tahun"}</div></TH>
@@ -127,7 +158,7 @@ export function Hpp() {
                 <SkeletonRows n={4} cols={7} />
               ) : !data?.length ? (
                 <TR>
-                  <TD colSpan={8} className="p-0">
+                  <TD colSpan={9} className="p-0">
                     <EmptyState
                       icon="package"
                       title="Belum ada produk"
@@ -138,6 +169,19 @@ export function Hpp() {
               ) : (
                 data.map((r) => (
                   <TR key={r.productId}>
+                    <TD>
+                      <input
+                        type="checkbox"
+                        aria-label={`Pilih ${r.name}`}
+                        checked={picked.has(r.productId)}
+                        onChange={(e) => {
+                          const next = new Set(picked);
+                          if (e.target.checked) next.add(r.productId);
+                          else next.delete(r.productId);
+                          setPicked(next);
+                        }}
+                      />
+                    </TD>
                     <TD>
                       <div className="text-ink font-medium">{r.name}</div>
                       <div className="text-xs text-ink-3 font-mono mt-0.5">{r.sku}</div>
@@ -196,6 +240,17 @@ export function Hpp() {
           </Table>
         </TableWrap>
       </Card>
+      {bulkOpen && (
+        <BulkCosting
+          productIds={[...picked]}
+          onClose={() => setBulkOpen(false)}
+          onDone={() => {
+            setPicked(new Set());
+            // The list carries margin and profit, both of which just moved.
+            window.location.reload();
+          }}
+        />
+      )}
     </Layout>
   );
 }

@@ -331,6 +331,17 @@ public final class Api {
      * small — it is their own labels, repeatedly — and asking per scan would
      * put a round trip in front of the sheet the packer is waiting on.
      */
+    /**
+     * One day's packing: totals, a count per courier, and what is incomplete.
+     *
+     * The last part is why this is a request rather than a tally the phone
+     * keeps: a shift is packed on several handsets and the question is about
+     * the day, not about this one.
+     */
+    public void dailyRecap(Cb cb) {
+        call("GET", session.baseUrl() + "/api/resi/daily-recap", session.token(), null, cb);
+    }
+
     public void ocrHints(Cb cb) {
         call("GET", session.baseUrl() + "/api/resi/ocr-hints", session.token(), null, cb);
     }

@@ -503,6 +503,15 @@ export class ResiController {
    * Sent whole rather than queried per scan: the sheet opens in the moment
    * after a barcode reads, and a round trip there is a delay the packer feels.
    */
+  /** One day's packing, for the end-of-shift message. */
+  @Get("daily-recap")
+  async dailyRecap(
+    @Req() req: FastifyRequest,
+    @Query("date") date?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.dailyRecap(uid(req), date) };
+  }
+
   @Get("ocr-hints")
   async ocrHints(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.memory.hints(uid(req)) };

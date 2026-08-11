@@ -1913,6 +1913,95 @@ public class ScanActivity extends AppCompatActivity {
         });
     }
 
+    /**
+     * The day's packing, shown and then shareable.
+     *
+     * Shown first rather than sent straight to WhatsApp: a packer about to
+     * report a number to their supervisor should see it before it leaves,
+     * especially the incomplete counts — which are the part that gets asked
+     * about.
+     */
+    private void showRecap() {
+        api.dailyRecap(r -> {
+            if (!r.ok() || r.data() == null) {
+                Toast.makeText(this, r.message("Gagal memuat rekap."), Toast.LENGTH_LONG).show();
+                return;
+            }
+            JSONObject d = r.data();
+            final String text = recapText(d);
+
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle("Rekap " + d.optString("date", ""))
+                    .setMessage(text)
+                    .setPositiveButton("Bagikan ke WhatsApp", (dlg, w) -> {
+                        Intent i = new Intent(Intent.ACTION_VIEW);
+                        i.setData(android.net.Uri.parse(
+                                "https://api.whatsapp.com/send?text="
+                                        + android.net.Uri.encode(text)));
+                        try {
+                            startActivity(i);
+                        } catch (Exception e) {
+                            Toast.makeText(this, "WhatsApp tidak ditemukan di HP ini.",
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    })
+                    .setNegativeButton("Tutup", null)
+                    .show();
+        });
+    }
+
+    /**
+     * The message itself.
+     *
+     * Incomplete counts are named rather than omitted when zero is not the
+     * answer: a recap that reports only the total invites the reply "and how
+     * many of those are actually finished?".
+     */
+    private String recapText(JSONObject d) {
+        StringBuilder b = new StringBuilder();
+        b.append("*Rekap Packing ").append(d.optString("date", "")).append("*\n");
+        b.append("Total resi: ").append(d.optInt("total", 0)).append("\n");
+
+        JSONArray couriers = d.optJSONArray("couriers");
+        if (couriers != null && couriers.length() > 0) {
+            b.append("\nPer kurir:\n");
+            for (int i = 0; i < couriers.length(); i++) {
+                JSONObject c = couriers.optJSONObject(i);
+                if (c == null) continue;
+                b.append("- ").append(c.optString("courier"))
+                 .append(": ").append(c.optInt("count", 0)).append("\n");
+            }
+        }
+
+        JSONArray devices = d.optJSONArray("devices");
+        if (devices != null && devices.length() > 1) {
+            // Only when more than one phone worked that day; otherwise it is a
+            // line saying the obvious.
+            b.append("\nPer alat:\n");
+            for (int i = 0; i < devices.length(); i++) {
+                JSONObject dv = devices.optJSONObject(i);
+                if (dv == null) continue;
+                b.append("- ").append(dv.optString("device"))
+                 .append(": ").append(dv.optInt("count", 0)).append("\n");
+            }
+        }
+
+        int unmapped = d.optInt("unmapped", 0);
+        int unconfirmed = d.optInt("unconfirmedItems", 0);
+        b.append("\n");
+        if (unmapped == 0 && unconfirmed == 0) {
+            b.append("Semua resi sudah lengkap.");
+        } else {
+            if (unmapped > 0) {
+                b.append("Belum dipetakan ke toko: ").append(unmapped).append("\n");
+            }
+            if (unconfirmed > 0) {
+                b.append("Isi paket belum dikonfirmasi: ").append(unconfirmed).append("\n");
+            }
+        }
+        return b.toString();
+    }
+
     private void showMenu() {
         View sheet = getLayoutInflater().inflate(R.layout.sheet_menu, null);
         com.google.android.material.bottomsheet.BottomSheetDialog dialog =
@@ -1939,6 +2028,11 @@ public class ScanActivity extends AppCompatActivity {
             dialog.dismiss();
             startActivity(new Intent(this, HistoryActivity.class));
         });
+        sheet.findViewById(R.id.menuRecap).setOnClickListener(v -> {
+            dialog.dismiss();
+            showRecap();
+        });
+
         sheet.findViewById(R.id.menuPending).setOnClickListener(v -> {
             dialog.dismiss();
             startActivity(new Intent(this, PendingActivity.class));

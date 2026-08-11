@@ -1519,6 +1519,62 @@ export class ResiService {
    * parcel, while `dueAmount` uses today's rate — so raising the rate changes
    * what you still owe without rewriting what you already paid.
    */
+  /**
+   * One day's packing, as a packer would report it at the end of a shift.
+   *
+   * Counted on the confirmed courier where there is one and the read courier
+   * otherwise, because a recap that says "unknown" for everything scanned
+   * before the mapping existed is a recap nobody reads twice.
+   */
+  async dailyRecap(userId: string, date?: string) {
+    const day = date ?? new Date().toISOString().slice(0, 10);
+    const from = new Date(`${day}T00:00:00`);
+    const to = new Date(`${day}T23:59:59.999`);
+
+    const rows = await this.db
+      .select({
+        id: resiScans.id,
+        courier: sql<string | null>`coalesce(${resiScans.courierConfirmed}, ${resiScans.courier})`,
+        mapped: sql<boolean>`${resiScans.mappingConfirmedAt} is not null`,
+        itemsConfirmed: sql<boolean>`${resiScans.itemsConfirmedAt} is not null`,
+        deviceLabel: resiScans.deviceLabel,
+      })
+      .from(resiScans)
+      .where(
+        and(
+          eq(resiScans.userId, userId),
+          gte(resiScans.scannedAt, from),
+          lte(resiScans.scannedAt, to),
+        ),
+      );
+
+    const byCourier = new Map<string, number>();
+    const byDevice = new Map<string, number>();
+    let unmapped = 0;
+    let unconfirmed = 0;
+    for (const r of rows) {
+      const c = (r.courier ?? "").trim() || "Belum diketahui";
+      byCourier.set(c, (byCourier.get(c) ?? 0) + 1);
+      const d = (r.deviceLabel ?? "").trim() || "Tanpa nama";
+      byDevice.set(d, (byDevice.get(d) ?? 0) + 1);
+      if (!r.mapped) unmapped++;
+      if (!r.itemsConfirmed) unconfirmed++;
+    }
+
+    return {
+      date: day,
+      total: rows.length,
+      unmapped,
+      unconfirmedItems: unconfirmed,
+      couriers: [...byCourier.entries()]
+        .map(([courier, count]) => ({ courier, count }))
+        .sort((a, b) => b.count - a.count),
+      devices: [...byDevice.entries()]
+        .map(([device, count]) => ({ device, count }))
+        .sort((a, b) => b.count - a.count),
+    };
+  }
+
   async daily(
     userId: string,
     opts: { from?: string; to?: string; limit?: number } = {},

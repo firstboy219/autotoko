@@ -112,6 +112,22 @@ export class CostingController {
     return ok(await this.costing.detail(uid(req), productId));
   }
 
+  /**
+   * One set of rates across many products.
+   *
+   * Declared before @Patch(":productId") — "bulk" is a literal segment and
+   * Nest matches in declaration order, so the other way round it would be
+   * read as a product id.
+   */
+  @Patch("bulk")
+  async updateManyCosting(
+    @Req() req: FastifyRequest,
+    @Body() body: { productIds: string[] } & UpdateCostingDto,
+  ) {
+    const { productIds, ...dto } = body;
+    return ok(await this.costing.updateManyCosting(uid(req), productIds, dto));
+  }
+
   @Patch(":productId")
   async update(
     @Req() req: FastifyRequest,
