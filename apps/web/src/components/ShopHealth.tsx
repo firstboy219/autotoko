@@ -33,6 +33,9 @@ interface ShopRow {
   parcels: number;
   parcelsPrev: number;
   units: number;
+  variety: number;
+  creditPerParcel: number | null;
+  unitsPerParcel: number | null;
   topProducts: { id: string; name: string; units: number }[];
 }
 
@@ -45,6 +48,9 @@ interface Insights {
     parcels: number;
     parcelsPerDay: number;
     units: number;
+    variety: number;
+    creditPerParcel: number | null;
+    unitsPerParcel: number | null;
     shops: number;
     activeShops: number;
     idleShops: number;
@@ -101,14 +107,59 @@ function Trend({ pct }: { pct: number | null }) {
   );
 }
 
+/** Local date as YYYY-MM-DD. toISOString would shift a Jakarta evening back a day. */
+function ymd(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/**
+ * Where a named period starts and ends.
+ *
+ * "Minggu ini" is a boundary, not a duration: on a Tuesday it is two days, not
+ * seven. Treating it as "the last 7 days" would answer a question nobody asked
+ * and quietly include last week's Sunday.
+ */
+function periodRange(preset: string, customFrom: string, customTo: string) {
+  const now = new Date();
+  const today = ymd(now);
+
+  if (preset === "hari") return { from: today, to: today };
+
+  if (preset === "minggu") {
+    // Monday as the first day: an Indonesian working week starts there, and a
+    // Sunday-start would put yesterday's work in "last week" every Monday.
+    const day = (now.getDay() + 6) % 7;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - day);
+    return { from: ymd(monday), to: today };
+  }
+
+  if (preset === "bulan") {
+    return { from: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), to: today };
+  }
+
+  if (preset === "custom") {
+    // Backwards dates would return nothing and look like "no sales"; swapped
+    // is what the person meant.
+    if (customFrom && customTo && customFrom > customTo) {
+      return { from: customTo, to: customFrom };
+    }
+    return { from: customFrom || today, to: customTo || today };
+  }
+
+  const n = Number(preset) || 30;
+  const start = new Date(now.getTime() - (n - 1) * 86_400_000);
+  return { from: ymd(start), to: today };
+}
+
 export function ShopHealth() {
   const [days, setDays] = useState("30");
   const [categoryId, setCategoryId] = useState("all");
+  const [customFrom, setCustomFrom] = useState(ymd(new Date()));
+  const [customTo, setCustomTo] = useState(ymd(new Date()));
 
-  const to = new Date().toISOString().slice(0, 10);
-  const from = new Date(Date.now() - (Number(days) - 1) * 86_400_000)
-    .toISOString()
-    .slice(0, 10);
+  const { from, to } = periodRange(days, customFrom, customTo);
 
   const categories = useFetch<Category[]>("/shops/categories");
   const data = useFetch<Insights>(
@@ -130,12 +181,40 @@ export function ShopHealth() {
             ))}
           </Select>
         </div>
+        {days === "custom" && (
+          <>
+            <div>
+              <label className="mb-1 block text-xs text-ink-3">Dari</label>
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="h-9 rounded-md border border-line bg-canvas px-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-ink-3">Sampai</label>
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="h-9 rounded-md border border-line bg-canvas px-2 text-sm"
+              />
+            </div>
+          </>
+        )}
+
         <div>
           <label className="mb-1 block text-xs text-ink-3">Periode</label>
           <Select value={days} onChange={(e) => setDays(e.target.value)}>
+            <option value="hari">Hari ini</option>
+            <option value="minggu">Minggu ini</option>
+            <option value="bulan">Bulan ini</option>
             <option value="7">7 hari terakhir</option>
             <option value="30">30 hari terakhir</option>
             <option value="90">90 hari terakhir</option>
+            <option value="365">1 tahun terakhir</option>
+            <option value="custom">Pilih tanggal…</option>
           </Select>
         </div>
       </div>
@@ -174,6 +253,40 @@ export function ShopHealth() {
                   ? `${d.totals.idleShops} vakum dari ${d.totals.shops}`
                   : `dari ${d.totals.shops} toko`
               }
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {/* Variety beside volume: forty parcels of one item and forty of
+                twelve are the same number and not the same business. */}
+            <Stat
+              label="Ragam produk terkirim"
+              value={String(d.totals.variety)}
+              sub="jenis produk berbeda"
+            />
+            <Stat
+              label="Nilai per paket"
+              value={d.totals.creditPerParcel != null ? rupiah(d.totals.creditPerParcel) : "—"}
+              sub="pencairan ÷ paket terpetakan"
+            />
+            <Stat
+              label="Isi per paket"
+              value={d.totals.unitsPerParcel != null ? `${d.totals.unitsPerParcel} pcs` : "—"}
+              sub="rata-rata isi satu paket"
+            />
+            <Stat
+              label="Rata-rata sub-seller"
+              value={
+                d.owners.subSellers.length
+                  ? rupiah(
+                      Math.round(
+                        d.owners.subSellers.reduce((n, s) => n + s.total, 0) /
+                          d.owners.subSellers.length,
+                      ),
+                    )
+                  : "—"
+              }
+              sub={`${d.owners.subSellers.length} sub-seller`}
             />
           </div>
 
@@ -273,6 +386,7 @@ export function ShopHealth() {
                     <th className="px-4 py-2 text-right font-medium">Pencairan</th>
                     <th className="px-4 py-2 text-right font-medium">Tren</th>
                     <th className="px-4 py-2 text-right font-medium">Paket</th>
+                    <th className="px-4 py-2 text-right font-medium">Per paket</th>
                     <th className="px-4 py-2 font-medium">Produk unggulan</th>
                   </tr>
                 </thead>
@@ -315,7 +429,15 @@ export function ShopHealth() {
                       <td className="px-4 py-2 text-right tabular-nums text-ink-2">
                         {s.parcels}
                         {s.units > 0 && (
-                          <div className="text-[11px] text-ink-3">{s.units} pcs</div>
+                          <div className="text-[11px] text-ink-3">
+                            {s.units} pcs · {s.variety} jenis
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums text-ink-2">
+                        {s.creditPerParcel != null ? rupiah(s.creditPerParcel) : "—"}
+                        {s.unitsPerParcel != null && (
+                          <div className="text-[11px] text-ink-3">{s.unitsPerParcel} pcs</div>
                         )}
                       </td>
                       <td className="px-4 py-2">

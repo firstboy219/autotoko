@@ -71,7 +71,30 @@ interface MasterDetail extends Master { shops: ShopGroup[]; }
 interface Shop { id: string; shopName: string | null; marketplace: string; }
 
 export function Produk() {
+  const [sort, setSort] = useState("nama");
+  const [days, setDays] = useState("30");
   const { data, loading, reload } = useFetch<Master[]>("/products");
+  /**
+   * Order and figures from the costing service rather than recomputed here.
+   * Two implementations of a margin is how they start disagreeing.
+   */
+  const costing = useFetch<
+    { productId: string; soldQty?: number; hpp: number; netMarginRate: number | null }[]
+  >(`/costing?sort=${sort}&days=${days}`);
+
+  const ordered = (() => {
+    const rows = data ?? [];
+    if (sort === "nama" || !costing.data?.length) return rows;
+    const rank = new Map(costing.data.map((c, i) => [c.productId, i]));
+    // Anything costing did not return keeps its place at the end: a product
+    // with no costing row is still a product, and hiding it here would hide
+    // exactly the ones that need setting up.
+    return [...rows].sort(
+      (a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+    );
+  })();
+
+  const soldById = new Map((costing.data ?? []).map((c) => [c.productId, c.soldQty ?? 0]));
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [sku, setSku] = useState("");
@@ -84,10 +107,10 @@ export function Produk() {
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return (data ?? []).filter((m) =>
+    return (ordered).filter((m) =>
       !needle || `${m.name} ${m.sku}`.toLowerCase().includes(needle),
     );
-  }, [data, q]);
+  }, [data, q, ordered]);
 
   function closeCreate() {
     setOpen(false);
@@ -125,6 +148,36 @@ export function Produk() {
           title="Daftar produk"
           subtitle={loading ? undefined : `${filtered.length} produk`}
           action={
+            <div className="flex flex-wrap items-center gap-2">
+  
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value)}
+                  className="min-w-[190px]"
+                >
+                  <option value="nama">Urut nama</option>
+                  <option value="terlaris">Terlaris (qty terjual)</option>
+                  <option value="margin">Margin bersih tertinggi</option>
+                  <option value="profit">Profit bersih terbesar</option>
+                  <option value="harga_tertinggi">Harga jual tertinggi</option>
+                  <option value="harga_terendah">Harga jual terendah</option>
+                  <option value="hpp_tertinggi">HPP termahal</option>
+                  <option value="hpp_terendah">HPP termurah</option>
+                </Select>
+                {sort === "terlaris" && (
+                  <Select
+                    value={days}
+                    onChange={(e) => setDays(e.target.value)}
+                    className="min-w-[130px]"
+                  >
+                    <option value="30">30 hari</option>
+                    <option value="90">3 bulan</option>
+                    <option value="180">6 bulan</option>
+                    <option value="365">1 tahun</option>
+                  </Select>
+                )}
+              </div>
             <div className="relative w-full sm:w-64">
               <Icon
                 name="search"
@@ -138,6 +191,7 @@ export function Produk() {
                 onChange={(e) => setQ(e.target.value)}
               />
             </div>
+            </div>
           }
         />
         <TableWrap>
@@ -149,15 +203,16 @@ export function Produk() {
                 <TH align="right">Stok</TH>
                 <TH align="right">Harga</TH>
                 <TH align="right">GMV 7h</TH>
+                <TH align="right">Terjual</TH>
                 <TH>Status</TH>
               </tr>
             </THead>
             <tbody>
               {loading ? (
-                <SkeletonRows n={6} cols={6} />
+                <SkeletonRows n={6} cols={7} />
               ) : !filtered.length ? (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={7}>
                     <EmptyState
                       icon="package"
                       title={q.trim() ? "Produk tidak ditemukan" : "Belum ada produk"}
@@ -195,6 +250,11 @@ export function Produk() {
                     <TD align="right" className="tabular-nums">{m.totalStock ?? 0}</TD>
                     <TD align="right" className="tabular-nums whitespace-nowrap">{rupiah(m.basePrice)}</TD>
                     <TD align="right" className="tabular-nums whitespace-nowrap">{rupiah(m.gmv7d)}</TD>
+                    {/* From packing scans over the chosen window — the same
+                        number the HPP page sorts by, from the same service. */}
+                    <TD align="right" className="tabular-nums text-ink-2">
+                      {soldById.get(m.id) ? soldById.get(m.id)!.toLocaleString("id-ID") : "—"}
+                    </TD>
                     <TD>
                       <Badge tone={STATUS_TONE[m.status] ?? "neutral"}>
                         <span className="capitalize">{m.status}</span>

@@ -32,7 +32,13 @@ export interface ShopInsightsRange {
 export class ShopInsightsService {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
-  /** Inclusive day count, so a single-day range divides by 1 rather than 0. */
+  /**
+   * Inclusive day count, so a single-day range divides by 1 rather than 0.
+   *
+   * "Hari ini" is a real answer here: from and to are the same date and the
+   * per-day figures equal the totals, which is what somebody asking about
+   * today expects to see.
+   */
   private static days(from: string, to: string): number {
     const ms = new Date(to).getTime() - new Date(from).getTime();
     return Math.max(1, Math.round(ms / 86_400_000) + 1);
@@ -91,6 +97,18 @@ export class ShopInsightsService {
     const lastShipped = await this.lastShippedByShop(userId, shopIds);
     const today = new Date();
 
+    /**
+     * How many different products a shop actually moved.
+     *
+     * Volume and variety answer different questions: forty parcels of one item
+     * is a shop with one hit, forty parcels of twelve items is a shop with a
+     * catalogue. Both read as "40 parcels" without this.
+     */
+    const varietyByShop = new Map<string, number>();
+    for (const [shopId, list] of products.byShop) {
+      varietyByShop.set(shopId, list.length);
+    }
+
     const perShop = shopRows
       .map((s) => {
         const m = money.get(s.id) ?? { credit: 0, seller: 0, subSeller: 0, subSubSeller: 0 };
@@ -133,6 +151,11 @@ export class ShopInsightsService {
           parcels: a.parcels,
           parcelsPrev: aPrev,
           units: a.units,
+          /** Distinct products shipped — variety, not volume. */
+          variety: varietyByShop.get(s.id) ?? 0,
+          /** What one parcel is worth on average, when both are known. */
+          creditPerParcel: a.parcels > 0 ? Math.round(m.credit / a.parcels) : null,
+          unitsPerParcel: a.parcels > 0 ? Math.round((a.units / a.parcels) * 10) / 10 : null,
           topProducts: (products.byShop.get(s.id) ?? []).slice(0, 3),
         };
       })
@@ -157,6 +180,11 @@ export class ShopInsightsService {
         parcels: totalParcels,
         parcelsPerDay: Math.round((totalParcels / days) * 10) / 10,
         units: totalUnits,
+        /** Different products moved across every shop in scope. */
+        variety: products.overall.length,
+        creditPerParcel: totalParcels > 0 ? Math.round(totalCredit / totalParcels) : null,
+        unitsPerParcel:
+          totalParcels > 0 ? Math.round((totalUnits / totalParcels) * 10) / 10 : null,
         shops: perShop.length,
         activeShops: perShop.filter((s) => s.status === "aktif").length,
         idleShops: perShop.filter((s) => s.status === "vakum").length,
