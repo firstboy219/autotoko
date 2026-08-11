@@ -40,8 +40,15 @@ export class CostingController {
   async list(
     @Req() req: FastifyRequest,
     @Query("brandId") brandId?: string,
+    @Query("sort") sort?: string,
+    @Query("days") days?: string,
   ) {
-    return ok(await this.costing.list(uid(req), brandId || null));
+    return ok(
+      await this.costing.list(uid(req), brandId || null, {
+        sort,
+        days: days ? Number(days) : undefined,
+      }),
+    );
   }
 
   // Declared BEFORE @Get(":productId") — otherwise "packing-materials" is

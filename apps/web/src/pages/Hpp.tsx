@@ -31,14 +31,19 @@ interface Row {
   publishPrice: number | null;
   netProfit: number | null;
   netMarginRate: number | null;
+  /** Units shipped in the chosen window, from packing scans. */
+  soldQty?: number;
 }
 
 export function Hpp() {
   /** "" every brand, "none" the unassigned ones. */
   const [brand, setBrand] = useState("");
   const brands = useFetch<{ id: string; name: string }[]>("/shops/categories");
+  const [sort, setSort] = useState("nama");
+  /** Only consulted when sorting by sales; see the control below. */
+  const [days, setDays] = useState("30");
   const { data, loading } = useFetch<Row[]>(
-    brand ? `/costing?brandId=${brand}` : "/costing",
+    `/costing?brandId=${brand}&sort=${sort}&days=${days}`,
   );
 
   return (
@@ -55,19 +60,52 @@ export function Hpp() {
           title={loading ? "Memuat…" : `${data?.length ?? 0} produk`}
           subtitle="Pilih produk untuk mengatur takaran bahan, biaya jasa, dan komposisi harga."
           action={
-            <Select
-              value={brand}
-              onChange={(e) => setBrand(e.target.value)}
-              className="min-w-[170px]"
-            >
-              <option value="">Semua brand</option>
-              {(brands.data ?? []).map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-              <option value="none">Tanpa brand</option>
-            </Select>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                value={sort}
+                onChange={(e) => setSort(e.target.value)}
+                className="min-w-[190px]"
+              >
+                <option value="nama">Urut nama</option>
+                <option value="terlaris">Terlaris (qty terjual)</option>
+                <option value="margin">Margin bersih tertinggi</option>
+                <option value="profit">Profit bersih terbesar</option>
+                <option value="harga_tertinggi">Harga jual tertinggi</option>
+                <option value="harga_terendah">Harga jual terendah</option>
+                <option value="hpp_tertinggi">HPP termahal</option>
+                <option value="hpp_terendah">HPP termurah</option>
+              </Select>
+
+              {/* Only for sales. A margin is not "over 30 days", and a control
+                  that stays put while doing nothing teaches people to ignore
+                  controls. */}
+              {sort === "terlaris" && (
+                <Select
+                  value={days}
+                  onChange={(e) => setDays(e.target.value)}
+                  className="min-w-[130px]"
+                >
+                  <option value="30">30 hari</option>
+                  <option value="90">3 bulan</option>
+                  <option value="180">6 bulan</option>
+                  <option value="365">1 tahun</option>
+                </Select>
+              )}
+
+              <Select
+                value={brand}
+                onChange={(e) => setBrand(e.target.value)}
+                className="min-w-[170px]"
+              >
+                <option value="">Semua brand</option>
+                {(brands.data ?? []).map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+                <option value="none">Tanpa brand</option>
+              </Select>
+            </div>
           }
         />
         <TableWrap>
@@ -76,6 +114,7 @@ export function Hpp() {
               <TR className="border-t-0">
                 <TH>Produk</TH>
                 <TH>Bahan Baku</TH>
+                <TH align="right">Terjual<div className="text-[10px] font-normal text-ink-3">{days === "30" ? "30 hari" : days === "90" ? "3 bulan" : days === "180" ? "6 bulan" : "1 tahun"}</div></TH>
                 <TH align="right">HPP / pcs</TH>
                 <TH align="right">Harga Publish</TH>
                 <TH align="right">Profit Bersih</TH>
@@ -88,7 +127,7 @@ export function Hpp() {
                 <SkeletonRows n={4} cols={7} />
               ) : !data?.length ? (
                 <TR>
-                  <TD colSpan={7} className="p-0">
+                  <TD colSpan={8} className="p-0">
                     <EmptyState
                       icon="package"
                       title="Belum ada produk"
@@ -111,6 +150,11 @@ export function Hpp() {
                       ) : (
                         <Badge tone="success">{r.materialCount} bahan</Badge>
                       )}
+                    </TD>
+                    {/* From packing scans — the only record of anything
+                        leaving, since the marketplace APIs are not connected. */}
+                    <TD align="right" className="tabular-nums text-ink-2">
+                      {r.soldQty ? r.soldQty.toLocaleString("id-ID") : "—"}
                     </TD>
                     <TD align="right" className="text-ink tabular-nums">{rupiah(r.hpp)}</TD>
                     <TD align="right" className="text-ink-2 tabular-nums">

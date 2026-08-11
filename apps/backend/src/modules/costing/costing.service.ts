@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import {
   calculateHpp,
   calculatePublishPricing,
@@ -22,6 +22,8 @@ import {
   payoutSettings,
   productCosting,
   productPackingQuantities,
+  resiScanItems,
+  resiScans,
 } from "../../database/schema/index.js";
 import type {
   CreateMaterialDto,
@@ -49,7 +51,21 @@ export class CostingService {
 
   /** Overview: every product with its HPP, publish price and projected profit. */
   /** `brandId` narrows to one business; "none" is the unassigned ones. */
-  async list(userId: string, brandId?: string | null) {
+  /**
+   * `sort` and `days` decide the order; everything else is unchanged.
+   *
+   * Quantity sold is counted from packing scans over the window, because that
+   * is the only record of anything leaving the building — the marketplace APIs
+   * are not connected. It counts scan lines whether or not the parcel was
+   * mapped to a shop: a product shipped is shipped regardless of whose shop it
+   * went out from, and requiring the mapping would understate every figure
+   * while sixty-odd parcels sit unmapped.
+   */
+  async list(
+    userId: string,
+    brandId?: string | null,
+    opts: { sort?: string; days?: number } = {},
+  ) {
     // "none" is a real answer: unassigned products must stay reachable, or a
     // filter quietly becomes a way to lose them.
     const brandWhere =
@@ -68,6 +84,26 @@ export class CostingService {
           : eq(masterProducts.userId, userId),
       )
       .orderBy(asc(masterProducts.name));
+
+    // How many of each shipped in the window. Zero rows for a product that has
+    // not shipped, rather than the product being dropped — "sold nothing" is
+    // an answer worth seeing on a list sorted by sales.
+    const days = opts.days && opts.days > 0 ? Math.min(opts.days, 3650) : 30;
+    const since = new Date(Date.now() - days * 86_400_000);
+    const soldRows = products.length
+      ? await this.db
+          .select({
+            productId: resiScanItems.masterProductId,
+            qty: sql<string>`coalesce(sum(${resiScanItems.qty}), 0)`,
+          })
+          .from(resiScanItems)
+          .innerJoin(resiScans, eq(resiScans.id, resiScanItems.resiScanId))
+          .where(and(eq(resiScans.userId, userId), gte(resiScans.scannedAt, since)))
+          .groupBy(resiScanItems.masterProductId)
+      : [];
+    const soldByProduct = new Map(
+      soldRows.filter((r) => r.productId).map((r) => [r.productId!, num(r.qty)]),
+    );
     if (!products.length) return [];
 
     const ids = products.map((p) => p.id);
@@ -117,7 +153,7 @@ export class CostingService {
       }));
     };
 
-    return products.map((p) => {
+    const rows = products.map((p) => {
       const mats = matByProduct.get(p.id) ?? [];
       const cfg = costByProduct.get(p.id);
       const hpp = calculateHpp({
@@ -147,8 +183,51 @@ export class CostingService {
         publishPrice,
         netProfit: pricing ? rupiah(pricing.netProfitCents) : null,
         netMarginRate: pricing ? pricing.netMarginRate : null,
+        /** Units shipped in the window, from packing scans. */
+        soldQty: soldByProduct.get(p.id) ?? 0,
       };
     });
+
+    /**
+     * Nulls last, always.
+     *
+     * A product with no publish price has no margin and no profit, and sorting
+     * it to the top of "highest margin" because null compares low would put the
+     * least useful rows where the eye lands first.
+     */
+    const desc = (a: number | null, b: number | null) =>
+      (b ?? Number.NEGATIVE_INFINITY) - (a ?? Number.NEGATIVE_INFINITY);
+    const ascend = (a: number | null, b: number | null) =>
+      (a ?? Number.POSITIVE_INFINITY) - (b ?? Number.POSITIVE_INFINITY);
+
+    switch (opts.sort) {
+      case "terlaris":
+        rows.sort((a, b) => desc(a.soldQty, b.soldQty) || a.name.localeCompare(b.name));
+        break;
+      case "margin":
+        rows.sort((a, b) => desc(a.netMarginRate, b.netMarginRate));
+        break;
+      case "profit":
+        rows.sort((a, b) => desc(a.netProfit, b.netProfit));
+        break;
+      case "hpp_tertinggi":
+        rows.sort((a, b) => desc(a.hpp, b.hpp));
+        break;
+      case "hpp_terendah":
+        rows.sort((a, b) => ascend(a.hpp, b.hpp));
+        break;
+      case "harga_tertinggi":
+        rows.sort((a, b) => desc(a.publishPrice, b.publishPrice));
+        break;
+      case "harga_terendah":
+        rows.sort((a, b) => ascend(a.publishPrice, b.publishPrice));
+        break;
+      default:
+        // Alphabetical, which is what the query already returned.
+        break;
+    }
+
+    return rows;
   }
 
   /** Full detail for one product: recipe lines, config, and the breakdown. */
