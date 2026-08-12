@@ -46,7 +46,7 @@ export function Hpp() {
   const [sort, setSort] = useState("nama");
   /** Only consulted when sorting by sales; see the control below. */
   const [days, setDays] = useState("30");
-  const { data, loading } = useFetch<Row[]>(
+  const { data, loading, reload } = useFetch<Row[]>(
     `/costing?brandId=${brand}&sort=${sort}&days=${days}`,
   );
 
@@ -247,7 +247,9 @@ export function Hpp() {
           onDone={() => {
             setPicked(new Set());
             // The list carries margin and profit, both of which just moved.
-            window.location.reload();
+            // Refetched rather than reloaded: a page reload would discard the
+            // sort and brand filter used to find these products.
+            void reload();
           }}
         />
       )}

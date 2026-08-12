@@ -1527,9 +1527,17 @@ export class ResiService {
    * before the mapping existed is a recap nobody reads twice.
    */
   async dailyRecap(userId: string, date?: string) {
-    const day = date ?? new Date().toISOString().slice(0, 10);
-    const from = new Date(`${day}T00:00:00`);
-    const to = new Date(`${day}T23:59:59.999`);
+    // The seller's day, not the server's. This box runs on UTC and Jakarta is
+    // seven hours ahead, so a naive window would put everything packed before
+    // seven in the morning on the previous day's recap.
+    const day =
+      date ??
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Jakarta",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
 
     const rows = await this.db
       .select({
@@ -1543,8 +1551,10 @@ export class ResiService {
       .where(
         and(
           eq(resiScans.userId, userId),
-          gte(resiScans.scannedAt, from),
-          lte(resiScans.scannedAt, to),
+          // Compared as a Jakarta calendar date, the same expression the
+          // packer-wage report has always used. Comparing timestamps against a
+          // parsed midnight would reintroduce the offset this fixes.
+          eq(ResiService.DAY_EXPR, sql`${day}::date`),
         ),
       );
 
