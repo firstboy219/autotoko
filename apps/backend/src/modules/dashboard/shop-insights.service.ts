@@ -24,6 +24,36 @@ import { CostingService } from "../costing/costing.service.js";
  * week.
  */
 
+/**
+ * Student's t, two-sided 95%, by degrees of freedom.
+ *
+ * Not the normal 1,96. With six days of data the normal approximation states
+ * an interval about a quarter too narrow, and a too-narrow interval is worse
+ * than none: it converts "we cannot tell yet" into a number that looks settled.
+ */
+const T95: Record<number, number> = {
+  1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365,
+  8: 2.306, 9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179, 13: 2.16, 14: 2.145,
+  15: 2.131, 16: 2.12, 17: 2.11, 18: 2.101, 19: 2.093, 20: 2.086,
+  21: 2.08, 22: 2.074, 23: 2.069, 24: 2.064, 25: 2.06, 26: 2.056,
+  27: 2.052, 28: 2.048, 29: 2.045, 30: 2.042,
+};
+const t95 = (df: number): number => (df <= 0 ? NaN : df <= 30 ? T95[df]! : 1.96);
+
+/**
+ * Effective number of items behind a set of shares — inverse Simpson.
+ *
+ * Twelve products where one carries 80% is not a catalogue of twelve. This
+ * says how many the business behaves as if it had, which is the number that
+ * matters when one of them stops selling.
+ */
+function effectiveCount(values: number[]): number | null {
+  const total = values.reduce((n, v) => n + v, 0);
+  if (total <= 0) return null;
+  const sumSq = values.reduce((n, v) => n + (v / total) ** 2, 0);
+  return sumSq > 0 ? Math.round((1 / sumSq) * 10) / 10 : null;
+}
+
 export interface ShopInsightsRange {
   from: string;
   to: string;
@@ -102,6 +132,7 @@ export class ShopInsightsService {
 
     // Needs the spend, so it runs after rather than beside the rest.
     const vsPublish = await this.materialShareOfPublish(userId, from, to, restock.spend);
+    const statistics = await this.statisticalReading(userId, from, to, days);
 
     const lastShipped = await this.lastShippedByShop(userId, shopIds);
     const today = new Date();
@@ -223,6 +254,14 @@ export class ShopInsightsService {
          */
         vsPublish,
       },
+      /**
+       * How much of the rest of this page can be believed.
+       *
+       * Placed alongside the figures rather than under them: a rate quoted
+       * without its spread, or a ranking built on half the parcels, is not a
+       * smaller truth — it is a different claim from the one the data supports.
+       */
+      statistics,
       /** Who took home what, averaged over the range. */
       owners,
       highlights: {
@@ -281,6 +320,217 @@ export class ShopInsightsService {
       purchases: Number(spend?.count ?? 0),
       unpricedPurchases: Number(spend?.unpriced ?? 0),
       heldForMaterials: Number(held?.total ?? 0),
+    };
+  }
+
+  /**
+   * The reading a statistician would insist on before any of the rest is used.
+   *
+   * Three questions, in order of how badly getting them wrong misleads:
+   *
+   * 1. How much data is there, and over what span? A rate divided by the
+   *    calendar window rather than by the days the business was actually
+   *    running understates it by however much of the window came before the
+   *    first parcel. Both are reported, labelled.
+   *
+   * 2. How much does it vary? The daily counts here run 5 to 25, which is far
+   *    more spread than a Poisson process would give — packing happens in
+   *    batches, not at a steady trickle. So the interval is built from the
+   *    observed day-to-day variation with a t multiplier, not from sqrt(n).
+   *    Assuming Poisson would state an interval roughly a third as wide and
+   *    make a guess look like a measurement.
+   *
+   * 3. How complete is it? Per-shop figures can only see parcels that have a
+   *    shop mapped. Ranking nine shops on 43% of parcels is not a ranking.
+   */
+  private async statisticalReading(
+    userId: string,
+    from: string,
+    to: string,
+    windowDays: number,
+  ) {
+    const day = sql<string>`(${resiScans.scannedAt} at time zone 'Asia/Jakarta')::date`;
+    const lo = new Date(from + "T00:00:00Z");
+    const hi = new Date(to + "T23:59:59Z");
+    const inWindow = and(
+      eq(resiScans.userId, userId),
+      gte(resiScans.scannedAt, lo),
+      lte(resiScans.scannedAt, hi),
+    );
+
+    const [dailyRows, coverRow, productRows, shopRows] = await Promise.all([
+      this.db
+        .select({
+          date: day,
+          parcels: sql<number>`count(distinct ${resiScans.id})::int`,
+          units: sql<string>`coalesce(sum(${resiScanItems.qty}), 0)`,
+        })
+        .from(resiScans)
+        .leftJoin(resiScanItems, eq(resiScanItems.resiScanId, resiScans.id))
+        .where(inWindow)
+        .groupBy(day)
+        .orderBy(day),
+      // Joined rather than an EXISTS subquery. The subquery form returned
+      // zero for every scan while a plain join over the same two tables
+      // returned 74 of 75 -- a correlated raw-SQL reference that reads as
+      // valid and quietly matches nothing. Counting distinct scan ids keeps
+      // the join from multiplying a parcel by its number of lines.
+      this.db
+        .select({
+          scans: sql<number>`count(distinct ${resiScans.id})::int`,
+          withShop: sql<number>`count(distinct ${resiScans.id}) filter (where ${resiScans.shopId} is not null)::int`,
+          withCourier: sql<number>`count(distinct ${resiScans.id}) filter (where coalesce(${resiScans.courier}, '') <> '')::int`,
+          withMarketplace: sql<number>`count(distinct ${resiScans.id}) filter (where coalesce(${resiScans.marketplace}, '') <> '')::int`,
+          withItems: sql<number>`count(distinct ${resiScans.id}) filter (where ${resiScanItems.id} is not null)::int`,
+        })
+        .from(resiScans)
+        .leftJoin(resiScanItems, eq(resiScanItems.resiScanId, resiScans.id))
+        .where(inWindow),
+      this.db
+        .select({
+          name: masterProducts.name,
+          units: sql<string>`coalesce(sum(${resiScanItems.qty}), 0)`,
+        })
+        .from(resiScanItems)
+        .innerJoin(resiScans, eq(resiScanItems.resiScanId, resiScans.id))
+        .innerJoin(masterProducts, eq(resiScanItems.masterProductId, masterProducts.id))
+        .where(inWindow)
+        .groupBy(masterProducts.name),
+      this.db
+        .select({
+          shopId: resiScans.shopId,
+          parcels: sql<number>`count(distinct ${resiScans.id})::int`,
+        })
+        .from(resiScans)
+        .where(inWindow)
+        .groupBy(resiScans.shopId),
+    ]);
+
+    const cover = coverRow[0] ?? {
+      scans: 0, withShop: 0, withCourier: 0, withMarketplace: 0, withItems: 0,
+    };
+    const pct = (part: number, whole: number) =>
+      whole > 0 ? Math.round((part / whole) * 1000) / 10 : null;
+
+    /**
+     * Zero-filled from the first active day to the last.
+     *
+     * Days inside the span with nothing shipped are real zeros and belong in
+     * the average. Days before the first parcel are not — the business was not
+     * running, and including them measures the calendar rather than the shop.
+     */
+    const observed = dailyRows.map((r) => ({
+      date: String(r.date),
+      parcels: Number(r.parcels),
+      units: Number(r.units),
+    }));
+    const daily: { date: string; parcels: number; units: number }[] = [];
+    if (observed.length) {
+      const byDate = new Map(observed.map((d) => [d.date, d]));
+      const first = new Date(observed[0]!.date + "T00:00:00Z");
+      const last = new Date(observed[observed.length - 1]!.date + "T00:00:00Z");
+      for (let t = first.getTime(); t <= last.getTime(); t += 86_400_000) {
+        const key = new Date(t).toISOString().slice(0, 10);
+        daily.push(byDate.get(key) ?? { date: key, parcels: 0, units: 0 });
+      }
+    }
+
+    const spanDays = daily.length;
+    const activeDays = observed.length;
+    const parcels = daily.reduce((n, d) => n + d.parcels, 0);
+    const units = daily.reduce((n, d) => n + d.units, 0);
+
+    /** Mean and spread of the daily count, and what that implies for the rate. */
+    let perDay: number | null = null;
+    let perDayLow: number | null = null;
+    let perDayHigh: number | null = null;
+    let dispersion: number | null = null;
+    if (spanDays > 0) {
+      perDay = Math.round((parcels / spanDays) * 10) / 10;
+      if (spanDays > 1) {
+        const mean = parcels / spanDays;
+        const variance =
+          daily.reduce((n, d) => n + (d.parcels - mean) ** 2, 0) / (spanDays - 1);
+        const stderr = Math.sqrt(variance / spanDays);
+        const margin = t95(spanDays - 1) * stderr;
+        perDayLow = Math.max(0, Math.round((mean - margin) * 10) / 10);
+        perDayHigh = Math.round((mean + margin) * 10) / 10;
+        // Above ~1,5 the days are clumpy rather than steady, which is the
+        // signal that a single day tells you very little about the next.
+        dispersion = mean > 0 ? Math.round((variance / mean) * 10) / 10 : null;
+      }
+    }
+
+    const productUnits = productRows.map((r) => Number(r.units)).filter((n) => n > 0);
+    const topProduct = productRows
+      .map((r) => ({ name: r.name, units: Number(r.units) }))
+      .sort((a, b) => b.units - a.units)[0] ?? null;
+    const totalProductUnits = productUnits.reduce((n, v) => n + v, 0);
+
+    const mappedShops = shopRows
+      .filter((r) => r.shopId)
+      .map((r) => Number(r.parcels))
+      .filter((n) => n > 0)
+      .sort((a, b) => b - a);
+
+    /**
+     * Two counts are only different if the gap outruns the noise in both.
+     *
+     * The standard two-sample comparison for counts: |a-b| against
+     * 1,96*sqrt(a+b). Sixteen parcels against twelve looks like a clear winner
+     * and is not — the gap is four and the noise is ten.
+     */
+    const topTwoDistinguishable =
+      mappedShops.length >= 2
+        ? Math.abs(mappedShops[0]! - mappedShops[1]!) >
+          1.96 * Math.sqrt(mappedShops[0]! + mappedShops[1]!)
+        : null;
+
+    return {
+      span: {
+        firstDay: daily[0]?.date ?? null,
+        lastDay: daily[daily.length - 1]?.date ?? null,
+        spanDays,
+        activeDays,
+        windowDays,
+        parcels,
+        units,
+      },
+      coverage: {
+        scans: cover.scans,
+        withShop: cover.withShop,
+        withCourier: cover.withCourier,
+        withMarketplace: cover.withMarketplace,
+        withItems: cover.withItems,
+        shopPct: pct(cover.withShop, cover.scans),
+        courierPct: pct(cover.withCourier, cover.scans),
+        marketplacePct: pct(cover.withMarketplace, cover.scans),
+        itemsPct: pct(cover.withItems, cover.scans),
+      },
+      rate: {
+        /** Over the days the business was actually running. */
+        parcelsPerDay: perDay,
+        parcelsPerDayLow: perDayLow,
+        parcelsPerDayHigh: perDayHigh,
+        unitsPerDay: spanDays > 0 ? Math.round((units / spanDays) * 10) / 10 : null,
+        /** The same parcels spread over the whole selected window, for contrast. */
+        parcelsPerWindowDay:
+          windowDays > 0 ? Math.round((parcels / windowDays) * 10) / 10 : null,
+        dispersion,
+        monthlyLow: perDayLow != null ? Math.round(perDayLow * 30) : null,
+        monthlyMid: perDay != null ? Math.round(perDay * 30) : null,
+        monthlyHigh: perDayHigh != null ? Math.round(perDayHigh * 30) : null,
+      },
+      concentration: {
+        topProductName: topProduct?.name ?? null,
+        topProductSharePct: topProduct ? pct(topProduct.units, totalProductUnits) : null,
+        effectiveProducts: effectiveCount(productUnits),
+        distinctProducts: productUnits.length,
+        effectiveShops: effectiveCount(mappedShops),
+        mappedShops: mappedShops.length,
+        topTwoDistinguishable,
+      },
+      daily,
     };
   }
 

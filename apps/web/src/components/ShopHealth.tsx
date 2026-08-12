@@ -194,6 +194,264 @@ function PersenHargaPublish({
   );
 }
 
+/** "6 Agu" — short enough for a bar label, unambiguous within one range. */
+function hariPendek(iso: string): string {
+  const d = new Date(iso + "T00:00:00Z");
+  return d.toLocaleDateString("id-ID", { day: "numeric", month: "short", timeZone: "UTC" });
+}
+
+/**
+ * What the numbers on this page can and cannot support.
+ *
+ * Placed above the tables it qualifies, because the order matters: a rate
+ * without its spread and a ranking without its coverage are not smaller
+ * truths, they are different claims. Everything here is one series at a time,
+ * so no chart carries identity by colour — the daily bars are a single hue and
+ * the coverage bars are a magnitude, not a set of categories.
+ */
+function BacaanStatistik({ s }: { s: Insights["statistics"] }) {
+  const { span, coverage, rate, concentration, daily } = s;
+
+  if (!span.parcels) {
+    return (
+      <Card>
+        <div className="text-xs text-ink-3">Bacaan data</div>
+        <div className="mt-2 text-sm text-ink-2">
+          Belum ada paket terscan di periode ini, jadi tidak ada yang bisa dibaca.
+        </div>
+      </Card>
+    );
+  }
+
+  const maxBar = Math.max(...daily.map((d) => d.parcels), 1);
+  const puncak = daily.reduce((a, b) => (b.parcels > a.parcels ? b : a), daily[0]!);
+  const terakhir = daily[daily.length - 1]!;
+  /**
+   * Six days fit their labels; thirty do not.
+   *
+   * Past ten bars only the ends and the peak keep a written date — the rest
+   * would overlap into an unreadable smear, and the shape of the row is the
+   * point anyway. Every bar still answers on hover.
+   */
+  const padat = daily.length > 10;
+  const berlabel = (iso: string) =>
+    !padat || iso === daily[0]!.date || iso === terakhir.date || iso === puncak.date;
+
+  // Above ~1,5 the days clump instead of trickling, and one day stops
+  // predicting the next. Worth saying in words, not just as a ratio.
+  const menggumpal = rate.dispersion != null && rate.dispersion > 1.5;
+  const kosong = span.windowDays - span.spanDays;
+
+  const baris: { label: string; pct: number | null; n: number; catatan?: string }[] = [
+    { label: "Isi paket", pct: coverage.itemsPct, n: coverage.withItems },
+    {
+      label: "Toko",
+      pct: coverage.shopPct,
+      n: coverage.withShop,
+      catatan: "dipakai tabel Kesehatan Toko di bawah",
+    },
+    { label: "Marketplace", pct: coverage.marketplacePct, n: coverage.withMarketplace },
+    { label: "Kurir", pct: coverage.courierPct, n: coverage.withCourier },
+  ];
+
+  const belum: string[] = [];
+  if (span.spanDays < 28) {
+    belum.push(
+      `Tren naik/turun — perlu sekitar 4 minggu data, sekarang baru ${span.spanDays} hari.`,
+    );
+  }
+  if (concentration.topTwoDistinguishable === false) {
+    belum.push(
+      "Toko mana yang paling laris — selisih dua teratas masih lebih kecil dari " +
+        "goyangan acaknya sendiri, jadi urutannya belum berarti.",
+    );
+  }
+  if ((coverage.courierPct ?? 0) < 50) {
+    belum.push(
+      `Perbandingan kurir — baru ${coverage.withCourier} dari ${coverage.scans} paket punya kurir.`,
+    );
+  }
+  if ((coverage.shopPct ?? 0) < 80) {
+    belum.push(
+      `Angka per toko hanya melihat ${coverage.withShop} dari ${coverage.scans} paket ` +
+        `(${coverage.shopPct}%). Sisanya belum dipetakan tokonya.`,
+    );
+  }
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="text-xs text-ink-3">Bacaan data</div>
+        <div className="text-[11px] text-ink-3">
+          {span.parcels} paket · {span.units} unit ·{" "}
+          {span.firstDay ? hariPendek(span.firstDay) : "—"}
+          {span.lastDay && span.lastDay !== span.firstDay
+            ? ` – ${hariPendek(span.lastDay)}`
+            : ""}{" "}
+          ({span.spanDays} hari)
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-5 lg:grid-cols-2">
+        {/* --------------------------------------------------- laju */}
+        <div>
+          <div className="text-[11px] text-ink-3">Paket per hari, saat toko jalan</div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-2xl font-semibold tabular-nums text-ink">
+              {rate.parcelsPerDay}
+            </span>
+            {rate.parcelsPerDayLow != null && (
+              <span className="text-sm tabular-nums text-ink-2">
+                kemungkinan {rate.parcelsPerDayLow}–{rate.parcelsPerDayHigh}
+              </span>
+            )}
+          </div>
+
+          {/* Single series, single hue: no legend, the heading names it. Only
+              the tallest and the newest bar carry a number; the rest answer
+              on hover, so the row stays readable. */}
+          <div className="mt-3 flex items-end gap-[2px]" role="img"
+               aria-label={
+                 `Paket per hari, ${daily.length} hari. ` +
+                 `Tertinggi ${hariPendek(puncak.date)} ${puncak.parcels} paket, ` +
+                 `terakhir ${hariPendek(terakhir.date)} ${terakhir.parcels} paket.`
+               }>
+            {daily.map((d) => (
+              <div key={d.date} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+                <span className="h-4 text-[10px] tabular-nums text-ink-2">
+                  {d.date === puncak.date ||
+                  d.date === terakhir.date ||
+                  (puncak.date === terakhir.date && d.date === daily[0]!.date)
+                    ? d.parcels
+                    : ""}
+                </span>
+                <div
+                  className="w-full rounded-t bg-brand"
+                  style={{ height: `${Math.max(3, (d.parcels / maxBar) * 40)}px` }}
+                  title={`${hariPendek(d.date)}: ${d.parcels} paket, ${d.units} unit`}
+                />
+                <span className="truncate text-[10px] text-ink-3">
+                  {berlabel(d.date) ? hariPendek(d.date) : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3 text-xs text-ink-3">
+            {menggumpal ? (
+              <>
+                Harian Anda <strong>tidak rata</strong> ({Math.min(...daily.map((d) => d.parcels))}–
+                {maxBar} paket). Rentang di atas dihitung dari goyangan itu, bukan dari
+                rata-ratanya saja — itu sebabnya lebar.
+              </>
+            ) : (
+              <>Harian Anda cukup rata, jadi rata-rata di atas cukup bisa dipegang.</>
+            )}
+          </div>
+
+          {rate.monthlyLow != null && (
+            <div className="mt-2 text-xs text-ink-2">
+              Kalau laju ini bertahan:{" "}
+              <strong className="tabular-nums">
+                {rate.monthlyLow}–{rate.monthlyHigh}
+              </strong>{" "}
+              paket per 30 hari (tengah {rate.monthlyMid}).{" "}
+              {span.spanDays < 14 && (
+                <span className="text-ink-3">
+                  {span.spanDays} hari belum cukup untuk memastikan laju ini bertahan.
+                </span>
+              )}
+            </div>
+          )}
+
+          {kosong > 0 && (
+            <div className="mt-2 text-xs text-ink-3">
+              Filter periode Anda {span.windowDays} hari, tapi datanya cuma {span.spanDays} hari.
+              Kalau dibagi rata sepanjang filter, angkanya jadi{" "}
+              <strong className="tabular-nums">{rate.parcelsPerWindowDay}</strong> paket/hari —
+              itu bukan laju toko, itu {kosong} hari kosong yang ikut membagi.
+            </div>
+          )}
+        </div>
+
+        {/* ---------------------------------------------- kelengkapan */}
+        <div>
+          <div className="text-[11px] text-ink-3">
+            Kelengkapan data — seberapa banyak paket yang punya isian ini
+          </div>
+          <div className="mt-2 space-y-2">
+            {baris.map((b) => (
+              <div key={b.label}>
+                <div className="flex items-baseline justify-between gap-2 text-xs">
+                  <span className="text-ink-2">{b.label}</span>
+                  <span className="tabular-nums text-ink-3">
+                    {b.n}/{coverage.scans} · {b.pct ?? 0}%
+                  </span>
+                </div>
+                {/* Magnitude, so one hue rather than a status colour per row:
+                    the design system's red and amber sit at ΔE 3,6 under
+                    deuteranopia and cannot carry the difference by themselves.
+                    The number beside each bar does that instead. */}
+                <div className="mt-1 h-1.5 w-full rounded-full bg-line">
+                  <div
+                    className="h-1.5 rounded-full bg-brand"
+                    style={{ width: `${Math.max(1, b.pct ?? 0)}%` }}
+                  />
+                </div>
+                {b.catatan && (
+                  <div className="mt-0.5 text-[10px] text-ink-3">{b.catatan}</div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 text-[11px] text-ink-3">Ketergantungan</div>
+          <div className="mt-1 space-y-1 text-xs text-ink-2">
+            {concentration.topProductName && (
+              <div>
+                Produk teratas <strong>{concentration.topProductName}</strong> menyumbang{" "}
+                <strong className="tabular-nums">{concentration.topProductSharePct}%</strong> unit.
+              </div>
+            )}
+            {concentration.effectiveProducts != null && (
+              <div>
+                {concentration.distinctProducts} produk terjual, tapi sebarannya setara{" "}
+                <strong className="tabular-nums">{concentration.effectiveProducts}</strong> produk
+                — itu jumlah yang benar-benar menopang omzet.
+              </div>
+            )}
+            {concentration.effectiveShops != null && concentration.mappedShops > 0 && (
+              <div>
+                {concentration.mappedShops} toko terpetakan, setara{" "}
+                <strong className="tabular-nums">{concentration.effectiveShops}</strong> toko.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* The part a dashboard normally leaves out. Saying which questions the
+          data cannot answer yet is what stops the ones it can answer from
+          being read too confidently. */}
+      {belum.length > 0 && (
+        <div className="mt-4 border-t border-line pt-3">
+          <div className="text-[11px] font-medium text-ink-2">
+            Belum bisa disimpulkan dari data ini
+          </div>
+          <ul className="mt-1 space-y-1">
+            {belum.map((b) => (
+              <li key={b} className="flex gap-2 text-xs text-ink-3">
+                <span aria-hidden="true">·</span>
+                <span>{b}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 interface ShopRow {
   id: string;
   name: string;
@@ -272,6 +530,49 @@ interface Insights {
       }[];
       needsReviewCount: number;
     };
+  };
+  statistics: {
+    span: {
+      firstDay: string | null;
+      lastDay: string | null;
+      spanDays: number;
+      activeDays: number;
+      windowDays: number;
+      parcels: number;
+      units: number;
+    };
+    coverage: {
+      scans: number;
+      withShop: number;
+      withCourier: number;
+      withMarketplace: number;
+      withItems: number;
+      shopPct: number | null;
+      courierPct: number | null;
+      marketplacePct: number | null;
+      itemsPct: number | null;
+    };
+    rate: {
+      parcelsPerDay: number | null;
+      parcelsPerDayLow: number | null;
+      parcelsPerDayHigh: number | null;
+      unitsPerDay: number | null;
+      parcelsPerWindowDay: number | null;
+      dispersion: number | null;
+      monthlyLow: number | null;
+      monthlyMid: number | null;
+      monthlyHigh: number | null;
+    };
+    concentration: {
+      topProductName: string | null;
+      topProductSharePct: number | null;
+      effectiveProducts: number | null;
+      distinctProducts: number;
+      effectiveShops: number | null;
+      mappedShops: number;
+      topTwoDistinguishable: boolean | null;
+    };
+    daily: { date: string; parcels: number; units: number }[];
   };
   owners: {
     seller: { total: number; perDay: number; perMonth: number };
@@ -507,6 +808,11 @@ export function ShopHealth() {
               sub={`${d.owners.subSellers.length} sub-seller`}
             />
           </div>
+
+          {/* Above the rankings, not below them. "Busiest shop" and "top
+              product" are read differently once you know they rest on 43% of
+              parcels and six days -- and nobody scrolls down to find that out. */}
+          <BacaanStatistik s={d.statistics} />
 
           {/* Ranked separately on purpose: the shop that ships most is often
               not the one that earns most, and one "best shop" would hide
