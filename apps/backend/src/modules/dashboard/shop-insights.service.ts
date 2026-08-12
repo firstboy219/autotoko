@@ -5,6 +5,7 @@ import { resiScans, resiScanItems } from "../../database/schema/resi.js";
 import { masterProducts } from "../../database/schema/products.js";
 import { shopCategories, shops } from "../../database/schema/shops.js";
 import { payoutBatches, payoutMutations } from "../../database/schema/payout.js";
+import { materialPurchases } from "../../database/schema/products.js";
 import { subSellers } from "../../database/schema/payout.js";
 
 /**
@@ -85,13 +86,14 @@ export class ShopInsightsService {
     const shopIds = shopRows.map((s) => s.id);
     const byId = new Map(shopRows.map((s) => [s.id, s]));
 
-    const [money, moneyPrev, activity, activityPrev, products, owners] = await Promise.all([
+    const [money, moneyPrev, activity, activityPrev, products, owners, restock] = await Promise.all([
       this.moneyByShop(userId, from, to, shopIds),
       this.moneyByShop(userId, prev.from, prev.to, shopIds),
       this.activityByShop(userId, from, to, shopIds),
       this.activityByShop(userId, prev.from, prev.to, shopIds),
       this.topProducts(userId, from, to, shopIds),
       this.ownerEarnings(userId, from, to, shopIds),
+      this.restockSpend(userId, from, to),
     ]);
 
     const lastShipped = await this.lastShippedByShop(userId, shopIds);
@@ -189,6 +191,26 @@ export class ShopInsightsService {
         activeShops: perShop.filter((s) => s.status === "aktif").length,
         idleShops: perShop.filter((s) => s.status === "vakum").length,
       },
+      /**
+       * Money in against money out on stock.
+       *
+       * `spend` counts every purchase in the window regardless of shop, so it
+       * does NOT follow the category filter — materials are shared and a
+       * per-category split would be invented. The UI says so.
+       */
+      restock: {
+        ...restock,
+        /** Positive means more came in than went out on stock. */
+        balance: totalCredit - restock.spend,
+        /** Spend as a share of what was released, when anything was. */
+        shareOfCredit:
+          totalCredit > 0 ? Math.round((restock.spend / totalCredit) * 1000) / 10 : null,
+        /**
+         * Set aside minus spent. Positive is stock money still in hand;
+         * negative means buying outran the allowance.
+         */
+        heldVsSpent: restock.heldForMaterials - restock.spend,
+      },
       /** Who took home what, averaged over the range. */
       owners,
       highlights: {
@@ -197,6 +219,56 @@ export class ShopInsightsService {
         topProducts: products.overall.slice(0, 8),
       },
       shops: perShop,
+    };
+  }
+
+  /**
+   * What was actually paid for stock in the window, and what was set aside.
+   *
+   * Deliberately NOT filtered by shop or category. Materials are bought once
+   * and used by every product across every shop — there is no honest way to
+   * attribute a drum of glycerine to one of them, and a per-shop figure here
+   * would be an invented split presented as a fact.
+   */
+  private async restockSpend(userId: string, from: string, to: string) {
+    const [spend] = await this.db
+      .select({
+        total: sql<string>`coalesce(sum(${materialPurchases.totalCost}), 0)`,
+        count: sql<number>`count(*)::int`,
+        // A delivery scanned without a COD amount has no price to record. The
+        // spend is a floor, and saying how many are missing is the difference
+        // between a figure and a guess.
+        unpriced: sql<number>`count(*) filter (where coalesce(${materialPurchases.totalCost}, '0')::numeric <= 0)::int`,
+      })
+      .from(materialPurchases)
+      .where(
+        and(
+          eq(materialPurchases.userId, userId),
+          gte(materialPurchases.purchasedAt, from),
+          lte(materialPurchases.purchasedAt, to),
+        ),
+      );
+
+    // What the payout split held back for materials. A different thing from
+    // what was spent, and the gap is the point.
+    const [held] = await this.db
+      .select({
+        total: sql<string>`coalesce(sum(${payoutMutations.sellerMaterialAmount}), 0)`,
+      })
+      .from(payoutMutations)
+      .where(
+        and(
+          eq(payoutMutations.userId, userId),
+          gte(payoutMutations.payoutDate, from),
+          lte(payoutMutations.payoutDate, to),
+        ),
+      );
+
+    return {
+      spend: Number(spend?.total ?? 0),
+      purchases: Number(spend?.count ?? 0),
+      unpricedPurchases: Number(spend?.unpriced ?? 0),
+      heldForMaterials: Number(held?.total ?? 0),
     };
   }
 

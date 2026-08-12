@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useFetch } from "../lib/useFetch";
 import { rupiah } from "../lib/fmt";
 import { Icon } from "./Icon";
-import { Badge, Card, CardHeader, EmptyState, Select } from "./ui";
+import { Badge, Card, CardHeader, EmptyState, InlineAlert, Select } from "./ui";
 
 /**
  * The shop owner's view of their own shops.
@@ -54,6 +54,15 @@ interface Insights {
     shops: number;
     activeShops: number;
     idleShops: number;
+  };
+  restock: {
+    spend: number;
+    purchases: number;
+    unpricedPurchases: number;
+    heldForMaterials: number;
+    balance: number;
+    shareOfCredit: number | null;
+    heldVsSpent: number;
   };
   owners: {
     seller: { total: number; perDay: number; perMonth: number };
@@ -371,6 +380,68 @@ export function ShopHealth() {
               </div>
             </Card>
           )}
+
+          {/* The question asked directly: does what came in cover what went
+              out on stock. Its own card because it is the only figure here
+              that does not follow the category filter. */}
+          <Card>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="text-xs text-ink-3">Pencairan vs belanja stok</div>
+                <div
+                  className={`mt-1 text-lg font-semibold ${
+                    d.restock.balance >= 0 ? "text-emerald-600" : "text-red-600"
+                  }`}
+                >
+                  {d.restock.balance >= 0
+                    ? `Surplus ${rupiah(d.restock.balance)}`
+                    : `Belanja lebih besar ${rupiah(Math.abs(d.restock.balance))}`}
+                </div>
+                <div className="mt-1 text-sm text-ink-2">
+                  Masuk {rupiah(d.totals.credit)} · Belanja stok {rupiah(d.restock.spend)}
+                  {d.restock.shareOfCredit != null && (
+                    <span className="text-ink-3"> ({d.restock.shareOfCredit}% dari pencairan)</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="text-right">
+                <div className="text-xs text-ink-3">Jatah bahan baku di pencairan</div>
+                <div className="mt-1 tabular-nums text-ink">
+                  {rupiah(d.restock.heldForMaterials)}
+                </div>
+                {/* Set aside minus spent. The two are different things and the
+                    gap is what a seller actually wants to know. */}
+                <div
+                  className={`text-xs ${
+                    d.restock.heldVsSpent >= 0 ? "text-ink-2" : "text-red-600"
+                  }`}
+                >
+                  {d.restock.heldVsSpent >= 0
+                    ? `Sisa belum terpakai ${rupiah(d.restock.heldVsSpent)}`
+                    : `Terpakai melebihi jatah ${rupiah(Math.abs(d.restock.heldVsSpent))}`}
+                </div>
+              </div>
+            </div>
+
+            {/* Stated rather than hidden: half the deliveries carry no price,
+                so the spend is a floor. A figure presented without that reads
+                as a total. */}
+            {(d.restock.unpricedPurchases > 0 || d.restock.purchases === 0) && (
+              <div className="mt-3">
+                <InlineAlert tone="warning">
+                  {d.restock.purchases === 0
+                    ? "Belum ada pembelian stok tercatat di periode ini, jadi angka belanja masih nol."
+                    : `${d.restock.unpricedPurchases} dari ${d.restock.purchases} pembelian belum ada nominalnya, jadi belanja sebenarnya lebih besar dari angka ini. Lengkapi di menu Pembelian Stok.`}
+                </InlineAlert>
+              </div>
+            )}
+
+            <div className="mt-3 text-xs text-ink-3">
+              Belanja stok dihitung untuk seluruh bisnis dan tidak ikut filter kategori —
+              bahan baku dibeli sekali lalu dipakai semua toko.
+            </div>
+          </Card>
 
           <Card padded={false}>
             <CardHeader
