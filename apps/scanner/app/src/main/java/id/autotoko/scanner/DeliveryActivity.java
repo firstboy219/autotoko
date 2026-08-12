@@ -82,6 +82,15 @@ public class DeliveryActivity extends AppCompatActivity {
     private static final android.util.Size ANALYSIS_SIZE = new android.util.Size(1920, 1080);
     private static final int PHOTO_MAX_EDGE = 1600;
     /** Let autofocus settle before the shutter; see focusThenCapture. */
+    /** Picking an image leaves the activity; the sheet's parts wait here. */
+    private static final int REQ_ORDER_PHOTO = 7301;
+    private List<Row> pendingRows = null;
+    private EditText pendingAmountField = null;
+    private MaterialButton pendingOrderButton = null;
+    private TextView pendingOrderNote = null;
+    /** Set once a screenshot is stored; travels with the delivery. */
+    private String orderPhotoUrl = null;
+
     private static final long FOCUS_SETTLE_MS = 600;
     /** After this long with nothing decoded, stop looking confident about it. */
     private static final long NO_HIT_HINT_MS = 6000;
@@ -445,6 +454,100 @@ public class DeliveryActivity extends AppCompatActivity {
         return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
     }
 
+    /** The same shrink-and-encode as the camera path, from a chosen file. */
+    private String toBase64Jpeg(Bitmap bmp) {
+        int w = bmp.getWidth(), h = bmp.getHeight();
+        float scale = PHOTO_MAX_EDGE / (float) Math.max(w, h);
+        if (scale < 1f) {
+            Bitmap small = Bitmap.createScaledBitmap(
+                    bmp, Math.round(w * scale), Math.round(h * scale), true);
+            if (small != bmp) bmp.recycle();
+            bmp = small;
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        bmp.compress(Bitmap.CompressFormat.JPEG, PHOTO_QUALITY, out);
+        bmp.recycle();
+        return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+    }
+
+    /**
+     * The chosen screenshot: stored, then read.
+     *
+     * The reading fills what it can and the packer keeps the last word, as
+     * everywhere else here. A total read wrongly is one number to correct; a
+     * total nobody entered is a wrong HPP for as long as the material lasts.
+     */
+    @Override
+    protected void onActivityResult(int req, int result, Intent data) {
+        super.onActivityResult(req, result, data);
+        if (req != REQ_ORDER_PHOTO) return;
+        if (result != RESULT_OK || data == null || data.getData() == null) return;
+
+        final String base64;
+        try {
+            java.io.InputStream in = getContentResolver().openInputStream(data.getData());
+            Bitmap bmp = BitmapFactory.decodeStream(in);
+            if (in != null) in.close();
+            if (bmp == null) throw new Exception("bukan gambar");
+            base64 = toBase64Jpeg(bmp);
+        } catch (Exception e) {
+            Toast.makeText(this, "Foto tidak bisa dibaca.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (pendingOrderButton != null) pendingOrderButton.setText("Membaca foto pesanan...");
+
+        api.scanOrderPhoto(base64, r -> {
+            if (!r.ok() || r.data() == null) {
+                Toast.makeText(this, "Gagal mengunggah foto pesanan.", Toast.LENGTH_LONG).show();
+                if (pendingOrderButton != null) {
+                    pendingOrderButton.setText("Lampirkan foto pesanan");
+                }
+                return;
+            }
+            // Stored even when nothing was read: the evidence is the point,
+            // the numbers can be typed.
+            String url = r.data().optString("url", "");
+            orderPhotoUrl = url.isEmpty() ? null : url;
+            if (pendingOrderButton != null) {
+                pendingOrderButton.setText("Foto pesanan terlampir");
+            }
+
+            org.json.JSONArray items = r.data().optJSONArray("items");
+            int filled = 0;
+            double total = 0;
+            for (int i = 0; items != null && i < items.length(); i++) {
+                org.json.JSONObject o = items.optJSONObject(i);
+                if (o == null) continue;
+                total += o.optDouble("totalCost", 0);
+                // Only fills a line the packer already mapped. A screenshot
+                // naming something not on this waybill is not a reason to
+                // invent a delivery line.
+                String matched = o.optString("matchedMaterialId", "");
+                double qty = o.optDouble("quantity", 0);
+                if (matched.isEmpty() || qty <= 0 || pendingRows == null) continue;
+                for (Row row : pendingRows) {
+                    if (row.removed || row.chosen < 0 || row.chosen >= row.options.size()) continue;
+                    if (matched.equals(row.options.get(row.chosen).id) && row.pcsField != null) {
+                        row.pcsField.setText(String.valueOf((long) qty));
+                        filled++;
+                        break;
+                    }
+                }
+            }
+            if (total > 0 && pendingAmountField != null
+                    && pendingAmountField.getText().toString().trim().isEmpty()) {
+                pendingAmountField.setText(String.valueOf((long) total));
+            }
+            if (pendingOrderNote != null) {
+                pendingOrderNote.setText(filled == 0 && total <= 0
+                        ? "Foto tersimpan, tapi jumlah dan nominal tidak terbaca - isi manual."
+                        : "Terbaca " + filled + " baris jumlah"
+                          + (total > 0 ? ", total Rp " + (long) total : "")
+                          + ". Periksa sebelum simpan.");
+            }
+        });
+    }
+
     /** One mapped line: which material, how many packages, how much in each. */
     private static final class Row {
         final String rawName;
@@ -569,21 +672,26 @@ public class DeliveryActivity extends AppCompatActivity {
         cod.setPadding(0, (int) (14 * d), 0, 0);
         root.addView(cod);
 
+        // Always visible. It used to appear only for COD, so a parcel paid by
+        // transfer — the commoner case — arrived priceless and its materials
+        // carried no cost into the HPP. The label changes; the field does not
+        // come and go.
         final EditText codAmount = new EditText(this);
         codAmount.setInputType(InputType.TYPE_CLASS_NUMBER);
-        codAmount.setHint("Nominal COD (Rp)");
-        codAmount.setVisibility(View.GONE);
-        root.addView(codAmount);
+        codAmount.setHint("Nominal pembelian (Rp)");
+        root.addView(codAmount, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
 
         final TextView codNote = new TextView(this);
         codNote.setTextSize(11);
         codNote.setTextColor(Color.parseColor("#6B7178"));
-        codNote.setVisibility(View.GONE);
+        codNote.setText("Nominal dipakai sebagai harga bahan bila resi ini "
+                + "hanya berisi satu bahan.");
         root.addView(codNote);
 
         cod.setOnCheckedChangeListener((v, checked) -> {
-            codAmount.setVisibility(checked ? View.VISIBLE : View.GONE);
-            codNote.setVisibility(checked ? View.VISIBLE : View.GONE);
+            codAmount.setHint(checked ? "Nominal COD (Rp)" : "Nominal pembelian (Rp)");
             // Said plainly, because it decides whether HPP learns anything from
             // this delivery: one material means the amount IS its price.
             codNote.setText(rows.size() == 1
@@ -591,6 +699,40 @@ public class DeliveryActivity extends AppCompatActivity {
                     : "Resi berisi beberapa bahan — nominal dicatat sebagai total, "
                       + "harga rata-rata tiap bahan tidak diubah.");
         });
+
+        // The order detail from the marketplace. A courier label carries
+        // neither a quantity nor a price; the order screen carries both, and
+        // for a parcel paid by transfer it is the only place they exist.
+        final MaterialButton orderBtn = new MaterialButton(this, null,
+                com.google.android.material.R.attr.materialButtonOutlinedStyle);
+        orderBtn.setText("Lampirkan foto pesanan");
+        orderBtn.setAllCaps(false);
+        final TextView orderNote = new TextView(this);
+        orderBtn.setOnClickListener(ob -> {
+            // The picker leaves this activity, so the parts the reading has to
+            // fill are parked where onActivityResult can reach them.
+            pendingRows = rows;
+            pendingAmountField = codAmount;
+            pendingOrderButton = orderBtn;
+            pendingOrderNote = orderNote;
+            Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
+            pick.setType("image/*");
+            try {
+                startActivityForResult(
+                        Intent.createChooser(pick, "Pilih foto pesanan"), REQ_ORDER_PHOTO);
+            } catch (Exception e) {
+                Toast.makeText(this, "Tidak ada aplikasi galeri.", Toast.LENGTH_LONG).show();
+            }
+        });
+        root.addView(orderBtn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        orderNote.setTextSize(11);
+        orderNote.setTextColor(Color.parseColor("#6B7178"));
+        orderNote.setText("Screenshot detail pesanan dibaca untuk mengisi jumlah dan "
+                + "nominal, lalu disimpan sebagai bukti.");
+        root.addView(orderNote);
 
         ScrollView sv = new ScrollView(this);
         sv.addView(root);
@@ -620,6 +762,9 @@ public class DeliveryActivity extends AppCompatActivity {
                         Toast.makeText(this, "Nominal COD wajib diisi.", Toast.LENGTH_LONG).show();
                         return;
                     }
+                    // Not required when it is not COD: sometimes nobody at the
+                    // bench knows what it cost, and refusing the whole parcel
+                    // over a number they do not have would lose the delivery.
                     // Only a sheet the server will accept closes the dialog.
                     if (submit(finalResi, photoBase64, rows, isCod, amount)) {
                         dialog.dismiss();
@@ -798,7 +943,7 @@ public class DeliveryActivity extends AppCompatActivity {
      * standing right there to fix.
      */
     private boolean submit(String resi, String photoBase64, List<Row> rows,
-                        boolean isCod, double codAmount) {
+                        boolean isCod, double amount) {
         JSONArray items = new JSONArray();
         // A row left blank is not a row to be dropped silently. Until now a
         // sheet with four lines and one filled in saved as a one-line parcel,
@@ -849,8 +994,11 @@ public class DeliveryActivity extends AppCompatActivity {
         }
 
         hint.setText("Menyimpan...");
+        // The amount goes as codAmount only when it was COD, and as totalCost
+        // always: on a COD parcel they are the same figure, and on a paid one
+        // only the total exists.
         api.recordDelivery(resi, photoBase64, collector.lines().toString(), items,
-                isCod, isCod ? codAmount : -1, r -> {
+                isCod, isCod ? amount : -1, amount, orderPhotoUrl, r -> {
             // The reply names any line the server refused on units; without
             // this the packer sees "saved" and a shelf short of one material.
             if (r.ok()) {
@@ -876,7 +1024,7 @@ public class DeliveryActivity extends AppCompatActivity {
                     // Only for COD: somebody has to be asked to pay, and asking
                     // is the step most easily forgotten once the parcel is open.
                     done.setNeutralButton("Minta Bayar (WhatsApp)", (d, w) -> {
-                        shareCod(resi, codAmount, contents.toString());
+                        shareCod(resi, amount, contents.toString());
                         reset();
                     });
                 }

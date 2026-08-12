@@ -171,6 +171,15 @@ export const materialPurchases = pgTable(
     note: text("note"),
     /** The screenshot this was recapped from, kept as the audit trail. */
     receiptUrl: text("receipt_url"),
+    /**
+     * The marketplace order detail, as photographed or screenshotted.
+     *
+     * Separate from receiptUrl, which holds the parcel's label: one says what
+     * arrived, the other what was ordered and for how much. A courier label
+     * carries neither a quantity nor a price, which is why a delivery scanned
+     * alone has no cost to record.
+     */
+    orderPhotoUrl: text("order_photo_url"),
     /** Waybill of the parcel that arrived, when this came from the scanner. */
     resi: varchar("resi", { length: 64 }),
     /** manual | delivery_scan */

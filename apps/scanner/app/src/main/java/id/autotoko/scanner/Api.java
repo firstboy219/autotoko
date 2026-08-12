@@ -178,7 +178,8 @@ public final class Api {
      * collapse into each other on the way to the server.
      */
     public void recordDelivery(String resi, String photoBase64, String deviceText,
-                               org.json.JSONArray items, boolean isCod, double codAmount, Cb cb) {
+                               org.json.JSONArray items, boolean isCod, double codAmount,
+                               double totalCost, String orderPhotoUrl, Cb cb) {
         JSONObject payload = new JSONObject();
         try {
             payload.put("resi", resi);
@@ -190,6 +191,12 @@ public final class Api {
             payload.put("items", items);
             payload.put("isCod", isCod);
             if (isCod && codAmount >= 0) payload.put("codAmount", codAmount);
+            // Sent whether or not it was COD. A transfer-paid parcel used to
+            // arrive priceless, and its materials carried no cost into the HPP.
+            if (totalCost > 0) payload.put("totalCost", totalCost);
+            if (orderPhotoUrl != null && !orderPhotoUrl.isEmpty()) {
+                payload.put("orderPhotoUrl", orderPhotoUrl);
+            }
         } catch (Exception ignored) {}
         call("POST", session.baseUrl() + "/api/materials/deliveries", session.token(), payload, cb);
     }
@@ -278,6 +285,20 @@ public final class Api {
      */
     public void pendingTasks(Cb cb) {
         call("GET", session.baseUrl() + "/api/dashboard/pending-tasks", session.token(), null, cb);
+    }
+
+    /**
+     * Send an order screenshot; get it stored and read back.
+     *
+     * One call rather than upload-then-parse: the packer is holding a box, and
+     * the screenshot is stored even when the reading fails, so a parse nobody
+     * agrees with still leaves the evidence behind.
+     */
+    public void scanOrderPhoto(String photoBase64, Cb cb) {
+        JSONObject body = new JSONObject();
+        try { body.put("photoBase64", photoBase64); } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/materials/purchases/scan-order",
+                session.token(), body, cb);
     }
 
     /** One recorded stock purchase, with its lines. */

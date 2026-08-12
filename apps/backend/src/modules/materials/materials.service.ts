@@ -382,6 +382,27 @@ export class MaterialsService {
    * only proposes rows for the admin to correct and confirm. Each candidate is
    * matched against the existing catalog so the UI can show "top up" vs "new".
    */
+  /**
+   * Store an order screenshot and read it, in one call.
+   *
+   * The phone has the image and no url; parseReceipt needs a url. Doing both
+   * here saves a round trip in front of a packer holding a box, and means the
+   * screenshot is already stored when the reading comes back — so a parse the
+   * operator disagrees with still leaves the evidence behind.
+   */
+  async scanOrderPhoto(userId: string, photoBase64: string) {
+    const { url } = await this.uploads.saveImage(photoBase64, "jpg");
+    try {
+      const parsed = await this.parseReceipt(userId, url);
+      return { url, ...parsed };
+    } catch (e) {
+      // A failed read is not a failed upload. The screenshot is the record
+      // that matters; the numbers can be typed.
+      this.logger.warn(`Foto pesanan tidak terbaca: ${(e as Error).message}`);
+      return { url, raw: "", items: [] as unknown[] };
+    }
+  }
+
   async parseReceipt(userId: string, imageUrl: string) {
     const text = await this.ocr.readText(imageUrl);
     const lines = parsePurchaseLines(text);
@@ -616,6 +637,8 @@ export class MaterialsService {
       note?: string | null;
       isCod?: boolean;
       codAmount?: number | null;
+      /** Attached or replaced from the web, for a parcel the phone sent bare. */
+      orderPhotoUrl?: string | null;
       items?: {
         materialId: string;
         qtyPcs?: number;
@@ -642,6 +665,9 @@ export class MaterialsService {
     if (dto.isCod !== undefined) header.isCod = dto.isCod;
     if (dto.codAmount !== undefined) {
       header.codAmount = dto.codAmount != null ? dto.codAmount.toFixed(2) : null;
+    }
+    if (dto.orderPhotoUrl !== undefined) {
+      header.orderPhotoUrl = dto.orderPhotoUrl || null;
     }
     if (Object.keys(header).length) {
       await this.db.update(materialPurchases).set(header).where(eq(materialPurchases.id, id));
@@ -733,6 +759,14 @@ export class MaterialsService {
       note?: string;
       isCod?: boolean;
       codAmount?: number;
+      /**
+       * What the parcel cost, for the far commoner case of a bill already
+       * paid. COD was the only way to record a price, so every transfer-paid
+       * delivery arrived priceless and dragged nothing into the HPP.
+       */
+      totalCost?: number;
+      /** The marketplace order detail this was ordered from. */
+      orderPhotoUrl?: string;
       items: {
         materialId: string;
         rawName?: string;
@@ -812,7 +846,15 @@ export class MaterialsService {
         source: "delivery_scan",
         isCod: dto.isCod === true,
         codAmount: dto.codAmount != null ? dto.codAmount.toFixed(2) : null,
-        totalCost: dto.codAmount != null ? dto.codAmount.toFixed(2) : "0",
+        orderPhotoUrl: dto.orderPhotoUrl ?? null,
+        // An explicit total wins over the COD amount: on a COD parcel they are
+        // the same figure, and on a paid one only the total exists.
+        totalCost:
+          dto.totalCost != null
+            ? dto.totalCost.toFixed(2)
+            : dto.codAmount != null
+              ? dto.codAmount.toFixed(2)
+              : "0",
       })
       .returning();
 
@@ -853,8 +895,11 @@ export class MaterialsService {
       // the amount belongs to the parcel, not to any one of them — see the
       // note on codAmount. Guessing a split there would be worse than not
       // knowing, because nothing downstream would ever show it was a guess.
-      const soleLineCost =
-        wanted.length === 1 && dto.codAmount != null ? dto.codAmount : null;
+      // The parcel's price reaches a line only when the parcel holds one
+      // material, where it is exact rather than apportioned. Same rule as
+      // before; it just no longer depends on the payment being COD.
+      const parcelTotal = dto.totalCost ?? dto.codAmount ?? null;
+      const soleLineCost = wanted.length === 1 && parcelTotal != null ? parcelTotal : null;
 
       const cost = i.totalCost != null && Number.isFinite(Number(i.totalCost))
         ? Number(i.totalCost)
@@ -1418,6 +1463,8 @@ export class MaterialsService {
       note: p.note,
       receiptUrl: p.receiptUrl,
       totalCost: num(p.totalCost),
+      /** The order screenshot, when one was attached. */
+      orderPhotoUrl: p.orderPhotoUrl,
       /** Present for a scanned parcel; the editor uses these to label it. */
       resi: p.resi,
       source: p.source,

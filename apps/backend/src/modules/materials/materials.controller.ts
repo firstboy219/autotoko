@@ -85,6 +85,16 @@ export class MaterialsController {
     return ok(await this.materials.recordDelivery(uid(req), dto));
   }
 
+  /**
+   * Send an order screenshot, get it stored and read back.
+   *
+   * One call because the phone has bytes and no url, and the packer is waiting.
+   */
+  @Post("purchases/scan-order")
+  async scanOrder(@Req() req: FastifyRequest, @Body() dto: { photoBase64: string }) {
+    return ok(await this.materials.scanOrderPhoto(uid(req), dto.photoBase64));
+  }
+
   @Post("purchases/parse")
   async parse(@Req() req: FastifyRequest, @Body() dto: ParseReceiptDto) {
     return ok(await this.materials.parseReceipt(uid(req), dto.imageUrl));

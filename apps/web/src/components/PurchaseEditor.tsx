@@ -38,6 +38,7 @@ interface Detail {
   source: string;
   isCod: boolean;
   codAmount: number | null;
+  orderPhotoUrl: string | null;
   items: Line[];
 }
 
@@ -86,6 +87,11 @@ export function PurchaseEditor({
   const [purchasedAt, setPurchasedAt] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /** The order screenshot: what was ordered and for how much. */
+  const [orderPhoto, setOrderPhoto] = useState<string | null>(null);
+  const [reading, setReading] = useState(false);
+  /** What the reading found, shown before it is trusted. */
+  const [readNote, setReadNote] = useState<string | null>(null);
   /** The whole catalogue, so a line can be pointed somewhere else entirely. */
   const catalog = useFetch<CatalogMaterial[]>("/materials");
 
@@ -99,6 +105,7 @@ export function PurchaseEditor({
         setDrafts(d.items.map(toDraft));
         setSupplier(d.supplierName ?? "");
         setPurchasedAt(d.purchasedAt);
+        setOrderPhoto(d.orderPhotoUrl ?? null);
       })
       .catch((e) => alive && setErr(e instanceof Error ? e.message : String(e)));
     return () => {
@@ -160,6 +167,63 @@ export function PurchaseEditor({
     return per === null ? null : pcs * per;
   }
 
+  /**
+   * Attach an order screenshot, and let it fill what it can.
+   *
+   * The same endpoint the phone uses: it stores first and reads second, so a
+   * screenshot the reader makes nothing of is still kept as the evidence of
+   * what was ordered and what it cost. Nothing it reads is applied silently —
+   * the prices it touches are the ones the HPP is built from.
+   */
+  async function attachPhoto(file: File) {
+    setReading(true);
+    setErr(null);
+    setReadNote(null);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onerror = () => reject(new Error("Gambar tidak terbaca."));
+        r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+        r.readAsDataURL(file);
+      });
+      const res = await api.post<{
+        url: string;
+        items?: {
+          quantity?: number;
+          totalCost?: number;
+          matchedMaterialId?: string | null;
+          matchedMaterialName?: string | null;
+        }[];
+      }>("/materials/purchases/scan-order", { photoBase64: base64 });
+      setOrderPhoto(res.url);
+
+      const read = res.items ?? [];
+      let filled = 0;
+      setDrafts((ds) =>
+        ds.map((d) => {
+          const hit = read.find((r) => r.matchedMaterialId === d.materialId);
+          if (!hit) return d;
+          filled++;
+          return {
+            ...d,
+            qtyPcs: hit.quantity && hit.quantity > 0 ? String(hit.quantity) : d.qtyPcs,
+            totalCost:
+              hit.totalCost && hit.totalCost > 0 ? String(hit.totalCost) : d.totalCost,
+          };
+        }),
+      );
+      setReadNote(
+        filled
+          ? `Foto tersimpan. ${filled} baris terisi dari bacaan — periksa sebelum simpan.`
+          : "Foto tersimpan, tapi jumlah dan nominal tidak terbaca — isi manual.",
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReading(false);
+    }
+  }
+
   async function save() {
     setBusy(true);
     setErr(null);
@@ -167,6 +231,7 @@ export function PurchaseEditor({
       await api.patch(`/materials/purchases/${purchaseId}`, {
         purchasedAt,
         supplierName: supplier,
+        orderPhotoUrl: orderPhoto ?? "",
         items: drafts.map((d) => ({
           materialId: d.materialId,
           qtyPcs: Number(d.qtyPcs) || 1,
@@ -257,6 +322,59 @@ export function PurchaseEditor({
                 onChange={(e) => setSupplier(e.target.value)}
               />
             </Field>
+          </div>
+
+          {/* Kept next to the lines it explains: a waybill photo says what
+              arrived, this says what was ordered and for how much — which is
+              where the price the HPP needs actually lives. */}
+          <div className="rounded-lg border border-line p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-xs font-medium text-ink-2">Foto pesanan</div>
+              <label className="cursor-pointer text-xs text-brand hover:underline">
+                {reading ? "Membaca…" : orderPhoto ? "Ganti foto" : "Unggah foto"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={reading}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (f) void attachPhoto(f);
+                  }}
+                />
+              </label>
+            </div>
+            {orderPhoto ? (
+              <div className="flex items-start gap-3">
+                <a href={orderPhoto} target="_blank" rel="noreferrer">
+                  <img
+                    src={orderPhoto}
+                    alt="Foto pesanan"
+                    className="h-24 w-24 rounded border border-line object-cover"
+                  />
+                </a>
+                <div className="flex-1 text-xs text-ink-3">
+                  <div>Klik gambar untuk melihat ukuran penuh.</div>
+                  <button
+                    type="button"
+                    className="mt-1 text-danger hover:underline"
+                    onClick={() => {
+                      setOrderPhoto(null);
+                      setReadNote(null);
+                    }}
+                  >
+                    Lepas foto
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-ink-3">
+                Belum ada. Unggah screenshot detail pesanan dari marketplace —
+                jumlah dan nominalnya akan dibaca otomatis.
+              </div>
+            )}
+            {readNote && <div className="mt-2 text-xs text-ink-2">{readNote}</div>}
           </div>
 
           <div className="space-y-3">

@@ -75,6 +75,12 @@ export class RecordDeliveryDto {
   /** Required by the app when isCod; the amount owed for the whole parcel. */
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(1_000_000_000) codAmount?: number;
 
+  /** What the parcel cost, whether or not it was paid at the door. */
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) @Max(1_000_000_000) totalCost?: number;
+
+  /** The stored order screenshot, from purchases/scan-order. */
+  @IsOptional() @IsString() @MaxLength(500) orderPhotoUrl?: string;
+
   @IsArray() @ValidateNested({ each: true }) @Type(() => DeliveryLineDto)
   items!: DeliveryLineDto[];
 }
@@ -101,6 +107,14 @@ export class UpdatePurchaseLineDto {
  * contents. Only `items` when present rewrites the lines.
  */
 export class UpdatePurchaseDto {
+  /**
+   * Attached from the web to a parcel the phone recorded without one.
+   *
+   * An empty string clears it; absent leaves it alone. Same rule as the other
+   * header fields, which a PATCH once got wrong and emptied wholesale.
+   */
+  @IsOptional() @IsString() @MaxLength(500) orderPhotoUrl?: string;
+
   @IsOptional() @IsDateString() purchasedAt?: string;
 
   @IsOptional() @IsString() @MaxLength(255) supplierName?: string;
