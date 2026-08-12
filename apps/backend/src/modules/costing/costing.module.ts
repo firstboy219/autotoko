@@ -7,5 +7,8 @@ import { CostingService } from "./costing.service.js";
   imports: [AuthModule], // provides JwtAuthGuard / JwtModule
   controllers: [CostingController],
   providers: [CostingService],
+  // The dashboard asks what a product's materials cost. Exported rather than
+  // reimplemented there, so both pages answer with the same arithmetic.
+  exports: [CostingService],
 })
 export class CostingModule {}

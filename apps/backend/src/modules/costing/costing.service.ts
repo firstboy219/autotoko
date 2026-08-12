@@ -164,51 +164,7 @@ export class CostingService {
     if (!products.length) return [];
 
     const ids = products.map((p) => p.id);
-    // The same four inputs the detail page uses, fetched once for every
-    // product rather than per row. The catalogue is joined in because it — not
-    // the copy on bom_items — is the price of record for a linked line.
-    const [recipe, costings, sharedPacking, overrides] = await Promise.all([
-      this.db
-        .select({ bom: bomItems, catalogCost: materials.unitCost, catalogId: materials.id })
-        .from(bomItems)
-        .leftJoin(materials, eq(bomItems.materialId, materials.id))
-        .where(inArray(bomItems.masterProductId, ids)),
-      this.db.select().from(productCosting).where(inArray(productCosting.masterProductId, ids)),
-      this.listPackingMaterials(userId),
-      this.db
-        .select()
-        .from(productPackingQuantities)
-        .where(inArray(productPackingQuantities.masterProductId, ids)),
-    ]);
-
-    /** Effective cost per recipe line, resolved the way detail() resolves it. */
-    const matByProduct = new Map<string, { quantity: number; unitCost: number }[]>();
-    for (const r of recipe) {
-      const linked = r.bom.materialId != null && r.catalogId != null;
-      const arr = matByProduct.get(r.bom.masterProductId) ?? [];
-      arr.push({
-        quantity: num(r.bom.quantity),
-        unitCost: linked ? num(r.catalogCost) : num(r.bom.unitCost),
-      });
-      matByProduct.set(r.bom.masterProductId, arr);
-    }
-    const costByProduct = new Map(costings.map((c) => [c.masterProductId, c]));
-
-    // Packing quantities are per product only where somebody overrode them;
-    // otherwise the shared default applies. Same rule as packingForProduct.
-    const overrideByProduct = new Map<string, Map<string, number>>();
-    for (const o of overrides) {
-      const m = overrideByProduct.get(o.masterProductId) ?? new Map<string, number>();
-      m.set(o.packingMaterialId, num(o.quantity));
-      overrideByProduct.set(o.masterProductId, m);
-    }
-    const packingFor = (productId: string) => {
-      const ov = overrideByProduct.get(productId);
-      return sharedPacking.map((m) => ({
-        quantity: ov?.get(m.id) ?? m.defaultQuantity,
-        unitCost: m.unitCost,
-      }));
-    };
+    const { matByProduct, costByProduct, packingFor } = await this.costInputs(userId, ids);
 
     const rows = products.map((p) => {
       const mats = matByProduct.get(p.id) ?? [];
@@ -297,6 +253,114 @@ export class CostingService {
    * change from a purchase reaches every product's HPP at once — the whole
    * reason these are catalogue materials and not numbers typed per product.
    */
+  /**
+   * The four inputs every HPP calculation needs, resolved once.
+   *
+   * Shared rather than copied per caller. The list page and the detail page
+   * once answered the same question differently because each resolved these
+   * itself, and the seller had to guess which number was real; a third copy
+   * for the dashboard would repeat that on a bigger screen.
+   */
+  private async costInputs(userId: string, ids: string[]) {
+    const [recipe, costings, sharedPacking, overrides] = await Promise.all([
+      this.db
+        .select({ bom: bomItems, catalogCost: materials.unitCost, catalogId: materials.id })
+        .from(bomItems)
+        .leftJoin(materials, eq(bomItems.materialId, materials.id))
+        .where(inArray(bomItems.masterProductId, ids)),
+      this.db.select().from(productCosting).where(inArray(productCosting.masterProductId, ids)),
+      this.listPackingMaterials(userId),
+      this.db
+        .select()
+        .from(productPackingQuantities)
+        .where(inArray(productPackingQuantities.masterProductId, ids)),
+    ]);
+
+    /** Effective cost per recipe line, resolved the way detail() resolves it. */
+    const matByProduct = new Map<string, { quantity: number; unitCost: number }[]>();
+    for (const r of recipe) {
+      const linked = r.bom.materialId != null && r.catalogId != null;
+      const arr = matByProduct.get(r.bom.masterProductId) ?? [];
+      arr.push({
+        quantity: num(r.bom.quantity),
+        unitCost: linked ? num(r.catalogCost) : num(r.bom.unitCost),
+      });
+      matByProduct.set(r.bom.masterProductId, arr);
+    }
+    const costByProduct = new Map(costings.map((c) => [c.masterProductId, c]));
+
+    // Packing quantities are per product only where somebody overrode them;
+    // otherwise the shared default applies. Same rule as packingForProduct.
+    const overrideByProduct = new Map<string, Map<string, number>>();
+    for (const o of overrides) {
+      const m = overrideByProduct.get(o.masterProductId) ?? new Map<string, number>();
+      m.set(o.packingMaterialId, num(o.quantity));
+      overrideByProduct.set(o.masterProductId, m);
+    }
+    const packingFor = (productId: string) => {
+      const ov = overrideByProduct.get(productId);
+      return sharedPacking.map((m) => ({
+        quantity: ov?.get(m.id) ?? m.defaultQuantity,
+        unitCost: m.unitCost,
+      }));
+    };
+
+    return { matByProduct, costByProduct, packingFor };
+  }
+
+  /**
+   * Per pcs: what the recipe says materials cost, and what it is listed at.
+   *
+   * Both kinds of material are reported separately because both are bought.
+   * Labels, boxes and shrink wrap come out of the same purchases as glycerine,
+   * so a plan that counted only the recipe would be compared against a spend
+   * that includes the packing — and would read as overspending every month.
+   */
+  async materialCostPerProduct(userId: string) {
+    const products = await this.db
+      .select()
+      .from(masterProducts)
+      .where(eq(masterProducts.userId, userId));
+    if (!products.length) return [];
+
+    const ids = products.map((p) => p.id);
+    const { matByProduct, costByProduct, packingFor } = await this.costInputs(userId, ids);
+
+    return products.map((p) => {
+      const mats = matByProduct.get(p.id) ?? [];
+      const cfg = costByProduct.get(p.id);
+      const raw = cfg ? num(cfg.avgUnitsPerOrder) : 1;
+      const perOrder = Number.isFinite(raw) && raw > 0 ? raw : 1;
+      const hpp = calculateHpp({
+        materials: mats,
+        serviceCostPerPcs: num(cfg?.serviceCostPerPcs),
+        packingCostPerOrder: num(cfg?.packingCostPerOrder),
+        packingMaterials: packingFor(p.id),
+        avgUnitsPerOrder: perOrder,
+      });
+      // The master product's price is the answer when costing has none — the
+      // same fallback the detail page makes, so the two cannot disagree about
+      // what a product sells for.
+      const publishPrice =
+        cfg?.publishPrice != null
+          ? num(cfg.publishPrice)
+          : p.basePrice != null
+            ? num(p.basePrice)
+            : null;
+
+      return {
+        id: p.id,
+        name: p.name,
+        publishPrice: publishPrice != null && publishPrice > 0 ? publishPrice : null,
+        recipeLines: mats.length,
+        /** Missing costs make this an understatement, so the caller can say so. */
+        missingCost: mats.some((m) => m.unitCost <= 0),
+        materialPerPcs: hpp.materialCostCents / 100,
+        packingMaterialPerPcs: hpp.packingMaterialCostCents / perOrder / 100,
+      };
+    });
+  }
+
   async listPackingMaterials(userId: string) {
     const rows = await this.db
       .select({

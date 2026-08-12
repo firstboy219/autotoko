@@ -7,6 +7,7 @@ import { shopCategories, shops } from "../../database/schema/shops.js";
 import { payoutBatches, payoutMutations } from "../../database/schema/payout.js";
 import { materialPurchases } from "../../database/schema/products.js";
 import { subSellers } from "../../database/schema/payout.js";
+import { CostingService } from "../costing/costing.service.js";
 
 /**
  * The questions a person who owns these shops actually asks.
@@ -31,7 +32,10 @@ export interface ShopInsightsRange {
 
 @Injectable()
 export class ShopInsightsService {
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly costing: CostingService,
+  ) {}
 
   /**
    * Inclusive day count, so a single-day range divides by 1 rather than 0.
@@ -95,6 +99,9 @@ export class ShopInsightsService {
       this.ownerEarnings(userId, from, to, shopIds),
       this.restockSpend(userId, from, to),
     ]);
+
+    // Needs the spend, so it runs after rather than beside the rest.
+    const vsPublish = await this.materialShareOfPublish(userId, from, to, restock.spend);
 
     const lastShipped = await this.lastShippedByShop(userId, shopIds);
     const today = new Date();
@@ -210,6 +217,11 @@ export class ShopInsightsService {
          * negative means buying outran the allowance.
          */
         heldVsSpent: restock.heldForMaterials - restock.spend,
+        /**
+         * The same spend read against what was shipped, as a share of the
+         * listed price — the figure a seller actually budgets against.
+         */
+        vsPublish,
       },
       /** Who took home what, averaged over the range. */
       owners,
@@ -269,6 +281,144 @@ export class ShopInsightsService {
       purchases: Number(spend?.count ?? 0),
       unpricedPurchases: Number(spend?.unpriced ?? 0),
       heldForMaterials: Number(held?.total ?? 0),
+    };
+  }
+
+  /**
+   * What stock buying comes to as a share of the listed price.
+   *
+   * Two figures side by side. The plan is what the recipes say a shipped unit
+   * should consume; the reality is what was actually paid for stock in the
+   * same window. A seller who budgeted 25% of the publish price for materials
+   * has no way to check that today — the recipes say one thing, the bank says
+   * another, and nothing puts them on the same axis.
+   *
+   * Deliberately NOT filtered by shop or category, for the same reason the
+   * spend is not: materials are bought once and used everywhere. Dividing a
+   * whole-business spend by one category's sales would invent a number.
+   *
+   * The honest caveat, which the page repeats: buying is lumpy and consumption
+   * is smooth. Six kilos of glycerine bought in one week are used over three
+   * months, so a short window says more about when an order was placed than
+   * about how much a product really eats. It is a long-range reading.
+   */
+  private async materialShareOfPublish(
+    userId: string,
+    from: string,
+    to: string,
+    spend: number,
+  ) {
+    const [unitRows, perPcs] = await Promise.all([
+      this.db
+        .select({
+          productId: resiScanItems.masterProductId,
+          units: sql<string>`coalesce(sum(${resiScanItems.qty}), 0)`,
+        })
+        .from(resiScanItems)
+        .innerJoin(resiScans, eq(resiScanItems.resiScanId, resiScans.id))
+        .where(
+          and(
+            eq(resiScans.userId, userId),
+            gte(resiScans.scannedAt, new Date(from + "T00:00:00Z")),
+            lte(resiScans.scannedAt, new Date(to + "T23:59:59Z")),
+          ),
+        )
+        .groupBy(resiScanItems.masterProductId),
+      this.costing.materialCostPerProduct(userId),
+    ]);
+
+    const byId = new Map(perPcs.map((p) => [p.id, p]));
+    let publishValue = 0;
+    let plannedRecipe = 0;
+    let plannedPacking = 0;
+    let units = 0;
+    let unitsNoPrice = 0;
+    let unitsNoRecipe = 0;
+    let productsMissingCost = 0;
+    const perProduct: {
+      id: string;
+      name: string;
+      units: number;
+      publishPrice: number;
+      materialPerPcs: number;
+      packingMaterialPerPcs: number;
+      pct: number;
+    }[] = [];
+
+    for (const r of unitRows) {
+      if (!r.productId) continue;
+      const qty = Number(r.units);
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      const c = byId.get(r.productId);
+      if (!c) continue;
+      // A unit with no listed price cannot be expressed as a share of one.
+      // Counted and reported rather than folded in at zero, which would drag
+      // the whole percentage up and look like overspending.
+      if (c.publishPrice == null) {
+        unitsNoPrice += qty;
+        continue;
+      }
+      units += qty;
+      publishValue += qty * c.publishPrice;
+      plannedRecipe += qty * c.materialPerPcs;
+      plannedPacking += qty * c.packingMaterialPerPcs;
+      if (c.recipeLines === 0) unitsNoRecipe += qty;
+      if (c.missingCost) productsMissingCost++;
+      const per = c.materialPerPcs + c.packingMaterialPerPcs;
+      perProduct.push({
+        id: c.id,
+        name: c.name,
+        units: qty,
+        publishPrice: c.publishPrice,
+        materialPerPcs: Math.round(c.materialPerPcs),
+        packingMaterialPerPcs: Math.round(c.packingMaterialPerPcs),
+        pct: Math.round((per / c.publishPrice) * 1000) / 10,
+      });
+    }
+
+    const share = (part: number, whole: number) =>
+      whole > 0 ? Math.round((part / whole) * 1000) / 10 : null;
+
+    const plannedPct = share(plannedRecipe + plannedPacking, publishValue);
+    const actualPct = share(spend, publishValue);
+
+    // Heaviest first: the point of the list is which products to look at, and
+    // that is never the ones sitting comfortably under the budget.
+    perProduct.sort((a, b) => b.pct - a.pct || b.units - a.units);
+
+    /**
+     * Above 100% the product costs more in materials than it sells for, which
+     * is never a costing insight — it is a wrong price or a wrong recipe. Kept
+     * out of the ranking and named instead.
+     *
+     * Found on real data: a product carrying a base price of Rp 32,55 scored
+     * 6.605% and sat at the top of the list, pushing every product actually
+     * worth looking at off the screen.
+     */
+    const needsReview = perProduct.filter((p) => p.pct > 100);
+    const ranked = perProduct.filter((p) => p.pct <= 100);
+
+    return {
+      publishValue: Math.round(publishValue),
+      units,
+      unitsNoPrice,
+      unitsNoRecipe,
+      productsMissingCost,
+      plannedRecipe: Math.round(plannedRecipe),
+      plannedPacking: Math.round(plannedPacking),
+      plannedPct,
+      plannedRecipePct: share(plannedRecipe, publishValue),
+      plannedPackingPct: share(plannedPacking, publishValue),
+      actualPct,
+      /** Positive means buying outran the recipe, in percentage points. */
+      gapPct:
+        plannedPct != null && actualPct != null
+          ? Math.round((actualPct - plannedPct) * 10) / 10
+          : null,
+      perProduct: ranked.slice(0, 12),
+      /** Priced below what their own materials cost — a data fix, not a ratio. */
+      needsReview: needsReview.slice(0, 8),
+      needsReviewCount: needsReview.length,
     };
   }
 

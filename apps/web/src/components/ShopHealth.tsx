@@ -16,6 +16,184 @@ import { Badge, Card, CardHeader, EmptyState, InlineAlert, Select } from "./ui";
  * activity column, so a shop that shipped forty parcels can read as dormant.
  */
 
+/**
+ * Belanja stok as a share of the listed price, next to what was planned.
+ *
+ * Separated out because it carries more caveats than figures, and every one of
+ * them changes how the number should be read.
+ */
+function PersenHargaPublish({
+  v,
+}: {
+  v: Insights["restock"]["vsPublish"];
+}) {
+  const [open, setOpen] = useState(false);
+
+  if (v.plannedPct == null || v.actualPct == null) {
+    return (
+      <div className="text-xs text-ink-3">
+        Belum bisa dihitung: perlu paket terkirim dari produk yang sudah punya
+        harga publish. {v.unitsNoPrice > 0
+          ? `${v.unitsNoPrice} pcs terkirim dari produk tanpa harga publish.`
+          : "Belum ada paket terkirim di periode ini."}
+      </div>
+    );
+  }
+
+  const over = v.gapPct != null && v.gapPct > 0;
+
+  return (
+    <div>
+      <div className="text-xs text-ink-3">Belanja stok vs harga publish</div>
+
+      <div className="mt-2 flex flex-wrap items-end gap-x-8 gap-y-3">
+        <div>
+          <div className="text-[11px] text-ink-3">Rencana (dari resep)</div>
+          <div className="text-lg font-semibold tabular-nums text-ink">
+            {v.plannedPct}%
+          </div>
+          <div className="text-[11px] text-ink-3">
+            bahan {v.plannedRecipePct}% + packing {v.plannedPackingPct}%
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[11px] text-ink-3">Nyata (belanja stok)</div>
+          <div
+            className={`text-lg font-semibold tabular-nums ${
+              over ? "text-red-600" : "text-emerald-600"
+            }`}
+          >
+            {v.actualPct}%
+          </div>
+          <div className="text-[11px] text-ink-3">
+            {rupiah(v.publishValue)} nilai publish terkirim
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[11px] text-ink-3">Selisih</div>
+          <div
+            className={`text-lg font-semibold tabular-nums ${
+              over ? "text-red-600" : "text-emerald-600"
+            }`}
+          >
+            {v.gapPct != null && v.gapPct > 0 ? "+" : ""}
+            {v.gapPct} poin
+          </div>
+          <div className="text-[11px] text-ink-3">
+            {over ? "belanja di atas resep" : "belanja di bawah resep"}
+          </div>
+        </div>
+      </div>
+
+      {/* Said before the number can be over-read. Buying is lumpy and using is
+          smooth: a drum bought this week is used for months, so a short range
+          measures when an order was placed, not what a product eats. */}
+      <div className="mt-3 text-xs text-ink-3">
+        Dihitung dari {v.units.toLocaleString("id-ID")} pcs terkirim di periode ini.
+        Belanja stok itu <strong>pembelian</strong>, bukan pemakaian — sekali beli
+        dipakai berbulan-bulan, jadi angka “nyata” baru bisa dipercaya pada rentang
+        panjang (misal 3–12 bulan). “Rencana” adalah pemakaian sebenarnya menurut
+        resep, dan itu yang berlaku untuk rentang pendek.
+      </div>
+
+      {(v.unitsNoPrice > 0 || v.unitsNoRecipe > 0 || v.productsMissingCost > 0) && (
+        <div className="mt-2">
+          <InlineAlert tone="warning">
+            {[
+              v.unitsNoPrice > 0
+                ? `${v.unitsNoPrice} pcs terkirim dari produk tanpa harga publish — tidak ikut dihitung.`
+                : null,
+              v.unitsNoRecipe > 0
+                ? `${v.unitsNoRecipe} pcs dari produk yang belum punya resep, jadi angka rencana lebih rendah dari seharusnya.`
+                : null,
+              v.productsMissingCost > 0
+                ? `${v.productsMissingCost} produk punya bahan yang belum ada harganya.`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          </InlineAlert>
+        </div>
+      )}
+
+      {/* Named rather than ranked. A product that costs more in materials
+          than it sells for is a wrong price or a wrong recipe, and putting it
+          at the top of a percentage list buries everything worth reading. */}
+      {v.needsReview.length > 0 && (
+        <div className="mt-2">
+          <InlineAlert tone="danger">
+            {v.needsReviewCount} produk berharga jual lebih rendah dari biaya
+            bahannya sendiri, jadi tidak masuk peringkat di bawah:{" "}
+            {v.needsReview.map((p) => `${p.name} (${rupiah(p.publishPrice)})`).join(", ")}.
+            Periksa harga publish atau resepnya di menu HPP.
+          </InlineAlert>
+        </div>
+      )}
+
+      {v.perProduct.length > 0 && (
+        <div className="mt-3">
+          <button
+            type="button"
+            className="text-xs text-brand hover:underline"
+            onClick={() => setOpen((o) => !o)}
+          >
+            {open ? "Sembunyikan" : "Lihat"} rincian per produk ({v.perProduct.length})
+          </button>
+
+          {/* Only the plan can be split per product. What was spent cannot:
+              one purchase of glycerine serves every recipe that uses it, and
+              apportioning it would be an invented number. */}
+          {open && (
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-ink-3">
+                    <th className="py-1 pr-3 font-normal">Produk</th>
+                    <th className="py-1 pr-3 text-right font-normal">Terkirim</th>
+                    <th className="py-1 pr-3 text-right font-normal">Harga publish</th>
+                    <th className="py-1 pr-3 text-right font-normal">Bahan/pcs</th>
+                    <th className="py-1 text-right font-normal">% harga</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {v.perProduct.map((p) => (
+                    <tr key={p.id} className="border-t border-line">
+                      <td className="py-1 pr-3">{p.name}</td>
+                      <td className="py-1 pr-3 text-right tabular-nums">{p.units}</td>
+                      <td className="py-1 pr-3 text-right tabular-nums">
+                        {rupiah(p.publishPrice)}
+                      </td>
+                      <td className="py-1 pr-3 text-right tabular-nums">
+                        {rupiah(p.materialPerPcs + p.packingMaterialPerPcs)}
+                      </td>
+                      <td
+                        className={`py-1 text-right font-medium tabular-nums ${
+                          v.plannedPct != null && p.pct > v.plannedPct
+                            ? "text-amber-600"
+                            : "text-ink-2"
+                        }`}
+                      >
+                        {p.pct}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="mt-2 text-[11px] text-ink-3">
+                Urut dari yang paling berat. Angka ini rencana menurut resep — belanja
+                nyata tidak bisa dipecah per produk, karena satu kali beli glycerin
+                dipakai banyak resep sekaligus.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ShopRow {
   id: string;
   name: string;
@@ -63,6 +241,37 @@ interface Insights {
     balance: number;
     shareOfCredit: number | null;
     heldVsSpent: number;
+    vsPublish: {
+      publishValue: number;
+      units: number;
+      unitsNoPrice: number;
+      unitsNoRecipe: number;
+      productsMissingCost: number;
+      plannedRecipe: number;
+      plannedPacking: number;
+      plannedPct: number | null;
+      plannedRecipePct: number | null;
+      plannedPackingPct: number | null;
+      actualPct: number | null;
+      gapPct: number | null;
+      perProduct: {
+        id: string;
+        name: string;
+        units: number;
+        publishPrice: number;
+        materialPerPcs: number;
+        packingMaterialPerPcs: number;
+        pct: number;
+      }[];
+      needsReview: {
+        id: string;
+        name: string;
+        units: number;
+        publishPrice: number;
+        pct: number;
+      }[];
+      needsReviewCount: number;
+    };
   };
   owners: {
     seller: { total: number; perDay: number; perMonth: number };
@@ -435,6 +644,14 @@ export function ShopHealth() {
               Jatah bahan baku adalah potongan yang sudah diambil di pencairan. Belanja
               stok dihitung untuk seluruh bisnis dan tidak ikut filter kategori — bahan
               baku dibeli sekali lalu dipakai semua toko.
+            </div>
+
+            {/* The same spend on the axis a seller actually budgets against.
+                Two percentages side by side and nothing else: what the recipes
+                say a shipped unit should eat, and what was really paid. The
+                gap between them is the whole point of showing it. */}
+            <div className="mt-4 border-t border-line pt-4">
+              <PersenHargaPublish v={d.restock.vsPublish} />
             </div>
           </Card>
 
