@@ -1,5 +1,5 @@
-import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { resiScans, resiScanItems } from "../../database/schema/resi.js";
 import { masterProducts } from "../../database/schema/products.js";
@@ -86,14 +86,24 @@ export class ShopInsightsService {
     return { from: prevFrom.toISOString().slice(0, 10), to: prevTo.toISOString().slice(0, 10) };
   }
 
+  /**
+   * The window, defaulted once.
+   *
+   * Shared by the overview and the per-shop detail opened from it: two copies
+   * of "last 30 days" drift the moment either is edited, and a detail covering
+   * a different fortnight from the row that opened it is worse than no detail.
+   */
+  private resolveRange(from?: string, to?: string) {
+    const end = to ?? new Date().toISOString().slice(0, 10);
+    const start = from ?? new Date(Date.now() - 29 * 86_400_000).toISOString().slice(0, 10);
+    return { from: start, to: end };
+  }
+
   async overview(
     userId: string,
     opts: { from?: string; to?: string; categoryId?: string | null } = {},
   ) {
-    const to = opts.to ?? new Date().toISOString().slice(0, 10);
-    const from =
-      opts.from ??
-      new Date(Date.now() - 29 * 86_400_000).toISOString().slice(0, 10);
+    const { from, to } = this.resolveRange(opts.from, opts.to);
     const days = ShopInsightsService.days(from, to);
     const prev = ShopInsightsService.shiftBack(from, to);
 
@@ -320,6 +330,181 @@ export class ShopInsightsService {
       purchases: Number(spend?.count ?? 0),
       unpricedPurchases: Number(spend?.unpriced ?? 0),
       heldForMaterials: Number(held?.total ?? 0),
+    };
+  }
+
+  /**
+   * One shop, parcel by parcel.
+   *
+   * The health table answers "which shops are moving"; this answers "moving
+   * what, exactly, and when". Those are different questions and the second one
+   * cannot be aggregated — an owner checking a shop wants the individual
+   * parcels, with the time on each, because that is what they can compare
+   * against the marketplace's own order list.
+   *
+   * Scans with no shop mapped cannot appear here by definition. The count of
+   * them is returned so the page can say how much of the shop's real traffic
+   * this list is likely to be missing, rather than presenting a partial list
+   * as a complete one.
+   */
+  async shopDetail(
+    userId: string,
+    shopId: string,
+    opts: { from?: string; to?: string } = {},
+  ) {
+    const { from, to } = this.resolveRange(opts.from, opts.to);
+    const lo = new Date(from + "T00:00:00Z");
+    const hi = new Date(to + "T23:59:59Z");
+
+    const [shop] = await this.db
+      .select({
+        id: shops.id,
+        name: sql<string>`coalesce(${shops.displayName}, ${shops.shopName}, '(tanpa nama)')`,
+        marketplace: shops.marketplace,
+        categoryName: shopCategories.name,
+      })
+      .from(shops)
+      .leftJoin(shopCategories, eq(shops.categoryId, shopCategories.id))
+      .where(and(eq(shops.id, shopId), eq(shops.userId, userId)))
+      .limit(1);
+    if (!shop) throw new NotFoundException("Toko tidak ditemukan");
+
+    const scanRows = await this.db
+      .select({
+        id: resiScans.id,
+        resi: resiScans.resi,
+        scannedAt: resiScans.scannedAt,
+        // The confirmed value wins over the guess; the guess is still shown
+        // when nobody has confirmed, marked as such.
+        courier: resiScans.courier,
+        courierConfirmed: resiScans.courierConfirmed,
+        marketplace: resiScans.marketplace,
+        photoUrl: resiScans.photoUrl,
+        mappingConfirmedAt: resiScans.mappingConfirmedAt,
+        itemsConfirmedAt: resiScans.itemsConfirmedAt,
+        recipient: resiScans.labelRecipient,
+        recipientArea: resiScans.labelRecipientArea,
+        service: resiScans.labelService,
+        weightKg: resiScans.labelWeightKg,
+        cod: resiScans.labelCod,
+      })
+      .from(resiScans)
+      .where(
+        and(
+          eq(resiScans.userId, userId),
+          eq(resiScans.shopId, shopId),
+          gte(resiScans.scannedAt, lo),
+          lte(resiScans.scannedAt, hi),
+        ),
+      )
+      .orderBy(desc(resiScans.scannedAt));
+
+    const scanIds = scanRows.map((s) => s.id);
+    const itemRows = scanIds.length
+      ? await this.db
+          .select({
+            scanId: resiScanItems.resiScanId,
+            name: masterProducts.name,
+            rawName: resiScanItems.rawName,
+            qty: resiScanItems.qty,
+            source: resiScanItems.source,
+          })
+          .from(resiScanItems)
+          .leftJoin(masterProducts, eq(resiScanItems.masterProductId, masterProducts.id))
+          .where(inArray(resiScanItems.resiScanId, scanIds))
+      : [];
+
+    const itemsByScan = new Map<string, { name: string; qty: number; guessed: boolean }[]>();
+    for (const r of itemRows) {
+      const arr = itemsByScan.get(r.scanId) ?? [];
+      arr.push({
+        // The mapped product is the answer; the raw OCR text is the fallback,
+        // and saying which one is on screen matters when it is wrong.
+        name: r.name ?? r.rawName ?? "(belum dipetakan)",
+        qty: Number(r.qty),
+        guessed: r.name == null,
+      });
+      itemsByScan.set(r.scanId, arr);
+    }
+
+    const scans = scanRows.map((s) => {
+      const items = itemsByScan.get(s.id) ?? [];
+      return {
+        id: s.id,
+        resi: s.resi,
+        scannedAt: s.scannedAt,
+        courier: s.courierConfirmed ?? s.courier ?? null,
+        courierConfirmed: s.courierConfirmed != null,
+        marketplace: s.marketplace,
+        photoUrl: s.photoUrl,
+        mappingConfirmed: s.mappingConfirmedAt != null,
+        itemsConfirmed: s.itemsConfirmedAt != null,
+        recipient: s.recipient,
+        recipientArea: s.recipientArea,
+        service: s.service,
+        weightKg: s.weightKg != null ? Number(s.weightKg) : null,
+        cod: s.cod,
+        items,
+        units: items.reduce((n, i) => n + i.qty, 0),
+      };
+    });
+
+    const payouts = await this.db
+      .select({
+        payoutDate: payoutMutations.payoutDate,
+        credit: sql<string>`coalesce(sum(${payoutMutations.creditAmount}), 0)`,
+        seller: sql<string>`coalesce(sum(${payoutMutations.sellerAmount}), 0)`,
+        subSeller: sql<string>`coalesce(sum(${payoutMutations.subSellerAmount} + ${payoutMutations.subSubSellerAmount}), 0)`,
+        rows: sql<number>`count(*)::int`,
+      })
+      .from(payoutMutations)
+      .where(
+        and(
+          eq(payoutMutations.userId, userId),
+          eq(payoutMutations.shopId, shopId),
+          gte(payoutMutations.payoutDate, from),
+          lte(payoutMutations.payoutDate, to),
+        ),
+      )
+      .groupBy(payoutMutations.payoutDate)
+      .orderBy(desc(payoutMutations.payoutDate));
+
+    // How much of this shop's traffic the list above can even see. An owner
+    // comparing it against the marketplace's order count deserves to know
+    // before they conclude parcels went missing.
+    const [unmapped] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(resiScans)
+      .where(
+        and(
+          eq(resiScans.userId, userId),
+          isNull(resiScans.shopId),
+          gte(resiScans.scannedAt, lo),
+          lte(resiScans.scannedAt, hi),
+        ),
+      );
+
+    return {
+      shop,
+      range: { from, to },
+      totals: {
+        parcels: scans.length,
+        units: scans.reduce((n, s) => n + s.units, 0),
+        credit: payouts.reduce((n, p) => n + Number(p.credit), 0),
+        seller: payouts.reduce((n, p) => n + Number(p.seller), 0),
+        subSeller: payouts.reduce((n, p) => n + Number(p.subSeller), 0),
+        unconfirmedItems: scans.filter((s) => !s.itemsConfirmed).length,
+      },
+      scans,
+      payouts: payouts.map((p) => ({
+        payoutDate: p.payoutDate,
+        credit: Number(p.credit),
+        seller: Number(p.seller),
+        subSeller: Number(p.subSeller),
+        rows: p.rows,
+      })),
+      /** Parcels in this window with no shop at all — not this shop's, but not ruled out either. */
+      unmappedInWindow: Number(unmapped?.n ?? 0),
     };
   }
 

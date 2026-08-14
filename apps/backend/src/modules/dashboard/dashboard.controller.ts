@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Req, UseGuards } from "@nestjs/common";
+import { Controller, Get, Param, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, type JwtPayload } from "../auth/jwt-auth.guard.js";
@@ -48,6 +48,25 @@ export class DashboardController {
         // not have to decide between omitting the parameter and sending blank.
         categoryId: categoryId && categoryId !== "all" ? categoryId : null,
       }),
+    };
+  }
+
+  /**
+   * One shop's parcels, newest first.
+   *
+   * Same range parameters as the insights page it is opened from, so the
+   * detail and the row that led to it cannot disagree about the period.
+   */
+  @Get("shop-insights/:shopId")
+  async shopDetail(
+    @Req() req: FastifyRequest,
+    @Param("shopId") shopId: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.insights.shopDetail(uid(req), shopId, { from, to }),
     };
   }
 

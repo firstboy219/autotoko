@@ -3,6 +3,7 @@ import { useFetch } from "../lib/useFetch";
 import { rupiah } from "../lib/fmt";
 import { Icon } from "./Icon";
 import { Badge, Card, CardHeader, EmptyState, InlineAlert, Select } from "./ui";
+import { ShopDetailModal } from "./ShopDetailModal";
 
 /**
  * The shop owner's view of their own shops.
@@ -677,6 +678,8 @@ export function ShopHealth() {
   const [categoryId, setCategoryId] = useState("all");
   const [customFrom, setCustomFrom] = useState(ymd(new Date()));
   const [customTo, setCustomTo] = useState(ymd(new Date()));
+  /** Which shop's parcels are open. The name travels so the title is not blank while loading. */
+  const [lihatToko, setLihatToko] = useState<{ id: string; name: string } | null>(null);
 
   const { from, to } = periodRange(days, customFrom, customTo);
 
@@ -961,10 +964,20 @@ export function ShopHealth() {
             </div>
           </Card>
 
+          {lihatToko && (
+            <ShopDetailModal
+              shopId={lihatToko.id}
+              shopName={lihatToko.name}
+              from={from}
+              to={to}
+              onClose={() => setLihatToko(null)}
+            />
+          )}
+
           <Card padded={false}>
             <CardHeader
               title={`Kesehatan Toko (${d.shops.length})`}
-              subtitle="Status dari kapan terakhir toko ini mengirim paket. Tren dibandingkan periode sebelumnya."
+              subtitle="Klik toko untuk melihat paketnya satu per satu. Status dari kapan terakhir toko ini mengirim paket; tren dibandingkan periode sebelumnya."
             />
             <div className="overflow-x-auto">
               <table className="w-full min-w-[820px] text-sm">
@@ -981,9 +994,25 @@ export function ShopHealth() {
                 </thead>
                 <tbody>
                   {d.shops.map((s) => (
-                    <tr key={s.id} className="border-b border-line/60 last:border-0">
+                    <tr
+                      key={s.id}
+                      className="cursor-pointer border-b border-line/60 last:border-0 hover:bg-canvas"
+                      onClick={() => setLihatToko({ id: s.id, name: s.name })}
+                    >
                       <td className="px-4 py-2">
-                        <div className="font-medium text-ink">{s.name}</div>
+                        {/* A button, not just a clickable row: the row keeps the
+                            pointer affordance, but the name is what a keyboard
+                            reaches and what a screen reader announces. */}
+                        <button
+                          type="button"
+                          className="text-left font-medium text-ink hover:text-brand hover:underline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setLihatToko({ id: s.id, name: s.name });
+                          }}
+                        >
+                          {s.name}
+                        </button>
                         <div className="flex items-center gap-1.5 text-[11px] text-ink-3">
                           <span>{s.marketplace}</span>
                           {s.categoryName && (
