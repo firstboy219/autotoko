@@ -3,6 +3,7 @@ import { useFetch } from "../lib/useFetch";
 import { rupiah } from "../lib/fmt";
 import { Icon } from "./Icon";
 import { Badge, Card, CardHeader, EmptyState, InlineAlert, Select } from "./ui";
+import { ProdukLemah, type ProductHealth } from "./ProdukLemah";
 import { ShopDetailModal } from "./ShopDetailModal";
 
 /**
@@ -536,6 +537,7 @@ interface Insights {
       needsReviewCount: number;
     };
   };
+  productHealth: ProductHealth;
   /** Days the per-day columns divide by: the span with data, not the filter. */
   rateDays: number | null;
   statistics: {
@@ -827,6 +829,11 @@ export function ShopHealth() {
               parcels and six days -- and nobody scrolls down to find that out. */}
           <BacaanStatistik s={d.statistics} />
 
+          <ProdukLemah
+            h={d.productHealth}
+            spanDays={d.statistics.span.spanDays}
+          />
+
           {/* Ranked separately on purpose: the shop that ships most is often
               not the one that earns most, and one "best shop" would hide
               exactly the case worth looking at — high volume, thin margin. */}
@@ -979,6 +986,9 @@ export function ShopHealth() {
               shopId={lihatToko.id}
               shopName={lihatToko.name}
               shopMarketplace={lihatToko.marketplace}
+              weakItems={
+                d.productHealth.byShop.find((b) => b.shopId === lihatToko.id)?.items ?? []
+              }
               from={from}
               to={to}
               onClose={() => setLihatToko(null)}

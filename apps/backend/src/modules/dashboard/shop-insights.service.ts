@@ -8,6 +8,7 @@ import { payoutBatches, payoutMutations } from "../../database/schema/payout.js"
 import { materialPurchases } from "../../database/schema/products.js";
 import { subSellers } from "../../database/schema/payout.js";
 import { CostingService } from "../costing/costing.service.js";
+import { bomItems, materials } from "../../database/schema/products.js";
 
 /**
  * The questions a person who owns these shops actually asks.
@@ -143,6 +144,7 @@ export class ShopInsightsService {
     // Needs the spend, so it runs after rather than beside the rest.
     const vsPublish = await this.materialShareOfPublish(userId, from, to, restock.spend);
     const statistics = await this.statisticalReading(userId, from, to, days);
+    const productHealth = await this.weakProducts(userId, from, to, days, products);
 
     const lastShipped = await this.lastShippedByShop(userId, shopIds);
     const today = new Date();
@@ -287,6 +289,8 @@ export class ShopInsightsService {
        * smaller truth — it is a different claim from the one the data supports.
        */
       statistics,
+      /** Products that are not paying their way, and why — per reason, not per score. */
+      productHealth,
       /** How many days the per-day columns divide by, so the page can say it. */
       rateDays: lajuHari,
       /** Who took home what, averaged over the range. */
@@ -522,6 +526,253 @@ export class ShopInsightsService {
       })),
       /** Parcels in this window with no shop at all — not this shop's, but not ruled out either. */
       unmappedInWindow: Number(unmapped?.n ?? 0),
+    };
+  }
+
+  /**
+   * Which products are not paying their way, and on which axis.
+   *
+   * Four different things get called "not worth it" and they need different
+   * fixes, so they are reported as separate named reasons rather than summed
+   * into a score. A score would rank products against each other and explain
+   * nothing; "sells fine but the margin is 3%" and "good margin but nobody
+   * buys it" are opposite problems with a shared total.
+   *
+   * The reasons:
+   *
+   *  - MARGIN. From the costing sheet, not from sales, so it is the one
+   *    judgement here that does not depend on how much data there is. Below
+   *    10% is thin; below zero the catalogue is selling at a loss.
+   *
+   *  - SALES. Deliberately relative — below the catalogue's own median — and
+   *    deliberately hedged. Nine days of data cannot establish that a product
+   *    does not sell, only that it has not sold yet, and the page says so.
+   *
+   *  - LOCKED MATERIALS. Materials no other product uses. This is the cost
+   *    nobody sees: every rupiah of that stock is committed to one product, so
+   *    dropping it strands the stock, and keeping it means restocking for one
+   *    line. A product with a thin margin AND locked stock is a different
+   *    decision from a thin margin alone.
+   *
+   *  - PRICE. Never on its own — a high price with good sales is a good
+   *    product. Only flagged when the price sits in the catalogue's top
+   *    quarter AND it is selling below median, which is the shape of something
+   *    priced out of its market.
+   *
+   * Products with no recipe or no publish price are not judged at all. They
+   * are listed separately, because "cannot tell" is not the same as "fine",
+   * and quietly scoring them as healthy is how a gap in the data becomes a
+   * conclusion.
+   */
+  private async weakProducts(
+    userId: string,
+    from: string,
+    to: string,
+    days: number,
+    shipped: { overall: { id: string; name: string; units: number }[]; byShop: Map<string, { id: string; name: string; units: number }[]> },
+  ) {
+    const rows = await this.costing.list(userId, null, { days });
+
+    // How many DIFFERENT products each material serves. One means the stock is
+    // committed to a single product and cannot be absorbed elsewhere.
+    const links = await this.db
+      .select({
+        productId: bomItems.masterProductId,
+        materialId: bomItems.materialId,
+        name: materials.name,
+        stock: materials.currentStock,
+        cost: materials.unitCost,
+      })
+      .from(bomItems)
+      .innerJoin(materials, eq(materials.id, bomItems.materialId))
+      .where(eq(materials.userId, userId));
+
+    const pemakai = new Map<string, Set<string>>();
+    for (const l of links) {
+      if (!l.materialId) continue;
+      const set = pemakai.get(l.materialId) ?? new Set<string>();
+      set.add(l.productId);
+      pemakai.set(l.materialId, set);
+    }
+
+    const exclusiveBy = new Map<string, { names: string[]; value: number }>();
+    for (const l of links) {
+      if (!l.materialId) continue;
+      if ((pemakai.get(l.materialId)?.size ?? 0) !== 1) continue;
+      const cur = exclusiveBy.get(l.productId) ?? { names: [], value: 0 };
+      cur.names.push(l.name);
+      // Only stock actually sitting there is money tied up; a negative figure
+      // is an accounting hole, not idle capital.
+      cur.value += Math.max(0, Number(l.stock)) * Number(l.cost);
+      exclusiveBy.set(l.productId, cur);
+    }
+
+    const judged = rows.filter((r) => r.publishPrice != null && r.materialCount > 0);
+    const soldValues = judged.map((r) => r.soldQty).sort((a, b) => a - b);
+    const priceValues = judged
+      .map((r) => r.publishPrice!)
+      .sort((a, b) => a - b);
+    const median = (xs: number[]) =>
+      xs.length ? xs[Math.floor((xs.length - 1) / 2)]! : 0;
+    const kuartilAtas = (xs: number[]) =>
+      xs.length ? xs[Math.floor((xs.length - 1) * 0.75)]! : Infinity;
+
+    const medianSold = median(soldValues);
+    const batasHarga = kuartilAtas(priceValues);
+
+    const items = judged
+      .map((r) => {
+        const ex = exclusiveBy.get(r.productId) ?? { names: [], value: 0 };
+        const flags: string[] = [];
+        const reasons: string[] = [];
+
+        const margin = r.netMarginRate;
+        if (margin != null && margin < 0) {
+          flags.push("rugi");
+          reasons.push(`Rugi ${Math.round(margin * 1000) / 10}% per pcs menurut HPP.`);
+        } else if (margin != null && margin < 0.1) {
+          flags.push("marginTipis");
+          reasons.push(`Margin cuma ${Math.round(margin * 1000) / 10}% per pcs.`);
+        }
+
+        if (r.soldQty === 0) {
+          flags.push("tidakLaku");
+          reasons.push(`Belum terkirim sama sekali dalam ${days} hari.`);
+        } else if (r.soldQty < medianSold) {
+          flags.push("jarangLaku");
+          reasons.push(
+            `Baru ${r.soldQty} pcs dalam ${days} hari, di bawah tengah katalog (${medianSold} pcs).`,
+          );
+        }
+
+        // Only when something else is already wrong. Stock committed to a
+        // product that sells is stock that turns over; the same stock behind a
+        // product nobody buys is money on a shelf. Flagging it on its own put
+        // the best-selling product in the catalogue on a "not worth it" list,
+        // which is how a warning list stops being read.
+        const lemah =
+          flags.includes("tidakLaku") ||
+          flags.includes("jarangLaku") ||
+          flags.includes("marginTipis") ||
+          flags.includes("rugi");
+        if (ex.names.length > 0 && lemah) {
+          flags.push("bahanTerkunci");
+          reasons.push(
+            `${ex.names.length} bahan tidak dipakai produk lain` +
+              (ex.value > 0 ? `, stoknya senilai Rp ${Math.round(ex.value).toLocaleString("id-ID")}` : "") +
+              ` (${ex.names.slice(0, 3).join(", ")}${ex.names.length > 3 ? ", …" : ""}).`,
+          );
+        }
+
+        if (r.publishPrice != null && r.publishPrice >= batasHarga && r.soldQty < medianSold) {
+          flags.push("hargaTinggi");
+          reasons.push(
+            `Harga publish termasuk 25% termahal di katalog tapi penjualannya di bawah tengah.`,
+          );
+        }
+
+        if (r.missingCost) {
+          flags.push("hppRagu");
+          reasons.push("Ada bahan yang belum ada harganya, jadi HPP-nya kurang dari sebenarnya.");
+        }
+
+        return {
+          id: r.productId,
+          name: r.name,
+          sku: r.sku,
+          soldQty: r.soldQty,
+          publishPrice: r.publishPrice,
+          hpp: r.hpp,
+          netProfit: r.netProfit,
+          netMarginRate: margin,
+          exclusiveMaterials: ex.names.length,
+          lockedStockValue: Math.round(ex.value),
+          flags,
+          reasons,
+        };
+      })
+      .filter((r) => r.flags.length > 0)
+      // Most reasons first: a product failing on three axes needs a decision,
+      // one failing on a single axis usually needs a tweak.
+      .sort(
+        (a, b) =>
+          b.flags.length - a.flags.length ||
+          b.lockedStockValue - a.lockedStockValue ||
+          a.soldQty - b.soldQty,
+      );
+
+    /**
+     * Locked stock on products that ARE selling: worth knowing, not a problem.
+     *
+     * Kept out of the list above so the warning list keeps meaning something,
+     * and reported separately so the fact does not simply disappear — it is
+     * still the reason a restock decision for one of these cannot be shared.
+     */
+    const terkunciTapiLaku = judged
+      .filter((r) => {
+        const ex = exclusiveBy.get(r.productId);
+        if (!ex || ex.names.length === 0) return false;
+        return r.soldQty >= medianSold && (r.netMarginRate ?? 0) >= 0.1;
+      })
+      .map((r) => {
+        const ex = exclusiveBy.get(r.productId)!;
+        return {
+          id: r.productId,
+          name: r.name,
+          soldQty: r.soldQty,
+          exclusiveMaterials: ex.names.length,
+          lockedStockValue: Math.round(ex.value),
+          names: ex.names.slice(0, 4),
+        };
+      })
+      .sort((a, b) => b.lockedStockValue - a.lockedStockValue || b.soldQty - a.soldQty);
+
+    const flaggedIds = new Map(items.map((i) => [i.id, i]));
+
+    /**
+     * The same products, but only where a shop actually ships them.
+     *
+     * Margin and locked stock are properties of the product wherever it goes;
+     * what changes per shop is how much of it moves. So a shop's list is its
+     * own units against the product's global reasons — which is what makes
+     * "this one is dead here but fine elsewhere" visible.
+     */
+    const byShop: {
+      shopId: string;
+      items: { id: string; name: string; units: number; flags: string[] }[];
+    }[] = [];
+    for (const [shopId, list] of shipped.byShop) {
+      const hit = list
+        .filter((p) => flaggedIds.has(p.id))
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          units: p.units,
+          flags: flaggedIds.get(p.id)!.flags,
+        }))
+        .sort((a, b) => b.flags.length - a.flags.length || a.units - b.units);
+      if (hit.length) byShop.push({ shopId, items: hit });
+    }
+
+    return {
+      days,
+      medianSold,
+      judged: judged.length,
+      /** Cannot be judged at all, and why — not the same as "fine". */
+      unjudged: rows
+        .filter((r) => r.publishPrice == null || r.materialCount === 0)
+        .map((r) => ({
+          id: r.productId,
+          name: r.name,
+          soldQty: r.soldQty,
+          alasan: r.publishPrice == null ? "belum ada harga publish" : "belum ada resep",
+        })),
+      items: items.slice(0, 15),
+      totalFlagged: items.length,
+      /** Exclusive materials on healthy products — context, not a warning. */
+      lockedButSelling: terkunciTapiLaku.slice(0, 8),
+      lockedTotal: items.reduce((n, i) => n + i.lockedStockValue, 0),
+      byShop,
     };
   }
 

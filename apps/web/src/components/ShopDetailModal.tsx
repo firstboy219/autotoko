@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { rupiah } from "../lib/fmt";
 import { Badge, InlineAlert, Modal } from "./ui";
+import { FLAG_LABEL } from "./ProdukLemah";
 
 /**
  * One shop, parcel by parcel.
@@ -89,6 +90,7 @@ export function ShopDetailModal({
   shopId,
   shopName,
   shopMarketplace,
+  weakItems = [],
   from,
   to,
   onClose,
@@ -97,6 +99,8 @@ export function ShopDetailModal({
   shopName: string;
   /** What distinguishes two shops that share a name. */
   shopMarketplace?: string | null;
+  /** This shop's share of the catalogue-wide "not worth it" list. */
+  weakItems?: { id: string; name: string; units: number; flags: string[] }[];
   from?: string;
   to?: string;
   onClose: () => void;
@@ -164,6 +168,33 @@ export function ShopDetailModal({
               manapun. Sebagiannya mungkin milik toko ini, jadi daftar di bawah belum
               tentu lengkap. Lengkapi lewat menu Data Belum Lengkap.
             </InlineAlert>
+          )}
+
+          {/* The catalogue-wide judgement, narrowed to what this shop
+              actually ships. Margin and locked stock belong to the product
+              wherever it goes; the units are this shop's own, which is what
+              makes "dead here, fine elsewhere" visible. */}
+          {weakItems.length > 0 && (
+            <div className="rounded-lg border border-line p-3">
+              <div className="text-xs font-medium text-ink-2">
+                Produk kurang worth it yang dikirim toko ini
+              </div>
+              <ul className="mt-2 space-y-1">
+                {weakItems.map((w) => (
+                  <li key={w.id} className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className="text-ink">{w.name}</span>
+                    <span className="tabular-nums text-ink-3">{w.units} pcs di sini</span>
+                    {w.flags.map((f) => (
+                      <Badge key={f}>{FLAG_LABEL[f] ?? f}</Badge>
+                    ))}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-2 text-[10px] text-ink-3">
+                Alasannya berlaku untuk produknya secara keseluruhan, bukan khusus toko
+                ini — yang khas toko ini adalah jumlah pcs-nya.
+              </div>
+            </div>
           )}
 
           <div className="flex gap-1 border-b border-line">
