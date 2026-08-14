@@ -159,11 +159,21 @@ export class ShopInsightsService {
       varietyByShop.set(shopId, list.length);
     }
 
+    /**
+     * The divisor for every per-day figure below.
+     *
+     * The days the business was actually running, not the length of the filter.
+     * A 30-day filter over 10 days of data divides by 30 and reports a third of
+     * the real rate -- the missing 20 days are calendar, not slow trading. The
+     * same span is used for every shop so the column can be read down.
+     */
+    const lajuHari = statistics.span.spanDays > 0 ? statistics.span.spanDays : null;
+
     const perShop = shopRows
       .map((s) => {
         const m = money.get(s.id) ?? { credit: 0, seller: 0, subSeller: 0, subSubSeller: 0 };
         const mPrev = moneyPrev.get(s.id)?.credit ?? 0;
-        const a = activity.get(s.id) ?? { parcels: 0, units: 0 };
+        const a = activity.get(s.id) ?? { parcels: 0, units: 0, activeDays: 0 };
         const aPrev = activityPrev.get(s.id)?.parcels ?? 0;
         const last = lastShipped.get(s.id) ?? null;
 
@@ -201,6 +211,11 @@ export class ShopInsightsService {
           parcels: a.parcels,
           parcelsPrev: aPrev,
           units: a.units,
+          /** Days this shop itself shipped on — context for the rate, not its divisor. */
+          activeDays: a.activeDays,
+          parcelsPerDay:
+            lajuHari != null ? Math.round((a.parcels / lajuHari) * 10) / 10 : null,
+          unitsPerDay: lajuHari != null ? Math.round((a.units / lajuHari) * 10) / 10 : null,
           /** Distinct products shipped — variety, not volume. */
           variety: varietyByShop.get(s.id) ?? 0,
           /** What one parcel is worth on average, when both are known. */
@@ -272,6 +287,8 @@ export class ShopInsightsService {
        * smaller truth — it is a different claim from the one the data supports.
        */
       statistics,
+      /** How many days the per-day columns divide by, so the page can say it. */
+      rateDays: lajuHari,
       /** Who took home what, averaged over the range. */
       owners,
       highlights: {
@@ -902,7 +919,7 @@ export class ShopInsightsService {
    * to every figure in this column.
    */
   private async activityByShop(userId: string, from: string, to: string, shopIds: string[]) {
-    const out = new Map<string, { parcels: number; units: number }>();
+    const out = new Map<string, { parcels: number; units: number; activeDays: number }>();
     if (!shopIds.length) return out;
 
     const rows = await this.db
@@ -910,6 +927,11 @@ export class ShopInsightsService {
         shopId: resiScans.shopId,
         parcels: sql<number>`count(distinct ${resiScans.id})::int`,
         units: sql<string>`coalesce(sum(${resiScanItems.qty}), 0)`,
+        // Days this shop actually shipped on, in Jakarta time. Not the same as
+        // the denominator below -- it is context for it: three parcels spread
+        // over three days and three parcels in one burst average the same and
+        // mean different things.
+        activeDays: sql<number>`count(distinct (${resiScans.scannedAt} at time zone 'Asia/Jakarta')::date)::int`,
       })
       .from(resiScans)
       .leftJoin(resiScanItems, eq(resiScanItems.resiScanId, resiScans.id))
@@ -925,7 +947,11 @@ export class ShopInsightsService {
 
     for (const r of rows) {
       if (!r.shopId) continue;
-      out.set(r.shopId, { parcels: Number(r.parcels), units: Number(r.units) });
+      out.set(r.shopId, {
+        parcels: Number(r.parcels),
+        units: Number(r.units),
+        activeDays: Number(r.activeDays),
+      });
     }
     return out;
   }

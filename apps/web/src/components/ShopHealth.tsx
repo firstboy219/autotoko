@@ -471,6 +471,10 @@ interface ShopRow {
   parcelsPrev: number;
   units: number;
   variety: number;
+  /** Days this shop itself shipped on — context for the rate, not its divisor. */
+  activeDays: number;
+  parcelsPerDay: number | null;
+  unitsPerDay: number | null;
   creditPerParcel: number | null;
   unitsPerParcel: number | null;
   topProducts: { id: string; name: string; units: number }[];
@@ -532,6 +536,8 @@ interface Insights {
       needsReviewCount: number;
     };
   };
+  /** Days the per-day columns divide by: the span with data, not the filter. */
+  rateDays: number | null;
   statistics: {
     span: {
       firstDay: string | null;
@@ -979,6 +985,20 @@ export function ShopHealth() {
               title={`Kesehatan Toko (${d.shops.length})`}
               subtitle="Klik toko untuk melihat paketnya satu per satu. Status dari kapan terakhir toko ini mengirim paket; tren dibandingkan periode sebelumnya."
             />
+            {/* Said once, above the table, because every "per hari" in it
+                depends on this number and a reader who assumes the filter
+                length would read every row three times too low. */}
+            {d.rateDays != null && (
+              <div className="px-4 pb-2 text-[11px] text-ink-3">
+                Kolom <strong>Per hari</strong> dibagi {d.rateDays} hari — rentang yang
+                benar-benar ada datanya, bukan panjang filter periode
+                {d.statistics.span.windowDays !== d.rateDays
+                  ? ` (${d.statistics.span.windowDays} hari)`
+                  : ""}
+                . Membaginya dengan panjang filter akan membuat setiap baris terlihat
+                jauh lebih sepi daripada kenyataannya.
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full min-w-[820px] text-sm">
                 <thead>
@@ -1050,6 +1070,27 @@ export function ShopHealth() {
                           <div className="text-[11px] text-ink-3">
                             {s.units} pcs · {s.variety} jenis
                           </div>
+                        )}
+                      </td>
+                      {/* Divided by the days the business was running, not by
+                          the length of the filter -- a 30-day filter over 10
+                          days of data would report a third of the real rate.
+                          The shop's own active days sit underneath, because
+                          three parcels over three days and three in one burst
+                          average the same and mean different things. */}
+                      <td className="px-4 py-2 text-right tabular-nums text-ink-2">
+                        {s.parcelsPerDay != null && s.parcels > 0 ? (
+                          <>
+                            {s.parcelsPerDay} resi
+                            <div className="text-[11px] text-ink-3">
+                              {s.unitsPerDay} pcs
+                            </div>
+                            <div className="text-[10px] text-ink-3">
+                              kirim {s.activeDays} hari
+                            </div>
+                          </>
+                        ) : (
+                          "—"
                         )}
                       </td>
                       <td className="px-4 py-2 text-right tabular-nums text-ink-2">
