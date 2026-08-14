@@ -35,6 +35,17 @@ interface Material {
   minimumThreshold: number;
   shopCategoryId?: string | null;
   usedByProducts: number;
+  usage: {
+    days: number;
+    orders: number;
+    units: number;
+    qty: number;
+    /** A recipe unit that cannot be converted to the catalogue's was left out. */
+    qtyIncomplete: boolean;
+    lastUsedAt: string | null;
+    /** Counted per parcel rather than per product: dus, label, shrink. */
+    fromPacking: boolean;
+  };
   isLow: boolean;
 }
 interface Usage {
@@ -98,15 +109,16 @@ export function MaterialsCatalogCard() {
               <TH className="text-right">Stok</TH>
               <TH className="text-right">Harga Satuan</TH>
               <TH className="text-right">Dipakai</TH>
+              <TH className="text-right">Terpakai</TH>
               <TH className="text-right">Aksi</TH>
             </TR>
           </THead>
           <tbody>
             {list.loading ? (
-              <SkeletonRows n={4} cols={5} />
+              <SkeletonRows n={4} cols={6} />
             ) : rows.length === 0 ? (
               <TR>
-                <TD colSpan={5}>
+                <TD colSpan={6}>
                   <EmptyState
                     icon="beaker"
                     title="Belum ada bahan baku"
@@ -151,6 +163,24 @@ export function MaterialsCatalogCard() {
                   <TD className="text-right tabular-nums text-ink-2">
                     {m.usedByProducts} produk
                   </TD>
+                  {/* How often it actually left the shelf, not how many recipes
+                      mention it. A material in nine recipes that nobody ships
+                      and one in a single product that ships daily read the same
+                      in the column to the left, and they are opposite problems. */}
+                  <TD className="text-right tabular-nums">
+                    {m.usage.orders > 0 ? (
+                      <>
+                        <div className="text-ink">{m.usage.orders} order</div>
+                        <div className="text-[10px] text-ink-3">
+                          {Math.round(m.usage.qty * 100) / 100} {m.unit ?? ""}
+                          {m.usage.qtyIncomplete && " +"}
+                          {m.usage.fromPacking && " · tiap paket"}
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-ink-3">belum terpakai</span>
+                    )}
+                  </TD>
                   <TD className="text-right whitespace-nowrap">
                     <Button variant="text" onClick={() => setMovements(m)}>
                       Mutasi
@@ -168,6 +198,19 @@ export function MaterialsCatalogCard() {
           </tbody>
         </Table>
       </TableWrap>
+
+      {/* The column needs three sentences of explanation and they belong
+          here, not in a tooltip nobody opens. */}
+      <div className="mt-2 px-1 text-[11px] text-ink-3">
+        <strong>Terpakai</strong> dihitung dari scan resi packing{" "}
+        {rows[0]?.usage.days ?? 30} hari terakhir: berapa order memuat produk yang
+        memakai bahan ini, dan berapa banyak yang keluar menurut resep. Bahan packing
+        (dus, label, shrink) ditandai <em>tiap paket</em> karena menempel di setiap
+        resi, bukan di resep — stoknya belum dipotong otomatis oleh scan, jadi
+        angkanya adalah yang seharusnya terpakai, bukan yang tercatat di mutasi.
+        Tanda <strong>+</strong> berarti ada baris resep bersatuan yang tidak bisa
+        dikonversi ke satuan master, jadi jumlahnya kurang dari sebenarnya.
+      </div>
 
       {movements && (
         <StockMovements

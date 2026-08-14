@@ -6,7 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   bomItems,
@@ -17,6 +17,7 @@ import {
   materials,
   packingMaterials,
 } from "../../database/schema/index.js";
+import { resiScanItems, resiScans } from "../../database/schema/resi.js";
 import { convertUnit } from "@autotoko/shared";
 import { OcrMemoryService } from "../resi/ocr-memory.service.js";
 import { UploadsService } from "../uploads/uploads.service.js";
@@ -50,7 +51,7 @@ export class MaterialsService {
    * whichever brand happens to be selected — a filter that silently hides rows
    * is how a catalogue quietly loses things.
    */
-  async list(userId: string, brandId?: string | null) {
+  async list(userId: string, brandId?: string | null, days = 30) {
     // "none" is a real answer, not the absence of one: unassigned rows have to
     // be reachable, or a catalogue quietly loses whatever nobody categorised.
     const brandWhere =
@@ -80,6 +81,8 @@ export class MaterialsService {
       usedBy.set(l.materialId, (usedBy.get(l.materialId) ?? 0) + 1);
     }
 
+    const usage = await this.usageFromScans(userId, ids, days);
+
     return rows.map((m) => ({
       id: m.id,
       name: m.name,
@@ -93,8 +96,154 @@ export class MaterialsService {
       minimumThreshold: num(m.minimumThreshold),
       stockValue: num(m.currentStock) * num(m.unitCost),
       usedByProducts: usedBy.get(m.id) ?? 0,
+      /** How often it actually left the shelf, from packing scans. */
+      usage: usage.get(m.id) ?? {
+        days,
+        orders: 0,
+        units: 0,
+        qty: 0,
+        qtyIncomplete: false,
+        lastUsedAt: null,
+        fromPacking: false,
+      },
       isLow: num(m.currentStock) <= num(m.minimumThreshold),
     }));
+  }
+
+  /**
+   * How often each material was actually used, counted from packing scans.
+   *
+   * Two different questions get confused here, so both are answered: how many
+   * ORDERS involved this material (the frequency a seller feels), and how much
+   * of it left the shelf (the quantity a stock level cares about). A material
+   * on one item in every parcel and a material used by the litre on one rare
+   * product are opposite problems, and a single number hides that.
+   *
+   * Packing materials are counted separately and deliberately. They are not in
+   * any recipe — dus, label and shrink attach per parcel, not per product — so
+   * a recipe-only count would report the most-used items in the warehouse as
+   * never used. Their quantity is the shared default per parcel; unlike recipe
+   * lines their stock is NOT deducted automatically today, so this figure is
+   * what the parcels imply rather than what the ledger recorded, and the page
+   * says so.
+   */
+  private async usageFromScans(userId: string, ids: string[], days: number) {
+    const out = new Map<
+      string,
+      {
+        days: number;
+        orders: number;
+        units: number;
+        qty: number;
+        qtyIncomplete: boolean;
+        lastUsedAt: Date | string | null;
+        fromPacking: boolean;
+      }
+    >();
+    if (!ids.length) return out;
+
+    const since = new Date(Date.now() - Math.max(1, days) * 86_400_000);
+    const shipped = and(
+      eq(resiScans.userId, userId),
+      gte(resiScans.scannedAt, since),
+      isNotNull(resiScanItems.masterProductId),
+    );
+
+    // Counted on its own, grouped by material only. Rolling this into the
+    // quantity query below would count one parcel twice whenever the same
+    // material appears with two different recipe units across products.
+    const freq = await this.db
+      .select({
+        materialId: bomItems.materialId,
+        orders: sql<number>`count(distinct ${resiScans.id})::int`,
+        units: sql<string>`coalesce(sum(${resiScanItems.qty}), 0)`,
+        lastUsedAt: sql<string>`max(${resiScans.scannedAt})`,
+      })
+      .from(resiScanItems)
+      .innerJoin(resiScans, eq(resiScans.id, resiScanItems.resiScanId))
+      .innerJoin(bomItems, eq(bomItems.masterProductId, resiScanItems.masterProductId))
+      .where(and(shipped, inArray(bomItems.materialId, ids)))
+      .groupBy(bomItems.materialId);
+
+    // The quantity needs both units in hand, because a recipe in ml against a
+    // catalogue in gram cannot be added up without a density nobody recorded.
+    // Same rule the stock deduction follows: skip it and say it is partial,
+    // rather than quietly adding the wrong number.
+    const amounts = await this.db
+      .select({
+        materialId: bomItems.materialId,
+        recipeUnit: bomItems.unit,
+        catalogUnit: materials.unit,
+        raw: sql<string>`coalesce(sum(${resiScanItems.qty} * ${bomItems.quantity}), 0)`,
+      })
+      .from(resiScanItems)
+      .innerJoin(resiScans, eq(resiScans.id, resiScanItems.resiScanId))
+      .innerJoin(bomItems, eq(bomItems.masterProductId, resiScanItems.masterProductId))
+      .innerJoin(materials, eq(materials.id, bomItems.materialId))
+      .where(and(shipped, inArray(bomItems.materialId, ids)))
+      .groupBy(bomItems.materialId, bomItems.unit, materials.unit);
+
+    for (const f of freq) {
+      if (!f.materialId) continue;
+      out.set(f.materialId, {
+        days,
+        orders: Number(f.orders),
+        units: Number(f.units),
+        qty: 0,
+        qtyIncomplete: false,
+        lastUsedAt: f.lastUsedAt ?? null,
+        fromPacking: false,
+      });
+    }
+
+    for (const a of amounts) {
+      if (!a.materialId) continue;
+      const row = out.get(a.materialId);
+      if (!row) continue;
+      const used = convertUnit(Number(a.raw), a.recipeUnit, a.catalogUnit);
+      if (used === null) row.qtyIncomplete = true;
+      else row.qty += used;
+    }
+
+    // Packing materials ride on the parcel, not on the product.
+    const packing = await this.db
+      .select({
+        materialId: packingMaterials.materialId,
+        defaultQuantity: packingMaterials.defaultQuantity,
+      })
+      .from(packingMaterials)
+      .where(and(eq(packingMaterials.userId, userId), inArray(packingMaterials.materialId, ids)));
+
+    if (packing.length) {
+      const [parcels] = await this.db
+        .select({
+          orders: sql<number>`count(distinct ${resiScans.id})::int`,
+          lastUsedAt: sql<string>`max(${resiScans.scannedAt})`,
+        })
+        .from(resiScanItems)
+        .innerJoin(resiScans, eq(resiScans.id, resiScanItems.resiScanId))
+        .where(shipped);
+
+      const n = Number(parcels?.orders ?? 0);
+      for (const p of packing) {
+        if (!p.materialId) continue;
+        const prev = out.get(p.materialId);
+        const perParcel = num(p.defaultQuantity);
+        out.set(p.materialId, {
+          days,
+          // Every shipped parcel carries it, so the parcel count is the floor
+          // -- never lower than whatever a recipe already contributed.
+          orders: Math.max(n, prev?.orders ?? 0),
+          units: prev?.units ?? 0,
+          qty: (prev?.qty ?? 0) + n * perParcel,
+          qtyIncomplete: prev?.qtyIncomplete ?? false,
+          lastUsedAt: prev?.lastUsedAt ?? parcels?.lastUsedAt ?? null,
+          fromPacking: true,
+        });
+      }
+    }
+
+    return out;
   }
 
   /**

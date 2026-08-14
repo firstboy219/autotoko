@@ -35,8 +35,19 @@ export class MaterialsController {
   constructor(private readonly materials: MaterialsService) {}
 
   @Get()
-  async list(@Req() req: FastifyRequest, @Query("brandId") brandId?: string) {
-    return ok(await this.materials.list(uid(req), brandId || null));
+  async list(
+    @Req() req: FastifyRequest,
+    @Query("brandId") brandId?: string,
+    @Query("days") days?: string,
+  ) {
+    const n = Number(days);
+    return ok(
+      await this.materials.list(
+        uid(req),
+        brandId || null,
+        Number.isFinite(n) && n > 0 ? Math.min(n, 3650) : 30,
+      ),
+    );
   }
 
   @Post()
