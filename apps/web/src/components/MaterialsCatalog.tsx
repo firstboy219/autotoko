@@ -49,6 +49,70 @@ interface Material {
   };
   isLow: boolean;
 }
+/**
+ * The orders the catalogue can be read in.
+ *
+ * Sorted here rather than on the server: every key is already in the response,
+ * the list is not paginated, and a round trip to reorder 22 rows would be
+ * slower than the click that asked for it.
+ *
+ * Two deliberate absences. There is no "most consumed by quantity", because
+ * quantity is measured in the material's own unit and 3.165 ml of aquades
+ * against 32 pcs of bottles is not a comparison — the rupiah value is, which
+ * is what "nilai keluar" ranks instead. And a price of zero is not the
+ * cheapest thing in the warehouse, it is a price nobody has entered, so those
+ * rows sink to the bottom of BOTH price orders rather than crowding the top of
+ * one of them.
+ */
+const URUTAN = {
+  nama: "Nama (A–Z)",
+  sering: "Paling sering terpakai",
+  nilai: "Nilai keluar terbesar",
+  produk: "Dipakai paling banyak produk",
+  murah: "Harga satuan termurah",
+  mahal: "Harga satuan termahal",
+  stokBanyak: "Stok paling banyak",
+  stokSedikit: "Stok paling sedikit",
+} as const;
+
+type Urutan = keyof typeof URUTAN;
+
+/** Unpriced rows sort last whichever direction was asked for. */
+function bandingHarga(a: Material, b: Material, naik: boolean): number {
+  const ka = a.unitCost > 0;
+  const kb = b.unitCost > 0;
+  if (ka !== kb) return ka ? -1 : 1;
+  if (!ka) return a.name.localeCompare(b.name);
+  return naik ? a.unitCost - b.unitCost : b.unitCost - a.unitCost;
+}
+
+function urutkan(rows: Material[], by: Urutan): Material[] {
+  const out = [...rows];
+  const nama = (a: Material, b: Material) => a.name.localeCompare(b.name);
+  switch (by) {
+    case "sering":
+      // Orders, not quantity: it is unit-free, so every material is on the
+      // same axis. Quantity only breaks ties within one material's own unit.
+      return out.sort((a, b) => b.usage.orders - a.usage.orders || b.usage.qty - a.usage.qty || nama(a, b));
+    case "nilai":
+      return out.sort(
+        (a, b) => b.usage.qty * b.unitCost - a.usage.qty * a.unitCost || nama(a, b),
+      );
+    case "produk":
+      return out.sort((a, b) => b.usedByProducts - a.usedByProducts || nama(a, b));
+    case "murah":
+      return out.sort((a, b) => bandingHarga(a, b, true));
+    case "mahal":
+      return out.sort((a, b) => bandingHarga(a, b, false));
+    case "stokBanyak":
+      return out.sort((a, b) => b.currentStock - a.currentStock || nama(a, b));
+    case "stokSedikit":
+      return out.sort((a, b) => a.currentStock - b.currentStock || nama(a, b));
+    default:
+      return out.sort(nama);
+  }
+}
+
 interface Usage {
   products: {
     id: string;
@@ -75,6 +139,7 @@ export function MaterialsCatalogCard() {
   const toast = useToast();
   /** "" is every brand, "none" is the ones nobody has assigned. */
   const [brand, setBrand] = useState("");
+  const [urutan, setUrutan] = useState<Urutan>("nama");
   const brands = useFetch<{ id: string; name: string }[]>("/shops/categories");
   const list = useFetch<Material[]>(
     brand ? `/materials?brandId=${brand}` : "/materials",
@@ -86,7 +151,7 @@ export function MaterialsCatalogCard() {
   /** Which material's recipe list is open. */
   const [resep, setResep] = useState<Material | null>(null);
 
-  const rows = list.data ?? [];
+  const rows = urutkan(list.data ?? [], urutan);
 
   return (
     <Card padded={false} className="mb-5">
@@ -94,22 +159,37 @@ export function MaterialsCatalogCard() {
         title="Master Bahan Baku"
         subtitle="Dipakai bersama oleh semua produk. Mengubah harga di sini berlaku untuk semuanya."
         action={
-          /* "Tanpa brand" is an option rather than a hidden bucket: a material
-             that vanishes from every view until somebody categorises it is a
-             filter that has quietly become data loss. */
-          <Select
-            value={brand}
-            onChange={(e) => setBrand(e.target.value)}
-            className="min-w-[170px]"
-          >
-            <option value="">Semua brand</option>
-            {(brands.data ?? []).map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-            <option value="none">Tanpa brand</option>
-          </Select>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={urutan}
+              onChange={(e) => setUrutan(e.target.value as Urutan)}
+              className="min-w-[210px]"
+              aria-label="Urutkan bahan baku"
+            >
+              {(Object.keys(URUTAN) as Urutan[]).map((k) => (
+                <option key={k} value={k}>
+                  {URUTAN[k]}
+                </option>
+              ))}
+            </Select>
+
+            {/* "Tanpa brand" is an option rather than a hidden bucket: a
+                material that vanishes from every view until somebody
+                categorises it is a filter that has quietly become data loss. */}
+            <Select
+              value={brand}
+              onChange={(e) => setBrand(e.target.value)}
+              className="min-w-[170px]"
+            >
+              <option value="">Semua brand</option>
+              {(brands.data ?? []).map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+              <option value="none">Tanpa brand</option>
+            </Select>
+          </div>
         }
       />
       <TableWrap>
@@ -198,6 +278,11 @@ export function MaterialsCatalogCard() {
                         <div className="text-[10px] text-ink-3">
                           {Math.round(m.usage.qty * 100) / 100} {m.unit ?? ""}
                           {m.usage.qtyIncomplete && " +"}
+                          {/* The figure the "nilai keluar" order ranks on, shown
+                              only in that order so the column stays readable. */}
+                          {urutan === "nilai" && m.unitCost > 0 && (
+                            <> · {rupiah(Math.round(m.usage.qty * m.unitCost))}</>
+                          )}
                           {m.usage.fromPacking && " · tiap paket"}
                         </div>
                       </>
