@@ -685,7 +685,11 @@ export function ShopHealth() {
   const [customFrom, setCustomFrom] = useState(ymd(new Date()));
   const [customTo, setCustomTo] = useState(ymd(new Date()));
   /** Which shop's parcels are open. The name travels so the title is not blank while loading. */
-  const [lihatToko, setLihatToko] = useState<{ id: string; name: string } | null>(null);
+  const [lihatToko, setLihatToko] = useState<{
+    id: string;
+    name: string;
+    marketplace: string | null;
+  } | null>(null);
 
   const { from, to } = periodRange(days, customFrom, customTo);
 
@@ -974,6 +978,7 @@ export function ShopHealth() {
             <ShopDetailModal
               shopId={lihatToko.id}
               shopName={lihatToko.name}
+              shopMarketplace={lihatToko.marketplace}
               from={from}
               to={to}
               onClose={() => setLihatToko(null)}
@@ -1000,7 +1005,7 @@ export function ShopHealth() {
               </div>
             )}
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] text-sm">
+              <table className="w-full min-w-[920px] text-sm">
                 <thead>
                   <tr className="border-b border-line text-left text-xs text-ink-3">
                     <th className="px-4 py-2 font-medium">Toko</th>
@@ -1008,6 +1013,7 @@ export function ShopHealth() {
                     <th className="px-4 py-2 text-right font-medium">Pencairan</th>
                     <th className="px-4 py-2 text-right font-medium">Tren</th>
                     <th className="px-4 py-2 text-right font-medium">Paket</th>
+                    <th className="px-4 py-2 text-right font-medium">Per hari</th>
                     <th className="px-4 py-2 text-right font-medium">Per paket</th>
                     <th className="px-4 py-2 font-medium">Produk unggulan</th>
                   </tr>
@@ -1017,7 +1023,9 @@ export function ShopHealth() {
                     <tr
                       key={s.id}
                       className="cursor-pointer border-b border-line/60 last:border-0 hover:bg-canvas"
-                      onClick={() => setLihatToko({ id: s.id, name: s.name })}
+                      onClick={() =>
+                        setLihatToko({ id: s.id, name: s.name, marketplace: s.marketplace })
+                      }
                     >
                       <td className="px-4 py-2">
                         {/* A button, not just a clickable row: the row keeps the
@@ -1028,7 +1036,7 @@ export function ShopHealth() {
                           className="text-left font-medium text-ink hover:text-brand hover:underline"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setLihatToko({ id: s.id, name: s.name });
+                            setLihatToko({ id: s.id, name: s.name, marketplace: s.marketplace });
                           }}
                         >
                           {s.name}

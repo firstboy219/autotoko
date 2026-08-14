@@ -88,12 +88,15 @@ function tanggal(iso: string): string {
 export function ShopDetailModal({
   shopId,
   shopName,
+  shopMarketplace,
   from,
   to,
   onClose,
 }: {
   shopId: string;
   shopName: string;
+  /** What distinguishes two shops that share a name. */
+  shopMarketplace?: string | null;
   from?: string;
   to?: string;
   onClose: () => void;
@@ -117,7 +120,15 @@ export function ShopDetailModal({
   }, [shopId, from, to]);
 
   return (
-    <Modal open onClose={onClose} title={shopName} width="max-w-4xl">
+    <Modal
+      open
+      onClose={onClose}
+      // Two of this seller's shops are both called "Bulanjacom" and only the
+      // marketplace tells them apart, so the title carries it rather than
+      // leaving the reader to guess which one they opened.
+      title={shopMarketplace ? `${shopName} · ${shopMarketplace}` : shopName}
+      width="max-w-4xl"
+    >
       {!d ? (
         <div className="py-8 text-center text-sm text-ink-3">{err ?? "Memuat…"}</div>
       ) : (
