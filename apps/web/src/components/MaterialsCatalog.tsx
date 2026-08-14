@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../lib/api";
 import { useFetch } from "../lib/useFetch";
+import { MaterialRecipes } from "./MaterialRecipes";
 import { StockMovements } from "./StockMovements";
 import { rupiah, dateShort } from "../lib/fmt";
 import { Icon } from "./Icon";
@@ -49,7 +50,15 @@ interface Material {
   isLow: boolean;
 }
 interface Usage {
-  products: { id: string; name: string; quantity: number }[];
+  products: {
+    id: string;
+    name: string;
+    quantity: number;
+    unit: string | null;
+    orders: number;
+    unitsShipped: number;
+  }[];
+  usageDays: number;
   packingLines: number;
   purchaseLines: number;
   inUse: boolean;
@@ -74,6 +83,8 @@ export function MaterialsCatalogCard() {
   const [deleting, setDeleting] = useState<Material | null>(null);
   /** The material whose ledger is open, or null. */
   const [movements, setMovements] = useState<Material | null>(null);
+  /** Which material's recipe list is open. */
+  const [resep, setResep] = useState<Material | null>(null);
 
   const rows = list.data ?? [];
 
@@ -161,7 +172,20 @@ export function MaterialsCatalogCard() {
                     </div>
                   </TD>
                   <TD className="text-right tabular-nums text-ink-2">
-                    {m.usedByProducts} produk
+                    {/* The number opens its own explanation. "Six products" is
+                        not actionable until you know which six, and which of
+                        them is the one actually emptying the shelf. */}
+                    {m.usedByProducts > 0 ? (
+                      <button
+                        onClick={() => setResep(m)}
+                        className="underline decoration-dotted underline-offset-2 hover:text-brand-ink"
+                        title="Lihat produk yang memakai bahan ini"
+                      >
+                        {m.usedByProducts} produk
+                      </button>
+                    ) : (
+                      <span className="text-ink-3">—</span>
+                    )}
                   </TD>
                   {/* How often it actually left the shelf, not how many recipes
                       mention it. A material in nine recipes that nobody ships
@@ -206,11 +230,13 @@ export function MaterialsCatalogCard() {
         {rows[0]?.usage.days ?? 30} hari terakhir: berapa order memuat produk yang
         memakai bahan ini, dan berapa banyak yang keluar menurut resep. Bahan packing
         (dus, label, shrink) ditandai <em>tiap paket</em> karena menempel di setiap
-        resi, bukan di resep — stoknya belum dipotong otomatis oleh scan, jadi
-        angkanya adalah yang seharusnya terpakai, bukan yang tercatat di mutasi.
+        resi, bukan di resep — stoknya ikut dipotong otomatis saat scan, satu kali
+        per resi berapapun isinya.
         Tanda <strong>+</strong> berarti ada baris resep bersatuan yang tidak bisa
         dikonversi ke satuan master, jadi jumlahnya kurang dari sebenarnya.
       </div>
+
+      {resep && <MaterialRecipes material={resep} onClose={() => setResep(null)} />}
 
       {movements && (
         <StockMovements

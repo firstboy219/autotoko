@@ -263,6 +263,10 @@ export class MaterialsService {
         productId: masterProducts.id,
         productName: masterProducts.name,
         quantity: bomItems.quantity,
+        // The recipe states its own unit and it does not always match the
+        // catalogue's -- glycerine is a recipe in ml against a master in gram.
+        // Showing the bare number would read as the master's unit and be wrong.
+        unit: bomItems.unit,
       })
       .from(bomItems)
       .innerJoin(masterProducts, eq(bomItems.masterProductId, masterProducts.id))
@@ -280,12 +284,55 @@ export class MaterialsService {
         and(eq(materialPurchaseItems.userId, userId), eq(materialPurchaseItems.materialId, id)),
       );
 
+    // How much of each product actually shipped, so the list answers "which
+    // of these recipes is the one draining the shelf" rather than only "which
+    // recipes mention it". A material in six recipes where one product ships
+    // daily and five never do is a different stock problem from the same
+    // material spread evenly, and the recipe list alone cannot tell them apart.
+    const days = 30;
+    const since = new Date(Date.now() - days * 86_400_000);
+    const shipped = recipes.length
+      ? await this.db
+          .select({
+            productId: resiScanItems.masterProductId,
+            orders: sql<number>`count(distinct ${resiScans.id})::int`,
+            units: sql<string>`coalesce(sum(${resiScanItems.qty}), 0)`,
+          })
+          .from(resiScanItems)
+          .innerJoin(resiScans, eq(resiScans.id, resiScanItems.resiScanId))
+          .where(
+            and(
+              eq(resiScans.userId, userId),
+              gte(resiScans.scannedAt, since),
+              inArray(
+                resiScanItems.masterProductId,
+                recipes.map((r) => r.productId),
+              ),
+            ),
+          )
+          .groupBy(resiScanItems.masterProductId)
+      : [];
+    const shippedBy = new Map(
+      shipped.map((s) => [s.productId!, { orders: Number(s.orders), units: Number(s.units) }]),
+    );
+
     return {
-      products: recipes.map((r) => ({
-        id: r.productId,
-        name: r.productName,
-        quantity: num(r.quantity),
-      })),
+      products: recipes
+        .map((r) => {
+          const s = shippedBy.get(r.productId);
+          return {
+            id: r.productId,
+            name: r.productName,
+            quantity: num(r.quantity),
+            /** The recipe's own unit, which may differ from the catalogue's. */
+            unit: r.unit ?? null,
+            orders: s?.orders ?? 0,
+            unitsShipped: s?.units ?? 0,
+          };
+        })
+        // Heaviest first: the product actually consuming the material leads.
+        .sort((a, b) => b.unitsShipped - a.unitsShipped || a.name.localeCompare(b.name)),
+      usageDays: days,
       packingLines: packing?.count ?? 0,
       purchaseLines: purchases?.count ?? 0,
       inUse: recipes.length > 0 || (packing?.count ?? 0) > 0,

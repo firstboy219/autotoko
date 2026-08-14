@@ -518,6 +518,18 @@ export class ResiService {
       }
     }
 
+    // The parcel itself, not its contents: one box, one label, one wrap per
+    // resi. Run unconditionally rather than inside the items branch -- a
+    // parcel nobody has itemised still used a box.
+    const packed = await this.consumption.syncScanPacking(userId, inserted.id);
+    for (const name of packed.clashes) {
+      stockWarnings.push(
+        `${name} ada di resep produk DAN di daftar bahan packing. ` +
+          `Stoknya dipotong sekali lewat resep saja supaya tidak dobel — ` +
+          `hapus barisnya dari resep kalau memang menempel per paket.`,
+      );
+    }
+
     return {
       id: inserted.id,
       resi: inserted.resi,
@@ -913,6 +925,10 @@ export class ResiService {
       row!.masterProductId,
       Number(row!.qty),
     );
+    // The parcel is scanned before it is itemised, so the packing was decided
+    // when there were no contents to compare against. Re-decide it now that
+    // there are: a recipe carrying the box means the box is already taken.
+    await this.repackScan(userId, row!.id);
     return row;
   }
 
@@ -969,6 +985,9 @@ export class ResiService {
       row.masterProductId,
       Number(row.qty),
     );
+    // Re-mapping a line can move a packing material in or out of the parcel's
+    // recipes, which changes whether packing should take it again.
+    await this.repackScan(userId, row.id);
     return row;
   }
 
@@ -983,6 +1002,10 @@ export class ResiService {
       .where(and(eq(resiScanItems.id, itemId), eq(resiScanItems.resiScanId, scanId)))
       .returning();
     if (!row) throw new NotFoundException("Baris isi paket tidak ditemukan.");
+    // AFTER the row is gone, not before: removing the last line carrying a
+    // packing material means packing must take it again, and asking while the
+    // row still existed would have answered with the state being undone.
+    await this.consumption.syncScanPacking(userId, scanId);
     return { ok: true as const };
   }
 
@@ -1241,6 +1264,22 @@ export class ResiService {
   }
 
   /** Ownership check: a scan id alone proves nothing about who owns it. */
+  /**
+   * Re-decide a parcel's packing after one of its lines changed.
+   *
+   * Takes the line id because that is what the item paths have in hand; the
+   * parcel is looked up from it. Silent when the line is already gone — the
+   * delete path reverses the whole parcel's packing anyway.
+   */
+  private async repackScan(userId: string, itemId: string) {
+    const [line] = await this.db
+      .select({ scanId: resiScanItems.resiScanId })
+      .from(resiScanItems)
+      .where(eq(resiScanItems.id, itemId))
+      .limit(1);
+    if (line?.scanId) await this.consumption.syncScanPacking(userId, line.scanId);
+  }
+
   private async getScanOrThrow(userId: string, scanId: string) {
     const [row] = await this.db
       .select({ id: resiScans.id })
@@ -1719,6 +1758,9 @@ export class ResiService {
     for (const line of lines) {
       await this.consumption.syncScanItem(userId, line.id, null, 0);
     }
+    // And the box, label and wrap the parcel itself used. Same reason as
+    // above: the delete cascades in the database, where no code of ours runs.
+    await this.consumption.syncScanPacking(userId, id, { remove: true });
 
     const [row] = await this.db
       .delete(resiScans)

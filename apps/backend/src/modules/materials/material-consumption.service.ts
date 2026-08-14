@@ -2,7 +2,13 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { convertUnit } from "@autotoko/shared";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { bomItems, materialMovements, materials } from "../../database/schema/products.js";
+import {
+  bomItems,
+  materialMovements,
+  materials,
+  packingMaterials,
+} from "../../database/schema/products.js";
+import { resiScanItems } from "../../database/schema/resi.js";
 
 /**
  * Taking raw materials off the shelf when a parcel ships.
@@ -25,6 +31,14 @@ export class MaterialConsumptionService {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
   private static readonly REF = "resi_scan_items";
+  /**
+   * Packing is filed against the PARCEL, not the line.
+   *
+   * A box is used once per resi however many products are inside it, so a
+   * per-line ledger reference would take one box per line and a three-item
+   * parcel would eat three.
+   */
+  private static readonly PACKING_REF = "resi_scans";
 
   /**
    * Make the shelf agree with one line of a packing scan.
@@ -114,6 +128,128 @@ export class MaterialConsumptionService {
   }
 
   /**
+   * Take the packing materials one parcel uses off the shelf.
+   *
+   * Recipes describe a product; dus, label and shrink describe a parcel. They
+   * live in packing_materials rather than in any bom_items row, which is why
+   * nothing subtracted them until now — the per-line consumption above could
+   * not see them, and their stock only ever went up.
+   *
+   * Called for every path that changes the parcel: created, contents edited,
+   * deleted. Reverses first and re-applies, so running it twice leaves the
+   * same result as running it once. `remove` is the delete path — reverse and
+   * stop.
+   *
+   * The overlap guard is not tidiness. Three of this tenant's recipes also
+   * list a packing material (Kardus on Cool Mint, Label on Cool Mint, Shrink
+   * on Inhaler Duo and Siwak), left over from before the shared packing list
+   * existed. Without the guard those parcels would take the same physical box
+   * twice — once as a recipe line and once as packing — and a shelf that
+   * drops by two for one box is a wrong number nobody can see. Names of the
+   * clashing materials come back so the page can ask for the duplicate recipe
+   * line to be removed, rather than leaving a silent rule in place forever.
+   */
+  async syncScanPacking(
+    userId: string,
+    scanId: string,
+    opts: { remove?: boolean } = {},
+  ): Promise<{ applied: number; clashes: string[] }> {
+    const clashes: string[] = [];
+    try {
+      await this.reversePacking(userId, scanId);
+      if (opts.remove) return { applied: 0, clashes };
+
+      const packing = await this.db
+        .select({
+          materialId: packingMaterials.materialId,
+          perParcel: packingMaterials.defaultQuantity,
+          name: materials.name,
+        })
+        .from(packingMaterials)
+        .innerJoin(materials, eq(materials.id, packingMaterials.materialId))
+        .where(and(eq(packingMaterials.userId, userId), eq(materials.userId, userId)));
+      if (!packing.length) return { applied: 0, clashes };
+
+      // Which materials this parcel's own recipes already took. Only mapped
+      // lines count: an unmapped line consumed nothing, so it cannot have
+      // taken the box either.
+      const viaRecipe = await this.db
+        .selectDistinct({ materialId: bomItems.materialId })
+        .from(resiScanItems)
+        .innerJoin(bomItems, eq(bomItems.masterProductId, resiScanItems.masterProductId))
+        .where(
+          and(
+            eq(resiScanItems.resiScanId, scanId),
+            isNotNull(resiScanItems.masterProductId),
+            isNotNull(bomItems.materialId),
+          ),
+        );
+      const already = new Set(viaRecipe.map((r) => r.materialId).filter(Boolean) as string[]);
+
+      let applied = 0;
+      for (const p of packing) {
+        if (!p.materialId) continue;
+        const qty = Number(p.perParcel);
+        if (!Number.isFinite(qty) || qty <= 0) continue;
+        if (already.has(p.materialId)) {
+          clashes.push(p.name);
+          continue;
+        }
+        await this.move(
+          userId,
+          p.materialId,
+          -qty,
+          "packing",
+          scanId,
+          `1 paket x ${qty}`,
+          MaterialConsumptionService.PACKING_REF,
+        );
+        applied++;
+      }
+      return { applied, clashes };
+    } catch (e) {
+      // Same rule as the per-line path: the scan is already saved and a stock
+      // problem must not undo it.
+      this.logger.error(
+        `Gagal menyesuaikan stok packing untuk scan ${scanId}: ${(e as Error).message}`,
+      );
+      return { applied: 0, clashes };
+    }
+  }
+
+  /** Give back whatever this parcel's packing ever took. */
+  private async reversePacking(userId: string, scanId: string) {
+    const prior = await this.db
+      .select({
+        materialId: materialMovements.materialId,
+        net: sql<string>`sum(${materialMovements.quantity})`,
+      })
+      .from(materialMovements)
+      .where(
+        and(
+          eq(materialMovements.userId, userId),
+          eq(materialMovements.refTable, MaterialConsumptionService.PACKING_REF),
+          eq(materialMovements.refId, scanId),
+        ),
+      )
+      .groupBy(materialMovements.materialId);
+
+    for (const row of prior) {
+      const net = Number(row.net);
+      if (!Number.isFinite(net) || net === 0) continue;
+      await this.move(
+        userId,
+        row.materialId,
+        -net,
+        "reversal",
+        scanId,
+        "Pembatalan packing karena paket berubah",
+        MaterialConsumptionService.PACKING_REF,
+      );
+    }
+  }
+
+  /**
    * Undo everything a scan line ever took, by adding it back.
    *
    * Compensating rows rather than deleted ones. The ledger is what explains the
@@ -153,13 +289,15 @@ export class MaterialConsumptionService {
     reason: string,
     refId: string,
     note: string,
+    /** Which ledger this belongs to: the line's, or the parcel's packing. */
+    refTable: string = MaterialConsumptionService.REF,
   ) {
     await this.db.insert(materialMovements).values({
       userId,
       materialId,
       quantity: quantity.toFixed(3),
       reason,
-      refTable: MaterialConsumptionService.REF,
+      refTable,
       refId,
       note,
     });
