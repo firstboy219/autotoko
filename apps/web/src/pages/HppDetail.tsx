@@ -6,6 +6,7 @@ import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
 import { rupiah } from "../lib/fmt";
 import { Icon } from "../components/Icon";
+import { KomposisiHarga } from "../components/KomposisiHarga";
 import {
   Badge,
   Button,
@@ -1025,7 +1026,12 @@ function PublishSection({
               description="Begitu harga publish diisi, rincian potongan sampai profit bersih langsung muncul di sini."
             />
           ) : (
-            <div className="rounded-lg border border-line overflow-hidden">
+            <div className="space-y-3">
+              {/* Part-to-whole at a glance; the waterfall underneath carries
+                  every exact figure, so the ring never gates a number. */}
+              <KomposisiHarga live={live} rates={rates} />
+
+              <div className="rounded-lg border border-line overflow-hidden">
               <WaterRow label="Harga Publish" value={rp(live.publishPriceCents)} strong />
               <WaterRow
                 label={`Biaya Marketplace ${rates.marketplaceFeeRate || 0}%`}
@@ -1091,6 +1097,7 @@ function PublishSection({
                   Angka di atas dihitung dari input terbaru — klik “Simpan Komposisi” agar tersimpan.
                 </div>
               )}
+              </div>
             </div>
           )}
         </div>
