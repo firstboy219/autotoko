@@ -620,6 +620,27 @@ export class ShopInsightsService {
     const medianSold = median(soldValues);
     const batasHarga = kuartilAtas(priceValues);
 
+    // The catalogue's own middle margin, so "thin" and "fat" mean something
+    // here rather than being a number picked out of the air.
+    const marginValues = judged
+      .map((r) => r.netMarginRate)
+      .filter((m): m is number => m != null)
+      .sort((a, b) => a - b);
+    const medianMargin = marginValues.length ? median(marginValues) : 0;
+
+    /**
+     * What a product actually put in the till: profit per pcs times pcs sold.
+     *
+     * The number an owner is really asking about, and the one a margin
+     * percentage hides. A 45% margin on one unit contributes less than a 20%
+     * margin on eighteen, and ranking by percentage would put them the wrong
+     * way round.
+     */
+    const kontribusi = (r: { netProfit: number | null; soldQty: number }) =>
+      r.netProfit != null ? Math.round(r.netProfit * r.soldQty) : 0;
+    const contribValues = judged.map(kontribusi).sort((a, b) => a - b);
+    const batasKontribusi = kuartilAtas(contribValues);
+
     const items = judged
       .map((r) => {
         const ex = exclusiveBy.get(r.productId) ?? { names: [], value: 0 };
@@ -664,10 +685,23 @@ export class ShopInsightsService {
           );
         }
 
-        if (r.publishPrice != null && r.publishPrice >= batasHarga && r.soldQty < medianSold) {
+        // Price alone says nothing, and neither does price with slow sales:
+        // a high price that earns a fat margin is a good product however few
+        // it moves. Only a high price that is NOT earning is a problem, so the
+        // margin decides -- measured against the catalogue's own middle rather
+        // than a number picked out of the air.
+        if (
+          r.publishPrice != null &&
+          r.publishPrice >= batasHarga &&
+          margin != null &&
+          margin < medianMargin
+        ) {
           flags.push("hargaTinggi");
           reasons.push(
-            `Harga publish termasuk 25% termahal di katalog tapi penjualannya di bawah tengah.`,
+            `Harga publish termasuk 25% termahal di katalog, tapi marginnya ` +
+              `${Math.round(margin * 1000) / 10}% — di bawah tengah katalog ` +
+              `(${Math.round(medianMargin * 1000) / 10}%). Harga premiumnya habis ` +
+              `di biaya, bukan jadi untung.`,
           );
         }
 
@@ -729,6 +763,94 @@ export class ShopInsightsService {
 
     const flaggedIds = new Map(items.map((i) => [i.id, i]));
 
+    /** How many different shops moved each product — one shop is a dependency. */
+    const tokoPerProduk = new Map<string, number>();
+    for (const [, list] of shipped.byShop) {
+      for (const p of list) {
+        tokoPerProduk.set(p.id, (tokoPerProduk.get(p.id) ?? 0) + 1);
+      }
+    }
+
+    /**
+     * The products carrying the business, and what makes each one carry it.
+     *
+     * The mirror of the list above, plus two things its inverse does not give:
+     *
+     *  - CONTRIBUTION. Profit per pcs times pcs sold. The figure an owner is
+     *    actually asking about and the one a margin percentage hides — 45% on
+     *    one unit is worth less than 20% on eighteen. It is what this list is
+     *    ranked by, because "best product" means the one putting the most in
+     *    the till, not the one with the prettiest percentage.
+     *
+     *  - SPREAD. Sold through more than one shop. A product that only moves in
+     *    a single shop earns just as well and is one account suspension away
+     *    from earning nothing; that is worth seeing next to the money.
+     *
+     * Only products with NO weak reason qualify, so nothing appears on both
+     * lists and the two can be read against each other.
+     */
+    const kuat = judged
+      .filter((r) => !flaggedIds.has(r.productId))
+      .map((r) => {
+        const ex = exclusiveBy.get(r.productId) ?? { names: [], value: 0 };
+        const contrib = kontribusi(r);
+        const shops = tokoPerProduk.get(r.productId) ?? 0;
+        const flags: string[] = [];
+        const reasons: string[] = [];
+
+        if (contrib > 0 && contrib >= batasKontribusi) {
+          flags.push("penyumbangUtama");
+          reasons.push(
+            `Menyumbang Rp ${contrib.toLocaleString("id-ID")} dalam ${days} hari — ` +
+              `termasuk 25% penyumbang terbesar.`,
+          );
+        }
+        if (r.netMarginRate != null && r.netMarginRate >= medianMargin) {
+          flags.push("marginTebal");
+          reasons.push(
+            `Margin ${Math.round(r.netMarginRate * 1000) / 10}%, di atas tengah katalog ` +
+              `(${Math.round(medianMargin * 1000) / 10}%).`,
+          );
+        }
+        if (r.soldQty >= medianSold && r.soldQty > 0) {
+          flags.push("laris");
+          reasons.push(`${r.soldQty} pcs dalam ${days} hari, di atas tengah katalog.`);
+        }
+        if (ex.names.length === 0 && r.materialCount > 0) {
+          flags.push("bahanBerbagi");
+          reasons.push(
+            "Semua bahannya juga dipakai produk lain, jadi restocknya tidak terkunci " +
+              "di satu produk.",
+          );
+        }
+        if (shops >= 2) {
+          flags.push("merataToko");
+          reasons.push(`Jalan di ${shops} toko, tidak bergantung pada satu akun.`);
+        } else if (shops === 1) {
+          // Not a strength, but it belongs beside the money it earns.
+          reasons.push("Catatan: baru jalan di 1 toko, jadi bergantung pada akun itu.");
+        }
+
+        return {
+          id: r.productId,
+          name: r.name,
+          sku: r.sku,
+          soldQty: r.soldQty,
+          publishPrice: r.publishPrice,
+          hpp: r.hpp,
+          netProfit: r.netProfit,
+          netMarginRate: r.netMarginRate,
+          contribution: contrib,
+          shopCount: shops,
+          exclusiveMaterials: ex.names.length,
+          flags,
+          reasons,
+        };
+      })
+      .filter((r) => r.flags.length > 0)
+      // Ranked by money, not by percentage or by number of badges.
+      .sort((a, b) => b.contribution - a.contribution || b.flags.length - a.flags.length);
+
     /**
      * The same products, but only where a shop actually ships them.
      *
@@ -771,6 +893,11 @@ export class ShopInsightsService {
       totalFlagged: items.length,
       /** Exclusive materials on healthy products — context, not a warning. */
       lockedButSelling: terkunciTapiLaku.slice(0, 8),
+      /** The products carrying the business, ranked by rupiah contributed. */
+      strong: kuat.slice(0, 10),
+      totalStrong: kuat.length,
+      contributionTotal: kuat.reduce((n, r) => n + r.contribution, 0),
+      medianMargin: Math.round(medianMargin * 1000) / 10,
       lockedTotal: items.reduce((n, i) => n + i.lockedStockValue, 0),
       byShop,
     };

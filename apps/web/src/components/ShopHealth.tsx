@@ -3,7 +3,7 @@ import { useFetch } from "../lib/useFetch";
 import { rupiah } from "../lib/fmt";
 import { Icon } from "./Icon";
 import { Badge, Card, CardHeader, EmptyState, InlineAlert, Select } from "./ui";
-import { ProdukLemah, type ProductHealth } from "./ProdukLemah";
+import { ProdukKuat, ProdukLemah, type ProductHealth } from "./ProdukLemah";
 import { ShopDetailModal } from "./ShopDetailModal";
 
 /**
@@ -829,10 +829,16 @@ export function ShopHealth() {
               parcels and six days -- and nobody scrolls down to find that out. */}
           <BacaanStatistik s={d.statistics} />
 
-          <ProdukLemah
-            h={d.productHealth}
-            spanDays={d.statistics.span.spanDays}
-          />
+          {/* Side by side, because the pair is the point: which products to
+              keep feeding and which to stop. Reading either alone invites the
+              wrong decision. */}
+          <div className="grid gap-3 lg:grid-cols-2">
+            <ProdukKuat h={d.productHealth} />
+            <ProdukLemah
+              h={d.productHealth}
+              spanDays={d.statistics.span.spanDays}
+            />
+          </div>
 
           {/* Ranked separately on purpose: the shop that ships most is often
               not the one that earns most, and one "best shop" would hide

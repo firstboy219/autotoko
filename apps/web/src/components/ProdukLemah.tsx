@@ -41,6 +41,25 @@ export interface ProductHealth {
     names: string[];
   }[];
   byShop: { shopId: string; items: { id: string; name: string; units: number; flags: string[] }[] }[];
+  strong: {
+    id: string;
+    name: string;
+    sku: string | null;
+    soldQty: number;
+    publishPrice: number | null;
+    hpp: number;
+    netProfit: number | null;
+    netMarginRate: number | null;
+    /** Profit per pcs times pcs sold — what it actually put in the till. */
+    contribution: number;
+    shopCount: number;
+    exclusiveMaterials: number;
+    flags: string[];
+    reasons: string[];
+  }[];
+  totalStrong: number;
+  contributionTotal: number;
+  medianMargin: number;
 }
 
 /** Short label per reason, so the badges read at a glance. */
@@ -52,6 +71,11 @@ export const FLAG_LABEL: Record<string, string> = {
   bahanTerkunci: "bahan terkunci",
   hargaTinggi: "harga tinggi",
   hppRagu: "HPP belum pasti",
+  penyumbangUtama: "penyumbang utama",
+  marginTebal: "margin tebal",
+  laris: "laris",
+  bahanBerbagi: "bahan berbagi",
+  merataToko: "merata di banyak toko",
 };
 
 const TONE: Record<string, "danger" | "warning" | "info"> = {
@@ -63,6 +87,94 @@ const TONE: Record<string, "danger" | "warning" | "info"> = {
   hargaTinggi: "warning",
   hppRagu: "info",
 };
+
+/**
+ * The products carrying the business, ranked by rupiah rather than percentage.
+ *
+ * Deliberately not ranked by margin. A 45% margin on one unit contributes less
+ * than a 20% margin on eighteen, and a "best products" list sorted by
+ * percentage would put them the wrong way round — which is the mistake the
+ * contribution column exists to prevent.
+ */
+export function ProdukKuat({ h }: { h: ProductHealth }) {
+  if (h.strong.length === 0) {
+    return (
+      <Card padded={false}>
+        <CardHeader
+          title="Produk yang worth it"
+          subtitle="Belum ada produk yang lolos semua sisi tanpa catatan."
+        />
+        <div className="px-4 pb-4 text-sm text-ink-3">
+          Untuk data sependek ini itu belum berarti apa-apa — margin sudah bisa
+          dipegang, penjualannya belum.
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card padded={false}>
+      <CardHeader
+        title="Produk yang worth it"
+        subtitle={`${h.totalStrong} produk, diurutkan dari rupiah yang benar-benar disumbang — bukan dari persen marginnya.`}
+      />
+      <div className="space-y-3 px-4 pb-4">
+        <div className="rounded-lg border border-line p-3">
+          <div className="text-[11px] text-ink-3">
+            Total sumbangan untung {h.days} hari
+          </div>
+          <div className="mt-0.5 text-lg font-semibold tabular-nums text-ink">
+            {rupiah(h.contributionTotal)}
+          </div>
+          <div className="text-[11px] text-ink-3">
+            Dari {h.strong.length} produk teratas. Margin tengah katalog {h.medianMargin}%.
+          </div>
+        </div>
+
+        {h.strong.map((p) => (
+          <div key={p.id} className="rounded-lg border border-line p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="font-medium text-ink">{p.name}</div>
+                <div className="mt-0.5 text-[11px] tabular-nums text-ink-3">
+                  {p.soldQty} pcs ×{" "}
+                  {p.netProfit != null ? rupiah(Math.round(p.netProfit)) : "—"} untung ={" "}
+                  <strong className="text-ink-2">{rupiah(p.contribution)}</strong>
+                  {p.netMarginRate != null
+                    ? ` · margin ${Math.round(p.netMarginRate * 1000) / 10}%`
+                    : ""}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {p.flags.map((f) => (
+                  <Badge key={f} tone="success">
+                    {FLAG_LABEL[f] ?? f}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+            <ul className="mt-2 space-y-0.5">
+              {p.reasons.map((r) => (
+                <li key={r} className="flex gap-2 text-xs text-ink-2">
+                  <span aria-hidden="true">·</span>
+                  <span>{r}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+
+        <div className="text-[11px] text-ink-3">
+          Selain kebalikan dari daftar “kurang worth it”, dua hal ditambahkan yang
+          tidak muncul dari pembalikan begitu saja: <strong>sumbangan rupiah</strong>{" "}
+          (untung per pcs × jumlah terjual — angka yang disembunyikan persentase
+          margin) dan <strong>sebaran toko</strong> (produk yang cuma jalan di satu
+          akun sama untungnya, tapi satu suspend dari berhenti sama sekali).
+        </div>
+      </div>
+    </Card>
+  );
+}
 
 export function ProdukLemah({
   h,
