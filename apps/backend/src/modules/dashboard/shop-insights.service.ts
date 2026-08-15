@@ -289,6 +289,8 @@ export class ShopInsightsService {
        * smaller truth — it is a different claim from the one the data supports.
        */
       statistics,
+      /** Which shops earn their keep, ranked by money and qualified by the rest. */
+      shopValue: this.shopValue(perShop, productHealth, statistics),
       /** Products that are not paying their way, and why — per reason, not per score. */
       productHealth,
       /** How many days the per-day columns divide by, so the page can say it. */
@@ -526,6 +528,189 @@ export class ShopInsightsService {
       })),
       /** Parcels in this window with no shop at all — not this shop's, but not ruled out either. */
       unmappedInWindow: Number(unmapped?.n ?? 0),
+    };
+  }
+
+  /**
+   * Which shops are worth keeping, and which are not.
+   *
+   * The analysis this rests on, because it decided the shape:
+   *
+   *  - MONEY IS COMPLETE, ACTIVITY IS NOT. Every payout row carries a shop;
+   *    barely half the scans do. So a figure built from payouts can be ranked
+   *    on, and one built from parcels cannot — "rupiah per parcel" would
+   *    divide a complete numerator by a denominator missing 43% of its rows
+   *    and produce a number that looks precise and is not.
+   *
+   *  - THE TWO WINDOWS BARELY OVERLAP. Payouts here start eight days before
+   *    the first scan, because money is released for orders shipped earlier.
+   *    Dividing one by the other mixes periods as well as coverage.
+   *
+   *  - SO: NO COMPOSITE SCORE. Weighting money together with parcel-derived
+   *    measures would launder the reliable number with the unreliable one, and
+   *    the weights would be invented. The rank is the money, full stop;
+   *    everything else is a named qualifier that can change how the rank is
+   *    read but never quietly moves it.
+   *
+   * A shop has no HPP, so "worth it" cannot mean margin. What it costs is
+   * attention — listings, orders, an account kept alive — and that cost is
+   * roughly FIXED per shop rather than per parcel. Which is why the rank is a
+   * level (what did this shop put in my pocket) rather than a rate: the
+   * question is whether it earns enough to justify existing at all.
+   *
+   * Two money figures, deliberately both:
+   *  - what was actually released, which is fact but on the payout calendar;
+   *  - profit implied by what it shipped, from the costing sheet, which is an
+   *    estimate but on the same calendar as the parcels. Where they disagree,
+   *    the disagreement is itself the finding.
+   */
+  private shopValue(
+    perShop: {
+      id: string;
+      name: string;
+      marketplace: string | null;
+      credit: number;
+      sellerShare: number;
+      parcels: number;
+      units: number;
+      variety: number;
+      activeDays: number;
+      idleDays: number | null;
+      topProducts: { id: string; name: string; units: number }[];
+    }[],
+    health: {
+      items: { id: string; flags: string[]; netProfit: number | null }[];
+      strong: { id: string; netProfit: number | null }[];
+      byShop: { shopId: string; items: { id: string; units: number }[] }[];
+    },
+    statistics: { span: { spanDays: number }; coverage: { scans: number; withShop: number } },
+  ) {
+    const spanDays = statistics.span.spanDays || 1;
+    const lemahIds = new Set(health.items.map((i) => i.id));
+    // BOTH lists. A product being on the weak list does not make its profit
+    // zero -- it still earned whatever it earned, and counting only the strong
+    // ones understated every shop's implied profit.
+    const untungPerPcs = new Map<string, number>();
+    for (const r of [...health.strong, ...health.items]) {
+      if (r.netProfit != null && !untungPerPcs.has(r.id)) {
+        untungPerPcs.set(r.id, r.netProfit);
+      }
+    }
+    const lemahPerToko = new Map(
+      health.byShop.map((b) => [b.shopId, b.items.reduce((n, i) => n + i.units, 0)]),
+    );
+
+    const takes = perShop.map((s) => s.sellerShare).sort((a, b) => a - b);
+    const median = takes.length ? takes[Math.floor((takes.length - 1) / 2)]! : 0;
+    const batasAtas = takes.length ? takes[Math.floor((takes.length - 1) * 0.67)]! : 0;
+
+    const items = perShop
+      .map((s) => {
+        // Profit implied by the mix this shop actually shipped. Only products
+        // with a costed profit contribute, so it is a floor, not a total.
+        const estimatedProfit = Math.round(
+          s.topProducts.reduce((n, p) => n + (untungPerPcs.get(p.id) ?? 0) * p.units, 0),
+        );
+        // Units whose product has no costed profit at all — no publish price,
+        // usually. Reported so the estimate reads as the floor it is.
+        const unitsTanpaHarga = s.topProducts
+          .filter((p) => !untungPerPcs.has(p.id))
+          .reduce((n, p) => n + p.units, 0);
+        const unitsLemah = lemahPerToko.get(s.id) ?? 0;
+        const notes: string[] = [];
+
+        let tier:
+          | "andalan"
+          | "sehat"
+          | "tipis"
+          | "belumMenghasilkan"
+          | "takTerlihat"
+          | "vakum";
+
+        if (s.sellerShare <= 0 && s.parcels > 0) {
+          // Ships but nothing has been released. The single most actionable
+          // state on this page: work went out and no money came back yet.
+          tier = "belumMenghasilkan";
+          notes.push(
+            `Kirim ${s.parcels} paket tapi belum ada pencairan tercatat sama sekali. ` +
+              `Cek apakah pencairannya belum masuk, atau tokonya memang baru.`,
+          );
+        } else if (s.sellerShare > 0 && s.parcels === 0) {
+          tier = "takTerlihat";
+          notes.push(
+            "Ada pencairan tapi tidak ada satupun paket yang dipetakan ke toko ini, " +
+              "jadi tidak bisa dilihat apa yang dijual atau seberapa aktifnya.",
+          );
+        } else if (s.sellerShare <= 0 && s.parcels === 0) {
+          tier = "vakum";
+          notes.push("Tidak ada pencairan dan tidak ada paket di periode ini.");
+        } else if (s.sellerShare >= batasAtas && (s.idleDays == null || s.idleDays <= 7)) {
+          tier = "andalan";
+        } else if (s.sellerShare >= median) {
+          tier = "sehat";
+        } else {
+          tier = "tipis";
+        }
+
+        if (s.parcels > 0 && s.variety === 1) {
+          notes.push(
+            "Cuma satu jenis produk yang jalan di sini — kalau produk itu berhenti, " +
+              "tokonya ikut berhenti.",
+          );
+        }
+        if (s.idleDays != null && s.idleDays > 14) {
+          notes.push(`Terakhir kirim ${s.idleDays} hari lalu.`);
+        }
+        if (unitsTanpaHarga > 0 && s.units > 0) {
+          const pct = Math.round((unitsTanpaHarga / s.units) * 100);
+          if (pct >= 30) {
+            notes.push(
+              `${pct}% unitnya dari produk yang belum ada harga publish, jadi angka ` +
+                `untungnya lebih rendah dari sebenarnya.`,
+            );
+          }
+        }
+        if (unitsLemah > 0 && s.units > 0) {
+          const pct = Math.round((unitsLemah / s.units) * 100);
+          if (pct >= 50) {
+            notes.push(
+              `${pct}% unit yang dikirim toko ini datang dari produk yang masuk daftar ` +
+                `kurang worth it.`,
+            );
+          }
+        }
+
+        return {
+          shopId: s.id,
+          name: s.name,
+          marketplace: s.marketplace,
+          tier,
+          sellerTake: s.sellerShare,
+          credit: s.credit,
+          sellerPerDay: Math.round(s.sellerShare / spanDays),
+          estimatedProfit,
+          parcels: s.parcels,
+          units: s.units,
+          variety: s.variety,
+          activeDays: s.activeDays,
+          idleDays: s.idleDays,
+          /** Only when both sides are known; still coloured by the coverage gap. */
+          sellerPerParcel: s.parcels > 0 ? Math.round(s.sellerShare / s.parcels) : null,
+          weakUnits: unitsLemah,
+          /** Units the profit estimate could not price, so it reads as a floor. */
+          unpricedUnits: unitsTanpaHarga,
+          notes,
+        };
+      })
+      .sort((a, b) => b.sellerTake - a.sellerTake || b.parcels - a.parcels);
+
+    return {
+      spanDays,
+      medianSeller: Math.round(median),
+      items,
+      /** How much of the activity side is missing, so the page can hedge it. */
+      unmappedScans: statistics.coverage.scans - statistics.coverage.withShop,
+      totalScans: statistics.coverage.scans,
     };
   }
 

@@ -4,6 +4,7 @@ import { rupiah } from "../lib/fmt";
 import { Icon } from "./Icon";
 import { Badge, Card, CardHeader, EmptyState, InlineAlert, Select } from "./ui";
 import { ProdukKuat, ProdukLemah, type ProductHealth } from "./ProdukLemah";
+import { TokoWorth, type ShopValue } from "./TokoWorth";
 import { ShopDetailModal } from "./ShopDetailModal";
 
 /**
@@ -538,6 +539,7 @@ interface Insights {
     };
   };
   productHealth: ProductHealth;
+  shopValue: ShopValue;
   /** Days the per-day columns divide by: the span with data, not the filter. */
   rateDays: number | null;
   statistics: {
@@ -986,6 +988,8 @@ export function ShopHealth() {
               <PersenHargaPublish v={d.restock.vsPublish} />
             </div>
           </Card>
+
+          <TokoWorth v={d.shopValue} />
 
           {lihatToko && (
             <ShopDetailModal
