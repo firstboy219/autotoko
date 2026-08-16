@@ -958,9 +958,15 @@ function MutationList({
           `Sub-sub-seller${shop?.subSubSellerName ? ` ${shop.subSubSellerName}` : ""} ${rupiah(subSubAmt)}`,
         );
       }
-      parts.push(`Seller ${rupiah(m.sellerAmount)}`);
+      // Bagian seller sengaja TIDAK ikut. Pesan ini dibaca sub-seller, dan
+      // berapa yang tinggal di pemilik bukan urusan yang perlu mereka lihat
+      // per toko. Angkanya tetap ada di halaman, CSV, dan PNG — yang ini cuma
+      // apa yang dikirim keluar.
       if (materialAmt > 0) parts.push(`Bahan baku ${rupiah(materialAmt)}`);
-      lines.push(`   ${parts.join(" | ")}`);
+      // Tanpa bagian seller, sebuah toko bisa kehabisan rincian sama sekali —
+      // toko milik sendiri tanpa sedekah dan tanpa jatah bahan baku. Barisnya
+      // dilewati, bukan dikirim sebagai baris kosong berindentasi.
+      if (parts.length) lines.push(`   ${parts.join(" | ")}`);
 
       if (m.marketplaceProofUrl) lines.push(`   ${absoluteUrl(m.marketplaceProofUrl)}`);
     });
