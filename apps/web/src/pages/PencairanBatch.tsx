@@ -85,6 +85,12 @@ interface BatchDetail {
   createdAt: string;
   mutations: Mutation[];
   disbursements: Disbursement[];
+  carryovers?: {
+    /** Held back by THIS batch for being under the minimum — still waiting. */
+    held: { id: string; name: string; amount: number; recipientType: string }[];
+    /** Brought forward from an earlier batch and paid out here. */
+    applied: { id: string; name: string; amount: number; recipientType: string }[];
+  };
 }
 
 const cents = (rupiahVal: number) => Math.round(rupiahVal * 100);
@@ -1237,6 +1243,42 @@ function DisbursementRekap({
     return [...byMutation.entries()];
   }, [batch.disbursements]);
 
+  /**
+   * Why this step's total is not the header's total.
+   *
+   * The header adds up what was CALCULATED for every shop. This step lists
+   * what will actually be TRANSFERRED now, and amounts under the minimum
+   * transfer wait for the next batch instead. Two totals disagreeing with
+   * nothing to account for the gap reads as a broken sum — it was reported as
+   * one — so the arithmetic is spelled out rather than left to be guessed.
+   */
+  const rekonsiliasi = useMemo(() => {
+    const dihitung = batch.mutations.reduce(
+      (n, m) =>
+        n +
+        (Number(m.sedekahAmount) || 0) +
+        (Number(m.subSellerAmount) || 0) +
+        (Number(m.subSubSellerAmount) || 0) +
+        (Number(m.sellerMaterialAmount) || 0),
+      0,
+    );
+    const ditahan = (batch.carryovers?.held ?? []).reduce((n, c) => n + c.amount, 0);
+    const dibawa = (batch.carryovers?.applied ?? []).reduce((n, c) => n + c.amount, 0);
+    const ditransfer = batch.disbursements.reduce(
+      (n, d) => n + (Number(d.expectedAmount) || 0),
+      0,
+    );
+    return {
+      dihitung,
+      ditahan,
+      dibawa,
+      ditransfer,
+      // If this is not zero the explanation is incomplete, and saying so beats
+      // showing a tidy panel that quietly does not add up.
+      sisa: Math.round((dihitung - ditahan + dibawa - ditransfer) * 100) / 100,
+    };
+  }, [batch.mutations, batch.carryovers, batch.disbursements]);
+
   const all = batch.disbursements;
   const doneCount = all.filter((d) => READY.includes(d.validationStatus)).length;
   const pct = all.length ? Math.round((doneCount / all.length) * 100) : 0;
@@ -1267,6 +1309,71 @@ function DisbursementRekap({
           </div>
           <div className="text-2xl text-ink tabular-nums">{pct}%</div>
         </div>
+        {/* The arithmetic behind the two totals, because they legitimately
+            differ and nothing on the page used to say why. Rendered whenever
+            anything was held or brought forward — when neither happened the
+            two totals agree and a panel explaining nothing is just noise. */}
+        {(rekonsiliasi.ditahan > 0 ||
+          rekonsiliasi.dibawa > 0 ||
+          Math.abs(rekonsiliasi.sisa) > 0.01) && (
+          <div className="mt-3 rounded-lg border border-line p-3">
+            <div className="text-xs font-medium text-ink-2">
+              Kenapa total di sini beda dengan di atas
+            </div>
+            <dl className="mt-2 space-y-1 text-xs">
+              <div className="flex justify-between gap-2">
+                <dt className="text-ink-2">Dihitung untuk semua toko</dt>
+                <dd className="tabular-nums text-ink">{rupiah(rekonsiliasi.dihitung)}</dd>
+              </div>
+              {rekonsiliasi.ditahan > 0 && (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-ink-2">
+                    Ditahan — di bawah batas transfer minimum
+                  </dt>
+                  <dd className="tabular-nums text-red-600">
+                    −{rupiah(rekonsiliasi.ditahan)}
+                  </dd>
+                </div>
+              )}
+              {rekonsiliasi.dibawa > 0 && (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-ink-2">Dibawa dari batch sebelumnya</dt>
+                  <dd className="tabular-nums text-emerald-600">
+                    +{rupiah(rekonsiliasi.dibawa)}
+                  </dd>
+                </div>
+              )}
+              <div className="flex justify-between gap-2 border-t border-line pt-1">
+                <dt className="font-medium text-ink">Ditransfer sekarang</dt>
+                <dd className="font-medium tabular-nums text-ink">
+                  {rupiah(rekonsiliasi.ditransfer)}
+                </dd>
+              </div>
+            </dl>
+
+            {batch.carryovers?.held?.length ? (
+              <div className="mt-2 text-[11px] text-ink-3">
+                Menunggu batch berikutnya:{" "}
+                {batch.carryovers.held
+                  .map((c) => `${c.name} ${rupiah(c.amount)}`)
+                  .join(" · ")}
+                . Uangnya tidak hilang — ikut ditransfer begitu jumlahnya melewati
+                batas minimum.
+              </div>
+            ) : null}
+
+            {/* If the explanation does not close, say so rather than show a
+                tidy panel that quietly does not add up. */}
+            {Math.abs(rekonsiliasi.sisa) > 0.01 && (
+              <div className="mt-2 text-[11px] text-red-600">
+                Masih ada selisih {rupiah(Math.abs(rekonsiliasi.sisa))} yang belum
+                terjelaskan oleh penahanan maupun bawaan — laporkan ini, jangan
+                dianggap wajar.
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="mt-3 h-1.5 rounded-full bg-line overflow-hidden">
           <div
             className={`h-full rounded-full transition-all ${

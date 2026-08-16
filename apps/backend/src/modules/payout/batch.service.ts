@@ -68,7 +68,7 @@ export class PayoutBatchService {
     // The transfer rekap only exists once input has closed (Tahap 2+).
     const disbursements =
       batch.status === "berjalan" ? [] : await this.disbursements.listForBatch(userId, id);
-    return { ...batch, mutations, disbursements };
+    return { ...batch, mutations, disbursements, carryovers: await this.carryoversOf(userId, id) };
   }
 
   /**
@@ -105,6 +105,100 @@ export class PayoutBatchService {
     // 24 million combinations against a handful of batches: getting here means
     // something is wrong with the generator, not that the space filled up.
     throw new ConflictException("Tidak bisa membuat kode batch yang unik.");
+  }
+
+  /**
+   * Money this batch held back, and money it brought forward.
+   *
+   * Without this the page cannot explain itself. The header adds up what was
+   * CALCULATED for every shop; step 2 lists what will actually be TRANSFERRED
+   * now, and the two differ by exactly the amounts that fell under the
+   * minimum transfer and are waiting for the next batch. Seeing two totals
+   * disagree with nothing to account for the gap reads as a broken sum — it
+   * was reported as one — when it is the rule working.
+   *
+   * Both directions are returned because both move the total: amounts held
+   * back make step 2 smaller than the header, and amounts carried in from an
+   * earlier batch make it larger.
+   */
+  private async carryoversOf(userId: string, batchId: string) {
+    const rows = await this.db
+      .select({
+        id: payoutCarryovers.id,
+        recipientType: payoutCarryovers.recipientType,
+        amount: payoutCarryovers.amount,
+        sourceBatchId: payoutCarryovers.sourceBatchId,
+        appliedBatchId: payoutCarryovers.appliedBatchId,
+        subSellerId: payoutCarryovers.recipientSubSellerId,
+        subSubSellerId: payoutCarryovers.recipientSubSubSellerId,
+        createdAt: payoutCarryovers.createdAt,
+      })
+      .from(payoutCarryovers)
+      .where(
+        and(
+          eq(payoutCarryovers.userId, userId),
+          or(
+            eq(payoutCarryovers.sourceBatchId, batchId),
+            eq(payoutCarryovers.appliedBatchId, batchId),
+          ),
+        ),
+      );
+
+    // Names, so the page can say WHOSE money is waiting rather than only how
+    // much — "sedekah" and "sub-seller" are not answers when there are three.
+    const subIds = [...new Set(rows.map((r) => r.subSellerId).filter(Boolean))] as string[];
+    const subSubIds = [...new Set(rows.map((r) => r.subSubSellerId).filter(Boolean))] as string[];
+    const [subs, subSubs] = await Promise.all([
+      subIds.length
+        ? this.db.select().from(subSellers).where(inArray(subSellers.id, subIds))
+        : Promise.resolve([]),
+      subSubIds.length
+        ? this.db.select().from(subSubSellers).where(inArray(subSubSellers.id, subSubIds))
+        : Promise.resolve([]),
+    ]);
+    const namaSub = new Map(subs.map((s) => [s.id, s.name]));
+    const namaSubSub = new Map(subSubs.map((s) => [s.id, s.name]));
+
+    const label = (r: (typeof rows)[number]) =>
+      r.subSellerId
+        ? (namaSub.get(r.subSellerId) ?? "Sub-seller")
+        : r.subSubSellerId
+          ? (namaSubSub.get(r.subSubSellerId) ?? "Sub-sub-seller")
+          : r.recipientType === "sedekah"
+            ? "Sedekah"
+            : r.recipientType === "bahan_baku"
+              ? "Bahan baku"
+              : String(r.recipientType);
+
+    // A row whose source AND destination are this same batch was held and
+    // released inside it: it moves nothing, and counting it as brought-in
+    // while ignoring it as held made the arithmetic overshoot by its amount.
+    const lewat = (r: (typeof rows)[number]) =>
+      r.sourceBatchId === batchId && r.appliedBatchId === batchId;
+
+    return {
+      /**
+       * Held back by this batch — why step 2 is smaller than the header.
+       *
+       * Deliberately NOT limited to rows still waiting. Once the money is
+       * finally paid out in a later batch the row gains an appliedBatchId, but
+       * from THIS batch's point of view it was still money that did not go out
+       * here, and a closed batch has to stay explainable afterwards.
+       */
+      held: rows
+        .filter((r) => r.sourceBatchId === batchId && !lewat(r))
+        .map((r) => ({
+          ...r,
+          name: label(r),
+          amount: Number(r.amount),
+          /** Already paid out in a later batch, rather than still waiting. */
+          sudahDibayar: r.appliedBatchId != null,
+        })),
+      /** Brought forward INTO this batch — why step 2 can be larger. */
+      applied: rows
+        .filter((r) => r.appliedBatchId === batchId && !lewat(r))
+        .map((r) => ({ ...r, name: label(r), amount: Number(r.amount) })),
+    };
   }
 
   /** Admin/Staff starts a fresh batch. Batches never auto-open (Bagian 1). */
