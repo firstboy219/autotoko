@@ -154,7 +154,7 @@ export function PencairanBatch() {
         </div>
       ) : (
         <div className="space-y-4">
-          <BatchProgress batch={batch} onDone={reload} />
+          <BatchProgress batch={batch} shops={shops ?? []} onDone={reload} />
           {batch.status === "berjalan" && shops && settings && (
             <>
               <MutationForm
@@ -211,7 +211,7 @@ const STEPS = [
  * toko mana bukan yang perlu dibaca semua penerimanya. Angkanya tetap lengkap
  * di halaman, CSV, dan PNG. Bagian seller ikut, karena memang untuk seller.
  */
-function pesanSeller(batch: BatchDetail): string {
+function pesanSeller(batch: BatchDetail, shops: ShopOpt[]): string {
   const t = batch.mutations.reduce(
     (a, m) => {
       a.credit += Number(m.creditAmount) || 0;
@@ -252,6 +252,31 @@ function pesanSeller(batch: BatchDetail): string {
     lines.push(`  - Bahan baku: ${rupiah(t.material)}`);
     lines.push(`  - Sisa seller: ${rupiah(t.seller - t.material)}`);
   }
+
+  /**
+   * Per toko: namanya, berapa yang cair, dan buktinya.
+   *
+   * Sengaja hanya tiga hal itu. Pecahan sedekah/sub-seller/seller per toko
+   * tidak ikut -- yang ingin dilihat di sini adalah "toko mana mencairkan
+   * berapa, mana buktinya", dan menambahkan pecahannya mengembalikan tepat
+   * rincian yang tadi dibuang.
+   */
+  if (batch.mutations.length > 0) {
+    lines.push("", "*Detail Toko*");
+    batch.mutations.forEach((m, i) => {
+      const nama =
+        shops.find((s) => s.id === m.shopId)?.shopName ?? m.shopId.slice(0, 8);
+      lines.push(`${i + 1}. ${nama} - ${rupiah(m.creditAmount)}`);
+      // Buktinya disebut ada-tidaknya, bukan dilewati diam-diam: baris tanpa
+      // tautan yang tidak diterangkan terbaca seperti bukti yang hilang.
+      lines.push(
+        m.marketplaceProofUrl
+          ? `   ${absoluteUrl(m.marketplaceProofUrl)}`
+          : "   (bukti pencairan belum diunggah)",
+      );
+    });
+  }
+
   return lines.join("\n");
 }
 
@@ -361,7 +386,16 @@ function Stepper({ current }: { current: number }) {
   );
 }
 
-function BatchProgress({ batch, onDone }: { batch: BatchDetail; onDone: () => void }) {
+function BatchProgress({
+  batch,
+  shops,
+  onDone,
+}: {
+  batch: BatchDetail;
+  /** Dipakai hanya untuk menamai toko di pesan WhatsApp. */
+  shops: ShopOpt[];
+  onDone: () => void;
+}) {
   const navigate = useNavigate();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
@@ -553,7 +587,7 @@ function BatchProgress({ batch, onDone }: { batch: BatchDetail; onDone: () => vo
                   size="sm"
                   variant="outline"
                   icon="share"
-                  onClick={() => bukaWhatsApp(pesanSeller(batch))}
+                  onClick={() => bukaWhatsApp(pesanSeller(batch, shops))}
                 >
                   Bagikan WA ke Seller
                 </Button>
