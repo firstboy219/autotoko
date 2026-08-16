@@ -6,9 +6,11 @@
   NotFoundException,
   BadRequestException,
 } from "@nestjs/common";
+import { randomBytes } from "node:crypto";
 import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
+  BATCH_CODE_ALPHABET,
   payoutBatches,
   payoutCarryovers,
   payoutMutations,
@@ -69,13 +71,63 @@ export class PayoutBatchService {
     return { ...batch, mutations, disbursements };
   }
 
+  /**
+   * One five-character code, checked against the ones already taken.
+   *
+   * Random rather than sequential: a running number leaks how many batches a
+   * tenant has ever opened, and more practically it would have to be derived
+   * from a count that two simultaneous starts would read identically.
+   *
+   * The unique index is what actually guarantees it — this loop only avoids
+   * the collision, and the insert below still retries if one slips through
+   * between the read and the write.
+   */
+  private async nextCode(userId: string): Promise<string> {
+    const taken = new Set(
+      (
+        await this.db
+          .select({ code: payoutBatches.code })
+          .from(payoutBatches)
+          .where(eq(payoutBatches.userId, userId))
+      )
+        .map((r) => r.code)
+        .filter((c): c is string => c != null),
+    );
+    const A = BATCH_CODE_ALPHABET;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const bytes = randomBytes(5);
+      let code = "";
+      for (let i = 0; i < 5; i++) code += A[bytes[i]! % A.length];
+      if (!taken.has(code)) return code;
+    }
+    // 24 million combinations against a handful of batches: getting here means
+    // something is wrong with the generator, not that the space filled up.
+    throw new ConflictException("Tidak bisa membuat kode batch yang unik.");
+  }
+
   /** Admin/Staff starts a fresh batch. Batches never auto-open (Bagian 1). */
   async start(userId: string, createdByUserId: string) {
-    const [row] = await this.db
-      .insert(payoutBatches)
-      .values({ userId, createdByUserId, status: "berjalan" })
-      .returning();
-    return row;
+    // Retried because the uniqueness lives in the index, not in the check
+    // above: two batches started in the same instant can read the same "taken"
+    // set and pick the same code, and only one insert will survive.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const [row] = await this.db
+          .insert(payoutBatches)
+          .values({
+            userId,
+            createdByUserId,
+            status: "berjalan",
+            code: await this.nextCode(userId),
+          })
+          .returning();
+        return row;
+      } catch (e) {
+        const msg = (e as Error).message ?? "";
+        if (!msg.includes("payout_batches_code_idx")) throw e;
+      }
+    }
+    throw new ConflictException("Gagal membuat batch — kode selalu bentrok.");
   }
 
   /**

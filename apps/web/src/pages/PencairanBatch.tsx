@@ -80,6 +80,9 @@ interface Disbursement {
 interface BatchDetail {
   id: string;
   status: "berjalan" | "siap_distribusi" | "selesai";
+  /** Five readable characters; the uuid stays the real key. */
+  code: string | null;
+  createdAt: string;
   mutations: Mutation[];
   disbursements: Disbursement[];
 }
@@ -122,7 +125,9 @@ export function PencairanBatch() {
   return (
     <Layout title="Detail Batch Pencairan">
       <PageHeader
-        title="Detail Batch Pencairan"
+        // The code in the title, because this is the page somebody has open
+        // while reading the number out to whoever asked about it.
+        title={`Detail Batch Pencairan${batch?.code ? ` #${batch.code}` : ""}`}
         back={
           <Link
             to="/pencairan"
@@ -163,6 +168,26 @@ export function PencairanBatch() {
 }
 
 /* -------------------------------------------------- stepper + next action */
+
+/**
+ * "16 Agu 2026" — short enough for a chat line, unambiguous about the month.
+ *
+ * Two shapes arrive here: a bare date ("2026-08-16", which is a day and has no
+ * timezone) and a full timestamp (which does). Reading a bare date as local
+ * time would slide it a day backwards for anyone east of UTC, so each is read
+ * in the zone it was written in.
+ */
+function tglPanjang(iso: string): string {
+  const bareDate = iso.length <= 10;
+  const d = new Date(bareDate ? iso + "T00:00:00Z" : iso);
+  return d.toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: bareDate ? "UTC" : "Asia/Jakarta",
+  });
+}
+
 
 const STEPS = [
   { key: "berjalan", label: "Rekam Pencairan", hint: "Input pencairan tiap toko" },
@@ -839,7 +864,7 @@ function MutationList({
     ];
     const csv = [header, ...rows, totalRow].map((r) => r.map(csvEscape).join(",")).join("\r\n");
     // Leading BOM so Excel opens the UTF-8 file (rupiah symbols etc.) correctly.
-    downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), `rekap-pencairan-${batch.id.slice(0, 8)}.csv`);
+    downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), `rekap-pencairan-${batch.code ?? batch.id.slice(0, 8)}.csv`);
   }
 
   async function downloadPng() {
@@ -850,7 +875,7 @@ function MutationList({
       const canvas = await html2canvas(captureRef.current, { backgroundColor: "#ffffff", scale: 2 });
       await new Promise<void>((resolve) => {
         canvas.toBlob((blob) => {
-          if (blob) downloadBlob(blob, `rekap-pencairan-${batch.id.slice(0, 8)}.png`);
+          if (blob) downloadBlob(blob, `rekap-pencairan-${batch.code ?? batch.id.slice(0, 8)}.png`);
           resolve();
         });
       });
@@ -867,8 +892,28 @@ function MutationList({
    * the material reserve is switched off.
    */
   function shareWhatsApp() {
+    // Which days this batch actually covers, taken from the payouts inside it
+    // rather than from when the batch was opened — a batch started on Monday
+    // can hold Friday's transfers, and the reader cares about the money's
+    // date, not the paperwork's.
+    const tanggalCair = batch.mutations
+      .map((m) => m.payoutDate)
+      .filter(Boolean)
+      .sort();
+    const rentang =
+      tanggalCair.length === 0
+        ? null
+        : tanggalCair[0] === tanggalCair[tanggalCair.length - 1]
+          ? tglPanjang(tanggalCair[0]!)
+          : `${tglPanjang(tanggalCair[0]!)} – ${tglPanjang(tanggalCair[tanggalCair.length - 1]!)}`;
+
     const lines = [
       `*Rekap Pencairan* (${batch.mutations.length} toko)`,
+      // The code first, because it is what someone will quote back when they
+      // reply about this message a week later.
+      `Batch: ${batch.code ? `#${batch.code}` : batch.id.slice(0, 8)}`,
+      ...(rentang ? [`Tanggal pencairan: ${rentang}`] : []),
+      `Dibuat: ${tglPanjang(batch.createdAt)}`,
       `Total Kredit: ${rupiah(totals.credit)}`,
       "",
       "*Hasil Kalkulasi*",

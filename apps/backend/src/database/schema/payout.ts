@@ -199,6 +199,16 @@ export const payoutSettings = pgTable("payout_settings", {
 // longer written by v2 code; `closedAt` is repurposed to mean "input stage
 // closed" (semantically the closest v1 field), and a NEW `completedAt` marks
 // when "Tutup Batch" fully settles the batch.
+/**
+ * Alphabet for the human-facing batch code.
+ *
+ * Missing 0/O and 1/I/L on purpose: this is read aloud down a phone and typed
+ * back in, and those are the pairs people get wrong. Thirty characters over
+ * five places is about 24 million codes, which is far more than a tenant will
+ * ever open.
+ */
+export const BATCH_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
+
 export const payoutBatches = pgTable(
   "payout_batches",
   {
@@ -213,6 +223,12 @@ export const payoutBatches = pgTable(
     // "berjalan") in a DEFAULT clause within the same migration transaction
     // that adds it. The service layer always sets this explicitly on insert.
     status: payoutBatchStatusEnum("status").notNull(),
+    /**
+     * Five characters a person can say out loud. The uuid stays the real key;
+     * this exists so a batch can be named in a WhatsApp message or a phone
+     * call without reading thirty-six hex digits.
+     */
+    code: varchar("code", { length: 5 }),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     // v1-only, unused by v2 — see note above.
     totalTransferToAdmin: numeric("total_transfer_to_admin", { precision: 15, scale: 2 })

@@ -27,6 +27,7 @@ import {
 interface Batch {
   id: string;
   status: "berjalan" | "siap_distribusi" | "selesai";
+  code: string | null;
   closedAt: string | null;
   completedAt: string | null;
   createdAt: string;
@@ -187,7 +188,7 @@ export function Pencairan() {
                     onClick={() => navigate(`/pencairan/batch/${b.id}`)}
                     className="rounded border border-line px-2 py-1 text-xs text-ink-2 hover:text-brand"
                   >
-                    Batch #{openBatches.length - i} · {b.id.slice(0, 8)}
+                    Batch {b.code ? `#${b.code}` : b.id.slice(0, 8)}
                   </button>
                 ))}
               </div>

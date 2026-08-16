@@ -323,6 +323,13 @@
       "when": 1786148727332,
       "tag": "0045_proof_hash",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1786148727333,
+      "tag": "0046_batch_code",
+      "breakpoints": true
     }
   ]
 }
