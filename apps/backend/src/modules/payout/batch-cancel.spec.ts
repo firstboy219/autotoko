@@ -28,7 +28,12 @@ class FakeOcr {
   const sellers = new PayoutSellersService(db);
   const disbursements = new DisbursementsService(db, ocr as never);
   const batches = new PayoutBatchService(db, disbursements);
-  const mutations = new PayoutMutationService(db);
+  const mutations = new PayoutMutationService(db, {
+      // The guard hashes a proof image; these tests never attach one, so a
+      // stub that always answers "unknown file" keeps them on the same path
+      // as a payout recorded without a screenshot.
+      hashOfUrl: async () => null,
+    } as never);
 
   async function makeShop(name: string) {
     const [s] = await (db as ReturnType<typeof drizzle>)

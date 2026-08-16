@@ -316,6 +316,13 @@
       "when": 1786148727331,
       "tag": "0044_order_photo",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1786148727332,
+      "tag": "0045_proof_hash",
+      "breakpoints": true
     }
   ]
 }

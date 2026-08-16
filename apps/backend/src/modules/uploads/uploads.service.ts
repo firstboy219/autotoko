@@ -1,6 +1,6 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -54,6 +54,24 @@ export class UploadsService {
     // Served via GET /api/uploads/:name (global prefix "api"), reachable through
     // the existing /api/ nginx proxy on the web domain.
     return { url: `/api/uploads/${name}`, name };
+  }
+
+  /**
+   * Fingerprint of a stored image's contents, by its public url.
+   *
+   * Null when the url is not one of ours or the file has gone — a missing
+   * file must not block a payout being recorded, it just cannot be checked
+   * for having been used before.
+   */
+  async hashOfUrl(url: string): Promise<string | null> {
+    const name = url.split("/").pop() ?? "";
+    if (!NAME_RE.test(name)) return null;
+    try {
+      const buf = await fs.readFile(join(this.dir, name));
+      return createHash("sha256").update(buf).digest("hex");
+    } catch {
+      return null;
+    }
   }
 
   /** Read an image for serving. Guards against path traversal. */

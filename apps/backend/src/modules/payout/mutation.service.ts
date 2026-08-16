@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
@@ -16,6 +17,7 @@ import {
   shops,
 } from "../../database/schema/index.js";
 import { calculatePayoutSplit, type SedekahBasis } from "@autotoko/shared";
+import { UploadsService } from "../uploads/uploads.service.js";
 import type {
   CreateMutationDto,
   UpdateMutationDto,
@@ -35,7 +37,99 @@ const fromCents = (c: number) => (c / 100).toFixed(2);
  */
 @Injectable()
 export class PayoutMutationService {
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly uploads: UploadsService,
+  ) {}
+
+  /**
+   * Refuse a payout that has already been recorded.
+   *
+   * Two ways the same withdrawal gets entered twice, and they need different
+   * checks because they fail differently:
+   *
+   *  - THE SAME AMOUNT FOR THE SAME SHOP. Someone opens a new batch and types
+   *    yesterday's figure again. Keyed on shop + amount and nothing else: the
+   *    date is exactly what differs when it happens, so including it would
+   *    make the check miss the case it exists for.
+   *
+   *  - THE SAME SCREENSHOT. Compared by the bytes, never by the url — the
+   *    same file uploaded twice gets two random names, so urls would agree
+   *    only when somebody pasted a link, which is not how it happens.
+   *
+   * A cancelled batch takes its mutations with it, so cancelling really is the
+   * escape hatch: once the old row is gone there is nothing left to collide
+   * with. Nothing is soft-deleted here, so no "ignore the cancelled ones"
+   * clause is needed.
+   */
+  private async assertNotDuplicate(
+    userId: string,
+    shopId: string,
+    creditAmount: string,
+    proofUrl: string | null | undefined,
+    exceptId?: string,
+  ) {
+    const sama = await this.db
+      .select({
+        id: payoutMutations.id,
+        batchId: payoutMutations.batchId,
+        payoutDate: payoutMutations.payoutDate,
+        amount: payoutMutations.creditAmount,
+      })
+      .from(payoutMutations)
+      .where(
+        and(
+          eq(payoutMutations.userId, userId),
+          eq(payoutMutations.shopId, shopId),
+          eq(payoutMutations.creditAmount, creditAmount),
+        ),
+      );
+    const bentrok = sama.filter((r) => r.id !== exceptId);
+    if (bentrok.length) {
+      const r = bentrok[0]!;
+      throw new ConflictException({
+        code: "DUPLICATE_PAYOUT",
+        message:
+          `Toko ini sudah pernah dicairkan sebesar ${creditAmount} pada ` +
+          `${r.payoutDate}. Kalau pencairan itu keliru, batalkan dulu batch-nya; ` +
+          `kalau memang pencairan yang berbeda, ubah nominalnya agar sesuai bukti.`,
+        existingBatchId: r.batchId,
+        existingDate: r.payoutDate,
+      });
+    }
+
+    if (!proofUrl) return null;
+    const hash = await this.uploads.hashOfUrl(proofUrl);
+    if (!hash) return null;
+
+    const samaBukti = await this.db
+      .select({
+        id: payoutMutations.id,
+        batchId: payoutMutations.batchId,
+        payoutDate: payoutMutations.payoutDate,
+      })
+      .from(payoutMutations)
+      .where(
+        and(
+          eq(payoutMutations.userId, userId),
+          eq(payoutMutations.marketplaceProofHash, hash),
+        ),
+      );
+    const bentrokBukti = samaBukti.filter((r) => r.id !== exceptId);
+    if (bentrokBukti.length) {
+      const r = bentrokBukti[0]!;
+      throw new ConflictException({
+        code: "DUPLICATE_PROOF",
+        message:
+          `Screenshot ini sudah dipakai untuk pencairan tanggal ${r.payoutDate}. ` +
+          `Satu bukti hanya boleh dipakai sekali — unggah screenshot pencairan ` +
+          `yang ini.`,
+        existingBatchId: r.batchId,
+        existingDate: r.payoutDate,
+      });
+    }
+    return hash;
+  }
 
   async list(userId: string, q: ListMutationQueryDto) {
     const conds = [eq(payoutMutations.userId, userId)];
@@ -67,6 +161,15 @@ export class PayoutMutationService {
     // "Nominal Kredit" input — the user merged the two, per their own request).
     const creditCents = toCents(dto.marketplaceProofAmount);
 
+    // Before anything is written or any split computed: a payout already on
+    // record must not be recorded twice.
+    const proofHash = await this.assertNotDuplicate(
+      userId,
+      dto.shopId,
+      dto.marketplaceProofAmount.toFixed(2),
+      dto.marketplaceProofUrl,
+    );
+
     const materialReserveRate = Number(settings.materialReserveRate ?? 0);
     const split = calculatePayoutSplit({
       creditCents,
@@ -86,6 +189,7 @@ export class PayoutMutationService {
         payoutDate: dto.payoutDate,
         creditAmount: dto.marketplaceProofAmount.toFixed(2),
         marketplaceProofAmount: dto.marketplaceProofAmount.toFixed(2),
+        marketplaceProofHash: proofHash,
         // Snapshot of what OCR originally suggested — comparing this against
         // the final marketplaceProofAmount above (set once, here, never on
         // update) is the OCR-correction signal for future tuning.
@@ -217,6 +321,17 @@ export class PayoutMutationService {
     // marketplaceProofAmount is now the sole basis; ocrSuggestedAmount is a
     // create()-time-only snapshot and is never touched here.
     const proofAmount = dto.marketplaceProofAmount ?? Number(mut.marketplaceProofAmount);
+
+    // Editing can create the same collision as recording — a figure corrected
+    // into one that already exists elsewhere is the same double entry, just
+    // arrived at differently. The row being edited is excluded from its own check.
+    const proofHash = await this.assertNotDuplicate(
+      userId,
+      mut.shopId,
+      proofAmount.toFixed(2),
+      dto.marketplaceProofUrl ?? mut.marketplaceProofUrl,
+      mut.id,
+    );
     const split = calculatePayoutSplit({
       creditCents: toCents(proofAmount),
       sedekahRate: Number(mut.sedekahRateUsed),
@@ -232,6 +347,7 @@ export class PayoutMutationService {
     const [row] = await this.db
       .update(payoutMutations)
       .set({
+        ...(proofHash != null ? { marketplaceProofHash: proofHash } : {}),
         ...(dto.payoutDate != null ? { payoutDate: dto.payoutDate } : {}),
         creditAmount: proofAmount.toFixed(2),
         marketplaceProofAmount: proofAmount.toFixed(2),

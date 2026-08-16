@@ -266,6 +266,13 @@ export const payoutMutations = pgTable(
     ocrSuggestedAmount: numeric("ocr_suggested_amount", { precision: 15, scale: 2 }),
     receivingAccount: varchar("receiving_account", { length: 255 }),
     marketplaceProofUrl: text("marketplace_proof_url"),
+    /**
+     * SHA-256 of the proof image's BYTES, not of its url.
+     *
+     * The same screenshot uploaded twice lands under two random filenames, so
+     * comparing urls would never catch a reused proof. Only the content does.
+     */
+    marketplaceProofHash: text("marketplace_proof_hash"),
     // Raw OCR read of the pencairan proof (Titik 1) — audit trail, never the
     // sole source of truth; staff can always override the extracted fields.
     ocrRawResult: jsonb("ocr_raw_result"),

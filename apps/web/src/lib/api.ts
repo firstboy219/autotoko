@@ -50,17 +50,26 @@ async function request<T>(
   }
 
   const json = (await res.json().catch(() => null)) as
-    | (ApiResponse<T> & { message?: string | string[] })
+    | (ApiResponse<T> & {
+        // Nest also allows an OBJECT here, which the payout module uses to
+        // carry a machine code alongside the sentence.
+        message?: string | string[] | { message?: string; code?: string };
+      })
     | null;
   if (!res.ok || !json?.success) {
     // Our ApiResponse uses error.message; NestJS HttpException uses a top-level
     // `message` (string or string[]). Surface whichever is present so the user
     // sees the real reason instead of a bare "HTTP 502".
     const nest = json?.message;
-    const msg =
-      json?.error?.message ??
-      (Array.isArray(nest) ? nest.join(", ") : nest) ??
-      `HTTP ${res.status}`;
+    const nestMsg =
+      Array.isArray(nest)
+        ? nest.join(", ")
+        : typeof nest === "object" && nest !== null
+          ? // An object carries the sentence under `message`; without this it
+            // reached the user as "[object Object]".
+            nest.message
+          : nest;
+    const msg = json?.error?.message ?? nestMsg ?? `HTTP ${res.status}`;
     throw new ApiError(msg, res.status);
   }
   return json.data as T;
