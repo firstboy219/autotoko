@@ -204,6 +204,116 @@ const STEPS = [
   { key: "selesai", label: "Selesai", hint: "Batch ditutup" },
 ] as const;
 
+/**
+ * Ringkasan untuk pemiliknya sendiri.
+ *
+ * Tanpa rincian per toko: pesan ini ringkasan, dan siapa mendapat berapa di
+ * toko mana bukan yang perlu dibaca semua penerimanya. Angkanya tetap lengkap
+ * di halaman, CSV, dan PNG. Bagian seller ikut, karena memang untuk seller.
+ */
+function pesanSeller(batch: BatchDetail): string {
+  const t = batch.mutations.reduce(
+    (a, m) => {
+      a.credit += Number(m.creditAmount) || 0;
+      a.sedekah += Number(m.sedekahAmount) || 0;
+      a.seller += Number(m.sellerAmount) || 0;
+      a.material += Number(m.sellerMaterialAmount) || 0;
+      a.sub += Number(m.subSellerAmount) || 0;
+      a.subSub += Number(m.subSubSellerAmount) || 0;
+      return a;
+    },
+    { credit: 0, sedekah: 0, seller: 0, material: 0, sub: 0, subSub: 0 },
+  );
+
+  // Tanggal uangnya, bukan tanggal batch dibuka: batch yang dimulai Senin bisa
+  // memuat transfer hari Jumat.
+  const hari = batch.mutations.map((m) => m.payoutDate).filter(Boolean).sort();
+  const rentang =
+    hari.length === 0
+      ? null
+      : hari[0] === hari[hari.length - 1]
+        ? tglPanjang(hari[0]!)
+        : `${tglPanjang(hari[0]!)} – ${tglPanjang(hari[hari.length - 1]!)}`;
+
+  const lines = [
+    `*Rekap Pencairan* (${batch.mutations.length} toko)`,
+    `Batch: ${batch.code ? `#${batch.code}` : batch.id.slice(0, 8)}`,
+    ...(rentang ? [`Tanggal pencairan: ${rentang}`] : []),
+    `Dibuat: ${tglPanjang(batch.createdAt)}`,
+    `Total Kredit: ${rupiah(t.credit)}`,
+    "",
+    "*Hasil Kalkulasi*",
+    `Sedekah: ${rupiah(t.sedekah)}`,
+  ];
+  if (t.sub > 0) lines.push(`Sub-seller: ${rupiah(t.sub)}`);
+  if (t.subSub > 0) lines.push(`Sub-sub-seller: ${rupiah(t.subSub)}`);
+  lines.push(`Seller: ${rupiah(t.seller)}`);
+  if (t.material > 0) {
+    lines.push(`  - Bahan baku: ${rupiah(t.material)}`);
+    lines.push(`  - Sisa seller: ${rupiah(t.seller - t.material)}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Bukti transfer untuk yang menerimanya.
+ *
+ * Tanpa ringkasan berhitung di kepala: kebalikan dari pesan seller, di sini
+ * yang dikirim justru rinciannya. Jatah bahan baku tidak ikut -- uang itu
+ * dipotong dari bagian seller dan masuk ke rekening pemilik sendiri, jadi
+ * menampilkannya berarti memperlihatkan nominal seller lewat pintu lain.
+ *
+ * Transfer yang belum ada buktinya tetap didaftar dan disebut belum ada:
+ * menghilangkannya membuat pesan terlihat lengkap sementara ada yang masih
+ * menunggu uangnya.
+ */
+function pesanSubSeller(batch: BatchDetail): string {
+  const JENIS: Record<string, string> = {
+    sub_seller: "Sub-seller",
+    sub_sub_seller: "Sub-sub-seller",
+    sedekah: "Sedekah",
+  };
+  const per = new Map<
+    string,
+    { nama: string; jenis: string; total: number; bukti: string[]; tanpaBukti: number }
+  >();
+  for (const d of batch.disbursements) {
+    if (d.recipientType === "bahan_baku") continue;
+    const kunci = `${d.recipientType}|${d.recipientName}`;
+    const g = per.get(kunci) ?? {
+      nama: d.recipientName,
+      jenis: d.recipientType,
+      total: 0,
+      bukti: [] as string[],
+      tanpaBukti: 0,
+    };
+    g.total += Number(d.expectedAmount) || 0;
+    if (d.proofUrl) g.bukti.push(absoluteUrl(d.proofUrl));
+    else g.tanpaBukti += 1;
+    per.set(kunci, g);
+  }
+
+  const lines = [
+    "*Bukti Transfer Pencairan*",
+    `Batch: ${batch.code ? `#${batch.code}` : batch.id.slice(0, 8)}`,
+    `Tanggal: ${tglPanjang(batch.completedAt ?? batch.closedAt ?? batch.createdAt)}`,
+    "",
+  ];
+  let n = 0;
+  for (const g of [...per.values()].sort((a, b) => b.total - a.total)) {
+    n += 1;
+    lines.push(`${n}. ${g.nama} (${JENIS[g.jenis] ?? g.jenis}) — ${rupiah(g.total)}`);
+    for (const url of g.bukti) lines.push(`   ${url}`);
+    if (g.tanpaBukti > 0) lines.push(`   (${g.tanpaBukti} transfer belum ada buktinya)`);
+  }
+  return lines.join("\n");
+}
+
+/** Satu pintu ke WhatsApp, supaya penyusunan pesannya tidak tercecer. */
+function bukaWhatsApp(teks: string) {
+  window.open(`https://wa.me/?text=${encodeURIComponent(teks)}`, "_blank");
+}
+
 function stepIndex(status: BatchDetail["status"]): number {
   return STEPS.findIndex((s) => s.key === status);
 }
@@ -430,6 +540,34 @@ function BatchProgress({ batch, onDone }: { batch: BatchDetail; onDone: () => vo
                     : "Selesai"}
               </Badge>
               <span className="text-sm text-ink-2">{nextHint}</span>
+            </div>
+
+            {/* Di kartu kepala, bukan di dalam salah satu step. Sebelumnya
+                yang seller cuma ada saat batch masih berjalan dan yang
+                sub-seller cuma saat sudah ditutup, jadi pada batch yang
+                sedang ditransfer tidak satupun bisa dijangkau. Syaratnya
+                sekarang isi, bukan status. */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {batch.mutations.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  icon="share"
+                  onClick={() => bukaWhatsApp(pesanSeller(batch))}
+                >
+                  Bagikan WA ke Seller
+                </Button>
+              )}
+              {batch.disbursements.some((d) => d.recipientType !== "bahan_baku") && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  icon="share"
+                  onClick={() => bukaWhatsApp(pesanSubSeller(batch))}
+                >
+                  Bagikan WA ke Sub-seller
+                </Button>
+              )}
             </div>
 
             {batch.mutations.length > 0 && (
@@ -893,57 +1031,6 @@ function MutationList({
     }
   }
 
-  /**
-   * The message someone reads on their phone, so every figure that was
-   * calculated is spelled out rather than left to be re-derived from the
-   * credit. Rows that do not apply are omitted entirely: a batch with no
-   * sub-seller should not carry a line of zeroes, and neither should one where
-   * the material reserve is switched off.
-   */
-  function shareWhatsApp() {
-    // Which days this batch actually covers, taken from the payouts inside it
-    // rather than from when the batch was opened — a batch started on Monday
-    // can hold Friday's transfers, and the reader cares about the money's
-    // date, not the paperwork's.
-    const tanggalCair = batch.mutations
-      .map((m) => m.payoutDate)
-      .filter(Boolean)
-      .sort();
-    const rentang =
-      tanggalCair.length === 0
-        ? null
-        : tanggalCair[0] === tanggalCair[tanggalCair.length - 1]
-          ? tglPanjang(tanggalCair[0]!)
-          : `${tglPanjang(tanggalCair[0]!)} – ${tglPanjang(tanggalCair[tanggalCair.length - 1]!)}`;
-
-    const lines = [
-      `*Rekap Pencairan* (${batch.mutations.length} toko)`,
-      // The code first, because it is what someone will quote back when they
-      // reply about this message a week later.
-      `Batch: ${batch.code ? `#${batch.code}` : batch.id.slice(0, 8)}`,
-      ...(rentang ? [`Tanggal pencairan: ${rentang}`] : []),
-      `Dibuat: ${tglPanjang(batch.createdAt)}`,
-      `Total Kredit: ${rupiah(totals.credit)}`,
-      "",
-      "*Hasil Kalkulasi*",
-      `Sedekah: ${rupiah(totals.sedekah)}`,
-    ];
-    if (totals.subSeller > 0) lines.push(`Sub-seller: ${rupiah(totals.subSeller)}`);
-    if (totals.subSubSeller > 0) lines.push(`Sub-sub-seller: ${rupiah(totals.subSubSeller)}`);
-    lines.push(`Seller: ${rupiah(totals.seller)}`);
-    if (totals.material > 0) {
-      // Indented under Seller because it is carved out of that figure, not
-      // taken alongside it — reading them as two separate payouts would double
-      // count the seller's share.
-      lines.push(`  - Bahan baku: ${rupiah(totals.material)}`);
-      lines.push(`  - Sisa seller: ${rupiah(totals.seller - totals.material)}`);
-    }
-
-    // Rincian per toko sengaja tidak ikut: pesan ini adalah ringkasan, dan
-    // siapa mendapat berapa di toko mana bukan yang perlu dibaca semua orang
-    // yang menerimanya. Angkanya tetap lengkap di halaman, CSV, dan PNG.
-    window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
-  }
 
   const target = batch.mutations.find((m) => m.id === confirmId);
 
@@ -960,11 +1047,6 @@ function MutationList({
                 </Button>
                 <Button size="sm" variant="outline" icon="image" loading={pngBusy} onClick={downloadPng}>
                   PNG
-                </Button>
-                {/* Named by who it is for: this one keeps the seller's own
-                    totals, so it is the owner's copy. */}
-                <Button size="sm" variant="outline" icon="share" onClick={shareWhatsApp}>
-                  Bagikan ke Seller
                 </Button>
               </div>
             )
@@ -1259,72 +1341,6 @@ function DisbursementRekap({
     };
   }, [batch.mutations, batch.carryovers, batch.disbursements]);
 
-  /**
-   * The proof of every transfer, as one message.
-   *
-   * Grouped by recipient rather than listed row by row: one sub-seller can
-   * appear several times in a batch — once per shop they hold — and what they
-   * actually want to see is "you sent me this much, here are the receipts",
-   * not a table keyed on a mutation id they never see.
-   *
-   * A transfer with no proof uploaded is still listed, and said to be missing.
-   * Leaving it out would make the message look complete while somebody is
-   * still waiting for their money.
-   */
-  function shareBukti() {
-    const perPenerima = new Map<
-      string,
-      { nama: string; jenis: string; total: number; bukti: string[]; tanpaBukti: number }
-    >();
-    for (const d of batch.disbursements) {
-      // Jatah bahan baku dilewati: uang itu dipotong dari bagian seller dan
-      // masuk ke rekening pemilik sendiri, jadi menampilkannya di pesan untuk
-      // sub-seller sama dengan memperlihatkan nominal seller lewat pintu lain.
-      if (d.recipientType === "bahan_baku") continue;
-      const kunci = `${d.recipientType}|${d.recipientName}`;
-      const g = perPenerima.get(kunci) ?? {
-        nama: d.recipientName,
-        jenis: d.recipientType,
-        total: 0,
-        bukti: [] as string[],
-        tanpaBukti: 0,
-      };
-      g.total += Number(d.expectedAmount) || 0;
-      if (d.proofUrl) g.bukti.push(absoluteUrl(d.proofUrl));
-      else g.tanpaBukti += 1;
-      perPenerima.set(kunci, g);
-    }
-
-    const JENIS: Record<string, string> = {
-      sub_seller: "Sub-seller",
-      sub_sub_seller: "Sub-sub-seller",
-      sedekah: "Sedekah",
-      bahan_baku: "Bahan baku",
-    };
-
-    const lines = [
-      "*Bukti Transfer Pencairan*",
-      `Batch: ${batch.code ? `#${batch.code}` : batch.id.slice(0, 8)}`,
-      `Tanggal: ${tglPanjang(batch.completedAt ?? batch.closedAt ?? batch.createdAt)}`,
-      // Dihitung dari yang benar-benar didaftar di bawah, bukan dari seluruh
-      // transfer batch — kalau tidak, angkanya menjanjikan baris yang tidak ada.
-      `${[...perPenerima.values()].reduce((n, g) => n + g.bukti.length + g.tanpaBukti, 0)} transfer` +
-        ` · total ${rupiah([...perPenerima.values()].reduce((n, g) => n + g.total, 0))}`,
-      "",
-    ];
-
-    let n = 0;
-    for (const g of [...perPenerima.values()].sort((a, b) => b.total - a.total)) {
-      n += 1;
-      lines.push(`${n}. ${g.nama} (${JENIS[g.jenis] ?? g.jenis}) — ${rupiah(g.total)}`);
-      for (const url of g.bukti) lines.push(`   ${url}`);
-      if (g.tanpaBukti > 0) {
-        lines.push(`   (${g.tanpaBukti} transfer belum ada buktinya)`);
-      }
-    }
-
-    window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
-  }
 
   const all = batch.disbursements;
   const doneCount = all.filter((d) => READY.includes(d.validationStatus)).length;
@@ -1355,14 +1371,6 @@ function DisbursementRekap({
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {/* Step 3 only. Before the batch is closed the proofs are still
-                being uploaded, and sending a half-finished set of receipts is
-                how a recipient concludes their transfer was skipped. */}
-            {batch.status === "selesai" && batch.disbursements.length > 0 && (
-              <Button size="sm" variant="outline" icon="share" onClick={shareBukti}>
-                Bagikan ke Sub-seller
-              </Button>
-            )}
             <div className="text-2xl text-ink tabular-nums">{pct}%</div>
           </div>
         </div>
