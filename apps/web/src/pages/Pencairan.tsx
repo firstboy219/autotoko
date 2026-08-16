@@ -97,7 +97,15 @@ export function Pencairan() {
   const [cancelBusy, setCancelBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const openBatch = batches?.find((b) => b.status === "berjalan");
+  /**
+   * Every batch still taking input, not "the" one.
+   *
+   * Several can run at once — a batch is entered by id and every payout is
+   * recorded against that id, so two open batches never compete for a
+   * mutation. What used to stop it was this page assuming there could only be
+   * one, and hiding the "start" button behind it.
+   */
+  const openBatches = (batches ?? []).filter((b) => b.status === "berjalan");
 
   async function startBatch() {
     setBusy(true);
@@ -135,19 +143,23 @@ export function Pencairan() {
         title="Pencairan Dana"
         subtitle="Rekam pencairan tiap toko, lalu distribusikan ke sedekah dan sub-seller."
         actions={
-          openBatch ? (
-            <Button
-              variant="filled"
-              iconRight="arrowRight"
-              onClick={() => navigate(`/pencairan/batch/${openBatch.id}`)}
-            >
-              Lanjutkan Batch Berjalan
-            </Button>
-          ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Kept as a shortcut, not as a gate. With more than one running
+                there is no single "the" batch to continue, so the shortcut
+                only appears when it is unambiguous. */}
+            {openBatches.length === 1 && (
+              <Button
+                variant="outline"
+                iconRight="arrowRight"
+                onClick={() => navigate(`/pencairan/batch/${openBatches[0]!.id}`)}
+              >
+                Lanjutkan Batch Berjalan
+              </Button>
+            )}
             <Button variant="filled" icon="plus" loading={busy} onClick={startBatch}>
               Mulai Batch Baru
             </Button>
-          )
+          </div>
         }
       />
 
@@ -157,10 +169,29 @@ export function Pencairan() {
         </div>
       )}
 
-      {openBatch && (
+      {/* Keterangan, bukan larangan. Batch berjalan lebih dari satu itu wajar:
+          pencairan tiap marketplace datang di hari yang berbeda dan tidak
+          harus saling menunggu. */}
+      {openBatches.length > 0 && (
         <div className="mb-4">
           <InlineAlert tone="info">
-            Ada batch yang masih berjalan — selesaikan dulu sebelum memulai batch baru.
+            {openBatches.length === 1
+              ? "Ada 1 batch yang masih berjalan. Boleh dilanjutkan, boleh juga mulai batch baru di sebelahnya — pencairan yang direkam selalu masuk ke batch yang sedang dibuka."
+              : `Ada ${openBatches.length} batch berjalan sekaligus. Setiap pencairan masuk ke batch yang sedang dibuka, jadi pastikan membuka batch yang benar sebelum merekam.`}
+            {openBatches.length > 1 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {openBatches.map((b, i) => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => navigate(`/pencairan/batch/${b.id}`)}
+                    className="rounded border border-line px-2 py-1 text-xs text-ink-2 hover:text-brand"
+                  >
+                    Batch #{openBatches.length - i} · {b.id.slice(0, 8)}
+                  </button>
+                ))}
+              </div>
+            )}
           </InlineAlert>
         </div>
       )}
