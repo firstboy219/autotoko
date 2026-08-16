@@ -124,6 +124,11 @@ export class DisbursementsService {
       shopName: r.shop ? (r.shop.displayName ?? r.shop.shopName ?? r.shop.shopId) : null,
       marketplace: r.shop?.marketplace ?? null,
       recipientType: r.disbursement.recipientType,
+      // Dikirim supaya halaman bisa menautkan transfer ini ke toko-toko yang
+      // menghasilkannya: barisnya digabung per penerima, jadi tidak ada
+      // payoutMutationId yang bisa dipakai untuk itu.
+      recipientSubSellerId: r.disbursement.recipientSubSellerId,
+      recipientSubSubSellerId: r.disbursement.recipientSubSubSellerId,
       recipientName:
         r.disbursement.recipientType === "sedekah"
           ? "Sedekah"
@@ -133,6 +138,8 @@ export class DisbursementsService {
       // Full chain for a sub-sub-seller recipient, per MAPPING_DAN_SELFSERVICE_TOKO.md.
       recipientChain: r.subSubSeller ? `${r.subSubSeller.name} › ${r.subSeller?.name ?? "-"}` : null,
       expectedAmount: r.disbursement.expectedAmount,
+      /** Bagian dari expectedAmount yang berasal dari batch sebelumnya. */
+      carryoverAmount: r.disbursement.carryoverAmount,
       recordedAccount: r.disbursement.recordedAccount,
       proofUrl: r.disbursement.proofUrl,
       ocrAmount: r.disbursement.ocrAmount,

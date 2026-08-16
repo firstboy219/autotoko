@@ -298,9 +298,37 @@ function pesanSubSeller(batch: BatchDetail): string {
     sub_sub_seller: "Sub-sub-seller",
     sedekah: "Sedekah",
   };
+  /**
+   * Berapa yang cair di toko yang menghasilkan bagian tiap orang.
+   *
+   * Dicocokkan lewat id sub-seller, BUKAN lewat mutasi: baris transfer
+   * sub-seller digabung per penerima, jadi payoutMutationId-nya null dan
+   * menghitung lewat mutasi menghasilkan nol untuk semua orang.
+   */
+  const cairPerSub = new Map<string, number>();
+  for (const m of batch.mutations) {
+    const kredit = Number(m.creditAmount) || 0;
+    if (m.subSellerId) {
+      cairPerSub.set(m.subSellerId, (cairPerSub.get(m.subSellerId) ?? 0) + kredit);
+    }
+    if (m.subSubSellerId) {
+      cairPerSub.set(m.subSubSellerId, (cairPerSub.get(m.subSubSellerId) ?? 0) + kredit);
+    }
+  }
+
   const per = new Map<
     string,
-    { nama: string; jenis: string; total: number; bukti: string[]; tanpaBukti: number }
+    {
+      nama: string;
+      jenis: string;
+      total: number;
+      bukti: string[];
+      tanpaBukti: number;
+      /** Pencairan toko-toko yang menghasilkan bagian ini. */
+      cair: number;
+      /** Bagian dari batch sebelumnya yang ikut dibayarkan di sini. */
+      bawaan: number;
+    }
   >();
   for (const d of batch.disbursements) {
     if (d.recipientType === "bahan_baku") continue;
@@ -311,8 +339,13 @@ function pesanSubSeller(batch: BatchDetail): string {
       total: 0,
       bukti: [] as string[],
       tanpaBukti: 0,
+      cair: 0,
+      bawaan: 0,
     };
     g.total += Number(d.expectedAmount) || 0;
+    g.bawaan += Number(d.carryoverAmount) || 0;
+    const idPenerima = d.recipientSubSellerId ?? d.recipientSubSubSellerId ?? null;
+    if (idPenerima) g.cair += cairPerSub.get(idPenerima) ?? 0;
     if (d.proofUrl) g.bukti.push(absoluteUrl(d.proofUrl));
     else g.tanpaBukti += 1;
     per.set(kunci, g);
@@ -328,6 +361,18 @@ function pesanSubSeller(batch: BatchDetail): string {
   for (const g of [...per.values()].sort((a, b) => b.total - a.total)) {
     n += 1;
     lines.push(`${n}. ${g.nama} (${JENIS[g.jenis] ?? g.jenis}) — ${rupiah(g.total)}`);
+    // Hanya untuk penerima yang bagiannya berasal dari toko tertentu. Baris
+    // sedekah digabung untuk seluruh batch, jadi "total pencairan"-nya sama
+    // dengan total seluruh batch — itu ringkasan yang justru tidak diinginkan
+    // di pesan ini.
+    if (g.cair > 0) {
+      lines.push(`   Total pencairan toko: ${rupiah(g.cair)}`);
+    }
+    // Disebut kalau ada, karena tanpa ini penerimanya akan menghitung
+    // persentasenya sendiri dan menyimpulkan angkanya salah.
+    if (g.bawaan > 0) {
+      lines.push(`   (termasuk ${rupiah(g.bawaan)} bawaan batch sebelumnya)`);
+    }
     for (const url of g.bukti) lines.push(`   ${url}`);
     if (g.tanpaBukti > 0) lines.push(`   (${g.tanpaBukti} transfer belum ada buktinya)`);
   }
