@@ -90,14 +90,16 @@ export class PayoutBatchService {
           .from(payoutBatches)
           .where(eq(payoutBatches.userId, userId))
       )
-        .map((r) => r.code)
+        .map((r) => r.code?.toUpperCase())
         .filter((c): c is string => c != null),
     );
     const A = BATCH_CODE_ALPHABET;
-    for (let attempt = 0; attempt < 50; attempt++) {
-      const bytes = randomBytes(5);
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const bytes = randomBytes(3);
       let code = "";
-      for (let i = 0; i < 5; i++) code += A[bytes[i]! % A.length];
+      // Always upper case: the index compares case-insensitively, so writing
+      // mixed case would only make two spellings of one code readable.
+      for (let i = 0; i < 3; i++) code += A[bytes[i]! % A.length];
       if (!taken.has(code)) return code;
     }
     // 24 million combinations against a handful of batches: getting here means

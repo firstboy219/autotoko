@@ -204,8 +204,12 @@ export const payoutSettings = pgTable("payout_settings", {
  *
  * Missing 0/O and 1/I/L on purpose: this is read aloud down a phone and typed
  * back in, and those are the pairs people get wrong. Thirty characters over
- * five places is about 24 million codes, which is far more than a tenant will
- * ever open.
+ * three places is 27.000 codes — far fewer than the five-character version it
+ * replaced, but still far more batches than a business will ever open, and the
+ * uniqueness is guaranteed by the index rather than by the odds.
+ *
+ * Compared case-insensitively: "a7k" and "A7K" are the same code. The app
+ * always writes upper case, but the index is what enforces it.
  */
 export const BATCH_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -228,7 +232,7 @@ export const payoutBatches = pgTable(
      * this exists so a batch can be named in a WhatsApp message or a phone
      * call without reading thirty-six hex digits.
      */
-    code: varchar("code", { length: 5 }),
+    code: varchar("code", { length: 3 }),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     // v1-only, unused by v2 — see note above.
     totalTransferToAdmin: numeric("total_transfer_to_admin", { precision: 15, scale: 2 })

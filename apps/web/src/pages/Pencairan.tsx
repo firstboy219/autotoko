@@ -241,6 +241,7 @@ export function Pencairan() {
           <Table>
             <THead>
               <TR className="border-t-0">
+                <TH>Kode</TH>
                 <TH>Dibuat</TH>
                 <TH>Status</TH>
                 <TH>Input Ditutup</TH>
@@ -250,10 +251,10 @@ export function Pencairan() {
             </THead>
             <tbody>
               {loading ? (
-                <SkeletonRows n={3} cols={5} />
+                <SkeletonRows n={3} cols={6} />
               ) : !batches?.length ? (
                 <TR>
-                  <TD colSpan={5} className="p-0">
+                  <TD colSpan={6} className="p-0">
                     <EmptyState
                       icon="banknote"
                       title="Belum ada batch"
@@ -269,6 +270,11 @@ export function Pencairan() {
               ) : (
                 batches.map((b) => (
                   <TR key={b.id}>
+                    {/* Monospace: three characters read back over the phone are
+                        easier to check against when the glyphs line up. */}
+                    <TD className="font-mono text-ink">
+                      {b.code ? `#${b.code}` : "—"}
+                    </TD>
                     <TD className="text-ink">{dateShort(b.createdAt)}</TD>
                     <TD>
                       <Badge tone={STATUS_TONE[b.status]}>{STATUS_LABEL[b.status]}</Badge>
