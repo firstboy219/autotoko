@@ -83,6 +83,9 @@ interface BatchDetail {
   /** Five readable characters; the uuid stays the real key. */
   code: string | null;
   createdAt: string;
+  /** When input was locked, and when the batch was finally closed. */
+  closedAt: string | null;
+  completedAt: string | null;
   mutations: Mutation[];
   disbursements: Disbursement[];
   carryovers?: {
@@ -936,40 +939,9 @@ function MutationList({
       lines.push(`  - Sisa seller: ${rupiah(totals.seller - totals.material)}`);
     }
 
-    lines.push("", "*Detail Toko*");
-    batch.mutations.forEach((m, i) => {
-      const shop = shops.find((s) => s.id === m.shopId);
-      const sedekahAmt = Number(m.sedekahAmount) || 0;
-      const subAmt = Number(m.subSellerAmount) || 0;
-      const subSubAmt = Number(m.subSubSellerAmount) || 0;
-      const materialAmt = Number(m.sellerMaterialAmount) || 0;
-
-      lines.push(`${i + 1}. ${shopName(m.shopId)} - ${rupiah(m.creditAmount)}`);
-
-      const parts: string[] = [];
-      if (sedekahAmt > 0) parts.push(`Sedekah ${rupiah(sedekahAmt)}`);
-      if (subAmt > 0) {
-        parts.push(
-          `Sub-seller${shop?.subSellerName ? ` ${shop.subSellerName}` : ""} ${rupiah(subAmt)}`,
-        );
-      }
-      if (subSubAmt > 0) {
-        parts.push(
-          `Sub-sub-seller${shop?.subSubSellerName ? ` ${shop.subSubSellerName}` : ""} ${rupiah(subSubAmt)}`,
-        );
-      }
-      // Bagian seller sengaja TIDAK ikut. Pesan ini dibaca sub-seller, dan
-      // berapa yang tinggal di pemilik bukan urusan yang perlu mereka lihat
-      // per toko. Angkanya tetap ada di halaman, CSV, dan PNG — yang ini cuma
-      // apa yang dikirim keluar.
-      if (materialAmt > 0) parts.push(`Bahan baku ${rupiah(materialAmt)}`);
-      // Tanpa bagian seller, sebuah toko bisa kehabisan rincian sama sekali —
-      // toko milik sendiri tanpa sedekah dan tanpa jatah bahan baku. Barisnya
-      // dilewati, bukan dikirim sebagai baris kosong berindentasi.
-      if (parts.length) lines.push(`   ${parts.join(" | ")}`);
-
-      if (m.marketplaceProofUrl) lines.push(`   ${absoluteUrl(m.marketplaceProofUrl)}`);
-    });
+    // Rincian per toko sengaja tidak ikut: pesan ini adalah ringkasan, dan
+    // siapa mendapat berapa di toko mana bukan yang perlu dibaca semua orang
+    // yang menerimanya. Angkanya tetap lengkap di halaman, CSV, dan PNG.
     window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
   }
 
@@ -989,8 +961,10 @@ function MutationList({
                 <Button size="sm" variant="outline" icon="image" loading={pngBusy} onClick={downloadPng}>
                   PNG
                 </Button>
+                {/* Named by who it is for: this one keeps the seller's own
+                    totals, so it is the owner's copy. */}
                 <Button size="sm" variant="outline" icon="share" onClick={shareWhatsApp}>
-                  WhatsApp
+                  Bagikan ke Seller
                 </Button>
               </div>
             )
@@ -1285,6 +1259,73 @@ function DisbursementRekap({
     };
   }, [batch.mutations, batch.carryovers, batch.disbursements]);
 
+  /**
+   * The proof of every transfer, as one message.
+   *
+   * Grouped by recipient rather than listed row by row: one sub-seller can
+   * appear several times in a batch — once per shop they hold — and what they
+   * actually want to see is "you sent me this much, here are the receipts",
+   * not a table keyed on a mutation id they never see.
+   *
+   * A transfer with no proof uploaded is still listed, and said to be missing.
+   * Leaving it out would make the message look complete while somebody is
+   * still waiting for their money.
+   */
+  function shareBukti() {
+    const perPenerima = new Map<
+      string,
+      { nama: string; jenis: string; total: number; bukti: string[]; tanpaBukti: number }
+    >();
+    for (const d of batch.disbursements) {
+      // Jatah bahan baku dilewati: uang itu dipotong dari bagian seller dan
+      // masuk ke rekening pemilik sendiri, jadi menampilkannya di pesan untuk
+      // sub-seller sama dengan memperlihatkan nominal seller lewat pintu lain.
+      if (d.recipientType === "bahan_baku") continue;
+      const kunci = `${d.recipientType}|${d.recipientName}`;
+      const g = perPenerima.get(kunci) ?? {
+        nama: d.recipientName,
+        jenis: d.recipientType,
+        total: 0,
+        bukti: [] as string[],
+        tanpaBukti: 0,
+      };
+      g.total += Number(d.expectedAmount) || 0;
+      if (d.proofUrl) g.bukti.push(absoluteUrl(d.proofUrl));
+      else g.tanpaBukti += 1;
+      perPenerima.set(kunci, g);
+    }
+
+    const JENIS: Record<string, string> = {
+      sub_seller: "Sub-seller",
+      sub_sub_seller: "Sub-sub-seller",
+      sedekah: "Sedekah",
+      bahan_baku: "Bahan baku",
+    };
+
+    const lines = [
+      "*Bukti Transfer Pencairan*",
+      `Batch: ${batch.code ? `#${batch.code}` : batch.id.slice(0, 8)}`,
+      `Tanggal: ${tglPanjang(batch.completedAt ?? batch.closedAt ?? batch.createdAt)}`,
+      // Dihitung dari yang benar-benar didaftar di bawah, bukan dari seluruh
+      // transfer batch — kalau tidak, angkanya menjanjikan baris yang tidak ada.
+      `${[...perPenerima.values()].reduce((n, g) => n + g.bukti.length + g.tanpaBukti, 0)} transfer` +
+        ` · total ${rupiah([...perPenerima.values()].reduce((n, g) => n + g.total, 0))}`,
+      "",
+    ];
+
+    let n = 0;
+    for (const g of [...perPenerima.values()].sort((a, b) => b.total - a.total)) {
+      n += 1;
+      lines.push(`${n}. ${g.nama} (${JENIS[g.jenis] ?? g.jenis}) — ${rupiah(g.total)}`);
+      for (const url of g.bukti) lines.push(`   ${url}`);
+      if (g.tanpaBukti > 0) {
+        lines.push(`   (${g.tanpaBukti} transfer belum ada buktinya)`);
+      }
+    }
+
+    window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
+  }
+
   const all = batch.disbursements;
   const doneCount = all.filter((d) => READY.includes(d.validationStatus)).length;
   const pct = all.length ? Math.round((doneCount / all.length) * 100) : 0;
@@ -1313,7 +1354,17 @@ function DisbursementRekap({
               <span className="tabular-nums">{rupiah(totalToTransfer)}</span>
             </div>
           </div>
-          <div className="text-2xl text-ink tabular-nums">{pct}%</div>
+          <div className="flex items-center gap-3">
+            {/* Step 3 only. Before the batch is closed the proofs are still
+                being uploaded, and sending a half-finished set of receipts is
+                how a recipient concludes their transfer was skipped. */}
+            {batch.status === "selesai" && batch.disbursements.length > 0 && (
+              <Button size="sm" variant="outline" icon="share" onClick={shareBukti}>
+                Bagikan ke Sub-seller
+              </Button>
+            )}
+            <div className="text-2xl text-ink tabular-nums">{pct}%</div>
+          </div>
         </div>
         {/* The arithmetic behind the two totals, because they legitimately
             differ and nothing on the page used to say why. Rendered whenever
