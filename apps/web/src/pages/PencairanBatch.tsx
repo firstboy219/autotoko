@@ -1726,12 +1726,37 @@ function DisbursementRow({ d, onChange }: { d: Disbursement; onChange: () => voi
 
       {d.validationStatus === "tidak_cocok" && (
         <div className="mt-3">
-          <InlineAlert tone="danger">
-            OCR tidak cocok — hasil baca: {d.ocrAmount ? rupiah(d.ocrAmount) : "(nominal tak terbaca)"}
-            {" · "}
-            {d.ocrAccount ?? "(rekening tak terbaca)"}. Seharusnya {rupiah(d.expectedAmount)} ke{" "}
-            {d.recordedAccount ?? "-"}.
-          </InlineAlert>
+          {(() => {
+            // Dipisah supaya jelas apa yang gagal. Nominal dibandingkan dalam
+            // rupiah bulat, sama seperti di server -- kalau tidak, pesannya
+            // bisa menunjuk nominal yang di layar terlihat sama persis.
+            const nominalCocok =
+              d.ocrAmount != null &&
+              Math.round(Number(d.ocrAmount)) === Math.round(Number(d.expectedAmount));
+            const ekor = (d.recordedAccount ?? "").replace(/\D/g, "").slice(-4);
+            return (
+              <InlineAlert tone="danger">
+                {!nominalCocok ? (
+                  <>
+                    <strong>Nominalnya berbeda.</strong> Struk terbaca{" "}
+                    {d.ocrAmount ? rupiah(d.ocrAmount) : "(tidak terbaca)"}, seharusnya{" "}
+                    {rupiah(d.expectedAmount)}.
+                  </>
+                ) : (
+                  <>
+                    <strong>Nominalnya cocok, rekeningnya yang belum terbukti.</strong>{" "}
+                    Struk tidak memuat nama bank beserta 4 angka terakhir
+                    {ekor ? ` (${ekor})` : ""} dari {d.recordedAccount ?? "rekening tujuan"}.
+                    {d.ocrAccount ? ` Yang terbaca: ${d.ocrAccount}.` : ""}
+                  </>
+                )}
+                <div className="mt-1 text-[11px]">
+                  Kalau transfernya memang benar, pakai Override dan tulis alasannya —
+                  jangan diunggah ulang berkali-kali.
+                </div>
+              </InlineAlert>
+            );
+          })()}
         </div>
       )}
       {d.validationStatus === "override_manual" && d.overrideReason && (

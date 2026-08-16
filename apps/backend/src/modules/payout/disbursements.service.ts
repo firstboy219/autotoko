@@ -39,6 +39,42 @@ function accountDigitsMatch(ocrAccount: string | null, recordedAccount: string |
   return recordedDigits.endsWith(ocrDigits);
 }
 
+/**
+ * The receipt names the bank and shows the tail of the account. That is the
+ * answer, even when no digit run long enough to look like an account survived.
+ *
+ * A real rejected proof read:
+ *
+ *     JAGO. Pee 7815
+ *
+ * against a recorded "JAGO 5030 2799 7815". The mask came through as letters,
+ * so four digits were all that was left and no extractor looking for eight
+ * would ever find them — while a person reading the same line has no doubt.
+ *
+ * Both halves are required. Four digits alone is one chance in ten thousand of
+ * landing by accident, which is too loose to accept on its own; four digits on
+ * a receipt that also names the right bank, for an amount that already
+ * matched to the rupiah, is not a coincidence.
+ */
+function bankAndTailMatch(rawText: string | null, recordedAccount: string | null): boolean {
+  if (!rawText || !recordedAccount) return false;
+  const teks = rawText.toUpperCase();
+
+  // The bank is whatever alphabetic token the account was recorded with —
+  // taken from the data rather than from a hard-coded list of Indonesian
+  // banks, which would need editing every time a new one appears.
+  const bank = (recordedAccount.toUpperCase().match(/[A-Z]{3,}/g) ?? []).filter(
+    (w) => !["BANK", "REKENING", "REK", "NO"].includes(w),
+  );
+  if (!bank.some((w) => teks.includes(w))) return false;
+
+  const ekor = digitsOnly(recordedAccount).slice(-4);
+  if (ekor.length < 4) return false;
+  // Anywhere in the text: the tail sits on the destination line, and trying to
+  // pin down which line that is was exactly what failed before.
+  return teks.includes(ekor);
+}
+
 @Injectable()
 export class DisbursementsService {
   constructor(
@@ -115,9 +151,23 @@ export class DisbursementsService {
     const row = await this.getOrThrow(userId, id);
     const ocr = await this.ocr.extractProofFields(dto.proofUrl);
 
+    // Dibandingkan dalam rupiah bulat, bukan sampai sen. Bagi hasil
+    // menghasilkan pecahan (263.447,65) sementara struk bank mencetak
+    // 263.448 -- tidak ada bank yang mengirim pecahan sen. Membandingkan
+    // sampai sen menolak bukti yang benar, dan menolaknya dengan pesan yang
+    // menampilkan dua angka yang sudah dibulatkan jadi sama persis.
     const amountMatches =
-      ocr.amount != null && toCents(ocr.amount) === toCents(row.expectedAmount);
-    const accountMatches = accountDigitsMatch(ocr.account, row.recordedAccount);
+      ocr.amount != null &&
+      Math.round(ocr.amount) === Math.round(Number(row.expectedAmount));
+    const accountMatches =
+      accountDigitsMatch(ocr.account, row.recordedAccount) ||
+      // Fallback for receipts whose masking did not survive the read.
+      bankAndTailMatch(
+        typeof (ocr.raw as { text?: unknown } | null)?.text === "string"
+          ? (ocr.raw as { text: string }).text
+          : null,
+        row.recordedAccount,
+      );
     const matched = ocr.amount != null && amountMatches && accountMatches;
 
     const [updated] = await this.db
