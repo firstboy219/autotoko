@@ -20,6 +20,18 @@
         android:text="Menu Lainnya" />
 
     <LinearLayout
+        android:id="@+id/menuDashboard"
+        style="@style/SheetRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView style="@style/Text.Body" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Dashboard" />
+        <TextView style="@style/Text.Caption" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Pencairan, kesehatan toko, produk, dan bahan baku" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/menuDelivery"
         style="@style/SheetRow"
         android:layout_width="match_parent"

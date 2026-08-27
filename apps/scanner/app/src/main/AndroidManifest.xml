@@ -20,6 +20,16 @@
 
         <activity
 
+            android:name=".DashboardActivity"
+
+            android:exported="false"
+
+            android:label="Dashboard"
+
+            android:screenOrientation="portrait" />
+
+        <activity
+
             android:name=".PayoutActivity"
 
             android:exported="false"

@@ -2033,6 +2033,10 @@ public class ScanActivity extends AppCompatActivity {
             showRecap();
         });
 
+        sheet.findViewById(R.id.menuDashboard).setOnClickListener(v -> {
+            dialog.dismiss();
+            startActivity(new Intent(this, DashboardActivity.class));
+        });
         sheet.findViewById(R.id.menuPayout).setOnClickListener(v -> {
             dialog.dismiss();
             startActivity(new Intent(this, PayoutActivity.class));

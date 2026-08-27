@@ -301,6 +301,19 @@ public final class Api {
                 session.token(), body, cb);
     }
 
+    /**
+     * Angka dashboard, dari endpoint yang sama dengan web.
+     *
+     * Satu panggilan membawa seluruhnya -- ringkasan, bacaan statistik,
+     * penilaian toko, produk, dan belanja stok -- jadi layarnya tidak perlu
+     * merangkai beberapa permintaan di jaringan yang mungkin lambat.
+     */
+    public void shopInsights(String from, String to, Cb cb) {
+        String q = "?from=" + from + "&to=" + to;
+        call("GET", session.baseUrl() + "/api/dashboard/shop-insights" + q,
+                session.token(), null, cb);
+    }
+
     /* ------------------------------------------------ pencairan dana */
 
     /**
