@@ -637,7 +637,8 @@ function BatchProgress({
                   Bagikan WA ke Seller
                 </Button>
               )}
-              {batch.disbursements.some((d) => d.recipientType !== "bahan_baku") && (
+              {batch.status !== "berjalan" &&
+                batch.disbursements.some((d) => d.recipientType !== "bahan_baku") && (
                 <Button
                   size="sm"
                   variant="outline"
