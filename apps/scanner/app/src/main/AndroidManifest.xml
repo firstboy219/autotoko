@@ -19,6 +19,26 @@
         android:theme="@style/Theme.Scanner">
 
         <activity
+
+            android:name=".PayoutActivity"
+
+            android:exported="false"
+
+            android:label="Pencairan Dana"
+
+            android:screenOrientation="portrait" />
+
+        <activity
+
+            android:name=".PayoutBatchActivity"
+
+            android:exported="false"
+
+            android:label="Batch Pencairan"
+
+            android:screenOrientation="portrait" />
+
+        <activity
             android:name=".LoginActivity"
             android:exported="true"
             android:screenOrientation="portrait">

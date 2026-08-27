@@ -301,6 +301,96 @@ public final class Api {
                 session.token(), body, cb);
     }
 
+    /* ------------------------------------------------ pencairan dana */
+
+    /**
+     * Alur pencairan yang sama persis dengan web, lewat endpoint yang sama.
+     *
+     * Tidak ada endpoint baru dan tidak ada aturan yang dikendurkan: seluruh
+     * penjagaan -- pencairan ganda, bukti yang dipakai dua kali, batas
+     * transfer minimum, pencocokan OCR -- hidup di server dan berlaku sama
+     * dari mana saja permintaannya datang. Yang dipindah ke sini cuma
+     * layarnya.
+     */
+    public void payoutBatches(Cb cb) {
+        call("GET", session.baseUrl() + "/api/payout/batches", session.token(), null, cb);
+    }
+
+    public void payoutBatch(String id, Cb cb) {
+        call("GET", session.baseUrl() + "/api/payout/batches/" + id, session.token(), null, cb);
+    }
+
+    public void payoutNewBatch(Cb cb) {
+        call("POST", session.baseUrl() + "/api/payout/batches", session.token(),
+                new JSONObject(), cb);
+    }
+
+    /** Toko beserta tarif yang berlaku — dipakai untuk memilih saat merekam. */
+    public void payoutShops(Cb cb) {
+        call("GET", session.baseUrl() + "/api/payout/shops", session.token(), null, cb);
+    }
+
+    /**
+     * Simpan bukti pencairan sebagai berkas, dapat url-nya.
+     *
+     * Terpisah dari perekamannya, sama seperti di web: gambarnya diunggah
+     * dulu, url-nya yang ikut ke mutasi. Server menyidik jari isinya untuk
+     * menolak bukti yang sudah pernah dipakai.
+     */
+    public void uploadImage(String base64, String ext, Cb cb) {
+        JSONObject b = new JSONObject();
+        try {
+            b.put("base64", base64);
+            b.put("ext", ext);
+        } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/uploads", session.token(), b, cb);
+    }
+
+    public void payoutRecord(String batchId, String shopId, String payoutDate,
+                             double amount, String proofUrl, Cb cb) {
+        JSONObject b = new JSONObject();
+        try {
+            b.put("batchId", batchId);
+            b.put("shopId", shopId);
+            b.put("payoutDate", payoutDate);
+            b.put("marketplaceProofAmount", amount);
+            if (proofUrl != null && !proofUrl.isEmpty()) b.put("marketplaceProofUrl", proofUrl);
+        } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/payout/mutations", session.token(), b, cb);
+    }
+
+    public void payoutDeleteMutation(String id, Cb cb) {
+        call("DELETE", session.baseUrl() + "/api/payout/mutations/" + id, session.token(), null, cb);
+    }
+
+    public void payoutCloseInput(String id, Cb cb) {
+        call("POST", session.baseUrl() + "/api/payout/batches/" + id + "/close-input",
+                session.token(), new JSONObject(), cb);
+    }
+
+    public void payoutUploadProof(String disbursementId, String proofUrl, Cb cb) {
+        JSONObject b = new JSONObject();
+        try { b.put("proofUrl", proofUrl); } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/payout/disbursements/" + disbursementId + "/proof",
+                session.token(), b, cb);
+    }
+
+    public void payoutOverride(String disbursementId, String reason, Cb cb) {
+        JSONObject b = new JSONObject();
+        try { b.put("reason", reason); } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/payout/disbursements/" + disbursementId + "/override",
+                session.token(), b, cb);
+    }
+
+    public void payoutClose(String id, Cb cb) {
+        call("POST", session.baseUrl() + "/api/payout/batches/" + id + "/close",
+                session.token(), new JSONObject(), cb);
+    }
+
+    public void payoutDeleteBatch(String id, Cb cb) {
+        call("DELETE", session.baseUrl() + "/api/payout/batches/" + id, session.token(), null, cb);
+    }
+
     /** One recorded stock purchase, with its lines. */
     public void purchase(String id, Cb cb) {
         call("GET", session.baseUrl() + "/api/materials/purchases/" + id,

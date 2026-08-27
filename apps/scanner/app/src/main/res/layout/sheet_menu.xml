@@ -80,6 +80,18 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/menuPayout"
+        style="@style/SheetRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView style="@style/Text.Body" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Pencairan Dana" />
+        <TextView style="@style/Text.Caption" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Rekam pencairan tiap toko, transfer, dan buktinya" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/menuPending"
         style="@style/SheetRow"
         android:layout_width="match_parent"
