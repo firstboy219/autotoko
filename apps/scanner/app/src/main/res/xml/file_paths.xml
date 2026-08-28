@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Satu folder saja: tempat APK pembaruan diunduh.
+
+    Folder milik aplikasi, bukan penyimpanan bersama, supaya tidak perlu
+    izin penyimpanan dan tidak ada berkas lain yang ikut terbuka.
+-->
+<paths>
+    <external-files-path name="unduhan" path="." />
+</paths>

@@ -9,6 +9,11 @@
          nothing else, so nothing in the app blocks on it. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- APK ini dibagikan di luar Play Store, jadi pembaruannya harus bisa
+         dipasang dari dalam aplikasi sendiri. Android tetap meminta
+         persetujuan per aplikasi sebelum pemasang dibuka. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <uses-feature android:name="android.hardware.camera.any" android:required="true" />
 
     <application
@@ -46,6 +51,12 @@
 
             android:label="Batch Pencairan"
 
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".UpdateActivity"
+            android:exported="false"
+            android:label="Versi Aplikasi"
             android:screenOrientation="portrait" />
 
         <activity
@@ -92,5 +103,17 @@
             android:name=".HistoryActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
+        <!-- Pemasang Android tidak bisa membaca berkas milik aplikasi lain;
+             APK yang baru diunduh dipinjamkan lewat sini. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.berkas"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 </manifest>

@@ -2062,6 +2062,34 @@ public class ScanActivity extends AppCompatActivity {
             showReminderSettings();
         });
 
+        // Versi terpasang ditulis di barisnya sendiri, dan diganti kalau
+        // server ternyata punya yang lebih baru. APK di luar Play Store
+        // tidak punya yang memberi tahu; tanpa ini satu-satunya cara tahu
+        // adalah membuka halaman web di komputer.
+        final TextView updateState = sheet.findViewById(R.id.menuUpdateState);
+        sheet.findViewById(R.id.menuUpdate).setOnClickListener(v -> {
+            dialog.dismiss();
+            startActivity(new Intent(this, UpdateActivity.class));
+        });
+        try {
+            android.content.pm.PackageInfo pi =
+                    getPackageManager().getPackageInfo(getPackageName(), 0);
+            final int terpasang =
+                    android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P
+                            ? (int) pi.getLongVersionCode() : pi.versionCode;
+            updateState.setText("Versi " + pi.versionName + " terpasang");
+            api.appReleases(r -> {
+                if (!r.ok() || r.data() == null) return;
+                org.json.JSONObject cur = r.data().optJSONObject("current");
+                if (cur == null) return;
+                if (cur.optInt("versionCode", 0) > terpasang) {
+                    updateState.setText("Versi baru tersedia: "
+                            + cur.optString("versionName", ""));
+                    updateState.setTextColor(android.graphics.Color.parseColor("#8A5A00"));
+                }
+            });
+        } catch (Exception ignored) {}
+
         sheet.findViewById(R.id.menuLogout).setOnClickListener(v -> {
             dialog.dismiss();
             session.clear();

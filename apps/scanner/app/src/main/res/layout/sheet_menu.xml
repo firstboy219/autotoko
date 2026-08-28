@@ -131,6 +131,20 @@
             android:text="Aktif setiap hari" />
     </LinearLayout>
 
+    <LinearLayout
+        android:id="@+id/menuUpdate"
+        style="@style/SheetRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView style="@style/Text.Body" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Versi Aplikasi" />
+        <TextView
+            android:id="@+id/menuUpdateState"
+            style="@style/Text.Caption" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Periksa dan pasang versi terbaru" />
+    </LinearLayout>
+
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"

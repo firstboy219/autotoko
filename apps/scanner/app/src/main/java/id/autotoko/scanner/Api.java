@@ -283,6 +283,16 @@ public final class Api {
      * One endpoint for both so the two screens cannot disagree about how much
      * is outstanding — two numbers for one question is worse than one number.
      */
+    /**
+     * Build mana saja yang pernah diterbitkan, dan mana yang sekarang berlaku.
+     *
+     * Endpoint yang sama dengan halaman versi di web, jadi tidak ada dua
+     * daftar rilis yang bisa berbeda isinya.
+     */
+    public void appReleases(Cb cb) {
+        call("GET", session.baseUrl() + "/api/resi/app/releases", session.token(), null, cb);
+    }
+
     public void pendingTasks(Cb cb) {
         call("GET", session.baseUrl() + "/api/dashboard/pending-tasks", session.token(), null, cb);
     }
