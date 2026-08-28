@@ -153,6 +153,8 @@ public class PayoutActivity extends AppCompatActivity {
         row.setLayoutParams(lp);
         row.setBackgroundColor(Color.parseColor("#F6F7F8"));
 
+        // Langkah keberapa, disebut angka. "siap_distribusi" adalah nama
+        // keadaan di basis data, bukan penjelasan bagi yang memakainya.
         TextView judul = new TextView(this);
         judul.setTextSize(15);
         judul.setTextColor(Color.parseColor("#20242B"));
@@ -162,8 +164,44 @@ public class PayoutActivity extends AppCompatActivity {
         TextView sub = new TextView(this);
         sub.setTextSize(12);
         sub.setTextColor(Color.parseColor("#6B7178"));
-        sub.setText(labelStatus(st) + " · " + Format.clock(b.optString("createdAt", "")));
+        // Daftar batch tanpa kemajuan memaksa membuka satu per satu untuk tahu
+        // mana yang tinggal sedikit lagi. Angkanya dibaca dari batch itu
+        // sendiri, jadi baris ini tidak pernah bercerita lain dari halamannya.
+        TextView maju = new TextView(this);
+        maju.setTextSize(11);
+        maju.setTextColor(Color.parseColor("#6B7178"));
+        api.payoutBatch(id, rr -> {
+            if (!rr.ok() || rr.data() == null) return;
+            org.json.JSONObject dt = rr.data();
+            org.json.JSONArray mut = dt.optJSONArray("mutations");
+            org.json.JSONArray dis = dt.optJSONArray("disbursements");
+            int nMut = mut == null ? 0 : mut.length();
+            int nDis = dis == null ? 0 : dis.length();
+            int beres = 0;
+            for (int i = 0; i < nDis; i++) {
+                org.json.JSONObject x = dis.optJSONObject(i);
+                if (x == null) continue;
+                String v = x.optString("validationStatus", "");
+                if ("cocok_otomatis".equals(v) || "override_manual".equals(v)) beres++;
+            }
+            StringBuilder t = new StringBuilder();
+            t.append(nMut).append(" toko direkam");
+            if (nDis > 0) {
+                int pct = Math.round(beres * 100f / nDis);
+                t.append(" · transfer ").append(beres).append("/").append(nDis)
+                        .append(" (").append(pct).append("%)");
+            }
+            maju.setText(t.toString());
+        });
+        // Tiga keadaan, bukan dua: batch yang dibuat sebelum fitur fee
+        // menyala tidak punya fee sama sekali, dan itu bukan hal yang sama
+        // dengan fee yang belum dibayar.
+        String fee = b.isNull("adminFeeAmount")
+                ? ""
+                : (b.isNull("adminFeePaidAt") ? " · fee BELUM" : " · fee sudah");
+        sub.setText(labelStatus(st) + fee + " · " + Format.clock(b.optString("createdAt", "")));
         row.addView(sub);
+        row.addView(maju);
 
         row.setOnClickListener(v -> buka(id, kode));
         row.setOnLongClickListener(v -> {
@@ -189,9 +227,17 @@ public class PayoutActivity extends AppCompatActivity {
     }
 
     static String labelStatus(String s) {
-        if ("berjalan".equals(s)) return "Berjalan — rekam pencairan";
-        if ("siap_distribusi".equals(s)) return "Transfer & bukti";
-        if ("selesai".equals(s)) return "Selesai";
+        if ("berjalan".equals(s)) return "Langkah 1/3 — Rekam pencairan";
+        if ("siap_distribusi".equals(s)) return "Langkah 2/3 — Transfer & bukti";
+        if ("selesai".equals(s)) return "Langkah 3/3 — Selesai";
         return s;
+    }
+
+    /** 1, 2, atau 3 — dipakai penunjuk langkah di halaman batch. */
+    static int stepIndex(String s) {
+        if ("berjalan".equals(s)) return 1;
+        if ("siap_distribusi".equals(s)) return 2;
+        if ("selesai".equals(s)) return 3;
+        return 0;
     }
 }

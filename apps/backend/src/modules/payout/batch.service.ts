@@ -7,6 +7,7 @@
   BadRequestException,
 } from "@nestjs/common";
 import { randomBytes } from "node:crypto";
+import { UploadsService } from "../uploads/uploads.service.js";
 import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
@@ -45,6 +46,10 @@ export class PayoutBatchService {
   constructor(
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly disbursements: DisbursementsService,
+    // Ditaruh terakhir supaya pemanggil yang sudah ada tidak bergeser
+    // argumennya. Dipakai untuk menyidik jari isi bukti fee: unggahan ulang
+    // gambar yang sama selalu mendapat nama berbeda.
+    private readonly uploads: UploadsService,
   ) {}
 
   async list(userId: string, status?: string) {
@@ -105,6 +110,73 @@ export class PayoutBatchService {
     // 24 million combinations against a handful of batches: getting here means
     // something is wrong with the generator, not that the space filled up.
     throw new ConflictException("Tidak bisa membuat kode batch yang unik.");
+  }
+
+  /**
+   * Catat bukti transfer fee admin batch ini.
+   *
+   * Satu batch satu fee, jadi mengunggah lagi menimpa yang sebelumnya --
+   * bukan menambah baris. Yang dijaga adalah buktinya: gambar yang sama tidak
+   * boleh dipakai untuk dua batch, dibandingkan lewat isi berkasnya karena
+   * unggahan ulang selalu mendapat nama yang berbeda.
+   */
+  async setAdminFeeProof(userId: string, id: string, proofUrl: string) {
+    const batch = await this.getOrThrow(userId, id);
+    if (batch.adminFeeAmount == null) {
+      throw new BadRequestException(
+        "Batch ini tidak punya fee admin — fiturnya belum aktif saat batch dibuat.",
+      );
+    }
+
+    const hash = await this.uploads.hashOfUrl(proofUrl);
+    if (hash) {
+      const bentrok = await this.db
+        .select({ id: payoutBatches.id, code: payoutBatches.code })
+        .from(payoutBatches)
+        .where(
+          and(
+            eq(payoutBatches.userId, userId),
+            eq(payoutBatches.adminFeeProofHash, hash),
+          ),
+        );
+      const lain = bentrok.filter((r) => r.id !== id);
+      if (lain.length) {
+        throw new ConflictException({
+          code: "DUPLICATE_FEE_PROOF",
+          message:
+            `Bukti ini sudah dipakai untuk fee batch #${lain[0]!.code ?? ""}. ` +
+            "Satu bukti hanya untuk satu batch — unggah bukti transfer batch ini.",
+        });
+      }
+    }
+
+    const [row] = await this.db
+      .update(payoutBatches)
+      .set({
+        adminFeeProofUrl: proofUrl,
+        adminFeeProofHash: hash,
+        adminFeePaidAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(payoutBatches.id, id), eq(payoutBatches.userId, userId)))
+      .returning();
+    return row;
+  }
+
+  /** Batalkan bukti fee — untuk gambar yang salah unggah. */
+  async clearAdminFeeProof(userId: string, id: string) {
+    await this.getOrThrow(userId, id);
+    const [row] = await this.db
+      .update(payoutBatches)
+      .set({
+        adminFeeProofUrl: null,
+        adminFeeProofHash: null,
+        adminFeePaidAt: null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(payoutBatches.id, id), eq(payoutBatches.userId, userId)))
+      .returning();
+    return row;
   }
 
   /**
@@ -203,6 +275,18 @@ export class PayoutBatchService {
 
   /** Admin/Staff starts a fresh batch. Batches never auto-open (Bagian 1). */
   async start(userId: string, createdByUserId: string) {
+    // Fee yang berlaku SEKARANG, direkam ke batch. Kalau fitur ini mati,
+    // kolomnya dibiarkan kosong -- itu yang membedakan "batch tanpa fee" dari
+    // "batch dengan fee nol", dan keduanya bukan hal yang sama.
+    const [setelan] = await this.db
+      .select({
+        aktif: payoutSettings.adminFeeEnabled,
+        nominal: payoutSettings.adminFeeAmount,
+      })
+      .from(payoutSettings)
+      .where(eq(payoutSettings.userId, userId))
+      .limit(1);
+    const feeBatch = setelan?.aktif ? setelan.nominal : null;
     // Retried because the uniqueness lives in the index, not in the check
     // above: two batches started in the same instant can read the same "taken"
     // set and pick the same code, and only one insert will survive.
@@ -215,6 +299,7 @@ export class PayoutBatchService {
             createdByUserId,
             status: "berjalan",
             code: await this.nextCode(userId),
+            adminFeeAmount: feeBatch,
           })
           .returning();
         return row;

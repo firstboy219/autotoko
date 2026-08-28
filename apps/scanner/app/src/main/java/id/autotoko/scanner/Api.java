@@ -400,6 +400,40 @@ public final class Api {
                 session.token(), new JSONObject(), cb);
     }
 
+    /**
+     * Kembali dari tahap transfer ke tahap rekam.
+     *
+     * `force` adalah pemakainya menyatakan menerima kehilangan bukti yang
+     * sudah diunggah -- servernya menolak tanpa itu, dan penolakannya menyebut
+     * berapa bukti yang akan hilang. Layar bertanya dengan kalimat penuh
+     * sebelum mengirim ulang dengan force.
+     */
+    public void payoutReopenInput(String id, boolean force, Cb cb) {
+        JSONObject b = new JSONObject();
+        try { b.put("force", force); } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/payout/batches/" + id + "/reopen-input",
+                session.token(), b, cb);
+    }
+
+    /** Hitung ulang seluruh mutasi memakai tarif terbaru; hanya selagi terbuka. */
+    public void payoutRecalculate(String id, Cb cb) {
+        call("POST", session.baseUrl() + "/api/payout/batches/" + id + "/recalculate",
+                session.token(), new JSONObject(), cb);
+    }
+
+    /** Bukti transfer fee admin sebuah batch. Satu batch satu bukti. */
+    public void payoutFeeProof(String batchId, String proofUrl, Cb cb) {
+        JSONObject b = new JSONObject();
+        try { b.put("proofUrl", proofUrl); } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/payout/batches/" + batchId + "/admin-fee-proof",
+                session.token(), b, cb);
+    }
+
+    public void payoutClearFeeProof(String batchId, Cb cb) {
+        call("DELETE", session.baseUrl() + "/api/payout/batches/" + batchId + "/admin-fee-proof",
+                session.token(), null, cb);
+    }
+
     public void payoutDeleteBatch(String id, Cb cb) {
         call("DELETE", session.baseUrl() + "/api/payout/batches/" + id, session.token(), null, cb);
     }

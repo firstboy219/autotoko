@@ -20,6 +20,7 @@ import { DisbursementsService } from "./disbursements.service.js";
 import { OcrService } from "./ocr.service.js";
 import { PayoutProfitService } from "./profit.service.js";
 import {
+  AdminFeeProofDto,
   CreateSubSellerDto,
   UpdateSubSellerDto,
   CreateSubSubSellerDto,
@@ -199,6 +200,26 @@ export class PayoutController {
   }
 
   /** Tahap 2 — "Selesai Pencairan Semua Toko": locks input, generates the disbursement rekap. */
+  /**
+   * Bukti transfer fee admin sebuah batch. Satu batch satu bukti.
+   */
+  @Post("batches/:id/admin-fee-proof")
+  async adminFeeProof(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: AdminFeeProofDto,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.batches.setAdminFeeProof(uid(req), id, dto.proofUrl) };
+  }
+
+  @Delete("batches/:id/admin-fee-proof")
+  async clearAdminFeeProof(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.batches.clearAdminFeeProof(uid(req), id) };
+  }
+
   @Post("batches/:id/close-input")
   async closeInput(@Req() req: FastifyRequest, @Param("id") id: string) {
     return ok(await this.batches.closeInput(uid(req), id));

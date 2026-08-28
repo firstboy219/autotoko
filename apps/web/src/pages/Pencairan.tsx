@@ -28,6 +28,8 @@ interface Batch {
   id: string;
   status: "berjalan" | "siap_distribusi" | "selesai";
   code: string | null;
+  adminFeeAmount: string | null;
+  adminFeePaidAt: string | null;
   closedAt: string | null;
   completedAt: string | null;
   createdAt: string;
@@ -242,6 +244,7 @@ export function Pencairan() {
             <THead>
               <TR className="border-t-0">
                 <TH>Kode</TH>
+                <TH>Fee admin</TH>
                 <TH>Dibuat</TH>
                 <TH>Status</TH>
                 <TH>Input Ditutup</TH>
@@ -251,10 +254,10 @@ export function Pencairan() {
             </THead>
             <tbody>
               {loading ? (
-                <SkeletonRows n={3} cols={6} />
+                <SkeletonRows n={3} cols={7} />
               ) : !batches?.length ? (
                 <TR>
-                  <TD colSpan={6} className="p-0">
+                  <TD colSpan={7} className="p-0">
                     <EmptyState
                       icon="banknote"
                       title="Belum ada batch"
@@ -274,6 +277,19 @@ export function Pencairan() {
                         easier to check against when the glyphs line up. */}
                     <TD className="font-mono text-ink">
                       {b.code ? `#${b.code}` : "—"}
+                    </TD>
+                    {/* Kenapa ada tiga keadaan, bukan dua: batch yang dibuat
+                        sebelum fitur ini menyala tidak punya fee sama sekali,
+                        dan itu bukan hal yang sama dengan fee yang belum
+                        dibayar. */}
+                    <TD>
+                      {b.adminFeeAmount == null ? (
+                        <span className="text-ink-3">—</span>
+                      ) : b.adminFeePaidAt ? (
+                        <Badge tone="success">sudah</Badge>
+                      ) : (
+                        <Badge tone="warning">belum</Badge>
+                      )}
                     </TD>
                     <TD className="text-ink">{dateShort(b.createdAt)}</TD>
                     <TD>

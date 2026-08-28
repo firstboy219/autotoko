@@ -41,6 +41,7 @@ public class PayoutBatchActivity extends AppCompatActivity {
 
     private static final int REQ_BUKTI_CAIR = 8101;
     private static final int REQ_BUKTI_TRANSFER = 8102;
+    private static final int REQ_BUKTI_FEE = 8103;
     private static final int FOTO_MAX_EDGE = 1600;
     private static final int FOTO_QUALITY = 82;
 
@@ -122,6 +123,7 @@ public class PayoutBatchActivity extends AppCompatActivity {
 
         String st = batch.optString("status", "");
         status.setText(PayoutActivity.labelStatus(st));
+        root.addView(penunjukLangkah(st));
 
         JSONArray mutations = batch.optJSONArray("mutations");
         JSONArray disbursements = batch.optJSONArray("disbursements");
@@ -142,11 +144,128 @@ public class PayoutBatchActivity extends AppCompatActivity {
                         + "\nSub-seller " + rp(sub)
                         + "\nSeller " + rp(seller)));
 
+        kartuFee();
+
         if ("berjalan".equals(st)) {
             gambarTahap1(mutations, d);
         } else {
             gambarTahap2(disbursements, st, d);
         }
+    }
+
+    /**
+     * Tiga langkah, dengan yang sedang berjalan ditandai.
+     *
+     * Nama keadaan di basis data ("siap_distribusi") bukan penjelasan bagi
+     * yang memakainya; yang perlu diketahui adalah sedang di mana, apa
+     * berikutnya, dan bisakah mundur.
+     */
+    private View penunjukLangkah(String st) {
+        int langkah = PayoutActivity.stepIndex(st);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int p = (int) (12 * getResources().getDisplayMetrics().density);
+        box.setPadding(p, p, p, p);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = (int) (8 * getResources().getDisplayMetrics().density);
+        box.setLayoutParams(lp);
+        box.setBackgroundColor(Color.parseColor("#F6F7F8"));
+
+        String[] nama = {"1. Rekam pencairan", "2. Transfer & bukti", "3. Selesai"};
+        for (int i = 0; i < nama.length; i++) {
+            TextView t = new TextView(this);
+            t.setTextSize(13);
+            boolean ini = (i + 1) == langkah;
+            boolean lewat = (i + 1) < langkah;
+            t.setTextColor(Color.parseColor(ini ? "#20242B" : "#6B7178"));
+            t.setText((lewat ? "✓ " : ini ? "▶ " : "   ") + nama[i]);
+            box.addView(t);
+        }
+
+        // Mundur satu langkah, hanya dari tahap transfer. Dari "selesai" tidak
+        // ditawarkan karena servernya memang menolak, dan tombol yang pasti
+        // ditolak lebih buruk daripada tombol yang tidak ada.
+        if ("siap_distribusi".equals(st)) {
+            MaterialButton mundur = new MaterialButton(this, null,
+                    com.google.android.material.R.attr.materialButtonOutlinedStyle);
+            mundur.setText("Kembali ke Langkah 1");
+            mundur.setAllCaps(false);
+            mundur.setOnClickListener(v -> mundurLangkah(false));
+            box.addView(mundur, lebar());
+        }
+        return box;
+    }
+
+    /**
+     * Kembali ke tahap rekam.
+     *
+     * Dicoba tanpa paksa dulu. Server menolak dengan 409 ketika sudah ada
+     * bukti yang akan hilang, dan penolakannya menyebut berapa banyak --
+     * kalimat itu yang ditanyakan ke pemakainya, bukan peringatan karangan
+     * yang bisa meleset dari kenyataannya.
+     */
+    private void mundurLangkah(boolean paksa) {
+        api.payoutReopenInput(batchId, paksa, r -> {
+            if (r.ok()) {
+                Toast.makeText(this, "Kembali ke langkah 1", Toast.LENGTH_LONG).show();
+                muat();
+                return;
+            }
+            if (r.code == 409 && !paksa) {
+                new MaterialAlertDialogBuilder(this)
+                        .setTitle("Bukti akan terhapus")
+                        .setMessage(r.message("Sudah ada bukti transfer di batch ini.")
+                                + "\n\nLanjutkan tetap kembali ke langkah 1?")
+                        .setNegativeButton("Batal", null)
+                        .setPositiveButton("Ya, hapus buktinya", (dd, w) -> mundurLangkah(true))
+                        .show();
+                return;
+            }
+            Toast.makeText(this, r.message("Gagal kembali ke langkah 1."),
+                    Toast.LENGTH_LONG).show();
+        });
+    }
+
+    /**
+     * Fee admin batch ini, berdiri sendiri di luar pembagian pencairan.
+     *
+     * Sedekah dan sub-seller dipotong DARI kredit yang cair; fee ini ongkos
+     * yang dibayar terpisah, satu kali per batch. Karena itu ia tidak ikut
+     * ke rincian transfer maupun ke penjumlahan manapun.
+     */
+    private void kartuFee() {
+        if (batch.isNull("adminFeeAmount")) return;
+        boolean sudah = !batch.isNull("adminFeePaidAt");
+
+        LinearLayout box = kotak("Fee admin batch ini",
+                rp(batch.optDouble("adminFeeAmount", 0))
+                        + "\n" + (sudah ? "Sudah ditransfer" : "BELUM ditransfer")
+                        + "\nDi luar pembagian pencairan — dibayar sekali untuk batch ini.");
+
+        MaterialButton unggah = new MaterialButton(this, null,
+                com.google.android.material.R.attr.materialButtonOutlinedStyle);
+        unggah.setText(sudah ? "Ganti bukti fee" : "Unggah bukti transfer fee");
+        unggah.setAllCaps(false);
+        unggah.setOnClickListener(v -> {
+            tombolMenunggu = unggah;
+            pilihGambar(REQ_BUKTI_FEE);
+        });
+        box.addView(unggah, lebar());
+
+        if (sudah) {
+            MaterialButton lepas = new MaterialButton(this, null,
+                    com.google.android.material.R.attr.materialButtonOutlinedStyle);
+            lepas.setText("Lepas bukti fee");
+            lepas.setAllCaps(false);
+            lepas.setOnClickListener(v -> api.payoutClearFeeProof(batchId, r -> {
+                Toast.makeText(this, r.ok() ? "Bukti dilepas"
+                        : r.message("Gagal melepas bukti."), Toast.LENGTH_LONG).show();
+                muat();
+            }));
+            box.addView(lepas, lebar());
+        }
+        root.addView(box);
     }
 
     /* ------------------------------------------------ tahap 1: rekam */
@@ -187,6 +306,20 @@ public class PayoutBatchActivity extends AppCompatActivity {
                 });
                 root.addView(row);
             }
+
+            // Dipakai setelah tarif diubah di pengaturan: tanpa ini, mutasi
+            // yang sudah direkam tetap memakai tarif lama dan bedanya baru
+            // ketahuan di tahap transfer.
+            MaterialButton hitung = new MaterialButton(this, null,
+                    com.google.android.material.R.attr.materialButtonOutlinedStyle);
+            hitung.setText("Hitung Ulang dengan Tarif Terbaru");
+            hitung.setAllCaps(false);
+            hitung.setOnClickListener(v -> api.payoutRecalculate(batchId, rr -> {
+                Toast.makeText(this, rr.ok() ? "Dihitung ulang"
+                        : rr.message("Gagal menghitung ulang."), Toast.LENGTH_LONG).show();
+                muat();
+            }));
+            root.addView(hitung, lebar());
 
             MaterialButton tutup = new MaterialButton(this);
             tutup.setText("Selesai Pencairan Semua Toko");
@@ -320,8 +453,13 @@ public class PayoutBatchActivity extends AppCompatActivity {
             root.addView(barisTransfer(x, st));
         }
 
+        int pct = disbursements.length() == 0
+                ? 0 : Math.round(selesai * 100f / disbursements.length());
         root.addView(catatan(selesai + " dari " + disbursements.length()
-                + " transfer sudah tervalidasi."));
+                + " transfer sudah tervalidasi (" + pct + "%)."
+                + (selesai < disbursements.length()
+                        ? " Batch baru bisa ditutup setelah semuanya tervalidasi atau di-override."
+                        : "")));
 
         if ("siap_distribusi".equals(st)) {
             MaterialButton tutup = new MaterialButton(this);
@@ -425,7 +563,7 @@ public class PayoutBatchActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int req, int result, Intent data) {
         super.onActivityResult(req, result, data);
-        if (req != REQ_BUKTI_CAIR && req != REQ_BUKTI_TRANSFER) return;
+        if (req != REQ_BUKTI_CAIR && req != REQ_BUKTI_TRANSFER && req != REQ_BUKTI_FEE) return;
         if (result != RESULT_OK || data == null || data.getData() == null) return;
 
         final String base64;
@@ -449,6 +587,24 @@ public class PayoutBatchActivity extends AppCompatActivity {
                 return;
             }
             String url = r.data().optString("url", "");
+            if (reqFinal == REQ_BUKTI_FEE) {
+                api.payoutFeeProof(batchId, url, rr -> {
+                    if (!rr.ok()) {
+                        // Pesan servernya apa adanya: di situlah penolakan
+                        // bukti yang sudah dipakai batch lain menerangkan diri.
+                        new MaterialAlertDialogBuilder(this)
+                                .setTitle("Bukti fee ditolak")
+                                .setMessage(rr.message("Gagal menyimpan bukti fee."))
+                                .setPositiveButton("Mengerti", null)
+                                .show();
+                        muat();
+                        return;
+                    }
+                    Toast.makeText(this, "Bukti fee tersimpan", Toast.LENGTH_LONG).show();
+                    muat();
+                });
+                return;
+            }
             if (reqFinal == REQ_BUKTI_CAIR) {
                 urlBuktiCair = url;
                 if (tombolMenunggu != null) tombolMenunggu.setText("Bukti terlampir");

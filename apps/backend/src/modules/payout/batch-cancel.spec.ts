@@ -27,7 +27,10 @@ class FakeOcr {
   const ocr = new FakeOcr();
   const sellers = new PayoutSellersService(db);
   const disbursements = new DisbursementsService(db, ocr as never);
-  const batches = new PayoutBatchService(db, disbursements);
+  const batches = new PayoutBatchService(db, disbursements, {
+      // Fee admin menyidik jari isi bukti; uji ini tidak memakai gambar.
+      hashOfUrl: async () => null,
+    } as never);
   const mutations = new PayoutMutationService(db, {
       // The guard hashes a proof image; these tests never attach one, so a
       // stub that always answers "unknown file" keeps them on the same path

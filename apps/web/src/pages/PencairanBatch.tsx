@@ -86,6 +86,10 @@ interface BatchDetail {
   /** When input was locked, and when the batch was finally closed. */
   closedAt: string | null;
   completedAt: string | null;
+  /** Null ketika fitur fee admin belum aktif saat batch ini dibuat. */
+  adminFeeAmount: string | null;
+  adminFeeProofUrl: string | null;
+  adminFeePaidAt: string | null;
   mutations: Mutation[];
   disbursements: Disbursement[];
   carryovers?: {
@@ -155,6 +159,9 @@ export function PencairanBatch() {
       ) : (
         <div className="space-y-4">
           <BatchProgress batch={batch} shops={shops ?? []} onDone={reload} />
+          {batch.adminFeeAmount != null && (
+            <AdminFeeCard batch={batch} onDone={reload} />
+          )}
           {batch.status === "berjalan" && shops && settings && (
             <>
               <MutationForm
@@ -173,6 +180,122 @@ export function PencairanBatch() {
         </div>
       )}
     </Layout>
+  );
+}
+
+/**
+ * Fee admin batch ini, dan buktinya.
+ *
+ * Berdiri sendiri, tidak masuk ke rincian transfer: sedekah dan sub-seller
+ * dipotong DARI kredit yang cair, sedangkan fee ini ongkos yang dibayar
+ * terpisah satu kali per batch. Menaruhnya di antara transfer akan
+ * mencampurnya ke setiap penjumlahan dan rekonsiliasi yang sudah ada, dan
+ * mengubah arti angka yang sudah dipakai orang.
+ */
+function AdminFeeCard({ batch, onDone }: { batch: BatchDetail; onDone: () => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const sudah = batch.adminFeePaidAt != null;
+
+  async function unggah(file: File) {
+    setBusy(true);
+    setErr(null);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onerror = () => reject(new Error("Gambar tidak terbaca."));
+        r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+        r.readAsDataURL(file);
+      });
+      const up = await api.post<{ url: string }>("/uploads", {
+        base64,
+        ext: (file.name.split(".").pop() ?? "jpg").toLowerCase(),
+      });
+      await api.post(`/payout/batches/${batch.id}/admin-fee-proof`, { proofUrl: up.url });
+      toast("Bukti fee tersimpan", "success");
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function lepas() {
+    setBusy(true);
+    try {
+      await api.del(`/payout/batches/${batch.id}/admin-fee-proof`);
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-xs text-ink-3">Fee admin batch ini</div>
+          <div className="mt-1 text-lg font-semibold tabular-nums text-ink">
+            {rupiah(batch.adminFeeAmount ?? 0)}
+          </div>
+          <div className="mt-0.5 text-[11px] text-ink-3">
+            Di luar pembagian pencairan — dibayar sekali untuk batch ini.
+          </div>
+        </div>
+        <div className="text-right">
+          <Badge tone={sudah ? "success" : "warning"}>
+            {sudah ? "sudah ditransfer" : "belum ditransfer"}
+          </Badge>
+          {sudah && (
+            <div className="mt-1 text-[11px] text-ink-3">
+              {dateShort(batch.adminFeePaidAt!)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <label className="cursor-pointer text-xs text-brand hover:underline">
+          {busy ? "Mengunggah…" : sudah ? "Ganti bukti" : "Unggah bukti transfer fee"}
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            disabled={busy}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) void unggah(f);
+            }}
+          />
+        </label>
+        {batch.adminFeeProofUrl && (
+          <a
+            href={batch.adminFeeProofUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-ink-2 hover:underline"
+          >
+            lihat bukti
+          </a>
+        )}
+        {sudah && (
+          <button type="button" className="text-xs text-danger hover:underline" onClick={lepas}>
+            lepas bukti
+          </button>
+        )}
+      </div>
+
+      {err && (
+        <div className="mt-2">
+          <InlineAlert tone="danger">{err}</InlineAlert>
+        </div>
+      )}
+    </Card>
   );
 }
 

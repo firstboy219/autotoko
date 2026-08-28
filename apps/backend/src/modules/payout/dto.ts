@@ -69,6 +69,13 @@ export class UpdatePayoutSettingsDto {
   @IsOptional() @IsString() @MaxLength(255) sedekahBankAccount?: string;
   @IsOptional() @IsString() @MaxLength(255) materialBankAccount?: string;
   @IsOptional() @IsNumber() @Min(0) @Max(10_000_000) minTransferAmount?: number;
+  @IsOptional() @IsBoolean() adminFeeEnabled?: boolean;
+  @IsOptional() @IsNumber() @Min(0) @Max(10_000_000) adminFeeAmount?: number;
+}
+
+/** Bukti transfer fee admin sebuah batch. */
+export class AdminFeeProofDto {
+  @IsString() @MaxLength(1024) proofUrl!: string;
 }
 
 // --- Mutation (Tahap 1 — one record per shop's pencairan) ---

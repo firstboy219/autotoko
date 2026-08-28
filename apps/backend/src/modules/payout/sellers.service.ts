@@ -330,6 +330,10 @@ export class PayoutSellersService {
     const [row] = await this.db
       .update(payoutSettings)
       .set({
+        ...(dto.adminFeeEnabled != null ? { adminFeeEnabled: dto.adminFeeEnabled } : {}),
+        ...(dto.adminFeeAmount != null
+          ? { adminFeeAmount: dto.adminFeeAmount.toFixed(2) }
+          : {}),
         ...(dto.sedekahRate != null ? { sedekahRate: rate(dto.sedekahRate) } : {}),
         ...(dto.materialReserveRate != null
           ? { materialReserveRate: rate(dto.materialReserveRate) }

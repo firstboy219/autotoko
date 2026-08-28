@@ -1,5 +1,6 @@
 ﻿import { sql } from "drizzle-orm";
 import {
+  boolean,
   pgTable,
   uuid,
   varchar,
@@ -181,6 +182,17 @@ export const payoutSettings = pgTable("payout_settings", {
    * they already keep so restocking is budgeted before the rest reads as
    * profit. 0 = off, which is the default so existing tenants see no change.
    */
+  /**
+   * Ongkos admin per batch, dibayar terpisah dari pembagian pencairan.
+   *
+   * Bukan potongan dari kredit seperti sedekah atau sub-seller: itu sebabnya
+   * ia tidak masuk ke payout_disbursements, yang akan mencampurnya ke setiap
+   * penjumlahan dan rekonsiliasi yang sudah ada.
+   */
+  adminFeeEnabled: boolean("admin_fee_enabled").notNull().default(false),
+  adminFeeAmount: numeric("admin_fee_amount", { precision: 15, scale: 2 })
+    .notNull()
+    .default("20000"),
   materialReserveRate: numeric("material_reserve_rate", { precision: 5, scale: 4 })
     .notNull()
     .default("0.0000"),
@@ -233,6 +245,19 @@ export const payoutBatches = pgTable(
      * call without reading thirty-six hex digits.
      */
     code: varchar("code", { length: 3 }),
+    /**
+     * Fee yang berlaku KETIKA batch ini jalan, direkam ulang di sini.
+     *
+     * Bukan dibaca dari pengaturan saat ditampilkan: pengaturannya bisa
+     * berubah bulan depan, sedangkan fee sebuah batch adalah yang berlaku
+     * waktu itu. Aturan yang sama dengan tarif sedekah dan sub-seller yang
+     * sudah disimpan per mutasi.
+     */
+    adminFeeAmount: numeric("admin_fee_amount", { precision: 15, scale: 2 }),
+    adminFeeProofUrl: text("admin_fee_proof_url"),
+    /** Sidik jari isi buktinya, supaya satu bukti tidak dipakai dua batch. */
+    adminFeeProofHash: text("admin_fee_proof_hash"),
+    adminFeePaidAt: timestamp("admin_fee_paid_at", { withTimezone: true }),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     // v1-only, unused by v2 — see note above.
     totalTransferToAdmin: numeric("total_transfer_to_admin", { precision: 15, scale: 2 })

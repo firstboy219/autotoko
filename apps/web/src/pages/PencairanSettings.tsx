@@ -25,6 +25,8 @@ interface Settings {
   sedekahBankAccount: string | null;
   materialBankAccount: string | null;
   minTransferAmount: string;
+  adminFeeEnabled: boolean;
+  adminFeeAmount: string;
 }
 
 /**
@@ -72,6 +74,8 @@ export function PencairanSettings() {
   const [bank, setBank] = useState("");
   const [materialBank, setMaterialBank] = useState("");
   const [minTransfer, setMinTransfer] = useState("10000");
+  const [feeAktif, setFeeAktif] = useState(false);
+  const [feeNominal, setFeeNominal] = useState("20000");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -84,6 +88,8 @@ export function PencairanSettings() {
     setBank(data.sedekahBankAccount ?? "");
     setMaterialBank(data.materialBankAccount ?? "");
     setMinTransfer(String(Number(data.minTransferAmount ?? 10000)));
+    setFeeAktif(Boolean(data.adminFeeEnabled));
+    setFeeNominal(String(Number(data.adminFeeAmount ?? 20000)));
   }, [data]);
 
   const sedekahNum = Number(rate);
@@ -129,6 +135,8 @@ export function PencairanSettings() {
         sedekahBankAccount: bank || undefined,
         materialBankAccount: materialBank || undefined,
         minTransferAmount: Number(minTransfer) || 0,
+        adminFeeEnabled: feeAktif,
+        adminFeeAmount: Number(feeNominal) || 0,
       });
       toast("Pengaturan tersimpan", "success");
       reload();
@@ -344,6 +352,31 @@ export function PencairanSettings() {
                   onChange={(e) => setMinTransfer(e.target.value.replace(/\D/g, ""))}
                   className="tabular-nums"
                 />
+              </Field>
+              {/* Ongkos, bukan potongan. Sedekah dan sub-seller diambil DARI
+                  kredit yang cair; fee admin dibayar terpisah, satu kali per
+                  batch — itu sebabnya ia tidak ikut ke perhitungan pembagian
+                  manapun, dan kenapa buktinya berdiri sendiri. */}
+              <Field
+                label="Fee Admin per Batch"
+                hint="Ongkos tetap yang dibayar sekali tiap batch, di luar pembagian pencairan. Nominal yang berlaku direkam ke batch saat batch dibuat, jadi mengubahnya di sini tidak mengubah batch yang sudah jalan."
+              >
+                <label className="flex items-center gap-2 text-sm text-ink-2">
+                  <input
+                    type="checkbox"
+                    checked={feeAktif}
+                    onChange={(e) => setFeeAktif(e.target.checked)}
+                  />
+                  Aktifkan fee admin
+                </label>
+                {feeAktif && (
+                  <Input
+                    inputMode="numeric"
+                    value={feeNominal ? Number(feeNominal).toLocaleString("id-ID") : ""}
+                    onChange={(e) => setFeeNominal(e.target.value.replace(/\D/g, ""))}
+                    className="tabular-nums mt-2"
+                  />
+                )}
               </Field>
               <Field
                 label="Rekening Tujuan Bahan Baku"
