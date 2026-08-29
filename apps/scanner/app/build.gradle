@@ -16,8 +16,8 @@ android {
         applicationId "id.autotoko.scanner"
         minSdk 21
         targetSdk 34
-        versionCode 35
-        versionName "4.4"
+        versionCode 37
+        versionName "4.6"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -75,5 +75,9 @@ dependencies {
     // model download.
     implementation 'com.google.mlkit:barcode-scanning:17.2.0'
 
+    // org.json di android.jar cuma rangka kosong yang melempar saat unit
+    // test; implementasi sungguhan ini menggantikannya HANYA di classpath
+    // tes, supaya isi pesan WhatsApp bisa diuji tanpa perangkat.
+    testImplementation 'org.json:json:20231013'
     testImplementation 'junit:junit:4.13.2'
 }

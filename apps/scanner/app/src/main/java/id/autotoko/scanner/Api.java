@@ -335,6 +335,121 @@ public final class Api {
      * dari mana saja permintaannya datang. Yang dipindah ke sini cuma
      * layarnya.
      */
+    /* ---------------------------------- pengaturan, orang, dan laporan */
+
+    /**
+     * Baca struk pencairan marketplace yang baru diunggah.
+     *
+     * Titik OCR pertama, sama seperti di web: hasilnya cuma usulan yang mengisi
+     * kotak nominal, dan siapa pun masih bisa mengoreksinya sebelum disimpan.
+     */
+    public void payoutOcrPencairan(String imageUrl, Cb cb) {
+        JSONObject body = new JSONObject();
+        try { body.put("imageUrl", imageUrl); } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/payout/ocr/extract-pencairan",
+                session.token(), body, cb);
+    }
+
+    /**
+     * Rekam pencairan lengkap dengan apa yang dibaca OCR.
+     *
+     * Nominal yang diusulkan OCR disimpan terpisah dari nominal yang benar-benar
+     * dipakai, supaya selisih antara "yang terbaca" dan "yang diketik orang"
+     * masih bisa ditelusuri belakangan.
+     */
+    public void payoutRecordFull(String batchId, String shopId, String payoutDate,
+                                 double amount, String proofUrl, double ocrAmount,
+                                 String receivingAccount, Cb cb) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("batchId", batchId);
+            body.put("shopId", shopId);
+            body.put("payoutDate", payoutDate);
+            body.put("marketplaceProofAmount", amount);
+            if (proofUrl != null && !proofUrl.isEmpty()) body.put("marketplaceProofUrl", proofUrl);
+            if (ocrAmount >= 0) body.put("ocrSuggestedAmount", ocrAmount);
+            if (receivingAccount != null && !receivingAccount.isEmpty()) {
+                body.put("receivingAccount", receivingAccount);
+            }
+        } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/payout/mutations", session.token(), body, cb);
+    }
+
+    public void payoutSettings(Cb cb) {
+        call("GET", session.baseUrl() + "/api/payout/settings", session.token(), null, cb);
+    }
+
+    public void payoutSaveSettings(JSONObject body, Cb cb) {
+        call("PATCH", session.baseUrl() + "/api/payout/settings", session.token(), body, cb);
+    }
+
+    public void payoutSubSellers(Cb cb) {
+        call("GET", session.baseUrl() + "/api/payout/sub-sellers", session.token(), null, cb);
+    }
+
+    public void payoutCreateSubSeller(JSONObject body, Cb cb) {
+        call("POST", session.baseUrl() + "/api/payout/sub-sellers", session.token(), body, cb);
+    }
+
+    public void payoutUpdateSubSeller(String id, JSONObject body, Cb cb) {
+        call("PATCH", session.baseUrl() + "/api/payout/sub-sellers/" + id,
+                session.token(), body, cb);
+    }
+
+    public void payoutSubSubSellers(Cb cb) {
+        call("GET", session.baseUrl() + "/api/payout/sub-sub-sellers", session.token(), null, cb);
+    }
+
+    public void payoutCreateSubSubSeller(JSONObject body, Cb cb) {
+        call("POST", session.baseUrl() + "/api/payout/sub-sub-sellers",
+                session.token(), body, cb);
+    }
+
+    public void payoutUpdateSubSubSeller(String id, JSONObject body, Cb cb) {
+        call("PATCH", session.baseUrl() + "/api/payout/sub-sub-sellers/" + id,
+                session.token(), body, cb);
+    }
+
+    /** Rantai kepemilikan tiap toko beserta rate yang benar-benar berlaku. */
+    public void payoutMapping(Cb cb) {
+        call("GET", session.baseUrl() + "/api/payout/mapping", session.token(), null, cb);
+    }
+
+    /**
+     * Toko ini punya siapa.
+     *
+     * Melepas toko ke pemiliknya sendiri dikirim sebagai null yang eksplisit:
+     * field yang dihilangkan berarti "jangan diubah", jadi toko yang mau
+     * dilepas justru tidak akan berubah apa-apa.
+     */
+    public void payoutAssignShop(String shopId, JSONObject body, Cb cb) {
+        call("POST", session.baseUrl() + "/api/payout/shops/" + shopId + "/assign",
+                session.token(), body, cb);
+    }
+
+    /** Semua pencairan lintas batch; status null berarti semuanya. */
+    public void payoutMutations(String status, Cb cb) {
+        String q = (status == null || status.isEmpty()) ? "" : "?status=" + status;
+        call("GET", session.baseUrl() + "/api/payout/mutations" + q, session.token(), null, cb);
+    }
+
+    public void payoutProfit(String from, String to, Cb cb) {
+        call("GET", session.baseUrl() + "/api/payout/profit?from=" + from + "&to=" + to,
+                session.token(), null, cb);
+    }
+
+    /** Sisa yang tertahan karena di bawah minimum transfer, lintas batch. */
+    public void payoutCarryovers(Cb cb) {
+        call("GET", session.baseUrl() + "/api/payout/carryovers", session.token(), null, cb);
+    }
+
+    public void payoutReleaseCarryovers(String batchId, JSONArray ids, Cb cb) {
+        JSONObject body = new JSONObject();
+        try { body.put("ids", ids); } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/payout/batches/" + batchId
+                + "/release-carryovers", session.token(), body, cb);
+    }
+
     public void payoutBatches(Cb cb) {
         call("GET", session.baseUrl() + "/api/payout/batches", session.token(), null, cb);
     }

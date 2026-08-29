@@ -57,7 +57,10 @@ public class PayoutBatchActivity extends AppCompatActivity {
     private String disbursementMenunggu = null;
     private EditText nominalMenunggu = null;
     private MaterialButton tombolMenunggu = null;
-    private String urlBuktiCair = null;
+    private String urlBuktiCair = null;    /** Usulan OCR untuk pencairan yang sedang direkam; -1 berarti tidak terbaca. */
+    private double ocrNominal = -1;
+    private String ocrRekening = null;
+
 
     @Override
     protected void onCreate(Bundle b) {
@@ -104,8 +107,10 @@ public class PayoutBatchActivity extends AppCompatActivity {
                 return;
             }
             batch = r.data();
-            // Daftar toko hanya dibutuhkan untuk merekam; diambil sekali.
-            if (shops == null && "berjalan".equals(batch.optString("status"))) {
+            // Diambil sekali, apa pun status batchnya: namanya bukan cuma
+            // untuk merekam, tapi juga untuk pesan "Bagikan WA ke Seller"
+            // yang tetap tersedia sampai batch selesai.
+            if (shops == null) {
                 api.payoutShops(rr -> {
                     shops = rr.dataArray();
                     gambar();
@@ -138,13 +143,17 @@ public class PayoutBatchActivity extends AppCompatActivity {
             seller += m.optDouble("sellerAmount", 0);
             sub += m.optDouble("subSellerAmount", 0) + m.optDouble("subSubSellerAmount", 0);
         }
+        root.addView(tombolBagikan());
+        root.addView(tombolEkspor());
+
         root.addView(kotak("Ringkasan",
                 "Total kredit " + rp(credit)
                         + "\nSedekah " + rp(sedekah)
                         + "\nSub-seller " + rp(sub)
                         + "\nSeller " + rp(seller)));
 
-        kartuFee();
+        kartuFee();        kartuBawaan();
+
 
         if ("berjalan".equals(st)) {
             gambarTahap1(mutations, d);
@@ -383,7 +392,10 @@ public class PayoutBatchActivity extends AppCompatActivity {
         bukti.setText("Lampirkan bukti pencairan");
         bukti.setAllCaps(false);
         urlBuktiCair = null;
+        ocrNominal = -1;
+        ocrRekening = null;
         bukti.setOnClickListener(v -> {
+            nominalMenunggu = nominal;
             tombolMenunggu = bukti;
             disbursementMenunggu = null;
             pilihGambar(REQ_BUKTI_CAIR);
@@ -413,8 +425,8 @@ public class PayoutBatchActivity extends AppCompatActivity {
                 Toast.makeText(this, "Nominal belum diisi.", Toast.LENGTH_LONG).show();
                 return;
             }
-            api.payoutRecord(batchId, ids.get(idx), tgl.getText().toString().trim(),
-                    amount, urlBuktiCair, r -> {
+            api.payoutRecordFull(batchId, ids.get(idx), tgl.getText().toString().trim(),
+                    amount, urlBuktiCair, ocrNominal, ocrRekening, r -> {
                         if (!r.ok()) {
                             // Pesan servernya ditampilkan apa adanya: di situlah
                             // penjagaan pencairan ganda dan bukti berulang
@@ -607,7 +619,31 @@ public class PayoutBatchActivity extends AppCompatActivity {
             }
             if (reqFinal == REQ_BUKTI_CAIR) {
                 urlBuktiCair = url;
-                if (tombolMenunggu != null) tombolMenunggu.setText("Bukti terlampir");
+                if (tombolMenunggu != null) tombolMenunggu.setText("Membaca struk…");
+                // Titik OCR pertama, sama seperti di web: hasilnya mengisi kotak
+                // nominal sebagai usulan, dan tetap bisa dikoreksi. Gagal membaca
+                // bukan kegagalan mengunggah -- buktinya sudah tersimpan.
+                api.payoutOcrPencairan(url, ro -> {
+                    if (tombolMenunggu != null) tombolMenunggu.setText("Bukti terlampir");
+                    if (!ro.ok() || ro.data() == null) {
+                        Toast.makeText(this, "OCR tidak terbaca — isi nominal manual.",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    JSONObject o = ro.data();
+                    if (!o.isNull("amount")) {
+                        ocrNominal = o.optDouble("amount", -1);
+                        if (ocrNominal >= 0 && nominalMenunggu != null) {
+                            nominalMenunggu.setText(String.valueOf((long) ocrNominal));
+                        }
+                    }
+                    if (!o.isNull("account")) ocrRekening = o.optString("account", null);
+                    Toast.makeText(this,
+                            ocrNominal >= 0 || ocrRekening != null
+                                    ? "Terisi dari OCR — periksa dan koreksi kalau perlu."
+                                    : "OCR tidak berhasil membaca — isi manual.",
+                            Toast.LENGTH_LONG).show();
+                });
                 return;
             }
             // Bukti transfer: langsung dikirim untuk divalidasi server, sama
@@ -644,6 +680,293 @@ public class PayoutBatchActivity extends AppCompatActivity {
     }
 
     /* ------------------------------------------------------ bantu */
+
+    /**
+     * Dua tombol bagikan, syaratnya sama persis dengan web.
+     *
+     * Ditaruh di kartu kepala, bukan di dalam salah satu langkah. Kalau
+     * ditempel per langkah, pada batch yang sedang ditransfer tidak satu pun
+     * bisa dijangkau -- persis keluhan yang dulu muncul di web.
+     */
+    private View tombolBagikan() {
+        float d = getResources().getDisplayMetrics().density;
+        LinearLayout baris = new LinearLayout(this);
+        baris.setOrientation(LinearLayout.HORIZONTAL);
+        baris.setPadding(0, (int) (8 * d), 0, 0);
+
+        if (PayoutShare.bisaBagikanSeller(batch)) {
+            baris.addView(tombolBagi("Bagikan WA ke Seller", v -> bagikanWa(
+                    PayoutShare.pesanSeller(batch, shops, new Session(this).baseUrl()))));
+        }
+        if (PayoutShare.bisaBagikanSubSeller(batch)) {
+            baris.addView(tombolBagi("Bagikan WA ke Sub-seller", v -> bagikanWa(
+                    PayoutShare.pesanSubSeller(batch, new Session(this).baseUrl()))));
+        }
+        return baris;
+    }
+
+    private MaterialButton tombolBagi(String teks, View.OnClickListener aksi) {
+        float d = getResources().getDisplayMetrics().density;
+        MaterialButton b = new MaterialButton(this);
+        b.setText(teks);
+        b.setAllCaps(false);
+        b.setTextSize(12);
+        b.setOnClickListener(aksi);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        lp.rightMargin = (int) (4 * d);
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    /** Langsung ke WhatsApp kalau terpasang; pemilih aplikasi cadangannya. */
+    private void bagikanWa(String teks) {
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_TEXT, teks);
+        try {
+            send.setPackage("com.whatsapp");
+            startActivity(send);
+        } catch (Exception e) {
+            send.setPackage(null);
+            startActivity(Intent.createChooser(send, "Bagikan lewat"));
+        }
+    }
+
+    /**
+     * Uang yang tertahan dan uang yang terbawa.
+     *
+     * Keduanya ditampilkan karena keduanya menggeser total: yang ditahan
+     * membuat langkah 2 lebih kecil dari kepala halaman, yang terbawa dari
+     * batch sebelumnya membuatnya lebih besar. Tanpa ini selisihnya terbaca
+     * seperti salah hitung.
+     */
+    private void kartuBawaan() {
+        JSONObject c = batch.optJSONObject("carryovers");
+        if (c == null) return;
+        StringBuilder isi = new StringBuilder();
+
+        JSONArray ditahan = c.optJSONArray("held");
+        if (ditahan != null && ditahan.length() > 0) {
+            isi.append("Menunggu batch berikutnya:\n");
+            for (int i = 0; i < ditahan.length(); i++) {
+                JSONObject x = ditahan.optJSONObject(i);
+                if (x == null) continue;
+                isi.append("• ").append(PayoutUi.str(x, "name", "-")).append(" ")
+                   .append(rp(PayoutUi.num(x, "amount"))).append("\n");
+            }
+            isi.append("Uangnya tidak hilang — ikut ditransfer begitu jumlahnya "
+                    + "melewati batas minimum.\n");
+        }
+
+        JSONArray terbawa = c.optJSONArray("applied");
+        if (terbawa != null && terbawa.length() > 0) {
+            if (isi.length() > 0) isi.append("\n");
+            isi.append("Dibawa dari batch sebelumnya:\n");
+            for (int i = 0; i < terbawa.length(); i++) {
+                JSONObject x = terbawa.optJSONObject(i);
+                if (x == null) continue;
+                isi.append("• ").append(PayoutUi.str(x, "name", "-")).append(" ")
+                   .append(rp(PayoutUi.num(x, "amount"))).append("\n");
+            }
+        }
+
+        if (isi.length() > 0) {
+            root.addView(kotak("Bawaan", isi.toString().trim()));
+        }
+
+        // Mencairkan sisa yang tertahan hanya masuk akal selagi batch masih
+        // menerima input.
+        if ("berjalan".equals(batch.optString("status", ""))) tombolLepasBawaan();
+    }
+
+    /**
+     * Cairkan sisa seseorang sekarang, tak peduli batas minimum.
+     *
+     * Sengaja per penerima, bukan satu tombol "lepas semua": membayar saldo di
+     * bawah batas bank adalah keputusan tentang uang satu orang -- biasanya
+     * karena ia berhenti berjualan -- dan tidak boleh kejadian pada tiga orang
+     * lain sebagai efek samping.
+     */
+    private void tombolLepasBawaan() {
+        api.payoutCarryovers(r -> {
+            JSONArray a = r.dataArray();
+            if (a == null || a.length() == 0) return;
+            root.addView(judul("Sisa Tertahan dari Batch Lalu"));
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject c = a.optJSONObject(i);
+                if (c == null) continue;
+                final JSONObject item = c;
+                final String nama = PayoutUi.str(c, "name", "-");
+                final double nominal = PayoutUi.num(c, "amount");
+                MaterialButton b = new MaterialButton(this);
+                b.setText("Cairkan sisa " + nama + " " + rp(nominal));
+                b.setAllCaps(false);
+                b.setTextSize(12);
+                b.setOnClickListener(v -> new MaterialAlertDialogBuilder(this)
+                        .setTitle("Cairkan sekarang?")
+                        .setMessage("Cairkan sisa " + nama + " sebesar " + rp(nominal)
+                                + " sekarang?\n\nNominalnya di bawah minimum transfer, jadi "
+                                + "bank mungkin menolak. Pakai ini kalau kamu memang akan "
+                                + "mentransfernya dengan cara lain.")
+                        .setPositiveButton("Cairkan", (dd, w) -> lepasBawaan(item, nama))
+                        .setNegativeButton("Batal", null)
+                        .show());
+                root.addView(b, lebar());
+            }
+        });
+    }
+
+    private void lepasBawaan(JSONObject c, String nama) {
+        JSONArray ids = c.optJSONArray("ids");
+        if (ids == null || ids.length() == 0) {
+            Toast.makeText(this, "Tidak ada sisa yang bisa dicairkan.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        api.payoutReleaseCarryovers(batchId, ids, r -> {
+            if (!r.ok()) {
+                Toast.makeText(this, r.message("Gagal mencairkan sisa."),
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            Toast.makeText(this, "Sisa " + nama + " masuk ke daftar transfer batch ini.",
+                    Toast.LENGTH_LONG).show();
+            muat();
+        });
+    }
+
+    /** Rekap batch sebagai berkas, isinya sama dengan tombol Excel/PNG di web. */
+    private View tombolEkspor() {
+        LinearLayout baris = new LinearLayout(this);
+        baris.setOrientation(LinearLayout.HORIZONTAL);
+        JSONArray m = batch.optJSONArray("mutations");
+        if (m == null || m.length() == 0) return baris;
+        baris.addView(tombolBagi("Ekspor CSV", v -> eksporCsv()));
+        baris.addView(tombolBagi("Ekspor PNG", v -> eksporPng()));
+        return baris;
+    }
+
+    private String kodeBatch() {
+        String c = batch.optString("code", "");
+        if (!c.isEmpty() && !"null".equals(c)) return c;
+        String id = batch.optString("id", "batch");
+        return id.substring(0, Math.min(8, id.length()));
+    }
+
+    private static String csvEscape(String v) {
+        if (v == null) return "";
+        return (v.contains(",") || v.contains("\"") || v.contains("\n"))
+                ? "\"" + v.replace("\"", "\"\"") + "\""
+                : v;
+    }
+
+    private String subDariToko(String shopId, String kunci) {
+        for (int i = 0; shops != null && i < shops.length(); i++) {
+            JSONObject s = shops.optJSONObject(i);
+            if (s != null && shopId != null && shopId.equals(PayoutUi.str(s, "id", null))) {
+                return PayoutUi.str(s, kunci, "");
+            }
+        }
+        return "";
+    }
+
+    private void eksporCsv() {
+        JSONArray m = batch.optJSONArray("mutations");
+        if (m == null || m.length() == 0) return;
+        String[] kepala = {"Toko", "Tanggal", "Total Kredit", "Sedekah", "Seller",
+                "Sub-seller", "Nama Sub-seller", "Sub-sub-seller", "Nama Sub-sub-seller",
+                "Link Bukti"};
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < kepala.length; i++) {
+            b.append(i > 0 ? "," : "").append(csvEscape(kepala[i]));
+        }
+        b.append("\r\n");
+
+        double tk = 0, ts = 0, tse = 0, tsub = 0, tsub2 = 0;
+        String base = new Session(this).baseUrl();
+        for (int i = 0; i < m.length(); i++) {
+            JSONObject x = m.optJSONObject(i);
+            if (x == null) continue;
+            double kredit = PayoutUi.num(x, "creditAmount");
+            double sed = PayoutUi.num(x, "sedekahAmount");
+            double sel = PayoutUi.num(x, "sellerAmount");
+            double sub = PayoutUi.num(x, "subSellerAmount");
+            double sub2 = PayoutUi.num(x, "subSubSellerAmount");
+            tk += kredit; ts += sed; tse += sel; tsub += sub; tsub2 += sub2;
+            String shopId = PayoutUi.str(x, "shopId", null);
+            String bukti = PayoutShare.absolut(PayoutUi.str(x, "marketplaceProofUrl", null), base);
+            b.append(csvEscape(namaToko(shopId))).append(",")
+             .append(csvEscape(PayoutUi.str(x, "payoutDate", ""))).append(",")
+             .append((long) kredit).append(",").append((long) sed).append(",")
+             .append((long) sel).append(",").append((long) sub).append(",")
+             .append(csvEscape(subDariToko(shopId, "subSellerName"))).append(",")
+             .append((long) sub2).append(",")
+             .append(csvEscape(subDariToko(shopId, "subSubSellerName"))).append(",")
+             .append(csvEscape(bukti == null ? "" : bukti)).append("\r\n");
+        }
+        b.append("TOTAL,,").append((long) tk).append(",").append((long) ts).append(",")
+         .append((long) tse).append(",").append((long) tsub).append(",,")
+         .append((long) tsub2).append(",,\r\n");
+
+        try {
+            java.io.File f = new java.io.File(getExternalFilesDir(null),
+                    "rekap-pencairan-" + kodeBatch() + ".csv");
+            java.io.FileOutputStream os = new java.io.FileOutputStream(f);
+            // BOM di depan supaya Excel membuka berkas UTF-8 ini dengan benar.
+            os.write(0xEF); os.write(0xBB); os.write(0xBF);
+            os.write(b.toString().getBytes("UTF-8"));
+            os.close();
+            bagikanBerkas(f, "text/csv");
+        } catch (Exception e) {
+            Toast.makeText(this, "Gagal membuat CSV.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /**
+     * Gambar seluruh isi layar batch.
+     *
+     * Digambar dari View-nya sendiri, bukan tangkapan layar: yang di luar
+     * layar ikut terekam, dan itulah yang membuat rekap panjang tetap utuh.
+     */
+    private void eksporPng() {
+        try {
+            int w = root.getWidth();
+            int h = root.getHeight();
+            if (w <= 0 || h <= 0) {
+                Toast.makeText(this, "Halamannya belum siap digambar.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas kanvas = new android.graphics.Canvas(bmp);
+            kanvas.drawColor(Color.WHITE);
+            root.draw(kanvas);
+            java.io.File f = new java.io.File(getExternalFilesDir(null),
+                    "rekap-pencairan-" + kodeBatch() + ".png");
+            java.io.FileOutputStream os = new java.io.FileOutputStream(f);
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, os);
+            os.close();
+            bmp.recycle();
+            bagikanBerkas(f, "image/png");
+        } catch (Exception e) {
+            Toast.makeText(this, "Gagal membuat PNG.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void bagikanBerkas(java.io.File f, String mime) {
+        try {
+            android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(
+                    this, getPackageName() + ".berkas", f);
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType(mime);
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(send, "Bagikan lewat"));
+        } catch (Exception e) {
+            Toast.makeText(this, "Tidak ada aplikasi yang bisa menerima berkas ini.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
 
     private String namaToko(String shopId) {
         for (int i = 0; shops != null && i < shops.length(); i++) {

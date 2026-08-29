@@ -56,6 +56,16 @@ public class PayoutActivity extends AppCompatActivity {
         root.addView(newBatch, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        // Lima layar pendukung di balik satu tombol, bukan lima tombol
+        // berjajar: semuanya jarang dibuka, dan yang sering dipakai di layar
+        // ini cuma "mulai batch".
+        MaterialButton lainnya = new MaterialButton(this);
+        lainnya.setText("Pengaturan & Data Pencairan");
+        lainnya.setAllCaps(false);
+        lainnya.setOnClickListener(v -> menuLainnya());
+        root.addView(lainnya, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         // Beberapa batch boleh berjalan bersamaan, sama seperti di web:
         // pencairan tiap marketplace datang di hari berbeda dan tidak harus
         // saling menunggu. Yang direkam selalu masuk ke batch yang dibuka.
@@ -91,6 +101,29 @@ public class PayoutActivity extends AppCompatActivity {
     public boolean onSupportNavigateUp() {
         finish();
         return true;
+    }
+
+    /** Lima layar yang di web jadi lima halaman terpisah di menu Pencairan. */
+    private void menuLainnya() {
+        final String[] judul = {
+            "Pengaturan Pencairan",
+            "Sub-seller & Toko",
+            "Pemetaan Toko",
+            "Mutasi Pencairan",
+            "Laba Pencairan",
+        };
+        final Class<?>[] layar = {
+            PayoutSettingsActivity.class,
+            PayoutPeopleActivity.class,
+            PayoutMappingActivity.class,
+            PayoutMutationsActivity.class,
+            PayoutProfitActivity.class,
+        };
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Pencairan Dana")
+                .setItems(judul, (d, w) -> startActivity(new Intent(this, layar[w])))
+                .setNegativeButton("Tutup", null)
+                .show();
     }
 
     private void mulaiBatch() {

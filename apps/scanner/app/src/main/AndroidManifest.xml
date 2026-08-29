@@ -60,6 +60,36 @@
             android:screenOrientation="portrait" />
 
         <activity
+            android:name=".PayoutSettingsActivity"
+            android:exported="false"
+            android:label="Pengaturan Pencairan"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".PayoutPeopleActivity"
+            android:exported="false"
+            android:label="Sub-seller &amp; Toko"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".PayoutMappingActivity"
+            android:exported="false"
+            android:label="Pemetaan Toko"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".PayoutMutationsActivity"
+            android:exported="false"
+            android:label="Mutasi Pencairan"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".PayoutProfitActivity"
+            android:exported="false"
+            android:label="Laba Pencairan"
+            android:screenOrientation="portrait" />
+
+        <activity
             android:name=".LoginActivity"
             android:exported="true"
             android:screenOrientation="portrait">
