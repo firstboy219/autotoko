@@ -360,3 +360,29 @@ export const resiScans = pgTable(
     userScannedIdx: index("resi_scans_user_scanned_idx").on(t.userId, t.scannedAt),
   }),
 );
+
+/**
+ * Kurir di luar daftar bawaan, milik satu seller.
+ *
+ * Daftar bawaan hidup di kode karena kurir nasional memang sama untuk semua
+ * orang. Yang tidak tertampung di situ: kurir lokal, layanan marketplace yang
+ * baru muncul, dan barang yang diantar sendiri. Tabel ini menambah daftar itu,
+ * bukan menggantikannya.
+ *
+ * Panjangnya dikunci 32 mengikuti resi_scans.courier, kolom yang nanti
+ * benar-benar menyimpan namanya.
+ */
+export const customCouriers = pgTable(
+  "custom_couriers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 32 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("custom_couriers_user_idx").on(t.userId),
+  }),
+);

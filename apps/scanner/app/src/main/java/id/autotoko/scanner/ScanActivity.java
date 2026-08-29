@@ -314,6 +314,10 @@ public class ScanActivity extends AppCompatActivity {
         loadCatalogue();
         loadMappingOptions();
         loadOcrMemory();
+        // Versi diperiksa di sini, bukan di layar login: HP gudang tetap
+        // masuk berhari-hari, jadi pemeriksaan yang menempel di login
+        // sungguhan nyaris tidak pernah jalan. Sekali per aplikasi dibuka.
+        UpdateActivity.periksaSekali(this, api);
         banner = findViewById(R.id.banner);
         bannerText = findViewById(R.id.bannerText);
 
@@ -1238,8 +1242,9 @@ public class ScanActivity extends AppCompatActivity {
         List<String> courierNames = new ArrayList<>();
         courierNames.add("— pilih kurir —");
         courierNames.addAll(courierList);
-        courierSpinner.setAdapter(new ArrayAdapter<>(
-                this, android.R.layout.simple_spinner_dropdown_item, courierNames));
+        final ArrayAdapter<String> courierAdapter = new ArrayAdapter<>(
+                this, android.R.layout.simple_spinner_dropdown_item, courierNames);
+        courierSpinner.setAdapter(courierAdapter);
         // The barcode already told us the carrier more reliably than any
         // guess, so it is preselected — and still shown, so a wrong read is
         // visible rather than filed silently.
@@ -1254,6 +1259,11 @@ public class ScanActivity extends AppCompatActivity {
             courierSpinner.setSelection(1);
         }
         root.addView(courierSpinner);
+        // Kurirnya bisa ditambah dari sini juga. Kebutuhannya muncul saat
+        // paket sedang dipegang; menyuruh orang menyeberang layar pada saat
+        // itu berarti kurirnya tidak akan diisi sama sekali.
+        root.addView(CourierPicker.tombolTambah(this, api, courierAdapter,
+                courierNames, courierSpinner, courierList));
 
         final TextView originNote = new TextView(this);
         originNote.setTextSize(11);

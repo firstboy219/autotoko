@@ -666,9 +666,14 @@ public class HistoryActivity extends AppCompatActivity {
             courierNames.add("— pilih kurir —");
             courierNames.addAll(couriers);
             final Spinner courierSpinner = new Spinner(this);
-            courierSpinner.setAdapter(new ArrayAdapter<>(this,
-                    android.R.layout.simple_spinner_dropdown_item, courierNames));
+            final ArrayAdapter<String> courierAdapter = new ArrayAdapter<>(this,
+                    android.R.layout.simple_spinner_dropdown_item, courierNames);
+            courierSpinner.setAdapter(courierAdapter);
             root.addView(courierSpinner);
+            // Resi lama yang kurirnya belum pernah ada di daftar dibereskan
+            // dari sini, tanpa perlu membuka web.
+            root.addView(CourierPicker.tombolTambah(this, api, courierAdapter,
+                    courierNames, courierSpinner, couriers));
 
             new MaterialAlertDialogBuilder(this)
                     .setTitle("Asal paket")

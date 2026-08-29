@@ -629,6 +629,29 @@ public final class Api {
         call("GET", session.baseUrl() + "/api/resi/ocr-hints", session.token(), null, cb);
     }
 
+    /** Kurir bawaan dan kurir tambahan seller ini, terpisah. */
+    public void couriers(Cb cb) {
+        call("GET", session.baseUrl() + "/api/resi/couriers", session.token(), null, cb);
+    }
+
+    /** Tambah kurir yang tidak ada di daftar bawaan. */
+    public void addCourier(String name, Cb cb) {
+        JSONObject body = new JSONObject();
+        try { body.put("name", name); } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/resi/couriers", session.token(), body, cb);
+    }
+
+    /**
+     * Hapus satu kurir tambahan.
+     *
+     * Resi yang terlanjur memakainya tidak berubah -- nama kurir tersimpan
+     * sebagai teks di resi, bukan rujukan ke baris yang dihapus ini.
+     */
+    public void deleteCourier(String id, Cb cb) {
+        call("DELETE", session.baseUrl() + "/api/resi/couriers/" + id,
+                session.token(), null, cb);
+    }
+
     /** The seller's shops and the courier list, for the mapping sheet. */
     public void mappingOptions(Cb cb) {
         call("GET", session.baseUrl() + "/api/resi/mapping-options", session.token(), null, cb);

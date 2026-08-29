@@ -17,6 +17,7 @@ import {
   resiScanPhotos,
   resiScans,
   shops,
+  customCouriers,
 } from "../../database/schema/index.js";
 import { UploadsService } from "../uploads/uploads.service.js";
 import { CourierTrackingService } from "./courier-tracking.service.js";
@@ -1139,7 +1140,96 @@ export class ResiService {
       }
     }
 
-    return { shops: shopList, couriers: COURIER_NAMES, marketplaces: MARKETPLACES, suggestion };
+    return {
+      shops: shopList,
+      couriers: await this.courierList(userId),
+      marketplaces: MARKETPLACES,
+      suggestion,
+    };
+  }
+
+  /**
+   * Nama kurir yang boleh dipilih: bawaan dulu, lalu tambahan seller ini.
+   *
+   * Bawaan tetap di depan dan tetap berurutan seperti di kode, karena itulah
+   * yang dipakai 99% paket; tambahan menyusul dan diurut sendiri. Yang sama
+   * dengan bawaan disaring supaya tidak muncul dua kali -- baris seperti itu
+   * bisa ada kalau nama bawaan bertambah setelah seller sempat membuatnya.
+   */
+  private async courierList(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ name: customCouriers.name })
+      .from(customCouriers)
+      .where(eq(customCouriers.userId, userId));
+    const bawaan = new Set(COURIER_NAMES.map((c) => c.toLowerCase()));
+    const tambahan = rows
+      .map((r) => r.name)
+      .filter((n) => !bawaan.has(n.toLowerCase()))
+      .sort((a, b) => a.localeCompare(b, "id"));
+    return [...COURIER_NAMES, ...tambahan];
+  }
+
+  /** Bawaan dan tambahan terpisah, untuk layar yang perlu mengelolanya. */
+  async couriers(userId: string) {
+    const rows = await this.db
+      .select({ id: customCouriers.id, name: customCouriers.name })
+      .from(customCouriers)
+      .where(eq(customCouriers.userId, userId))
+      .orderBy(asc(customCouriers.name));
+    return { builtin: [...COURIER_NAMES], custom: rows };
+  }
+
+  /**
+   * Tambah satu kurir.
+   *
+   * Namanya dirapikan dulu -- spasi ganda dan spasi di ujung tidak terlihat di
+   * layar tapi membuat "JNE " dan "JNE" jadi dua kurir berbeda selamanya.
+   */
+  async addCourier(userId: string, nameRaw: string) {
+    const name = (nameRaw ?? "").trim().replace(/\s+/g, " ");
+    if (name.length < 2) {
+      throw new BadRequestException("Nama kurir minimal 2 huruf.");
+    }
+    if (name.length > 32) {
+      throw new BadRequestException("Nama kurir maksimal 32 huruf.");
+    }
+    const bentrok = COURIER_NAMES.find((c) => c.toLowerCase() === name.toLowerCase());
+    if (bentrok) {
+      throw new ConflictException(`"${bentrok}" sudah ada di daftar bawaan.`);
+    }
+    try {
+      const [row] = await this.db
+        .insert(customCouriers)
+        .values({ userId, name })
+        .returning({ id: customCouriers.id, name: customCouriers.name });
+      return row;
+    } catch (e) {
+      // 23505 = unique_violation. Nama yang sama, beda besar-kecil huruf,
+      // tetap kena karena indeksnya di lower(name).
+      if ((e as { code?: string }).code === "23505") {
+        throw new ConflictException(`Kurir "${name}" sudah ada di daftar Anda.`);
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Hapus satu kurir tambahan.
+   *
+   * Resi yang terlanjur memakainya TIDAK ikut berubah: nama kurir tersimpan
+   * sebagai teks di resi masing-masing, bukan sebagai rujukan ke baris ini.
+   * Menghapusnya hanya menghilangkannya dari daftar pilihan, dan itu memang
+   * yang diinginkan ketika yang dihapus adalah salah ketik.
+   */
+  async removeCourier(userId: string, id: string) {
+    const hapus = await this.db
+      .delete(customCouriers)
+      .where(and(eq(customCouriers.id, id), eq(customCouriers.userId, userId)))
+      .returning({ id: customCouriers.id });
+    if (!hapus.length) {
+      throw new NotFoundException("Kurir tambahan tidak ditemukan.");
+    }
+    return { deleted: true };
   }
 
   /**

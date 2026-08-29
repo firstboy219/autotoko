@@ -1,5 +1,6 @@
 package id.autotoko.scanner;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.graphics.Color;
@@ -81,6 +82,82 @@ public class UpdateActivity extends AppCompatActivity {
     /** Unduhan sudah ada dan sha256-nya cocok, tinggal dipasang. */
     private boolean siapPasang = false;
 
+    /**
+     * Sudah ditawari pembaruan sekali sejak aplikasi ini dibuka.
+     *
+     * Sekali per proses, bukan sekali per layar: layar beranda dibuat ulang
+     * tiap kali orang kembali ke sana, dan dialog yang muncul tiap kali akan
+     * diketuk "Nanti" tanpa pernah dibaca.
+     */
+    private static boolean sudahDitawari = false;
+
+    static int versiKode(android.content.Context c) {
+        try {
+            PackageInfo pi = c.getPackageManager().getPackageInfo(c.getPackageName(), 0);
+            return Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                    ? (int) pi.getLongVersionCode()
+                    : pi.versionCode;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    static String versiNama(android.content.Context c) {
+        try {
+            String n = c.getPackageManager()
+                    .getPackageInfo(c.getPackageName(), 0).versionName;
+            return n == null ? "?" : n;
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
+    /**
+     * Tawarkan pembaruan begitu aplikasi dibuka, kalau ada yang lebih baru.
+     *
+     * Dipanggil dari layar beranda, bukan dari layar login: HP gudang tetap
+     * masuk berhari-hari, jadi pemeriksaan yang hanya jalan saat login
+     * sungguhan nyaris tidak pernah jalan.
+     *
+     * Gagal memeriksa didiamkan. Server yang tak terjangkau bukan alasan untuk
+     * menghalangi orang yang sedang memegang paket -- dan APK yang tertinggal
+     * satu versi masih bisa bekerja, sedangkan yang tidak bisa membuka layar
+     * sama sekali tidak.
+     */
+    static void periksaSekali(final Activity a, Api api) {
+        if (sudahDitawari) return;
+        sudahDitawari = true;
+        final int terpasang = versiKode(a);
+        api.appReleases(r -> {
+            if (!r.ok() || r.data() == null) return;
+            JSONObject cur = r.data().optJSONObject("current");
+            if (cur == null) return;
+            if (cur.optInt("versionCode", 0) <= terpasang) return;
+            if (a.isFinishing() || a.isDestroyed()) return;
+
+            StringBuilder p = new StringBuilder();
+            p.append("Scan Resi ").append(cur.optString("versionName", ""))
+             .append(" sudah terbit.\n");
+            p.append("Versi di HP ini: ").append(versiNama(a)).append(".");
+            String catatan = cur.optString("notes", "");
+            if (!catatan.isEmpty() && !"null".equals(catatan)) {
+                p.append("\n\n").append(catatan);
+            }
+
+            new MaterialAlertDialogBuilder(a)
+                    .setTitle("Versi baru tersedia")
+                    .setMessage(p.toString())
+                    // Tidak bisa ditutup dengan mengetuk di luar kotak: satu
+                    // ketukan tak sengaja tidak boleh terhitung sebagai
+                    // "nanti saja".
+                    .setCancelable(false)
+                    .setPositiveButton("Perbarui Sekarang",
+                            (d, w) -> a.startActivity(new Intent(a, UpdateActivity.class)))
+                    .setNegativeButton("Nanti", null)
+                    .show();
+        });
+    }
+
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -89,16 +166,10 @@ public class UpdateActivity extends AppCompatActivity {
         setTitle("Versi Aplikasi");
         if (getSupportActionBar() != null) getSupportActionBar().setDisplayHomeAsUpEnabled(true);
 
-        PackageInfo pi = null;
-        try {
-            pi = getPackageManager().getPackageInfo(getPackageName(), 0);
-        } catch (Exception ignored) {}
-        if (pi != null) {
-            namaTerpasang = pi.versionName == null ? "?" : pi.versionName;
-            kodeTerpasang = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
-                    ? (int) pi.getLongVersionCode()
-                    : pi.versionCode;
-        }
+        // Dibaca lewat pembantu yang sama dengan pemeriksa di beranda, supaya
+        // tidak ada dua cara membaca versi yang bisa menyimpang satu sama lain.
+        namaTerpasang = versiNama(this);
+        kodeTerpasang = versiKode(this);
         berkas = new File(getExternalFilesDir(null), NAMA_BERKAS);
 
         float d = getResources().getDisplayMetrics().density;

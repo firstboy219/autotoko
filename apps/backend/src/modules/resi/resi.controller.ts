@@ -517,6 +517,33 @@ export class ResiController {
     return { success: true, data: await this.memory.hints(uid(req)) };
   }
 
+  /**
+   * Kurir yang boleh dipilih: bawaan dari kode, tambahan dari seller.
+   *
+   * Dipisah di sini -- tidak seperti mapping-options yang menggabungkannya --
+   * karena layar yang mengelola perlu tahu mana yang boleh dihapus.
+   */
+  @Get("couriers")
+  async couriers(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.couriers(uid(req)) };
+  }
+
+  @Post("couriers")
+  async addCourier(
+    @Req() req: FastifyRequest,
+    @Body() body: { name: string },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.addCourier(uid(req), body?.name) };
+  }
+
+  @Delete("couriers/:id")
+  async removeCourier(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.resi.removeCourier(uid(req), id) };
+  }
+
   @Get("mapping-options")
   async mappingLists(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.resi.mappingOptions(uid(req)) };
