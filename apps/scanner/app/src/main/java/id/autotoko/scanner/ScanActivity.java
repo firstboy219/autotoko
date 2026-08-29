@@ -318,6 +318,9 @@ public class ScanActivity extends AppCompatActivity {
         // masuk berhari-hari, jadi pemeriksaan yang menempel di login
         // sungguhan nyaris tidak pernah jalan. Sekali per aplikasi dibuka.
         UpdateActivity.periksaSekali(this, api);
+        // Siapa yang masuk dan boleh apa. Dipakai hanya untuk menyembunyikan
+        // menu yang pasti tertutup -- yang menegakkan aturannya tetap server.
+        Access.muat(api);
         banner = findViewById(R.id.banner);
         bannerText = findViewById(R.id.bannerText);
 
@@ -2100,9 +2103,42 @@ public class ScanActivity extends AppCompatActivity {
             });
         } catch (Exception ignored) {}
 
+        // Menu yang tidak boleh dibuka akun ini disembunyikan. Baris yang
+        // selalu menolak saat diketuk terbaca sebagai aplikasi rusak, bukan
+        // sebagai akses yang memang tidak diberikan.
+        final int[][] menuIzin = {
+            {R.id.menuDashboard, 0}, {R.id.menuDelivery, 1}, {R.id.menuStock, 1},
+            {R.id.menuTextScan, 2}, {R.id.menuHistory, 3}, {R.id.menuRecap, 3},
+            {R.id.menuPayout, 4}, {R.id.menuPending, 0},
+        };
+        final String[] kunci = {"dashboard", "bahan", "produk", "scan", "pencairan"};
+        for (int[] pasangan : menuIzin) {
+            View baris = sheet.findViewById(pasangan[0]);
+            if (baris != null && !Access.boleh(kunci[pasangan[1]])) {
+                baris.setVisibility(View.GONE);
+            }
+        }
+
+        // Mengelola karyawan hanya untuk pemiliknya. Karyawan yang bisa
+        // membuat karyawan lain membuat seluruh lapisan izin tidak ada artinya.
+        View barisStaf = sheet.findViewById(R.id.menuStaff);
+        if (barisStaf != null) {
+            if (Access.termuat() && !Access.pemilik()) {
+                barisStaf.setVisibility(View.GONE);
+            } else {
+                barisStaf.setOnClickListener(v -> {
+                    dialog.dismiss();
+                    startActivity(new Intent(this, StaffActivity.class));
+                });
+            }
+        }
+
         sheet.findViewById(R.id.menuLogout).setOnClickListener(v -> {
             dialog.dismiss();
             session.clear();
+            // Izin akun sebelumnya harus ikut dilupakan, kalau tidak orang
+            // berikutnya yang masuk di HP ini melihat menu milik yang tadi.
+            Access.lupakan();
             startActivity(new Intent(this, LoginActivity.class));
             finish();
         });

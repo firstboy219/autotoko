@@ -9,7 +9,7 @@ import { JwtService } from "@nestjs/jwt";
 import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { createHash, randomBytes } from "node:crypto";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { passwordResetTokens, users } from "../../database/schema/index.js";
+import { passwordResetTokens, staffAccounts, users } from "../../database/schema/index.js";
 import { MailService } from "../../common/mail/mail.service.js";
 import { ConfigService } from "@nestjs/config";
 import { TenantService } from "../../database/tenant.service.js";
@@ -66,15 +66,62 @@ export class PasswordAuthService {
     // response latency reveals which addresses are registered.
     const ok = await verifyPassword(password, row?.passwordHash ?? null);
 
-    if (!row || !ok) {
-      throw new UnauthorizedException("Email atau password salah.");
-    }
-    if (!row.isActive || row.isSuspended) {
-      throw new UnauthorizedException("Akun ini telah dinonaktifkan atau ditangguhkan.");
+    if (row && ok) {
+      if (!row.isActive || row.isSuspended) {
+        throw new UnauthorizedException("Akun ini telah dinonaktifkan atau ditangguhkan.");
+      }
+      const payload: JwtPayload = { sub: row.id, role: "user", email };
+      return { accessToken: this.jwt.sign(payload) };
     }
 
-    const payload: JwtPayload = { sub: row.id, role: "user", email };
-    return { accessToken: this.jwt.sign(payload) };
+    // Bukan akun pemilik. Coba akun karyawan, lewat pintu login yang SAMA:
+    // karyawan tidak boleh disuruh mengingat alamat masuk yang berbeda, dan
+    // dua halaman login berarti dua tempat yang harus sama-sama benar.
+    //
+    // Baris pemilik yang ada tapi passwordnya salah tidak jatuh ke sini --
+    // email dijamin unik di antara kedua tabel, jadi tidak ada karyawan
+    // dengan alamat itu untuk dicoba.
+    if (!row) {
+      const staf = await this.tenant.runBypass(async () => {
+        const [s] = await this.db
+          .select({
+            id: staffAccounts.id,
+            userId: staffAccounts.userId,
+            passwordHash: staffAccounts.passwordHash,
+            isActive: staffAccounts.isActive,
+          })
+          .from(staffAccounts)
+          .where(sql`lower(${staffAccounts.email}) = ${email}`)
+          .limit(1);
+        return s ?? null;
+      });
+      const okStaf = await verifyPassword(password, staf?.passwordHash ?? null);
+      if (staf && okStaf) {
+        if (!staf.isActive) {
+          throw new UnauthorizedException("Akun karyawan ini sudah dinonaktifkan.");
+        }
+        await this.tenant.runBypass(async () => {
+          await this.db
+            .update(staffAccounts)
+            .set({ lastLoginAt: new Date() })
+            .where(eq(staffAccounts.id, staf.id));
+        });
+        // sub = pemiliknya, bukan karyawannya: itu yang membuat seluruh RLS
+        // dan app.user_id bekerja tanpa satu pun kueri diubah.
+        const payload: JwtPayload = {
+          sub: staf.userId,
+          role: "user",
+          email,
+          staffId: staf.id,
+          // Diambil SETELAH pemeriksaan di atas, jadi ia selalu lebih baru
+          // daripada pencabutan mana pun yang terjadi sebelum login ini.
+          iatMs: Date.now(),
+        };
+        return { accessToken: this.jwt.sign(payload) };
+      }
+    }
+
+    throw new UnauthorizedException("Email atau password salah.");
   }
 
   /** Sets or replaces the caller's own password. Requires an authenticated session. */

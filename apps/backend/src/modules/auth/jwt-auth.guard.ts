@@ -14,7 +14,12 @@ import type { FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { TenantService } from "../../database/tenant.service.js";
-import { users } from "../../database/schema/index.js";
+import { staffAccounts, users } from "../../database/schema/index.js";
+import {
+  ANY_STAFF,
+  OWNER_ONLY,
+  permissionForRequest,
+} from "../staff/permissions.js";
 
 export interface JwtPayload {
   sub: string;
@@ -28,6 +33,24 @@ export interface JwtPayload {
   // uses to restrict a portal caller to their own shops/history only.
   principalType?: "sub_seller" | "sub_sub_seller";
   principalId?: string;
+  /**
+   * Ada hanya untuk login AKUN KARYAWAN.
+   *
+   * `sub` tetap users.id PEMILIK, sama seperti token portal -- seluruh RLS dan
+   * app.user_id bekerja tanpa perubahan. Izin sengaja TIDAK ditanam di token:
+   * ia dibaca dari baris staff_accounts pada tiap permintaan, supaya mencabut
+   * akses berlaku dalam hitungan detik dan bukan setelah token kedaluwarsa.
+   */
+  staffId?: string;
+
+  /**
+   * Kapan token ini lahir, dalam milidetik.
+   *
+   * `iat` bawaan JWT hanya beresolusi detik, dan di dalam satu detik yang
+   * sama token lama tidak bisa dibedakan dari token baru hasil login ulang.
+   * Pencabutan akses tidak boleh bergantung pada tebakan sehalus itu.
+   */
+  iatMs?: number;
   /** Issued-at, seconds. Set by jwt.sign(); used for the session-epoch check. */
   iat?: number;
 }
@@ -71,6 +94,21 @@ const suspensionCache = new Map<string, SuspensionCacheEntry>();
  */
 export function invalidateSuspensionCache(userId: string): void {
   suspensionCache.delete(userId);
+}
+
+interface StaffCacheEntry {
+  ok: boolean;
+  ownerId: string;
+  permissions: string[];
+  /** Milidetik, bukan detik -- lihat catatan pada iatMs. */
+  validFromMs: number;
+  expiresAt: number;
+}
+const staffCache = new Map<string, StaffCacheEntry>();
+
+/** Dipanggil StaffService setelah izin diubah, akun dimatikan, atau dihapus. */
+export function invalidateStaffCache(staffId: string): void {
+  staffCache.delete(staffId);
 }
 
 @Injectable()
@@ -119,6 +157,34 @@ export class JwtAuthGuard implements CanActivate {
       }
     }
 
+    // Akun karyawan: aktif, tokennya belum dicabut, dan modul yang dituju
+    // memang diizinkan untuknya.
+    if (payload.staffId) {
+      const staf = await this.loadStaff(payload.staffId);
+      if (!staf.ok || staf.ownerId !== payload.sub) {
+        throw new UnauthorizedException("Akun karyawan ini sudah tidak aktif.");
+      }
+      // Dibandingkan dalam milidetik supaya tidak ada detik yang ambigu:
+      // token lama yang lahir pada detik pencabutan tetap mati, sedangkan
+      // token baru hasil login ulang pada detik yang sama tetap hidup.
+      const lahirMs = payload.iatMs ?? (payload.iat ?? 0) * 1000;
+      if (staf.validFromMs > 0 && lahirMs < staf.validFromMs) {
+        throw new UnauthorizedException(
+          "Sesi berakhir karena akses akun ini diubah. Silakan masuk lagi.",
+        );
+      }
+      const perlu = permissionForRequest(req.method ?? "GET", req.url ?? "");
+      if (perlu === null || perlu === OWNER_ONLY) {
+        // Gagal-tertutup: yang tidak dipetakan ditolak. Modul baru yang lupa
+        // didaftarkan akan dilaporkan sebagai "karyawan tidak bisa membuka X",
+        // sedangkan gagal-terbuka tidak akan terlihat sampai terlambat.
+        throw new ForbiddenException("Akun karyawan tidak punya akses ke bagian ini.");
+      }
+      if (perlu !== ANY_STAFF && !staf.permissions.includes(perlu)) {
+        throw new ForbiddenException("Akses ke bagian ini belum diberikan untuk akun Anda.");
+      }
+    }
+
     const adminOnly = this.reflector.getAllAndOverride<boolean>(ADMIN_ONLY, [
       context.getHandler(),
       context.getClass(),
@@ -144,6 +210,50 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     return true;
+  }
+
+  /**
+   * Keadaan satu akun karyawan, dengan cache pendek seperti pemeriksaan suspend.
+   *
+   * Gagal-TERTUTUP kalau database bermasalah, kebalikan dari loadState() di
+   * bawah. Alasannya berbeda: di sana menutup berarti mengunci seluruh pemilik
+   * dari aplikasinya sendiri, di sini membuka berarti memberi akses penuh ke
+   * akun yang mungkin sudah dicabut.
+   */
+  private async loadStaff(staffId: string): Promise<StaffCacheEntry> {
+    const now = Date.now();
+    const cached = staffCache.get(staffId);
+    if (cached && cached.expiresAt > now) return cached;
+
+    try {
+      const hasil = await this.tenant.runBypass(async () => {
+        const [row] = await this.db
+          .select({
+            userId: staffAccounts.userId,
+            isActive: staffAccounts.isActive,
+            permissions: staffAccounts.permissions,
+            sessionsValidFrom: staffAccounts.sessionsValidFrom,
+          })
+          .from(staffAccounts)
+          .where(eq(staffAccounts.id, staffId))
+          .limit(1);
+        return row ?? null;
+      });
+      const entry: StaffCacheEntry = {
+        ok: Boolean(hasil?.isActive),
+        ownerId: hasil?.userId ?? "",
+        permissions: Array.isArray(hasil?.permissions) ? hasil!.permissions : [],
+        validFromMs: hasil?.sessionsValidFrom
+          ? hasil.sessionsValidFrom.getTime()
+          : 0,
+        expiresAt: now + SUSPENSION_CACHE_TTL_MS,
+      };
+      staffCache.set(staffId, entry);
+      return entry;
+    } catch (e) {
+      this.logger.warn(`Pemeriksaan akun karyawan ${staffId} gagal: ${(e as Error).message}`);
+      return { ok: false, ownerId: "", permissions: [], validFromMs: 0, expiresAt: 0 };
+    }
   }
 
   private async loadState(userId: string): Promise<{ blocked: boolean; validFromSec: number }> {

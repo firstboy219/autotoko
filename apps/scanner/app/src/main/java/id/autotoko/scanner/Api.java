@@ -311,6 +311,27 @@ public final class Api {
                 session.token(), body, cb);
     }
 
+    /** Angka hari ini dan totalnya: order, omzet, toko aktif, saldo wallet. */
+    public void dashboardSummary(Cb cb) {
+        call("GET", session.baseUrl() + "/api/dashboard/summary", session.token(), null, cb);
+    }
+
+    /** Stok menipis, saldo wallet rendah, token toko yang mau kedaluwarsa. */
+    public void dashboardAlerts(Cb cb) {
+        call("GET", session.baseUrl() + "/api/dashboard/alerts", session.token(), null, cb);
+    }
+
+    /**
+     * Isi satu toko: resi, pencairan, dan totalnya pada satu rentang.
+     *
+     * Endpoint yang sama dengan modal detail toko di web, supaya angka yang
+     * dibaca di HP dan di layar tidak pernah berbeda.
+     */
+    public void shopDetail(String shopId, String from, String to, Cb cb) {
+        call("GET", session.baseUrl() + "/api/dashboard/shop-insights/" + shopId
+                + "?from=" + from + "&to=" + to, session.token(), null, cb);
+    }
+
     /**
      * Angka dashboard, dari endpoint yang sama dengan web.
      *
@@ -627,6 +648,37 @@ public final class Api {
 
     public void ocrHints(Cb cb) {
         call("GET", session.baseUrl() + "/api/resi/ocr-hints", session.token(), null, cb);
+    }
+
+    /**
+     * Siapa yang sedang masuk, dan boleh membuka apa.
+     *
+     * Dibutuhkan karena token karyawan memakai sub milik PEMILIK -- tanpa ini
+     * aplikasi tidak punya cara tahu bahwa yang masuk adalah karyawan, dan
+     * akan menampilkan seluruh menu lalu membiarkan tiap ketukan berakhir 403.
+     */
+    public void me(Cb cb) {
+        call("GET", session.baseUrl() + "/api/me", session.token(), null, cb);
+    }
+
+    public void staffList(Cb cb) {
+        call("GET", session.baseUrl() + "/api/staff", session.token(), null, cb);
+    }
+
+    public void staffPermissions(Cb cb) {
+        call("GET", session.baseUrl() + "/api/staff/permissions", session.token(), null, cb);
+    }
+
+    public void staffCreate(JSONObject body, Cb cb) {
+        call("POST", session.baseUrl() + "/api/staff", session.token(), body, cb);
+    }
+
+    public void staffUpdate(String id, JSONObject body, Cb cb) {
+        call("PATCH", session.baseUrl() + "/api/staff/" + id, session.token(), body, cb);
+    }
+
+    public void staffDelete(String id, Cb cb) {
+        call("DELETE", session.baseUrl() + "/api/staff/" + id, session.token(), null, cb);
     }
 
     /** Kurir bawaan dan kurir tambahan seller ini, terpisah. */

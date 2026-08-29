@@ -19,6 +19,7 @@ import { Katalog } from "./pages/Katalog";
 import { Affiliate } from "./pages/Affiliate";
 import { Onboarding } from "./pages/Onboarding";
 import { Akun } from "./pages/Akun";
+import Karyawan from "./pages/Karyawan";
 import { Paket } from "./pages/Paket";
 import { Notifikasi } from "./pages/Notifikasi";
 import { Landing } from "./pages/Landing";
@@ -56,6 +57,7 @@ export function App() {
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/onboarding" element={<Protected><Onboarding /></Protected>} />
         <Route path="/akun" element={<Protected><Akun /></Protected>} />
+        <Route path="/karyawan" element={<Protected><Karyawan /></Protected>} />
         <Route path="/paket" element={<Protected><Paket /></Protected>} />
         <Route path="/notifikasi" element={<Protected><Notifikasi /></Protected>} />
         <Route path="/" element={<Protected><Dashboard /></Protected>} />

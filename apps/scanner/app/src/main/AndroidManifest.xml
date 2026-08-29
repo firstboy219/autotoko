@@ -90,6 +90,18 @@
             android:screenOrientation="portrait" />
 
         <activity
+            android:name=".ShopDetailActivity"
+            android:exported="false"
+            android:label="Detail Toko"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".StaffActivity"
+            android:exported="false"
+            android:label="Akun Karyawan"
+            android:screenOrientation="portrait" />
+
+        <activity
             android:name=".LoginActivity"
             android:exported="true"
             android:screenOrientation="portrait">

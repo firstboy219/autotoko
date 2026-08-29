@@ -7,6 +7,7 @@ import { useRealtime, useConnectionStatus } from "../lib/realtime";
 import { api } from "../lib/api";
 import { Icon, type IconName } from "./Icon";
 import { ToastHost } from "./ui";
+import { useMeAccess } from "../lib/me";
 import { NavSettingsModal, type NavItem, type NavPrefs } from "./NavSettings";
 
 export const NAV: NavItem[] = [
@@ -28,7 +29,37 @@ export const NAV: NavItem[] = [
   { to: "/notifikasi", label: "Notifikasi", icon: "bell" },
   { to: "/pending", label: "Data Belum Lengkap", icon: "warning" },
   { to: "/aplikasi", label: "Versi Aplikasi", icon: "download" },
+  { to: "/karyawan", label: "Akun Karyawan", icon: "users" },
 ];
+
+/**
+ * Izin yang dibutuhkan tiap menu.
+ *
+ * Yang tidak terdaftar selalu tampil. Ini SEMATA kerapian tampilan --
+ * penjagaan sebenarnya ada di server, dan menyembunyikan menu bukan
+ * pengganti izin. Gunanya: menu yang selalu menolak saat diketuk terbaca
+ * sebagai aplikasi rusak, bukan sebagai akses yang memang tidak diberikan.
+ */
+const NAV_PERM: Record<string, string> = {
+  "/": "dashboard",
+  "/toko": "toko",
+  "/produk": "produk",
+  "/katalog": "produk",
+  "/orders": "order",
+  "/produksi-packing": "scan",
+  "/autopilot": "produk",
+  "/affiliate": "toko",
+  "/laporan": "dashboard",
+  "/bom": "bahan",
+  "/pembelian": "bahan",
+  "/hpp": "produk",
+  "/wallet": "wallet",
+  "/pencairan": "pencairan",
+  "/laporan-bagian": "pencairan",
+  "/pending": "dashboard",
+  "/aplikasi": "scan",
+  "/karyawan": "__owner__",
+};
 
 const EMPTY_PREFS: NavPrefs = { groups: [], counts: {}, collapsed: [] };
 
@@ -148,7 +179,24 @@ export function Layout({
     return () => clearTimeout(t);
   }, [toast]);
 
-  const byPath = useMemo(() => new Map(NAV.map((n) => [n.to, n])), []);
+  // Menu yang boleh dilihat akun ini. Selagi /me belum termuat, can()
+  // menjawab true, jadi menunya tampil utuh dulu lalu menyusut -- lebih baik
+  // daripada menu yang berkedip kosong pada tiap muat halaman.
+  const { access, load: muatAkses, can } = useMeAccess();
+  useEffect(() => {
+    muatAkses();
+  }, [muatAkses]);
+
+  const NAV_TAMPIL = useMemo(() => {
+    return NAV.filter((n) => {
+      const perlu = NAV_PERM[n.to];
+      if (perlu === undefined) return true;
+      if (perlu === "__owner__") return access ? access.isOwner : true;
+      return can(perlu);
+    });
+  }, [access, can]);
+
+  const byPath = useMemo(() => new Map(NAV_TAMPIL.map((n) => [n.to, n])), [NAV_TAMPIL]);
 
   /**
    * The rendered sections: the automatic group, then the seller's own, then
@@ -159,7 +207,7 @@ export function Layout({
    * items change place is harder to use than one with a short duplicate list.
    */
   const sections = useMemo(() => {
-    const frequent = NAV.filter((n) => (prefs.counts[n.to] ?? 0) >= FREQUENT_MIN)
+    const frequent = NAV_TAMPIL.filter((n) => (prefs.counts[n.to] ?? 0) >= FREQUENT_MIN)
       .sort((a, b) => (prefs.counts[b.to] ?? 0) - (prefs.counts[a.to] ?? 0))
       .slice(0, FREQUENT_MAX);
 
@@ -173,7 +221,7 @@ export function Layout({
       .filter((g) => g.items.length > 0);
 
     const filed = new Set(grouped.flatMap((g) => g.items.map((i) => i.to)));
-    const rest = NAV.filter((n) => !filed.has(n.to));
+    const rest = NAV_TAMPIL.filter((n) => !filed.has(n.to));
 
     const out: { id: string; label: string | null; items: NavItem[]; auto?: boolean }[] = [];
     if (frequent.length >= 2) {
@@ -342,7 +390,7 @@ export function Layout({
 
       {settingsOpen && (
         <NavSettingsModal
-          nav={NAV}
+          nav={NAV_TAMPIL}
           prefs={prefs}
           onClose={() => setSettingsOpen(false)}
           onChange={(next) => setPrefs(next)}

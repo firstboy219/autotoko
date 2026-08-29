@@ -1,5 +1,6 @@
 package id.autotoko.scanner;
 
+import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.view.Gravity;
@@ -37,6 +38,9 @@ public class DashboardActivity extends AppCompatActivity {
     private LinearLayout root;
     private TextView status;
     private int hari = 30;
+    private JSONObject insights, ringkasHariIni, peringatan, tugas;
+    private String tglDari, tglSampai, gagalInsights;
+    private int menunggu = 0;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -68,18 +72,42 @@ public class DashboardActivity extends AppCompatActivity {
         return true;
     }
 
+    /**
+     * Empat sumber, digambar setelah semuanya pulang.
+     *
+     * Digambar sekali di akhir, bukan ditempel satu per satu begitu tiap
+     * jawaban datang: urutan kedatangan tidak bisa ditebak, dan bagian yang
+     * melompat-lompat saat dibaca lebih buruk daripada menunggu sebentar.
+     * Yang gagal dibiarkan kosong -- satu endpoint mati tidak boleh
+     * mengosongkan seluruh dashboard.
+     */
     private void muat() {
         status.setText("Memuat…");
         SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-        String to = f.format(new Date());
-        String from = f.format(new Date(System.currentTimeMillis() - (hari - 1L) * 86400000L));
-        api.shopInsights(from, to, r -> {
-            if (!r.ok() || r.data() == null) {
-                status.setText(r.message("Gagal memuat dashboard."));
-                return;
-            }
-            gambar(r.data());
+        tglSampai = f.format(new Date());
+        tglDari = f.format(new Date(System.currentTimeMillis() - (hari - 1L) * 86400000L));
+
+        insights = null; ringkasHariIni = null; peringatan = null; tugas = null;
+        gagalInsights = null;
+        menunggu = 4;
+        api.shopInsights(tglDari, tglSampai, r -> {
+            if (r.ok()) insights = r.data();
+            else gagalInsights = r.message("Gagal memuat dashboard.");
+            siap();
         });
+        api.dashboardSummary(r -> { if (r.ok()) ringkasHariIni = r.data(); siap(); });
+        api.dashboardAlerts(r -> { if (r.ok()) peringatan = r.data(); siap(); });
+        api.pendingTasks(r -> { if (r.ok()) tugas = r.data(); siap(); });
+    }
+
+    private void siap() {
+        menunggu -= 1;
+        if (menunggu > 0) return;
+        if (insights == null) {
+            status.setText(gagalInsights == null ? "Gagal memuat dashboard." : gagalInsights);
+            return;
+        }
+        gambar(insights);
     }
 
     private void gambar(JSONObject d) {
@@ -88,7 +116,12 @@ public class DashboardActivity extends AppCompatActivity {
         status.setText("Periode " + hari + " hari terakhir");
         root.addView(pilihPeriode());
 
+        hariIni();
+        perluPerhatian();
+        belumLengkap();
         ringkasan(d);
+        sorotan(d);
+        bagianPemilik(d);
         bacaanData(d);
         penilaianToko(d);
         produk(d);
@@ -129,6 +162,130 @@ public class DashboardActivity extends AppCompatActivity {
                 t.optInt("parcels") + " paket · " + (int) t.optDouble("units", 0) + " pcs"
                         + "\n" + t.optInt("variety") + " jenis produk bergerak"
                         + "\n" + t.optInt("activeShops") + " toko aktif dari " + t.optInt("shops")));
+    }
+
+    /** Empat angka yang di web jadi kartu di paling atas. */
+    private void hariIni() {
+        if (ringkasHariIni == null) return;
+        root.addView(judul("Hari ini"));
+        root.addView(kotak("Order & omzet",
+                ringkasHariIni.optInt("today_orders", 0) + " order hari ini"
+                        + "\n" + rp(ringkasHariIni.optDouble("today_revenue", 0)) + " omzet hari ini"
+                        + "\n" + ringkasHariIni.optInt("active_shops", 0) + " toko aktif"));
+        // Total sepanjang masa ikut, seperti di web: angka hari ini tanpa
+        // pembandingnya tidak memberi tahu apakah hari ini ramai atau sepi.
+        root.addView(kotak("Sepanjang masa",
+                ringkasHariIni.optInt("total_orders", 0) + " order"
+                        + "\n" + rp(ringkasHariIni.optDouble("total_revenue", 0)) + " omzet"
+                        + "\n" + rp(ringkasHariIni.optDouble("total_fee_charged", 0)) + " fee terpakai"));
+    }
+
+    /** Stok menipis, saldo rendah, token toko yang mau habis. */
+    private void perluPerhatian() {
+        if (peringatan == null) return;
+        StringBuilder isi = new StringBuilder();
+
+        JSONArray stok = peringatan.optJSONArray("low_stock");
+        if (stok != null && stok.length() > 0) {
+            isi.append(stok.length()).append(" bahan baku stoknya menipis: ");
+            for (int i = 0; i < Math.min(3, stok.length()); i++) {
+                JSONObject s = stok.optJSONObject(i);
+                if (s == null) continue;
+                if (i > 0) isi.append(", ");
+                isi.append(s.optString("name", "-"));
+            }
+            if (stok.length() > 3) isi.append(", dan ").append(stok.length() - 3).append(" lagi");
+            isi.append("\n");
+        }
+
+        JSONObject wallet = peringatan.optJSONObject("low_wallet");
+        if (wallet != null) {
+            isi.append("Saldo wallet rendah: ").append(rp(wallet.optDouble("balance", 0)))
+               .append(" (minimum ").append(rp(wallet.optDouble("threshold", 0))).append(")\n");
+        }
+
+        JSONArray token = peringatan.optJSONArray("expiring_tokens");
+        for (int i = 0; token != null && i < token.length(); i++) {
+            JSONObject t = token.optJSONObject(i);
+            if (t == null) continue;
+            isi.append("Token toko akan kedaluwarsa: ")
+               .append(t.optString("shop_name", t.optString("shop_id", "-"))).append("\n");
+        }
+
+        if (isi.length() == 0) return;
+        root.addView(judul("Perlu perhatian"));
+        LinearLayout box = kotak("", isi.toString().trim());
+        box.setBackgroundColor(Color.parseColor("#FBF0DC"));
+        root.addView(box);
+    }
+
+    /** Data yang belum lengkap, sama dengan yang di web muncul di dashboard. */
+    private void belumLengkap() {
+        if (tugas == null) return;
+        int total = tugas.optInt("total", 0);
+        if (total <= 0) return;
+        StringBuilder isi = new StringBuilder();
+        JSONArray daftar = tugas.optJSONArray("tasks");
+        for (int i = 0; daftar != null && i < daftar.length(); i++) {
+            JSONObject t = daftar.optJSONObject(i);
+            if (t == null) continue;
+            isi.append("• ").append(t.optString("title", "-"))
+               .append(" (").append(t.optInt("count", 0)).append(")\n");
+        }
+        root.addView(judul("Data belum lengkap (" + total + ")"));
+        root.addView(kotak("", isi.length() == 0 ? "-" : isi.toString().trim()));
+    }
+
+    /** Toko tersibuk, toko penghasil terbesar, produk yang paling bergerak. */
+    private void sorotan(JSONObject d) {
+        JSONObject h = d.optJSONObject("highlights");
+        if (h == null) return;
+        root.addView(judul("Sorotan"));
+
+        JSONObject sibuk = h.optJSONObject("busiestShop");
+        if (sibuk != null) {
+            root.addView(kotak("Paling sibuk", sibuk.optString("name", "-")
+                    + " — " + sibuk.optInt("parcels", 0) + " paket"));
+        }
+        JSONObject cuan = h.optJSONObject("topEarningShop");
+        if (cuan != null) {
+            root.addView(kotak("Penghasil terbesar", cuan.optString("name", "-")
+                    + " — " + rp(cuan.optDouble("credit", 0))));
+        }
+        JSONArray produk = h.optJSONArray("topProducts");
+        if (produk != null && produk.length() > 0) {
+            StringBuilder isi = new StringBuilder();
+            for (int i = 0; i < produk.length(); i++) {
+                JSONObject p = produk.optJSONObject(i);
+                if (p == null) continue;
+                isi.append(i + 1).append(". ").append(p.optString("name", "-"))
+                   .append(" — ").append(p.optInt("units", 0)).append(" pcs / ")
+                   .append(p.optInt("parcels", 0)).append(" paket\n");
+            }
+            root.addView(kotak("Produk teratas", isi.toString().trim()));
+        }
+    }
+
+    /** Siapa mendapat berapa: pemilik sendiri, lalu tiap sub-seller. */
+    private void bagianPemilik(JSONObject d) {
+        JSONObject o = d.optJSONObject("owners");
+        if (o == null) return;
+        root.addView(judul("Bagian pemilik"));
+        JSONObject s = o.optJSONObject("seller");
+        if (s != null) {
+            root.addView(kotak("Seller", rp(s.optDouble("total", 0))
+                    + "\n" + rp(s.optDouble("perDay", 0)) + " per hari"
+                    + " · " + rp(s.optDouble("perMonth", 0)) + " per bulan"));
+        }
+        JSONArray subs = o.optJSONArray("subSellers");
+        for (int i = 0; subs != null && i < subs.length(); i++) {
+            JSONObject x = subs.optJSONObject(i);
+            if (x == null) continue;
+            // Yang nol tetap ditampilkan: sub-seller yang tidak kebagian
+            // apa-apa pada periode ini adalah informasi, bukan baris kosong.
+            root.addView(kotak(x.optString("name", "-"), rp(x.optDouble("total", 0))
+                    + "\n" + rp(x.optDouble("perDay", 0)) + " per hari"));
+        }
     }
 
     private void bacaanData(JSONObject d) {
@@ -317,8 +474,22 @@ public class DashboardActivity extends AppCompatActivity {
                 isi.append(" · ").append(s.optDouble("unitsPerDay")).append(" pcs/hari");
             }
             isi.append("\nkirim ").append(s.optInt("activeDays")).append(" hari");
-            root.addView(kotak(s.optString("name") + " (" + s.optString("marketplace", "-") + ")",
-                    isi.toString()));
+            // Diketuk untuk melihat isinya: resi mana saja, kapan, dan
+            // pencairannya -- pertanyaan yang tidak bisa dijawab kartu ringkas.
+            final String shopId = s.optString("id", "");
+            final String namaToko = s.optString("name", "");
+            LinearLayout kartuToko = kotak(namaToko
+                    + " (" + s.optString("marketplace", "-") + ")",
+                    isi.toString() + "\nketuk untuk lihat isinya");
+            kartuToko.setOnClickListener(v -> {
+                Intent buka = new Intent(this, ShopDetailActivity.class);
+                buka.putExtra("shopId", shopId);
+                buka.putExtra("shopName", namaToko);
+                buka.putExtra("from", tglDari);
+                buka.putExtra("to", tglSampai);
+                startActivity(buka);
+            });
+            root.addView(kartuToko);
         }
         if (rd instanceof Integer) {
             root.addView(catatan("Kolom per hari dibagi " + rd + " hari yang benar-benar ada "

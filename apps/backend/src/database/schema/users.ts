@@ -140,3 +140,34 @@ export const passwordResetTokens = pgTable(
     userIdx: index("password_reset_tokens_user_idx").on(t.userId),
   }),
 );
+
+/**
+ * Akun karyawan: orang lain yang bekerja atas toko pemiliknya.
+ *
+ * Sengaja BUKAN baris di `users`. Satu baris users berarti satu tenant di
+ * seluruh sistem -- punya wallet, paket langganan, tagihan, dan muncul di
+ * panel admin. Karyawan tidak punya satu pun dari itu; ia hanya sebuah cara
+ * masuk ke data pemiliknya, jadi menaruhnya di users akan membuat setiap kueri
+ * yang mengasumsikan "satu users = satu toko" diam-diam salah.
+ *
+ * Token yang diterbitkan untuknya tetap memakai sub = users.id PEMILIK, persis
+ * seperti token portal sub-seller. RLS dan app.user_id tidak berubah sama
+ * sekali; yang membatasi karyawan adalah lapisan izin di guard.
+ */
+export const staffAccounts = pgTable("staff_accounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  email: varchar("email", { length: 255 }).notNull(),
+  passwordHash: varchar("password_hash", { length: 255 }).notNull(),
+  /** Daftar kunci modul, mis. ["dashboard","scan"]. Lihat modules/staff/permissions.ts. */
+  permissions: jsonb("permissions").$type<string[]>().notNull().default([]),
+  isActive: boolean("is_active").notNull().default(true),
+  /** Token yang lebih tua dari ini ditolak -- pencabutan akses harus langsung terasa. */
+  sessionsValidFrom: timestamp("sessions_valid_from", { withTimezone: true }),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

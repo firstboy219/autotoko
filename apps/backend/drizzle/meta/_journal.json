@@ -351,6 +351,13 @@
       "when": 1786148727336,
       "tag": "0049_custom_couriers",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1786148727337,
+      "tag": "0050_staff_accounts",
+      "breakpoints": true
     }
   ]
 }
