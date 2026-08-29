@@ -97,6 +97,8 @@ export const ROUTE_PERMISSIONS: Record<string, string> = {
   marketing: "toko",
 
   payout: "pencairan",
+  // Yang boleh mengaudit uang adalah yang boleh melihat uang.
+  statements: "pencairan",
 
   orders: "order",
 

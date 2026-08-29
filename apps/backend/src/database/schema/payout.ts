@@ -323,6 +323,23 @@ export const payoutMutations = pgTable(
     ocrRawResult: jsonb("ocr_raw_result"),
 
     // Rate snapshots — later rate edits must never alter historical records.
+    /**
+     * Dari mana baris ini berasal: 'manual' atau nanti 'api'.
+     *
+     * Default 'manual' bukan tebakan -- sampai API marketplace menyala tidak
+     * ada cara lain sebuah baris bisa lahir, jadi kolom ini menuliskan yang
+     * selama ini tersirat, bukan mengubah artinya.
+     */
+    dataSource: varchar("data_source", { length: 16 }).notNull().default("manual"),
+    /** Nomor referensi marketplace, kalau barisnya memang punya padanan. */
+    externalRef: varchar("external_ref", { length: 64 }),
+    /**
+     * Baris laporan marketplace yang dianggap sepadan. Sengaja tanpa foreign
+     * key: menghapus laporan yang salah impor tidak boleh mengunci pencairan
+     * yang sudah tervalidasi.
+     */
+    reconciledLineId: uuid("reconciled_line_id"),
+
     sedekahRateUsed: numeric("sedekah_rate_used", { precision: 5, scale: 4 }).notNull(),
     sedekahBasisUsed: sedekahBasisEnum("sedekah_basis_used").notNull(),
     subSellerRateUsed: numeric("sub_seller_rate_used", { precision: 5, scale: 4 }),
