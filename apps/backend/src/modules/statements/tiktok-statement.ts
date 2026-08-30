@@ -13,7 +13,7 @@ import { bacaXlsx, type LembarXlsx } from "./xlsx.js";
  */
 
 export interface BarisLaporan {
-  kind: "withdrawal" | "earnings" | "adjustment";
+  kind: "withdrawal" | "earnings" | "adjustment" | "order";
   externalRef: string | null;
   occurredOn: string;
   amount: number;
@@ -136,6 +136,61 @@ export function uraiLaporanTiktok(buf: Buffer): HasilUrai {
       status: kStatus ? (kolom.get(kStatus) ?? null) : null,
       raw,
     });
+  }
+
+  /*
+   * Sheet "Detail pesanan": satu baris per pesanan yang sudah diselesaikan.
+   *
+   * Hanya yang berjenis "Pesanan" yang diambil. Baris lain di sheet itu --
+   * pencairan di muka, pengembalian dana, penyesuaian komisi -- memakai kolom
+   * ID yang sama tapi isinya bukan nomor pesanan, dan memasukkannya akan
+   * membuat audit melaporkan "pesanan" yang tidak pernah ada.
+   */
+  const pesanan = buku.cari("detail pesanan");
+  if (pesanan) {
+    const hp = kepala(pesanan);
+    const kId = kolomBerjudul(hp, "ID Pesanan/Penyesuaian", "ID Pesanan", "Order ID");
+    const kJenisP = kolomBerjudul(hp, "Jenis transaksi");
+    const kPesan = kolomBerjudul(hp, "Waktu pemesanan");
+    const kBayar = kolomBerjudul(hp, "Waktu pembayaran pesanan");
+    const kJumlah = kolomBerjudul(hp, "Jumlah penyelesaian pembayaran");
+
+    if (kId && kJumlah) {
+      for (const [nomor, kolom] of [...pesanan.baris.entries()].sort((a, b) => a[0] - b[0])) {
+        if (nomor === 1) continue;
+        const jenis = (kJenisP ? kolom.get(kJenisP) : "")?.trim() ?? "";
+        if (jenis.toLowerCase() !== "pesanan") continue;
+
+        const id = (kolom.get(kId) ?? "").trim();
+        if (!id) continue;
+        const tgl = tanggal(kBayar ? kolom.get(kBayar) : undefined)
+          ?? tanggal(kPesan ? kolom.get(kPesan) : undefined);
+        if (!tgl) continue;
+
+        const raw: Record<string, string> = {};
+        for (const [kol, nilai] of kolom) {
+          const judul = hp.get(kol) ?? kol;
+          // Delapan puluh kolom biaya per pesanan akan membengkakkan tabel
+          // tanpa menjawab pertanyaan apa pun; yang disimpan yang dipakai.
+          if (["ID Pesanan/Penyesuaian", "Jenis transaksi", "Waktu pemesanan",
+               "Waktu pembayaran pesanan", "Jumlah penyelesaian pembayaran",
+               "Total Pendapatan", "Total Biaya", "Detail produk terjual",
+               "Sumber pesanan"].includes(judul)) {
+            raw[judul] = nilai;
+          }
+        }
+
+        lines.push({
+          kind: "order",
+          externalRef: id,
+          occurredOn: tgl,
+          amount: angka(kolom.get(kJumlah)) ?? 0,
+          bankAccount: null,
+          status: jenis,
+          raw,
+        });
+      }
+    }
   }
 
   // Ringkasan dari sheet Laporan: label bisa berada di kolom B..E tergantung

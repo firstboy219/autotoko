@@ -13,8 +13,10 @@ import {
   marketplaceStatementLines,
   marketplaceStatements,
   payoutMutations,
+  resiScans,
   shops,
 } from "../../database/schema/index.js";
+import { normaliseOrderId } from "../resi/order-id.js";
 import { uraiLaporanTiktok } from "./tiktok-statement.js";
 
 /**
@@ -113,27 +115,31 @@ export class StatementsService {
     // digagalkan: dua laporan dengan periode yang tumpang tindih adalah hal
     // biasa, dan menolak seluruh berkas karena satu baris beririsan akan
     // membuat impor bulanan mustahil.
+    // Disisipkan berkelompok: satu laporan bulanan toko yang ramai bisa
+    // memuat ribuan pesanan, dan seribu perjalanan pulang-pergi ke database
+    // membuat unggahan terasa menggantung.
     let masuk = 0;
-    let dilewati = 0;
-    for (const l of urai.lines) {
+    const KELOMPOK = 200;
+    for (let i = 0; i < urai.lines.length; i += KELOMPOK) {
+      const potongan = urai.lines.slice(i, i + KELOMPOK).map((l) => ({
+        statementId: statement.id,
+        userId,
+        kind: l.kind,
+        externalRef: l.externalRef,
+        occurredOn: l.occurredOn,
+        amount: l.amount.toString(),
+        bankAccount: l.bankAccount,
+        status: l.status,
+        raw: l.raw,
+      }));
       const hasil = await this.db
         .insert(marketplaceStatementLines)
-        .values({
-          statementId: statement.id,
-          userId,
-          kind: l.kind,
-          externalRef: l.externalRef,
-          occurredOn: l.occurredOn,
-          amount: l.amount.toString(),
-          bankAccount: l.bankAccount,
-          status: l.status,
-          raw: l.raw,
-        })
+        .values(potongan)
         .onConflictDoNothing()
         .returning({ id: marketplaceStatementLines.id });
-      if (hasil.length) masuk += 1;
-      else dilewati += 1;
+      masuk += hasil.length;
     }
+    const dilewati = urai.lines.length - masuk;
 
     this.logger.log(
       `Laporan ${urai.marketplace} diimpor untuk ${userId}: ${masuk} baris baru, ${dilewati} dilewati`,
@@ -146,6 +152,7 @@ export class StatementsService {
       linesImported: masuk,
       linesSkipped: dilewati,
       withdrawals: urai.lines.filter((l) => l.kind === "withdrawal").length,
+      orders: urai.lines.filter((l) => l.kind === "order").length,
       summary: urai.rawSummary,
     };
   }
@@ -181,6 +188,170 @@ export class StatementsService {
     // Barisnya ikut terhapus lewat ON DELETE CASCADE. payout_mutations TIDAK
     // tersentuh -- itulah sebabnya tautannya sengaja tanpa foreign key.
     return { deleted: true };
+  }
+
+  /* ------------------------------------------------------ audit pesanan */
+
+  /**
+   * Pesanan yang sudah dipacking lawan pesanan yang sudah dicairkan.
+   *
+   * Pertanyaan yang dijawab: mana yang sudah diserahkan ke kurir tapi uangnya
+   * belum masuk, dan sudah berapa lama menggantung. Scan resi packing berarti
+   * picker sudah menyiapkan pesanan dan menyerahkannya ke kurir, jadi umur
+   * dihitung dari saat itu -- bukan dari tanggal pesanan dibuat, yang tidak
+   * mengatakan apa-apa tentang kewajiban marketplace.
+   *
+   * Kuncinya order id. Resi yang order id-nya tidak terbaca TIDAK dianggap
+   * hilang -- ia dilaporkan terpisah sebagai "tidak bisa diaudit", karena
+   * mencampurnya ke daftar "belum cair" akan menuduh marketplace atas
+   * kegagalan OCR sendiri.
+   */
+  async auditOrders(
+    userId: string,
+    q: { shopId?: string; from: string; to: string },
+  ) {
+    const syaratScan = [
+      eq(resiScans.userId, userId),
+      gte(resiScans.scannedAt, new Date(q.from + "T00:00:00Z")),
+      lte(resiScans.scannedAt, new Date(q.to + "T23:59:59Z")),
+    ];
+    if (q.shopId) syaratScan.push(eq(resiScans.shopId, q.shopId));
+
+    const scans = await this.db
+      .select({
+        id: resiScans.id,
+        resi: resiScans.resi,
+        orderNo: resiScans.labelOrderNo,
+        shopId: resiScans.shopId,
+        scannedAt: resiScans.scannedAt,
+      })
+      .from(resiScans)
+      .where(and(...syaratScan))
+      .orderBy(asc(resiScans.scannedAt));
+
+    const syaratOrder = [
+      eq(marketplaceStatementLines.userId, userId),
+      eq(marketplaceStatementLines.kind, "order"),
+      // Disaring per tanggal seperti scan-nya. Tanpa ini, laporan yang
+      // periodenya lebih panjang dari jendela audit menyumbang ratusan
+      // "pesanan belum discan" dari bulan ketika memang belum ada yang discan.
+      gte(marketplaceStatementLines.occurredOn, q.from),
+      lte(marketplaceStatementLines.occurredOn, q.to),
+    ];
+    if (q.shopId) syaratOrder.push(eq(marketplaceStatements.shopId, q.shopId));
+
+    const pesanan = await this.db
+      .select({
+        id: marketplaceStatementLines.id,
+        externalRef: marketplaceStatementLines.externalRef,
+        occurredOn: marketplaceStatementLines.occurredOn,
+        amount: marketplaceStatementLines.amount,
+        shopId: marketplaceStatements.shopId,
+      })
+      .from(marketplaceStatementLines)
+      .innerJoin(
+        marketplaceStatements,
+        eq(marketplaceStatements.id, marketplaceStatementLines.statementId),
+      )
+      .where(and(...syaratOrder));
+
+    const perRef = new Map<string, (typeof pesanan)[number]>();
+    for (const p of pesanan) if (p.externalRef) perRef.set(p.externalRef, p);
+
+    const hariIni = Date.now();
+    const umur = (d: Date) => Math.floor((hariIni - d.getTime()) / 86400000);
+
+    const cocok: unknown[] = [];
+    const belumCair: unknown[] = [];
+    const tanpaOrderId: unknown[] = [];
+    const terpakai = new Set<string>();
+
+    for (const s of scans) {
+      // Nilai tersimpan diperiksa ulang di sini, bukan dipercaya begitu saja.
+      // Data lama memuat kode sortir dan nomor pengiriman di kolom ini, dan
+      // memperlakukannya sebagai order id akan melaporkannya sebagai pesanan
+      // yang belum dibayar -- kesalahan kita, dituduhkan ke marketplace.
+      const orderNo = normaliseOrderId(s.orderNo);
+      if (!orderNo) {
+        tanpaOrderId.push({
+          scanId: s.id,
+          resi: s.resi,
+          shopId: s.shopId,
+          scannedAt: s.scannedAt,
+          umurHari: umur(s.scannedAt),
+          // Dibedakan supaya jelas mana yang labelnya tidak terbaca dan mana
+          // yang terbaca tapi hasilnya mustahil -- dua masalah yang berbeda.
+          tersimpanTapiTidakSah: s.orderNo ?? null,
+        });
+        continue;
+      }
+      const p = perRef.get(orderNo);
+      if (p) {
+        terpakai.add(orderNo);
+        const cair = new Date(p.occurredOn + "T00:00:00Z").getTime();
+        cocok.push({
+          scanId: s.id,
+          resi: s.resi,
+          orderNo,
+          scannedAt: s.scannedAt,
+          tanggalCair: p.occurredOn,
+          nominal: Number(p.amount) || 0,
+          hariSampaiCair: Math.max(0, Math.round((cair - s.scannedAt.getTime()) / 86400000)),
+        });
+      } else {
+        belumCair.push({
+          scanId: s.id,
+          resi: s.resi,
+          orderNo,
+          shopId: s.shopId,
+          scannedAt: s.scannedAt,
+          umurHari: umur(s.scannedAt),
+        });
+      }
+    }
+
+    // Sisi sebaliknya: marketplace membayar sesuatu yang tidak pernah discan.
+    // Bisa berarti pesanan digital, bisa berarti paket yang lolos dari meja
+    // packing -- dua-duanya perlu dilihat orang.
+    const belumDiscan = pesanan
+      .filter((p) => p.externalRef && !terpakai.has(p.externalRef))
+      .map((p) => ({
+        lineId: p.id,
+        orderNo: p.externalRef,
+        shopId: p.shopId,
+        tanggalCair: p.occurredOn,
+        nominal: Number(p.amount) || 0,
+      }));
+
+    const jumlahNominal = (xs: { nominal: number }[]) =>
+      xs.reduce((a, b) => a + b.nominal, 0);
+
+    const umurBelumCair = (belumCair as { umurHari: number }[]).map((x) => x.umurHari);
+    return {
+      range: { from: q.from, to: q.to },
+      shopId: q.shopId ?? null,
+      totals: {
+        discan: scans.length,
+        bisaDiaudit: scans.length - tanpaOrderId.length,
+        cocok: cocok.length,
+        belumCair: belumCair.length,
+        belumDiscan: belumDiscan.length,
+        tanpaOrderId: tanpaOrderId.length,
+        nilaiCocok: jumlahNominal(cocok as { nominal: number }[]),
+        nilaiBelumDiscan: jumlahNominal(belumDiscan),
+        umurTertua: umurBelumCair.length ? Math.max(...umurBelumCair) : 0,
+        umurRata: umurBelumCair.length
+          ? Math.round((umurBelumCair.reduce((a, b) => a + b, 0) / umurBelumCair.length) * 10) / 10
+          : 0,
+      },
+      // Tanpa laporan sama sekali, "semua belum cair" bukan temuan -- itu
+      // hanya berarti belum ada yang diunggah.
+      adaPembanding: pesanan.length > 0,
+      cocok,
+      belumCair,
+      belumDiscan,
+      tanpaOrderId,
+    };
   }
 
   /* ------------------------------------------------------ rekonsiliasi */

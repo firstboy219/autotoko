@@ -62,6 +62,25 @@ export class StatementsController {
     return { success: true, data: await this.statements.remove(uid(req), id) };
   }
 
+  /**
+   * Pesanan yang dipacking lawan pesanan yang dicairkan.
+   *
+   * Dipisah dari /reconcile karena menjawab pertanyaan yang berbeda: yang itu
+   * soal uang yang masuk ke rekening, yang ini soal pesanan yang menggantung.
+   */
+  @Get("audit-orders")
+  async auditOrders(
+    @Req() req: FastifyRequest,
+    @Query("from") from: string,
+    @Query("to") to: string,
+    @Query("shopId") shopId?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.statements.auditOrders(uid(req), { from, to, shopId }),
+    };
+  }
+
   /** Manual lawan marketplace, pada satu toko dan satu rentang. */
   @Get("reconcile")
   async reconcile(

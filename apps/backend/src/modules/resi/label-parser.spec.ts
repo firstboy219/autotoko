@@ -56,7 +56,14 @@ describe("parseShippingLabel", () => {
     const r = parseShippingLabel(SHOPEE);
     expect(r.marketplace).toBe("shopee");
     expect(r.courier).toBe("SPX");
-    expect(r.orderNo).toBe("2408XYZABC123");
+    // Order id Shopee berbentuk alfanumerik, dan pengesah order id sekarang
+    // hanya menerima 18 digit murni -- bentuk yang terbukti dari laporan
+    // penyelesaian TikTok/Tokopedia. Shopee belum punya kebenaran acuan, dan
+    // melonggarkan aturan untuknya berarti menerima kembali nomor pengiriman
+    // dan kode sortir yang selama ini mengotori kolom ini (79% dari isinya).
+    // Kosong lebih jujur daripada tebakan: yang salah akan gagal berpasangan
+    // dengan laporan secara diam-diam dan terbaca sebagai pesanan hilang.
+    expect(r.orderNo).toBeNull();
     expect(r.recipient).toBe("MAYA SARI");
     expect(r.items).toEqual([
       { name: "Kaos Polos Hitam L", qty: 3 },

@@ -30,6 +30,7 @@ import {
 } from "./scan-mapping.js";
 import { MaterialConsumptionService } from "../materials/material-consumption.service.js";
 import { OcrMemoryService } from "./ocr-memory.service.js";
+import { normaliseOrderId } from "./order-id.js";
 import { ConfigService } from "@nestjs/config";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -434,7 +435,10 @@ export class ResiService {
         deviceLabel: input.deviceLabel?.slice(0, 64) ?? null,
         photoUrl,
         barcodeFormat: input.barcodeFormat?.slice(0, 32) ?? null,
-        labelOrderNo: input.labelOrderNo?.trim().slice(0, 128) || null,
+        // Diperiksa juga meski datang dari ponsel: asal sebuah nilai tidak
+        // membuatnya sah, dan APK lama yang belum diperbarui tetap mengirim
+        // kode sortir kurir ke kolom ini.
+        labelOrderNo: normaliseOrderId(input.labelOrderNo),
         deviceText: input.deviceText?.slice(0, 20_000) ?? null,
         deviceClarity: input.deviceClarity != null ? input.deviceClarity.toFixed(2) : null,
         // "pending" only when there is something to read. The background task

@@ -22,6 +22,8 @@
  * recorded, whether it arrives from OCR or from the operator's keyboard.
  */
 
+import { findOrderId } from "./order-id.js";
+
 export interface ParsedLabelItem {
   name: string;
   qty: number;
@@ -176,23 +178,17 @@ function parseService(lines: string[]): string | null {
   return null;
 }
 
+/**
+ * Order id dari label, atau null.
+ *
+ * Seluruh aturannya hidup di order-id.ts supaya server dan ponsel memakai
+ * definisi yang sama persis. Versi lama menerima apa pun sepanjang enam huruf
+ * dan menerima 19 digit -- akibatnya 79% isi kolom ini bentuknya mustahil, dan
+ * yang tersimpan bukan order id melainkan kode sortir kurir atau nomor
+ * pengiriman Shopee.
+ */
 function parseOrderNo(lines: string[]): string | null {
-  for (const line of lines) {
-    const m = line.match(ORDER_LABEL_RE);
-    if (m?.[1]) {
-      const v = m[1].trim().replace(/[.,;]$/, "");
-      // A "number" of three characters is OCR noise, not an order id.
-      if (v.length >= 6) return v;
-    }
-  }
-  // TikTok prints a bare 18-19 digit order id, often on its own line with no
-  // label at all. Long enough to be unambiguous; anything shorter is left
-  // alone rather than risking a phone number or a waybill.
-  for (const line of lines) {
-    const m = cleanLine(line).match(/^(\d{18,19})$/);
-    if (m?.[1]) return m[1];
-  }
-  return null;
+  return findOrderId(lines.join("\n"));
 }
 
 /** The name on a "Penerima:"/"Pengirim:" line, or the line under it. */

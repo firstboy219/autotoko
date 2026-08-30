@@ -30,6 +30,7 @@ export const NAV: NavItem[] = [
   { to: "/pending", label: "Data Belum Lengkap", icon: "warning" },
   { to: "/aplikasi", label: "Versi Aplikasi", icon: "download" },
   { to: "/rekonsiliasi", label: "Rekonsiliasi", icon: "activity" },
+  { to: "/audit-pesanan", label: "Audit Pesanan", icon: "warning" },
   { to: "/karyawan", label: "Akun Karyawan", icon: "users" },
 ];
 
@@ -58,6 +59,7 @@ const NAV_PERM: Record<string, string> = {
   "/pencairan": "pencairan",
   "/laporan-bagian": "pencairan",
   "/rekonsiliasi": "pencairan",
+  "/audit-pesanan": "pencairan",
   "/pending": "dashboard",
   "/aplikasi": "scan",
   "/karyawan": "__owner__",
