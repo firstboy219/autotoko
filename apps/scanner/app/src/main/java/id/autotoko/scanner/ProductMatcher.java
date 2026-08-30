@@ -199,6 +199,21 @@ public final class ProductMatcher {
     public static final double MIN_BUKTI_TEKS = 3.0;
 
     /**
+     * Jalan kedua, untuk entri yang namanya pendek.
+     *
+     * Master bahan baku bukan master produk: namanya satu atau dua kata, bukan
+     * tiga puluh kata deskripsi marketplace. Diukur pada 31 master bahan toko
+     * ini, "Tali" berbobot 2,28, "Shrink" 2,57 dan "Tabung" 2,57 -- semuanya di
+     * bawah MIN_BUKTI_TEKS, sehingga mustahil cocok betapa pun jelas namanya
+     * tercetak di nota.
+     *
+     * Maka sebuah entri juga lolos kalau sebagian besar bobot katanya memang
+     * ditemukan. Diperiksa TIDAK merusak hasil produk: 284 scan terkonfirmasi
+     * menghasilkan angka yang sama persis dengan dan tanpa klausa ini.
+     */
+    private static final double MIN_BAGIAN_TEKS = 0.6;
+
+    /**
      * Mengubah bobot bukti menjadi angka 0..1 untuk disimpan dan dibandingkan.
      *
      * Menjenuh, bukan linear: bukti kesepuluh tidak menambah keyakinan sebanyak
@@ -300,19 +315,21 @@ public final class ProductMatcher {
                 if (!sepakat) continue;
             }
 
-            double bukti = 0;
+            double bukti = 0, seluruh = 0;
             int khasKena = 0;
             for (String t : p.tokens) {
+                double w = bobot(t, df, katalog.size());
+                seluruh += w;
                 if (!adaDiTeks(t, tokenTeks, rata)) continue;
-                bukti += bobot(t, df, katalog.size());
+                bukti += w;
                 Integer n = df.get(t);
                 if (n != null && n <= KHAS_MAKS_PRODUK) khasKena++;
             }
             // Tanpa satu pun kata khas, yang cocok cuma kata umum katalog ini.
             if (khasKena == 0) continue;
-            if (bukti >= MIN_BUKTI_TEKS) {
-                semua.add(new Match(p, skorDariBukti(bukti), false));
-            }
+            boolean cukup = bukti >= MIN_BUKTI_TEKS
+                    || (seluruh > 0 && bukti >= MIN_BAGIAN_TEKS * seluruh);
+            if (cukup) semua.add(new Match(p, skorDariBukti(bukti), false));
         }
         if (semua.isEmpty()) return out;
 

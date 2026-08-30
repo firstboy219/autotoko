@@ -674,6 +674,15 @@ public class DeliveryActivity extends AppCompatActivity {
         rowsBox.setOrientation(LinearLayout.VERTICAL);
         root.addView(rowsBox);
 
+        // Seluruh teks dicari ke master BAHAN BAKU, sekali untuk semua baris.
+        //
+        // Alasannya sama dengan di scan resi packing: OCR memotong baris
+        // menurut tata letak cetakan, bukan menurut arti, sehingga nama bahan
+        // rutin terbelah atau menyatu dengan alamat. Yang membedakan di sini
+        // katalognya -- bahan baku, bukan produk jadi.
+        final List<ProductMatcher.Match> dariTeks =
+                ProductMatcher.cariDiTeks(collector.lines().toString(), catalogue, 5);
+
         for (String line : collector.lines()) {
             // Character-level first: whole words rarely survive these photos,
             // and word matching is what left this sheet empty.
@@ -690,13 +699,18 @@ public class DeliveryActivity extends AppCompatActivity {
             List<ProductMatcher.Product> opts = new ArrayList<>();
             if (best != null) {
                 opts.add(best.product);
+                // Yang ditemukan dari seluruh teks ditaruh tepat di belakang
+                // pilihan terbaik, bukan di ekor 31 bahan: kalau tebakan
+                // pertama meleset, yang benar tinggal satu ketukan.
+                tambahDariTeks(opts, dariTeks);
                 for (ProductMatcher.Product other : catalogue) {
-                    if (!other.id.equals(best.product.id)) opts.add(other);
+                    if (!berisi(opts, other.id)) opts.add(other);
                 }
             } else {
                 List<ProductMatcher.Match> ranked = ProductMatcher.rank(line, catalogue, 5);
-                if (ranked.isEmpty()) continue;
                 for (ProductMatcher.Match m : ranked) opts.add(m.product);
+                tambahDariTeks(opts, dariTeks);
+                if (opts.isEmpty()) continue;
             }
             addRow(rowsBox, rows, line, opts, d);
             if (rows.size() >= 8) break;
@@ -704,6 +718,15 @@ public class DeliveryActivity extends AppCompatActivity {
 
         // Nothing per line. Try the whole reading at once: a material named
         // across two lines is invisible to line-by-line matching.
+        if (rows.isEmpty() && !dariTeks.isEmpty()) {
+            List<ProductMatcher.Product> opts = new ArrayList<>();
+            tambahDariTeks(opts, dariTeks);
+            for (ProductMatcher.Product other : catalogue) {
+                if (!berisi(opts, other.id)) opts.add(other);
+            }
+            addRow(rowsBox, rows, null, opts, d);
+        }
+
         if (rows.isEmpty()) {
             FuzzyMatch.Scored whole = FuzzyMatch.best(collector.lines().toString(), catalogue);
             if (whole != null) {
@@ -869,6 +892,20 @@ public class DeliveryActivity extends AppCompatActivity {
                     }
                 }));
         dialog.show();
+    }
+
+    /** Sudah ada di daftar pilihan? */
+    private static boolean berisi(List<ProductMatcher.Product> opts, String id) {
+        for (ProductMatcher.Product p : opts) if (p.id.equals(id)) return true;
+        return false;
+    }
+
+    /** Menyisipkan hasil pencarian seluruh teks, urut, tanpa menggandakan. */
+    private static void tambahDariTeks(List<ProductMatcher.Product> opts,
+                                       List<ProductMatcher.Match> dariTeks) {
+        for (ProductMatcher.Match m : dariTeks) {
+            if (!berisi(opts, m.product.id)) opts.add(m.product);
+        }
     }
 
     private void addRow(final LinearLayout box, List<Row> rows, String rawName,

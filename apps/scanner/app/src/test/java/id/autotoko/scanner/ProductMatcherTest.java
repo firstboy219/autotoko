@@ -225,4 +225,94 @@ public class ProductMatcherTest {
         assertFalse(ProductMatcher.bedaSatuHuruf("peppermint", "spearmint"));
         assertFalse(ProductMatcher.bedaSatuHuruf("kopi", "teh"));
     }
+
+    // --- master BAHAN BAKU ----------------------------------------------
+    //
+    // Nama bahan baku jauh lebih pendek daripada nama produk marketplace, dan
+    // di situlah ambang yang disetel untuk produk gagal: "Tali" berbobot 2,28,
+    // "Shrink" 2,57, "Tabung" 2,57 -- semuanya di bawah MIN_BUKTI_TEKS 3,0.
+
+    private static java.util.List<ProductMatcher.Product> katalogBahanBaku() {
+        java.util.List<ProductMatcher.Product> k = new java.util.ArrayList<>();
+        String[][] b = {
+            {"aq", "Aquades", "ml"}, {"jo", "Jojoba Oil", "ml"},
+            {"opm", "Oil Peppermint", "ml"}, {"obp", "Oil Black Pepper", "ml"},
+            {"oeu", "Oil Eucalyptus", "ml"}, {"bs100", "Botol Spray 100ml", "pcs"},
+            {"bs70", "Botol Spray 70ml", "pcs"}, {"tali", "Tali", "Pcs"},
+            {"talimini", "Tali Mini Leher", "Pcs"},
+            {"talireg", "Tali Reguler Leher", "pcs"},
+            {"shrink", "Shrink", "pcs"}, {"shrinkw", "Shrink Wrap", "pcs"},
+            {"tabung", "Tabung", "pcs"}, {"tabungih", "Tabung Inhaler Reguler", "pcs"},
+            {"kardus", "Kardus Packing", "pcs"}, {"kunyit", "Bubuk Kunyit", "gram"},
+            {"siwak", "Siwak", "Batang"}, {"label", "Label Sticker", "pcs"},
+        };
+        for (String[] x : b) k.add(new ProductMatcher.Product(x[0], x[1], x[2]));
+        return k;
+    }
+
+    /**
+     * Nama sependek satu kata tetap ketemu.
+     *
+     * Tanpa jalan kedua di ambangnya, "Aquades" mustahil cocok betapa pun
+     * jelas tercetak di nota -- bobotnya sendiri di bawah MIN_BUKTI_TEKS.
+     */
+    @Test public void bahan_bernama_pendek_tetap_ketemu() {
+        java.util.List<ProductMatcher.Match> m = ProductMatcher.cariDiTeks(
+                "Nota Pembelian\nAquades 5 liter\nJojoba Oil 100ml",
+                katalogBahanBaku(), 5);
+        assertFalse(m.isEmpty());
+        java.util.Set<String> id = new java.util.HashSet<>();
+        for (ProductMatcher.Match x : m) id.add(x.product.id);
+        assertTrue("Aquades tidak ketemu", id.contains("aq"));
+        assertTrue("Jojoba Oil tidak ketemu", id.contains("jo"));
+    }
+
+    /** Yang lebih lengkap namanya menang atas yang namanya penggalan. */
+    @Test public void bahan_nama_lengkap_menang_atas_penggalannya() {
+        java.util.List<ProductMatcher.Match> m = ProductMatcher.cariDiTeks(
+                "Tali Mini Leher 100 pcs", katalogBahanBaku(), 5);
+        assertFalse(m.isEmpty());
+        assertEquals("talimini", m.get(0).product.id);
+    }
+
+    @Test public void bahan_shrink_wrap_menang_atas_shrink() {
+        java.util.List<ProductMatcher.Match> m = ProductMatcher.cariDiTeks(
+                "Shrink Wrap 30 pcs", katalogBahanBaku(), 5);
+        assertFalse(m.isEmpty());
+        assertEquals("shrinkw", m.get(0).product.id);
+    }
+
+    /**
+     * Label kurir yang selama ini tertangkap, apa adanya dari basis data.
+     * Tidak ada nama bahan di dalamnya, dan tidak boleh dikarang jadi ada.
+     */
+    @Test public void label_kurir_tidak_menghasilkan_bahan() {
+        for (String teks : new String[]{
+            "[COD Cek Dulu: Tidak]",
+            "[JTN-A-04, SPX]",
+            "[A-319, S Shopee, JTN-A-04, SPX, STD]",
+            "[cOD Cek Dulu: Tidak DO, voTA JAKARTA TIMUR, SPX, TANPA ADANYA VIDEO UNBOXING, CASHLESS]",
+        }) {
+            assertTrue("mengarang bahan dari: " + teks,
+                    ProductMatcher.cariDiTeks(teks, katalogBahanBaku(), 5).isEmpty());
+        }
+    }
+
+    /** Ukuran yang bertentangan tetap mematikan, sama seperti untuk produk. */
+    @Test public void bahan_ukuran_bertentangan_tetap_mematikan() {
+        for (ProductMatcher.Match m : ProductMatcher.cariDiTeks(
+                "Botol Spray 70ml x 30", katalogBahanBaku(), 5)) {
+            assertFalse("100ml tidak boleh muncul untuk nota 70ml",
+                    m.product.id.equals("bs100"));
+        }
+    }
+
+    @Test public void bahan_dari_nota_yang_terpotong_barisnya() {
+        // OCR memotong baris menurut tata letak; nama bahan terbelah.
+        String teks = "Nota\nBotol\nSpray 100ml\nqty 30\n";
+        java.util.List<ProductMatcher.Match> m =
+                ProductMatcher.cariDiTeks(teks, katalogBahanBaku(), 5);
+        assertFalse("terbelah baris jadi tidak ketemu", m.isEmpty());
+        assertEquals("bs100", m.get(0).product.id);
+    }
 }
