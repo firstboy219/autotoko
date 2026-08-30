@@ -320,6 +320,15 @@ public class ScanActivity extends AppCompatActivity {
     private int tahap = 0;
     private String panduanResi, panduanRaw, panduanFormat;
     private final List<String> fotoTahap = new ArrayList<>();
+    /**
+     * Foto utama paket ini adalah gambar gabungan, bukan bidikan pertama.
+     *
+     * Menentukan bidikan mana yang masih perlu dikirim sebagai halaman: kalau
+     * yang utama sudah gabungan, bidikan PERTAMA pun belum terkirim -- dan
+     * bidikan pertama itu justru close-up nomor pesanan, yang paling berharga
+     * saat gambarnya diperbesar.
+     */
+    private boolean gabunganDipakai = false;
     /** Order id yang akan dikirim. Tanpa ini, paket tidak bisa disimpan. */
     private String orderIdFinal = null;
     /** "ocr" atau "manual" — menentukan aturan mana yang dipakai server. */
@@ -1003,11 +1012,33 @@ public class ScanActivity extends AppCompatActivity {
         collecting = false;
         busy = true;
         guide.setVisibility(View.GONE);
-        hint.setText("Membaca hasil...");
-        // Foto pertama jadi bukti utama; sisanya menyusul sebagai halaman
-        // tambahan setelah scan-nya punya id.
-        String utama = fotoTahap.isEmpty() ? null : fotoTahap.get(0);
-        resolve(panduanResi, panduanRaw, panduanFormat, utama);
+        gabunganDipakai = false;
+
+        final List<String> bidikan = new ArrayList<>(fotoTahap);
+        if (bidikan.size() <= 1) {
+            hint.setText("Membaca hasil...");
+            resolve(panduanResi, panduanRaw, panduanFormat,
+                    bidikan.isEmpty() ? null : bidikan.get(0));
+            return;
+        }
+
+        // Penyusunannya memuat dan mengecilkan beberapa bitmap besar. Di utas
+        // utama itu berarti layar membeku beberapa detik tepat saat paket
+        // berpindah tangan ke kurir.
+        hint.setText("Menyusun gambar...");
+        final String[] nama = new String[TAHAP.length];
+        for (int i = 0; i < TAHAP.length; i++) nama[i] = TAHAP[i][0];
+        cameraExecutor.execute(() -> {
+            final String gabungan = GabungFrame.rakit(bidikan, nama, PHOTO_QUALITY);
+            main.post(() -> {
+                gabunganDipakai = gabungan != null;
+                hint.setText("Membaca hasil...");
+                // Gagal menyusun tidak boleh menahan paketnya: kembali ke
+                // bidikan pertama, persis seperti sebelum fitur ini ada.
+                resolve(panduanResi, panduanRaw, panduanFormat,
+                        gabungan != null ? gabungan : bidikan.get(0));
+            });
+        });
     }
 
     /**
@@ -1017,8 +1048,14 @@ public class ScanActivity extends AppCompatActivity {
      * beberapa lembar — pertanyaannya sama: satu waybill, beberapa gambar.
      */
     private void kirimFotoSisa(String scanId) {
-        if (scanId == null || scanId.isEmpty() || fotoTahap.size() <= 1) return;
-        final List<String> sisa = new ArrayList<>(fotoTahap.subList(1, fotoTahap.size()));
+        if (scanId == null || scanId.isEmpty()) return;
+        // Kalau yang utama gambar gabungan, TIDAK ADA bidikan asli yang sudah
+        // terkirim -- termasuk yang pertama. Menggabungkan mengecilkan tiap
+        // bidikan supaya muat satu bingkai; yang ingin memperbesar sampai ke
+        // serat kertasnya membuka bidikan aslinya, dan itu harus ada.
+        final int mulai = gabunganDipakai ? 0 : 1;
+        if (fotoTahap.size() <= mulai) return;
+        final List<String> sisa = new ArrayList<>(fotoTahap.subList(mulai, fotoTahap.size()));
         fotoTahap.clear();
         for (String f : sisa) {
             api.addPage(scanId, f, null, r -> {
@@ -2499,6 +2536,7 @@ public class ScanActivity extends AppCompatActivity {
         // paket sebelumnya tidak boleh terbawa ke paket berikutnya.
         panduanAktif = false;
         fotoTahap.clear();
+        gabunganDipakai = false;
         orderIdFinal = null;
         orderIdSumber = null;
         if (guide != null) guide.setVisibility(View.GONE);

@@ -80,7 +80,15 @@ public class DeliveryActivity extends AppCompatActivity {
 
     private static final int REQ_CAMERA = 103;
     private static final android.util.Size ANALYSIS_SIZE = new android.util.Size(1920, 1080);
-    private static final int PHOTO_MAX_EDGE = 1600;
+    /**
+     * Disamakan dengan resi packing (2560/85).
+     *
+     * Nota bahan baku adalah jejak audit untuk uang yang KELUAR, dan ia justru
+     * yang paling rendah resolusinya di seluruh sistem. Pada 1600 piksel,
+     * angka nominal yang ditulis tangan di sudut nota sudah tidak terbaca lagi
+     * begitu gambarnya diperbesar -- padahal itulah yang perlu diperiksa.
+     */
+    private static final int PHOTO_MAX_EDGE = 2560;
     /** Let autofocus settle before the shutter; see focusThenCapture. */
     /** Picking an image leaves the activity; the sheet's parts wait here. */
     private static final int REQ_ORDER_PHOTO = 7301;
@@ -91,10 +99,23 @@ public class DeliveryActivity extends AppCompatActivity {
     /** Set once a screenshot is stored; travels with the delivery. */
     private String orderPhotoUrl = null;
 
+    /**
+     * Bidikan-bidikan nota yang akan disatukan jadi satu gambar.
+     *
+     * Satu foto seluruh nota dari jarak yang cukup untuk memuat semuanya
+     * berarti tidak ada satu bagian pun yang beresolusi cukup untuk dibaca.
+     * Beberapa bidikan dekat, lalu disatukan, memberi keduanya: pandangan
+     * menyeluruh dan tiap bagian yang benar-benar terbaca.
+     */
+    private final List<String> bidikanNota = new ArrayList<>();
+
+    /** Lebih dari ini, kanvas gabungannya mulai mengecilkan tiap bidikan. */
+    private static final int MAKS_BIDIKAN = 4;
+
     private static final long FOCUS_SETTLE_MS = 600;
     /** After this long with nothing decoded, stop looking confident about it. */
     private static final long NO_HIT_HINT_MS = 6000;
-    private static final int PHOTO_QUALITY = 80;
+    private static final int PHOTO_QUALITY = 85;
 
     private PreviewView preview;
     private TextView status, hint, read;
@@ -416,12 +437,54 @@ public class DeliveryActivity extends AppCompatActivity {
                     image.close();
                 }
                 final String payload = b64;
-                main.post(() -> map(resi, payload));
+                main.post(() -> {
+                    if (payload != null) bidikanNota.add(payload);
+                    if (bidikanNota.size() >= MAKS_BIDIKAN) lanjutkanNota(resi);
+                    else tanyaBidikanLagi(resi);
+                });
             }
 
             @Override public void onError(@NonNull ImageCaptureException e) {
-                main.post(() -> map(resi, null));
+                // Bidikan yang gagal tidak membatalkan yang sudah terkumpul.
+                main.post(() -> lanjutkanNota(resi));
             }
+        });
+    }
+
+    /**
+     * Menawarkan bidikan tambahan sebelum lembar pencocokan dibuka.
+     *
+     * Ditaruh SEBELUM lembar itu, bukan di dalamnya: begitu lembar terbuka,
+     * kamera tertutup dialog dan tidak ada lagi cara membidik. Menanyakannya
+     * di sini juga membuat mesin keadaan layar ini tidak berubah sama sekali
+     * -- map() tetap dipanggil sekali, dengan satu gambar.
+     */
+    private void tanyaBidikanLagi(String resi) {
+        if (isFinishing() || isDestroyed()) return;
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Bidikan " + bidikanNota.size() + " tersimpan")
+                .setMessage("Kalau ada bagian yang belum terbaca jelas — daftar barang, "
+                        + "nominal, tanggal — dekatkan kamera ke bagian itu lalu ketuk "
+                        + "\"Potret lagi\". Semua bidikan disatukan jadi satu gambar.")
+                .setPositiveButton("Lanjut", (d, w) -> lanjutkanNota(resi))
+                .setNegativeButton("Potret lagi", (d, w) -> focusThenCapture(resi))
+                .setCancelable(false)
+                .show();
+    }
+
+    /** Menyatukan bidikan yang terkumpul, lalu membuka lembar pencocokan. */
+    private void lanjutkanNota(String resi) {
+        final List<String> bidikan = new ArrayList<>(bidikanNota);
+        if (bidikan.size() <= 1) {
+            map(resi, bidikan.isEmpty() ? null : bidikan.get(0));
+            return;
+        }
+        // Di utas utama, penyusunan beberapa bitmap besar membekukan layar
+        // beberapa detik tepat saat barang sedang diturunkan.
+        hint.setText("Menyusun gambar...");
+        cameraExecutor.execute(() -> {
+            final String gabungan = GabungFrame.rakit(bidikan, null, PHOTO_QUALITY);
+            main.post(() -> map(resi, gabungan != null ? gabungan : bidikan.get(0)));
         });
     }
 
@@ -1177,6 +1240,9 @@ public class DeliveryActivity extends AppCompatActivity {
 
     private void reset() {
         busy = false;
+        // Bidikan nota sebelumnya yang terbawa akan menempelkan gambar
+        // pengiriman yang salah ke pengiriman berikutnya.
+        bidikanNota.clear();
         lookingSince = android.os.SystemClock.uptimeMillis();
         collector.reset();
         status.setText("Siap");
