@@ -286,6 +286,42 @@ public class ScanActivity extends AppCompatActivity {
      * berkata "belum terbaca" adalah membuang jawabannya sendiri.
      */
     private final SuaraOrderId suara = new SuaraOrderId();
+
+    /**
+     * Resi yang dibaca dari TULISAN, saat barcode-nya tidak terbaca.
+     *
+     * Sejak awal seluruh scan bersumber barcode: kalau barcode rusak,
+     * terlipat, atau tertutup lakban, satu-satunya jalan adalah mengetik.
+     * Di korpus, nomor resinya ada utuh di dalam teks OCR pada 79% scan --
+     * yang dibutuhkan cuma membacanya.
+     */
+    private final java.util.HashMap<String, Integer> resiTulisan = new java.util.HashMap<>();
+    private long menganggurSejak = 0;
+    private long teksMenganggurAt = 0;
+    private boolean tawaranResiDitolak = false;
+    private boolean tawaranResiTampil = false;
+
+    /** Sesudah selama ini tanpa barcode, tulisannya mulai ikut dibaca. */
+    private static final long MULAI_BACA_TULISAN_MS = 2500;
+    /** Jeda antar pembacaan teks saat menganggur, supaya barcode tetap lancar. */
+    private static final long JEDA_TULISAN_MS = 500;
+    /** Sebanyak ini frame harus sepakat sebelum ditawarkan. */
+    private static final int SUARA_RESI_MIN = 3;
+
+    /** Barcode nomor pesanan yang terlihat sebelum resinya ketemu. */
+    private String pesananDariBarcode = null;
+
+    /**
+     * Untaian ini nomor PESANAN, bukan nomor pengiriman.
+     *
+     * Dipakai supaya barcode nomor pesanan tidak pernah mengisi kolom resi.
+     * Syarat keduanya perlu: bentuknya dikenali sebagai nomor pesanan DAN
+     * awalannya bukan awalan kurir -- tanpa syarat kedua, nomor pengiriman
+     * berupa angka panjang bisa ikut tersingkir.
+     */
+    private static boolean bentukNomorPesanan(String v) {
+        return OrderId.skorkan(v, false, false) != null && !ResiExtractor.berawalanResi(v);
+    }
     /** The seller's own products, fetched once, matched against on every scan. */
     private final List<ProductMatcher.Product> catalogue = new ArrayList<>();
     /** True between finding the barcode and taking the photo: gather text now. */
@@ -581,6 +617,27 @@ public class ScanActivity extends AppCompatActivity {
             }
             return;
         }
+        // Menganggur terlalu lama tanpa barcode: sebagian kecil frame
+        // dialihkan untuk membaca tulisannya. Satu frame tiap setengah detik
+        // tidak terasa pada pemindaian barcode, dan itulah satu-satunya jalan
+        // bagi label yang barcode-nya terlipat atau tertutup lakban.
+        if (menganggurSejak > 0 && !readingText && !tawaranResiDitolak
+                && now - menganggurSejak >= MULAI_BACA_TULISAN_MS
+                && now - teksMenganggurAt >= JEDA_TULISAN_MS) {
+            teksMenganggurAt = now;
+            readingText = true;
+            textRecognizer.process(InputImage.fromMediaImage(media, rot))
+                    .addOnSuccessListener(t -> {
+                        String teks = t.getText();
+                        main.post(() -> kumpulkanResiTulisan(teks));
+                    })
+                    .addOnCompleteListener(t -> {
+                        readingText = false;
+                        proxy.close();
+                    });
+            return;
+        }
+
         analysing = true;
         // ML Kit reports boxes in the UPRIGHT frame, so at 90/270 the sides swap.
         boolean swapped = rot == 90 || rot == 270;
@@ -678,6 +735,8 @@ public class ScanActivity extends AppCompatActivity {
         // the barcode nearest the middle of the frame is the intended one.
         Barcode best = null;
         double bestDistance = Double.MAX_VALUE;
+        Barcode kodePesanan = null;
+        double jarakPesanan = Double.MAX_VALUE;
         for (Barcode code : codes) {
             String raw = code.getRawValue();
             if (raw == null) continue;
@@ -693,12 +752,34 @@ public class ScanActivity extends AppCompatActivity {
                 double dy = box.exactCenterY() / frameHeight - 0.5;
                 d = dx * dx + dy * dy;
             }
+
+            // Label Shopee mencetak barcode NOMOR PESANAN di tengah lembar dan
+            // barcode resi di atasnya. Karena yang dipilih adalah yang
+            // terdekat ke tengah bingkai, membidik label justru memilih nomor
+            // pesanan sebagai resi -- terukur: 9 scan menyimpan untaian
+            // seperti "260814B62PDTY8" dan "585527219881477623" di kolom resi,
+            // dan nomor pengiriman paket-paket itu tidak pernah tercatat.
+            if (bentukNomorPesanan(resi)) {
+                if (d < jarakPesanan) { jarakPesanan = d; kodePesanan = code; }
+                continue;
+            }
             if (d < bestDistance) {
                 bestDistance = d;
                 best = code;
             }
         }
-        if (best == null) return;
+        if (best == null) {
+            // Yang terbaca hanya barcode nomor pesanan. Ia BUKAN resi, jadi
+            // paketnya belum boleh dimulai -- biarkan bingkai berikutnya, atau
+            // cadangan pembacaan dari tulisan, yang menemukan resinya.
+            if (kodePesanan != null) {
+                pesananDariBarcode = ResiExtractor.normalize(kodePesanan.getRawValue());
+            }
+            return;
+        }
+        if (kodePesanan != null) {
+            pesananDariBarcode = ResiExtractor.normalize(kodePesanan.getRawValue());
+        }
 
         // The other codes printed on the same label. Kept only when they sit
         // close to the winner: see SAME_LABEL_RADIUS.
@@ -715,12 +796,7 @@ public class ScanActivity extends AppCompatActivity {
                 double dy = (b.exactCenterY() - bestBox.exactCenterY()) / frameHeight;
                 if (Math.sqrt(dx * dx + dy * dy) > SAME_LABEL_RADIUS) continue;
             }
-            if (seenCodes.size() < MAX_CODES_PER_LABEL) {
-                seenCodes.add(other);
-                // Sebagian kecil label membawa nomor pesanannya di barcode.
-                // Itu satu-satunya pembacaan di sini yang punya checksum.
-                suara.catatBarcode(other);
-            }
+            if (seenCodes.size() < MAX_CODES_PER_LABEL) seenCodes.add(other);
         }
 
         String resi = ResiExtractor.normalize(best.getRawValue());
@@ -734,10 +810,20 @@ public class ScanActivity extends AppCompatActivity {
                 box.bottom / (float) frameHeight);
 
         mute(resi);
+        menganggurSejak = 0;
+        resiTulisan.clear();
         reader.reset();
         // Suara paket sebelumnya yang terbawa akan memilih nomor
         // pesanan milik paket yang salah.
         suara.kosongkan();
+        // SESUDAH dikosongkan, bukan sebelum. Ditulis sebelum, seluruh
+        // catatannya terhapus beberapa baris kemudian dan jalur barcode itu
+        // tidak pernah berpengaruh sama sekali.
+        for (String c : seenCodes) suara.catatBarcode(c);
+        if (pesananDariBarcode != null) {
+            suara.catatBarcode(pesananDariBarcode);
+            pesananDariBarcode = null;
+        }
         collecting = true;
         focusThenCapture(resi, best.getRawValue(), formatName(best.getFormat()));
     }
@@ -774,6 +860,74 @@ public class ScanActivity extends AppCompatActivity {
     }
 
     /* ══════════════════════════════════════════════ scan bertahap ══════ */
+
+    /**
+     * Mengumpulkan calon resi dari satu bingkai tulisan.
+     *
+     * Ambang skornya sengaja tinggi: yang lolos hanya yang berdampingan dengan
+     * kata "Resi"/"AWB" atau berawalan kurir yang dikenal. Sebuah label penuh
+     * angka -- nomor telepon pembeli, kode pos, nomor pesanan -- dan menawarkan
+     * angka mana saja yang panjang akan membuat tawaran ini lebih sering salah
+     * daripada benar, lalu berhenti dipercaya.
+     */
+    private void kumpulkanResiTulisan(String teks) {
+        if (busy || tawaranResiDitolak || tawaranResiTampil) return;
+        for (ResiExtractor.Candidate c : ResiExtractor.extract(teks)) {
+            if (c.score < 40) continue;
+            if (bentukNomorPesanan(c.value)) continue;
+            Integer n = resiTulisan.get(c.value);
+            resiTulisan.put(c.value, n == null ? 1 : n + 1);
+        }
+        String menang = null;
+        int tertinggi = 0;
+        for (java.util.Map.Entry<String, Integer> e : resiTulisan.entrySet()) {
+            if (e.getValue() > tertinggi) { tertinggi = e.getValue(); menang = e.getKey(); }
+        }
+        if (menang == null || tertinggi < SUARA_RESI_MIN) return;
+        tawarkanResiTulisan(menang, tertinggi);
+    }
+
+    /**
+     * Menawarkan resi yang terbaca dari tulisan.
+     *
+     * Ditawarkan, tidak dipakai sendiri. Pembacaan tulisan tidak punya
+     * checksum seperti barcode, dan resi yang salah lebih buruk daripada resi
+     * yang kosong: server menolak duplikat, jadi nomor yang keliru membakar
+     * kunci yang mungkin dibutuhkan paket yang benar nanti.
+     */
+    private void tawarkanResiTulisan(final String nilai, int suaraNya) {
+        if (isFinishing() || isDestroyed() || busy || tawaranResiTampil) return;
+        tawaranResiTampil = true;
+        String kurir = ResiExtractor.courierOf(nilai);
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Resi terbaca dari tulisan")
+                .setMessage(nilai + (kurir != null ? "\n\nKurir: " + kurir : "")
+                        + "\n\nBarcode-nya tidak terbaca — mungkin terlipat atau "
+                        + "tertutup. Nomor ini dibaca dari tulisan di label oleh "
+                        + suaraNya + " bidikan. Cocok?")
+                .setPositiveButton("Ya, pakai ini", (d, w) -> {
+                    tawaranResiTampil = false;
+                    menganggurSejak = 0;
+                    resiTulisan.clear();
+                    mute(nilai);
+                    reader.reset();
+                    suara.kosongkan();
+                    collecting = true;
+                    // Sumbernya "ocr", bukan "barcode": asal sebuah nomor
+                    // menentukan seberapa ia layak dipercaya nanti saat audit.
+                    focusThenCapture(nilai, nilai, "OCR");
+                })
+                .setNegativeButton("Bukan, terus cari", (d, w) -> {
+                    tawaranResiTampil = false;
+                    // Tidak ditawarkan lagi sampai paket berikutnya: menanyakan
+                    // hal yang sama berulang-ulang membuat orang berhenti
+                    // membacanya dan menekan apa saja.
+                    tawaranResiDitolak = true;
+                    resiTulisan.clear();
+                })
+                .setCancelable(false)
+                .show();
+    }
 
     private void mulaiPanduan(String resi, String raw, String format) {
         if (isFinishing() || isDestroyed()) return;
@@ -2525,6 +2679,14 @@ public class ScanActivity extends AppCompatActivity {
         // The single place a parcel is let go of. Every path ends here, which
         // is what makes it safe for busy to be released only here.
         busy = false;
+        // Jam menganggur dimulai di sini: sesudah beberapa detik tanpa
+        // barcode, tulisannya ikut dibaca.
+        menganggurSejak = android.os.SystemClock.uptimeMillis();
+        teksMenganggurAt = 0;
+        resiTulisan.clear();
+        tawaranResiDitolak = false;
+        tawaranResiTampil = false;
+        pesananDariBarcode = null;
         status.setText("Siap");
         status.setTextColor(Color.parseColor("#6B7178"));
         detail.setVisibility(View.GONE);

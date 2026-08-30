@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.util.List;
+import static org.junit.Assert.assertNull;
 import org.junit.Test;
 
 /**
@@ -86,5 +87,72 @@ public class ResiExtractorTest {
         assertTrue(ResiExtractor.extract("").isEmpty());
         assertTrue(ResiExtractor.extract(null).isEmpty());
         assertTrue(ResiExtractor.extract("!!! ??? ...").isEmpty());
+    }
+
+    // --- dari 312 scan sungguhan ---------------------------------------
+    //
+    //   282  JY1328393153     J&T (dikonfirmasi manusia 241 kali)
+    //    17  CM67961230459    J&T 8x / JNE 6x -- ambigu
+    //     3  JX8000643600     J&T
+    //     1  MY1516662593     J&T
+    //     9  260814B62PDTY8   NOMOR PESANAN, tersimpan di kolom resi
+
+    @Test public void awalan_yang_benar_benar_dipakai_dikenali() {
+        // Sebelum ini hanya JX yang dikenali -- 3 dari 312 scan.
+        assertEquals("J&T", ResiExtractor.courierOf("JY1328393153"));
+        assertEquals("J&T", ResiExtractor.courierOf("MY1516662593"));
+        assertEquals("J&T", ResiExtractor.courierOf("JX8000643600"));
+    }
+
+    /**
+     * CM muncul 17 kali dan manusia menyebutnya J&T delapan kali dan JNE enam
+     * kali. Menebak salah satunya menuliskan kurir yang salah pada hampir
+     * separuh paket; yang bisa dipastikan hanya bahwa ia nomor pengiriman.
+     */
+    @Test public void awalan_ambigu_diakui_bentuknya_tanpa_menebak_kurirnya() {
+        assertNull(ResiExtractor.courierOf("CM67961230459"));
+        assertTrue(ResiExtractor.berawalanResi("CM67961230459"));
+    }
+
+    @Test public void nomor_pesanan_bukan_awalan_resi() {
+        assertFalse(ResiExtractor.berawalanResi("260814B62PDTY8"));
+        assertFalse(ResiExtractor.berawalanResi("585527219881477623"));
+    }
+
+    @Test public void resi_terbaca_dari_tulisan_label_shopee() {
+        // Dari tangkapan layar hasil tes: barcode-nya terlipat, tulisannya
+        // terbaca jelas.
+        String teks = "Shopee ECO\n"
+                + "PDO-B-04    Resi: SPXID064183635268\n"
+                + "BW-33\n"
+                + "Penerima: Ziza\n"
+                + "Pengirim: LKCARE Official Store\n"
+                + "No.Pesanan: 260827EXWKKVDE\n";
+        java.util.List<ResiExtractor.Candidate> c = ResiExtractor.extract(teks);
+        assertFalse("tidak ada kandidat sama sekali", c.isEmpty());
+        assertEquals("SPXID064183635268", c.get(0).value);
+        assertEquals("SPX", c.get(0).courier);
+    }
+
+    @Test public void resi_jnt_terbaca_dari_tulisan() {
+        String teks = "J&T EXPRESS\n"
+                + "No. Resi : JY1328393153\n"
+                + "Penerima: Budi   Telp 081234567890\n";
+        java.util.List<ResiExtractor.Candidate> c = ResiExtractor.extract(teks);
+        assertFalse(c.isEmpty());
+        assertEquals("JY1328393153", c.get(0).value);
+        assertEquals("J&T", c.get(0).courier);
+    }
+
+    /**
+     * Nomor telepon pembeli selalu ada di label dan panjangnya mirip. Kalau ia
+     * yang menang, setiap paket tercatat dengan resi yang salah -- dan karena
+     * server menolak duplikat, nomor keliru itu membakar kunci yang mungkin
+     * dibutuhkan paket yang benar nanti.
+     */
+    @Test public void nomor_telepon_tidak_pernah_menang_atas_resi() {
+        String teks = "Penerima: Ziza\nTelp: 081234567890\nResi: JY1328393153\n";
+        java.util.List<ResiExtractor.Candidate> c = ResiExtractor.extract(teks);
+        assertEquals("JY1328393153", c.get(0).value);
     }
 }

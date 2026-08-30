@@ -56,7 +56,10 @@ export function normalizeResi(raw: string): string {
 
 /** Well-known Indonesian courier prefixes, purely for labelling a scan. */
 const COURIER_PREFIXES: ReadonlyArray<readonly [RegExp, string]> = [
-  [/^JX|^JP|^JT/, "J&T"],
+  // JY dan MY dari data: 241 scan berawalan JY dikonfirmasi manusia sebagai
+  // J&T sementara deteksi otomatisnya kosong. JX yang selama ini dikenali
+  // hanya muncul 3 kali dari 312.
+  [/^JX|^JP|^JT|^JY|^MY/, "J&T"],
   [/^JNE|^CGK|^TLS/, "JNE"],
   [/^SPXID|^SPX/, "SPX"],
   [/^NLID|^NINJA/, "Ninja"],

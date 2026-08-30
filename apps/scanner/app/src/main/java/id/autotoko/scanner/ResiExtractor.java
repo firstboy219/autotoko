@@ -45,9 +45,18 @@ public final class ResiExtractor {
         "RESI", "AWB", "TRACKING", "WAYBILL", "AIRWAYBILL", "NOMOR RESI", "NO RESI"
     };
 
-    /** Longest prefixes first, so SPXID wins over SPX and NLID over NL. */
+    /**
+     * Awalan terpanjang lebih dulu, supaya SPXID menang atas SPX.
+     *
+     * JY dan MY ditambahkan dari data, bukan dari daftar resmi: 241 scan
+     * berawalan JY dikonfirmasi manusia sebagai J&T sementara deteksi
+     * otomatisnya kosong, dan MY satu kali. Sebelum ini daftarnya hanya
+     * mengenali JX -- yang muncul 3 kali dari 312.
+     */
     private static final String[][] COURIERS = {
         {"SPXID", "SPX"},
+        {"JY", "J&T"},
+        {"MY", "J&T"},
         {"NLID", "Ninja"},
         {"10000", "Anteraja"},
         {"JNE", "JNE"},
@@ -62,6 +71,27 @@ public final class ResiExtractor {
         {"LP", "Lion Parcel"},
         {"SC", "SiCepat"},
     };
+
+    /**
+     * Awalan yang jelas nomor pengiriman tapi kurirnya TIDAK bisa dipastikan.
+     *
+     * CM muncul 17 kali dan manusia menyebutnya J&T delapan kali dan JNE enam
+     * kali. Menebak salah satunya berarti menuliskan kurir yang salah pada
+     * hampir separuh paket; yang bisa dipastikan hanyalah bahwa ia nomor
+     * pengiriman, dan itu saja sudah cukup untuk memenangkannya atas nomor
+     * pesanan saat memilih resi.
+     */
+    private static final String[] AWALAN_TANPA_NAMA = {"CM"};
+
+    /** Bentuknya nomor pengiriman, walau kurirnya belum tentu bisa disebut. */
+    public static boolean berawalanResi(String normalized) {
+        if (normalized == null) return false;
+        if (courierOf(normalized) != null) return true;
+        for (String p : AWALAN_TANPA_NAMA) {
+            if (normalized.startsWith(p)) return true;
+        }
+        return false;
+    }
 
     private static final int MIN_LEN = 8;
     private static final int MAX_LEN = 24;
@@ -185,7 +215,7 @@ public final class ResiExtractor {
 
         int s = 10;
         if (hinted) s += 25;
-        if (courierOf(norm) != null) s += 40;
+        if (berawalanResi(norm)) s += 40;
         if (len >= 10 && len <= 16) s += 10;
 
         // A shipping label always carries the recipient's mobile number, and
