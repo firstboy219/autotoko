@@ -12,6 +12,7 @@ import { NavSettingsModal, type NavItem, type NavPrefs } from "./NavSettings";
 
 export const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: "dashboard", end: true },
+  { to: "/dashboard-v2", label: "Dashboard v2", icon: "activity" },
   { to: "/toko", label: "Toko Saya", icon: "store" },
   { to: "/produk", label: "Master Produk", icon: "package" },
   { to: "/katalog", label: "Kesehatan Katalog", icon: "activity" },
@@ -44,6 +45,7 @@ export const NAV: NavItem[] = [
  */
 const NAV_PERM: Record<string, string> = {
   "/": "dashboard",
+  "/dashboard-v2": "dashboard",
   "/toko": "toko",
   "/produk": "produk",
   "/katalog": "produk",

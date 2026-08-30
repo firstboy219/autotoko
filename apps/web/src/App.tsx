@@ -22,6 +22,7 @@ import { Akun } from "./pages/Akun";
 import Karyawan from "./pages/Karyawan";
 import Rekonsiliasi from "./pages/Rekonsiliasi";
 import AuditPesanan from "./pages/AuditPesanan";
+import DashboardV2 from "./pages/DashboardV2";
 import { Paket } from "./pages/Paket";
 import { Notifikasi } from "./pages/Notifikasi";
 import { Landing } from "./pages/Landing";
@@ -62,6 +63,7 @@ export function App() {
         <Route path="/karyawan" element={<Protected><Karyawan /></Protected>} />
         <Route path="/rekonsiliasi" element={<Protected><Rekonsiliasi /></Protected>} />
         <Route path="/audit-pesanan" element={<Protected><AuditPesanan /></Protected>} />
+        <Route path="/dashboard-v2" element={<Protected><DashboardV2 /></Protected>} />
         <Route path="/paket" element={<Protected><Paket /></Protected>} />
         <Route path="/notifikasi" element={<Protected><Notifikasi /></Protected>} />
         <Route path="/" element={<Protected><Dashboard /></Protected>} />

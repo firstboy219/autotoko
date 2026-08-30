@@ -3,6 +3,7 @@ import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, type JwtPayload } from "../auth/jwt-auth.guard.js";
 import { DashboardService } from "./dashboard.service.js";
+import { DashboardV2Service } from "./dashboard-v2.service.js";
 import { PendingTasksService } from "./pending-tasks.service.js";
 import { ShopInsightsService } from "./shop-insights.service.js";
 
@@ -17,6 +18,7 @@ export class DashboardController {
     private readonly dashboard: DashboardService,
     private readonly pending: PendingTasksService,
     private readonly insights: ShopInsightsService,
+    private readonly v2Service: DashboardV2Service,
   ) {}
 
   /**
@@ -68,6 +70,27 @@ export class DashboardController {
       success: true,
       data: await this.insights.shopDetail(uid(req), shopId, { from, to }),
     };
+  }
+
+  /**
+   * Angka untuk Dashboard v2.
+   *
+   * Rute terpisah, bukan mengubah /summary: dashboard lama masih dipakai dan
+   * tidak boleh berubah artinya hanya karena ada yang baru.
+   */
+  @Get("v2")
+  async v2(
+    @Req() req: FastifyRequest,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ): Promise<ApiResponse<unknown>> {
+    const akhir = to ?? new Date().toISOString().slice(0, 10);
+    const awal =
+      from ??
+      new Date(new Date(akhir + "T00:00:00Z").getTime() - 29 * 86400000)
+        .toISOString()
+        .slice(0, 10);
+    return { success: true, data: await this.v2Service.overview(uid(req), awal, akhir) };
   }
 
   @Get("summary")
