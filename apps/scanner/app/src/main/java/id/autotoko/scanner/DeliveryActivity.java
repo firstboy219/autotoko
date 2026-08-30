@@ -112,6 +112,23 @@ public class DeliveryActivity extends AppCompatActivity {
     /** Lebih dari ini, kanvas gabungannya mulai mengecilkan tiap bidikan. */
     private static final int MAKS_BIDIKAN = 4;
 
+    /**
+     * Setiap frame ikut memilih bahan mana yang ada di nota.
+     *
+     * Mekanisme yang sama dengan nomor pesanan di scan resi packing: satu frame
+     * adalah tebakan, puluhan frame yang sepakat adalah bukti. Dipakai untuk
+     * memutuskan KAPAN panduan boleh berhenti -- bukan untuk memilih bahannya,
+     * yang tetap diambil dari teks terkumpul supaya nama yang terbelah antar
+     * baris tetap utuh.
+     */
+    private final SuaraBahan suaraBahan = new SuaraBahan();
+    private boolean panduanNotaAktif = false;
+    private long panduanMulai = 0;
+    private long bidikanTerakhirAt = 0;
+
+    /** Jarak antar bidikan otomatis. */
+    private static final long JEDA_BIDIK_MS = 2000;
+
     private static final long FOCUS_SETTLE_MS = 600;
     /** After this long with nothing decoded, stop looking confident about it. */
     private static final long NO_HIT_HINT_MS = 6000;
@@ -280,8 +297,12 @@ public class DeliveryActivity extends AppCompatActivity {
             readingText = true;
             recognizer.process(InputImage.fromMediaImage(media, rot))
                     .addOnSuccessListener(t -> {
-                        collector.addFrame(t.getText());
-                        main.post(this::renderRead);
+                        final String teks = t.getText();
+                        collector.addFrame(teks);
+                        main.post(() -> {
+                            catatBahanDariFrame(teks);
+                            renderRead();
+                        });
                     })
                     .addOnCompleteListener(t -> readingText = false);
         }
@@ -439,37 +460,77 @@ public class DeliveryActivity extends AppCompatActivity {
                 final String payload = b64;
                 main.post(() -> {
                     if (payload != null) bidikanNota.add(payload);
-                    if (bidikanNota.size() >= MAKS_BIDIKAN) lanjutkanNota(resi);
-                    else tanyaBidikanLagi(resi);
+                    // Panduan yang mengatur alurnya; bidikan berikutnya datang
+                    // dari detaknya sendiri, bukan dari orang yang menekan.
+                    if (panduanNotaAktif) return;
+                    mulaiPanduanNota(resi);
                 });
             }
 
             @Override public void onError(@NonNull ImageCaptureException e) {
                 // Bidikan yang gagal tidak membatalkan yang sudah terkumpul.
-                main.post(() -> lanjutkanNota(resi));
+                main.post(() -> {
+                    if (panduanNotaAktif) return;
+                    if (bidikanNota.isEmpty()) lanjutkanNota(resi);
+                    else mulaiPanduanNota(resi);
+                });
             }
         });
     }
 
     /**
-     * Menawarkan bidikan tambahan sebelum lembar pencocokan dibuka.
+     * Satu frame ikut memilih bahan apa yang ada di nota.
      *
-     * Ditaruh SEBELUM lembar itu, bukan di dalamnya: begitu lembar terbuka,
-     * kamera tertutup dialog dan tidak ada lagi cara membidik. Menanyakannya
-     * di sini juga membuat mesin keadaan layar ini tidak berubah sama sekali
-     * -- map() tetap dipanggil sekali, dengan satu gambar.
+     * Sama seperti nomor pesanan di scan resi packing: satu frame adalah
+     * tebakan, beberapa frame yang sepakat adalah bukti.
      */
-    private void tanyaBidikanLagi(String resi) {
+    private void catatBahanDariFrame(String teks) {
+        if (!panduanNotaAktif || catalogue.isEmpty()) return;
+        suaraBahan.catat(ProductMatcher.cariDiTeks(teks, catalogue, 3));
+    }
+
+    /**
+     * Panduan nota, OTOMATIS.
+     *
+     * Menggantikan tawaran "Potret lagi" yang manual. Dialog itu menaruh
+     * keputusan pada orang yang sedang memegang kardus dengan dua tangan, dan
+     * menanyakannya berulang kali membuat orang menekan apa saja supaya cepat
+     * selesai. Di sini kamera yang bekerja: terus membaca, memotret sendiri
+     * berkala, dan berhenti sendiri begitu bahannya dikenali beberapa frame --
+     * mekanisme yang sama dengan panduan bertahap di scan resi packing.
+     */
+    private void mulaiPanduanNota(String resi) {
         if (isFinishing() || isDestroyed()) return;
-        new MaterialAlertDialogBuilder(this)
-                .setTitle("Bidikan " + bidikanNota.size() + " tersimpan")
-                .setMessage("Kalau ada bagian yang belum terbaca jelas — daftar barang, "
-                        + "nominal, tanggal — dekatkan kamera ke bagian itu lalu ketuk "
-                        + "\"Potret lagi\". Semua bidikan disatukan jadi satu gambar.")
-                .setPositiveButton("Lanjut", (d, w) -> lanjutkanNota(resi))
-                .setNegativeButton("Potret lagi", (d, w) -> focusThenCapture(resi))
-                .setCancelable(false)
-                .show();
+        panduanNotaAktif = true;
+        panduanMulai = android.os.SystemClock.uptimeMillis();
+        bidikanTerakhirAt = panduanMulai;
+        suaraBahan.kosongkan();
+        detakNota(resi);
+    }
+
+    private void detakNota(final String resi) {
+        if (!panduanNotaAktif || isFinishing() || isDestroyed()) return;
+        long t = android.os.SystemClock.uptimeMillis();
+        long lewat = t - panduanMulai;
+        int dikenali = suaraBahan.disepakati();
+
+        hint.setText(dikenali > 0
+                ? "Nota terbaca — " + dikenali + " bahan dikenali dari "
+                  + suaraBahan.frame() + " frame"
+                : "Arahkan ke daftar barang & nominal di nota — "
+                  + suaraBahan.frame() + " frame");
+
+        if (SuaraBahan.selesai(dikenali, lewat)) {
+            panduanNotaAktif = false;
+            lanjutkanNota(resi);
+            return;
+        }
+
+        if (bidikanNota.size() < MAKS_BIDIKAN && t - bidikanTerakhirAt >= JEDA_BIDIK_MS) {
+            bidikanTerakhirAt = t;
+            focusThenCapture(resi);
+        }
+        main.postDelayed(() -> detakNota(resi), 250);
     }
 
     /** Menyatukan bidikan yang terkumpul, lalu membuka lembar pencocokan. */
@@ -1280,6 +1341,8 @@ public class DeliveryActivity extends AppCompatActivity {
         // Bidikan nota sebelumnya yang terbawa akan menempelkan gambar
         // pengiriman yang salah ke pengiriman berikutnya.
         bidikanNota.clear();
+        panduanNotaAktif = false;
+        suaraBahan.kosongkan();
         lookingSince = android.os.SystemClock.uptimeMillis();
         collector.reset();
         status.setText("Siap");
