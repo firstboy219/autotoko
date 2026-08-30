@@ -1,64 +1,115 @@
 import { describe, expect, it } from "vitest";
-import { bestOrderId, findOrderId, isOrderId, normaliseOrderId } from "./order-id.js";
+import {
+  bacaOrderId,
+  bacaSemuaOrderId,
+  bestOrderId,
+  findOrderId,
+  isOrderId,
+  normaliseOrderId,
+  normaliseOrderIdTyped,
+} from "./order-id.js";
 
 /**
- * Yang dijaga di sini adalah sebuah janji: kolom order id hanya berisi nilai
- * yang mungkin, atau kosong. Tidak ada tebakan.
+ * Dua janji yang harus dijaga bersamaan, dan dulu hanya satu yang dijaga.
+ *
+ * 1. Kolom order id tidak pernah berisi tebakan yang disimpan diam-diam.
+ * 2. Nomor pesanan yang jelas-jelas tercetak di label tidak boleh gagal
+ *    terbaca. Menjaga janji pertama dengan cara melanggar janji kedua adalah
+ *    persis kegagalan yang terlihat di hasil tes: "No.Pesanan: 260827EXWKKVDE"
+ *    terbaca sempurna, ditolak, dan seluruh paket Shopee berhenti di sana.
  *
  * Nilainya diambil dari data sungguhan -- order id asli dari laporan
- * penyelesaian TikTok, dan sampah asli yang selama ini tersimpan di kolom itu.
+ * penyelesaian TikTok, sampah asli yang pernah tersimpan di kolom ini, dan
+ * label Shopee dari tangkapan layar hasil tes.
  */
 describe("order id", () => {
   const ASLI = "585623070310172189"; // dari laporan, jenis "Pesanan"
+  const SHOPEE = "260827EXWKKVDE";
+  const LABEL_SHOPEE =
+    "Penerima: Ziza\nBerat: 10 gr    COD Cek Dulu: Tidak\n" +
+    "Batas Kirim: 28-08-2026\nNo.Pesanan: " + SHOPEE + "\n";
 
-  it("menerima 18 digit apa adanya", () => {
-    expect(normaliseOrderId(ASLI)).toBe(ASLI);
-    expect(isOrderId(ASLI)).toBe(true);
+  // --- jalur ketat: dipakai membaca laporan marketplace --------------------
+
+  describe("normaliseOrderId tetap ketat", () => {
+    /**
+     * Sengaja TIDAK ikut dilonggarkan. Fungsi ini membaca kolom "ID Pesanan"
+     * di laporan penyelesaian marketplace, di mana 18 digit murni memang
+     * satu-satunya bentuk yang ada. Melonggarkan di sini akan membuat
+     * pencocokan pencairan mulai menerima nilai yang bukan pesanan.
+     */
+    it("menerima 18 digit apa adanya", () => {
+      expect(normaliseOrderId(ASLI)).toBe(ASLI);
+      expect(isOrderId(ASLI)).toBe(true);
+    });
+
+    it("memperbaiki huruf yang tertukar angka, kalau hasilnya jadi sah", () => {
+      expect(normaliseOrderId("S85623070310172189")).toBe(ASLI);
+      expect(normaliseOrderId("5856230703101721B9")).toBe(ASLI);
+    });
+
+    it("menolak yang masih bersisa huruf setelah diperbaiki", () => {
+      expect(normaliseOrderId("SH8476199355610969")).toBeNull();
+      expect(normaliseOrderId("SHS4BSTISSIATTO04E")).toBeNull();
+    });
+
+    it("menolak kode sortir kurir dan panjang yang salah", () => {
+      expect(normaliseOrderId("2605149T3NJJJN")).toBeNull();
+      expect(normaliseOrderId("585691")).toBeNull();
+      expect(normaliseOrderId("3690853782936651237")).toBeNull();
+    });
+
+    it("mengabaikan spasi dan tanda pemisah", () => {
+      expect(normaliseOrderId("5856 2307 0310 172189")).toBe(ASLI);
+      expect(normaliseOrderId("585623-070310-172189")).toBe(ASLI);
+    });
   });
 
-  it("memperbaiki huruf yang tertukar angka, kalau hasilnya jadi sah", () => {
-    // Kasus nyata dari database: S menggantikan 5 di awal.
-    expect(normaliseOrderId("S85623070310172189")).toBe(ASLI);
-    expect(normaliseOrderId("5856230703101721B9")).toBe(ASLI);
+  // --- yang diperbaiki -----------------------------------------------------
+
+  describe("label Shopee dari hasil tes", () => {
+    it("terbaca, dan tidak lagi berhenti di langkah wajib", () => {
+      expect(findOrderId(LABEL_SHOPEE)).toBe(SHOPEE);
+    });
+
+    it("alasannya menyebut jangkarnya, supaya penolakan tidak pernah bisu", () => {
+      const b = bacaOrderId(LABEL_SHOPEE)!;
+      expect(b.keyakinan).toBe("tinggi");
+      expect(b.keluarga).toBe("Shopee");
+      expect(b.berjangkar).toBe(true);
+      expect(b.alasan.join(" ")).toContain("No. Pesanan");
+    });
+
+    it("berat dan batas kirim di label yang sama tidak ikut terbawa", () => {
+      const nilai = bacaSemuaOrderId(LABEL_SHOPEE).map((b) => b.nilai);
+      expect(nilai).toEqual([SHOPEE]);
+    });
   });
 
-  it("menolak yang masih bersisa huruf setelah diperbaiki", () => {
-    // Ini nomor pengiriman Shopee, bukan order id -- H tidak ada di peta.
-    expect(normaliseOrderId("SH8476199355610969")).toBeNull();
-    expect(normaliseOrderId("SHS4BSTISSIATTO04E")).toBeNull();
-  });
+  // --- yang tidak boleh ikut longgar ---------------------------------------
 
-  it("menolak kode sortir kurir", () => {
-    expect(normaliseOrderId("2605149T3NJJJN")).toBeNull();
-    expect(normaliseOrderId("260B100JHWOY")).toBeNull();
-    expect(normaliseOrderId("28082341EHVNMU")).toBeNull();
-  });
-
-  it("menolak yang panjangnya salah", () => {
-    expect(normaliseOrderId("585691")).toBeNull();
-    expect(normaliseOrderId("12775002522784")).toBeNull();
-    // 19 digit BUKAN order id: di laporan, entri 19 digit seluruhnya
-    // referensi pencairan di muka atau penyesuaian komisi.
-    expect(normaliseOrderId("3690853782936651237")).toBeNull();
-  });
-
-  it("mengabaikan spasi dan tanda pemisah", () => {
-    expect(normaliseOrderId("5856 2307 0310 172189")).toBe(ASLI);
-    expect(normaliseOrderId("585623-070310-172189")).toBe(ASLI);
-  });
-
-  it("membaca yang berjangkar dari teks label", () => {
-    expect(findOrderId(`Penerima: Budi\nOrder ID : ${ASLI}\nJNE REG`)).toBe(ASLI);
-    expect(findOrderId(`No. Pesanan ${ASLI}`)).toBe(ASLI);
-  });
-
-  it("membaca angka telanjang 18 digit", () => {
-    expect(findOrderId(`tokopedia Shop\n${ASLI}\nJNE`)).toBe(ASLI);
+  it("menolak nomor pengiriman kurir walau berjangkar", () => {
+    expect(findOrderId("Order ID: SPXID064183635268")).toBeNull();
+    expect(findOrderId("No. Pesanan: JX1234567890123")).toBeNull();
   });
 
   /**
-   * Pemeriksaan yang paling penting di berkas ini.
-   *
+   * Perbaikan huruf diperiksa SESUDAH pemeriksaan "jelas bukan", bukan
+   * sebelum: "SPXID0641..." yang diperbaiki jadi "5PX10064..." tidak lagi
+   * berawalan kode kurir dan akan lolos, padahal yang tercetak di kertas itu
+   * tetap nomor pengiriman.
+   */
+  it("perbaikan huruf tidak bisa menyelundupkan nomor kurir", () => {
+    expect(bacaSemuaOrderId("Order ID: SPXID064183635268")).toEqual([]);
+  });
+
+  it("nilai di sebelah kata resi tidak pernah jadi order id", () => {
+    expect(findOrderId(`No. Resi: ${ASLI}`)).toBeNull();
+    expect(findOrderId(`AWB: ${SHOPEE}`)).toBeNull();
+    expect(bacaSemuaOrderId(`Nomor Resi ${ASLI}`)).toEqual([]);
+  });
+
+  /**
    * Tanpa batas non-digit, /\d{18}/ mencocok DELAPAN BELAS ANGKA PERTAMA dari
    * package id 19 digit dan menghasilkan order id yang terpotong satu angka.
    * Bentuknya sempurna, nilainya salah, dan tidak akan pernah berpasangan
@@ -69,26 +120,75 @@ describe("order id", () => {
     expect(findOrderId("1206362770642142504")).toBeNull();
   });
 
-  it("menolak memilih kalau ada beberapa angka 18 digit berbeda", () => {
+  it("menolak memilih kalau ada dua yang sama kuat", () => {
     expect(findOrderId(`${ASLI}\n585688912408380856`)).toBeNull();
   });
 
   it("jangkar menang atas angka telanjang", () => {
-    const lain = "585688912408380856";
-    expect(findOrderId(`${lain}\nOrder ID: ${ASLI}`)).toBe(ASLI);
+    expect(findOrderId(`585688912408380856\nOrder ID: ${ASLI}`)).toBe(ASLI);
   });
 
-  it("bestOrderId mendahulukan yang tersimpan, tapi tetap memeriksanya", () => {
+  it("angka telanjang 18 digit tetap diterima", () => {
+    expect(findOrderId(`tokopedia Shop\n${ASLI}\nJNE`)).toBe(ASLI);
+  });
+
+  // --- tingkat sedang: ditawarkan, bukan ditolak diam-diam -----------------
+
+  /**
+   * Inti dari perubahannya.
+   *
+   * Kode sortir kurir tidak bisa dibedakan bentuknya dari nomor pesanan
+   * Shopee. Dulu itu alasan menolak SEMUA bentuk Shopee dari OCR -- membuang
+   * yang benar bersama yang salah, lalu diam soal apa yang sebenarnya terbaca.
+   * Sekarang ia tetap tidak dipakai otomatis, tapi TIDAK hilang: nilainya
+   * ditawarkan, dan yang memutuskan adalah orang yang memegang labelnya.
+   */
+  it("bentuk Shopee tanpa jangkar ditawarkan, bukan dibuang", () => {
+    const teks = `BW-33\n${SHOPEE}\nSPX`;
+    expect(findOrderId(teks)).toBeNull();
+    const b = bacaOrderId(teks)!;
+    expect(b.nilai).toBe(SHOPEE);
+    expect(b.keyakinan).toBe("sedang");
+    expect(b.berjangkar).toBe(false);
+  });
+
+  it("kode sortir kurir juga hanya sampai tingkat sedang", () => {
+    expect(bacaOrderId("2605149T3NJJJN")!.keyakinan).toBe("sedang");
+  });
+
+  it("tanggal yang mustahil menjatuhkan bentuk Shopee", () => {
+    // Bulan 99 bukan tanggal, jadi ini bukan nomor pesanan Shopee.
+    expect(bacaSemuaOrderId("999999ABCDEFGH").map((b) => b.nilai)).toEqual([]);
+  });
+
+  // --- ketikan atau pembenaran orang ---------------------------------------
+
+  it("ketikan orang jauh lebih longgar", () => {
+    // Yang mengetik sedang memegang labelnya. Menolak di sini berarti
+    // menghentikan pekerjaan atas nama ketelitian.
+    expect(normaliseOrderIdTyped(SHOPEE)).toBe(SHOPEE);
+    expect(normaliseOrderIdTyped(ASLI)).toBe(ASLI);
+    expect(normaliseOrderIdTyped("inv/20260827/mpl/123456")).toBe("INV20260827MPL123456");
+  });
+
+  it("ketikan tetap menolak yang jelas bukan", () => {
+    expect(normaliseOrderIdTyped("SPXID064183635268")).toBeNull();
+    expect(normaliseOrderIdTyped("081234567890")).toBeNull();
+    expect(normaliseOrderIdTyped("12345")).toBeNull();
+  });
+
+  it("bestOrderId mendahulukan yang tersimpan", () => {
     expect(bestOrderId(ASLI, "teks apa pun")).toBe(ASLI);
-    // Tersimpan tapi sampah -> jatuh ke teks.
-    expect(bestOrderId("2605149T3NJJJN", `Order ID: ${ASLI}`)).toBe(ASLI);
-    // Dua-duanya sampah -> kosong, bukan tebakan.
-    expect(bestOrderId("2605149T3NJJJN", "tidak ada apa-apa")).toBeNull();
+    expect(bestOrderId(null, `Order ID: ${ASLI}`)).toBe(ASLI);
+    expect(bestOrderId("081234567890", `Order ID: ${ASLI}`)).toBe(ASLI);
+    expect(bestOrderId(null, "tidak ada apa-apa")).toBeNull();
   });
 
   it("kosong tetap kosong", () => {
     expect(normaliseOrderId(null)).toBeNull();
     expect(normaliseOrderId("")).toBeNull();
     expect(findOrderId(null)).toBeNull();
+    expect(bacaOrderId("")).toBeNull();
+    expect(bacaSemuaOrderId(null)).toEqual([]);
   });
 });

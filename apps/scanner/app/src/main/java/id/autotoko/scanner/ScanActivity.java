@@ -277,6 +277,15 @@ public class ScanActivity extends AppCompatActivity {
     private TextRecognizer textRecognizer;
     /** Accumulates readings of the label across frames; see LabelReader. */
     private final LabelReader reader = new LabelReader();
+    /**
+     * Setiap frame ikut memilih nomor pesanan.
+     *
+     * Di hasil tes tercatat 154 frame atas satu label, dan keputusannya
+     * diambil dari satu frame yang kebetulan sedang dilihat. Ratusan
+     * pembacaan bebas atas kertas yang sama adalah bukti; membuangnya lalu
+     * berkata "belum terbaca" adalah membuang jawabannya sendiri.
+     */
+    private final SuaraOrderId suara = new SuaraOrderId();
     /** The seller's own products, fetched once, matched against on every scan. */
     private final List<ProductMatcher.Product> catalogue = new ArrayList<>();
     /** True between finding the barcode and taking the photo: gather text now. */
@@ -551,6 +560,7 @@ public class ScanActivity extends AppCompatActivity {
                 textRecognizer.process(InputImage.fromMediaImage(media, rot))
                         .addOnSuccessListener(t -> {
                             reader.addFrame(t.getText());
+                            suara.catat(t.getText());
                             main.post(this::renderLive);
                         })
                         .addOnCompleteListener(t -> {
@@ -711,6 +721,9 @@ public class ScanActivity extends AppCompatActivity {
 
         mute(resi);
         reader.reset();
+        // Suara paket sebelumnya yang terbawa akan memilih nomor
+        // pesanan milik paket yang salah.
+        suara.kosongkan();
         collecting = true;
         focusThenCapture(resi, best.getRawValue(), formatName(best.getFormat()));
     }
@@ -770,10 +783,15 @@ public class ScanActivity extends AppCompatActivity {
     private void detakPanduan() {
         if (!panduanAktif || isFinishing() || isDestroyed()) return;
         if (tahap == 0 && orderIdFinal == null) {
-            String v = OrderId.cari(reader.rawText());
-            if (v != null) {
-                orderIdFinal = v;
-                orderIdSumber = "ocr";
+            OrderId.Bacaan b = suara.hasil();
+            // Hanya keyakinan tinggi yang diterima tanpa ditanya. Yang sedang
+            // TIDAK dibuang -- ia ditawarkan di panel untuk dibenarkan sekali
+            // sentuh, lihat renderPanduan().
+            if (b != null && b.pasti()) {
+                orderIdFinal = b.nilai;
+                // Dibedakan supaya server tahu aturan mana yang berlaku:
+                // yang berjangkar dinyatakan sendiri oleh labelnya.
+                orderIdSumber = b.berjangkar ? "ocr_label" : "ocr";
                 feedback(true);
             }
         }
@@ -793,15 +811,36 @@ public class ScanActivity extends AppCompatActivity {
 
         if (tahap == 0) {
             boolean ada = orderIdFinal != null;
-            guideFound.setText(ada
-                    ? "✓ " + orderIdFinal
-                    : "Belum terbaca — " + reader.frames() + " frame, kejelasan " + clarity + "%");
-            guideFound.setTextColor(Color.parseColor(ada ? "#7BD88F" : "#F2A93B"));
-            guideNext.setEnabled(ada);
-            guideNext.setText(ada ? "Lanjut" : "Menunggu nomor pesanan");
-            // Tidak ada "Lewati" untuk yang wajib. Jalan keluarnya mengetik,
-            // yang tetap menghasilkan order id — bukan melewatkannya.
-            guideSkip.setText("Ketik manual");
+            OrderId.Bacaan b = ada ? null : suara.hasil();
+
+            // Tiga keadaan, dan yang tengah itulah yang dulu tidak ada.
+            // "Belum terbaca" sementara aplikasi yang sama menampilkan
+            // nomornya beberapa sentimeter di bawah adalah cara tercepat
+            // membuat orang berhenti percaya pada layarnya.
+            if (ada) {
+                guideFound.setText("✓ " + orderIdFinal);
+                guideFound.setTextColor(Color.parseColor("#7BD88F"));
+                guideNext.setEnabled(true);
+                guideNext.setText("Lanjut");
+            } else if (b != null) {
+                guideFound.setText("Terbaca \"" + b.nilai + "\" — "
+                        + Math.round(b.skor * 100) + "% yakin (" + b.alasan + ")");
+                guideFound.setTextColor(Color.parseColor("#F2A93B"));
+                // Satu ketukan untuk membenarkan. Menyuruh orang mengetik
+                // ulang nomor yang sudah terbaca di layarnya adalah cara
+                // membuat jalan keluar ini tidak pernah dipakai.
+                guideNext.setEnabled(true);
+                guideNext.setText("Pakai " + b.nilai);
+            } else {
+                guideFound.setText("Belum terbaca — " + suara.frame()
+                        + " frame, kejelasan " + clarity + "%");
+                guideFound.setTextColor(Color.parseColor("#F2A93B"));
+                guideNext.setEnabled(false);
+                guideNext.setText("Menunggu nomor pesanan");
+            }
+            // Tidak ada "Lewati" untuk yang wajib. Jalan keluarnya memilih
+            // atau mengetik, yang tetap menghasilkan order id.
+            guideSkip.setText(suara.pilihan().size() > 1 ? "Pilih nomor lain" : "Ketik manual");
         } else {
             guideFound.setText(reader.frames() + " frame terbaca");
             guideFound.setTextColor(Color.parseColor("#9AA0A6"));
@@ -814,10 +853,47 @@ public class ScanActivity extends AppCompatActivity {
     private void lewatiTahap() {
         if (!panduanAktif) return;
         if (tahap == 0) {
-            ketikOrderId();
+            pilihOrderId();
             return;
         }
         majuTahap();
+    }
+
+    /**
+     * Menawarkan nomor-nomor yang terbaca untuk disentuh.
+     *
+     * Menyentuh tidak bisa salah ketik, dan yang benar hampir selalu ada di
+     * antara tiga teratas -- label yang sama sudah dibaca ratusan kali. Kotak
+     * ketik tetap ada sebagai pilihan terakhir, bukan sebagai satu-satunya.
+     */
+    private void pilihOrderId() {
+        final java.util.List<OrderId.Bacaan> pil = suara.pilihan();
+        if (pil.isEmpty()) {
+            ketikOrderId();
+            return;
+        }
+        final String[] baris = new String[pil.size() + 1];
+        for (int i = 0; i < pil.size(); i++) {
+            OrderId.Bacaan b = pil.get(i);
+            baris[i] = b.nilai + "   (" + Math.round(b.skor * 100) + "% yakin, "
+                    + suara.suaraUntuk(b.nilai) + " frame)";
+        }
+        baris[pil.size()] = "Ketik manual…";
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Nomor pesanan yang terbaca")
+                .setItems(baris, (d, which) -> {
+                    if (which >= pil.size()) {
+                        ketikOrderId();
+                        return;
+                    }
+                    orderIdFinal = pil.get(which).nilai;
+                    orderIdSumber = "ocr_confirmed";
+                    feedback(true);
+                    renderPanduan();
+                })
+                .setNegativeButton("Batal", null)
+                .show();
     }
 
     /**
@@ -831,6 +907,15 @@ public class ScanActivity extends AppCompatActivity {
     private void ketikOrderId() {
         final EditText input = new EditText(this);
         input.setHint("Nomor pesanan seperti tertulis di label");
+        // Diisi kandidat yang sudah dibaca, kalau ada. Menyuruh orang mengetik
+        // ulang empat belas karakter yang sudah terbaca di layar adalah cara
+        // membuat jalan keluar ini tidak pernah dipakai.
+        OrderId.Bacaan terkuat = suara.hasil();
+        String awal = terkuat != null ? terkuat.nilai : reader.orderNo();
+        if (awal != null) {
+            input.setText(awal);
+            input.setSelection(awal.length());
+        }
         input.setInputType(InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
         androidx.appcompat.app.AlertDialog d = new MaterialAlertDialogBuilder(this)
@@ -846,13 +931,15 @@ public class ScanActivity extends AppCompatActivity {
                     String v2 = OrderId.dariKetikan(input.getText().toString());
                     if (v2 == null) {
                         Toast.makeText(this,
-                                "Bentuknya tidak dikenali. Nomor pesanan biasanya 18 angka, "
-                                        + "atau untuk Shopee diawali 6 angka tanggal.",
+                                "Itu bukan nomor pesanan — bentuknya nomor pengiriman "
+                                        + "kurir, nomor telepon, atau terlalu pendek.",
                                 Toast.LENGTH_LONG).show();
                         return;
                     }
                     orderIdFinal = v2;
                     orderIdSumber = "manual";
+                    // Kotak isian sudah menampilkan kandidat OCR, jadi yang
+                    // diketik biasanya tinggal koreksi satu-dua huruf.
                     d.dismiss();
                     renderPanduan();
                 }));
@@ -862,7 +949,16 @@ public class ScanActivity extends AppCompatActivity {
     /** Memotret tahap ini, lalu maju. */
     private void potretTahap() {
         if (!panduanAktif) return;
-        if (tahap == 0 && orderIdFinal == null) return;
+        if (tahap == 0 && orderIdFinal == null) {
+            // Tombolnya berbunyi "Pakai <nomor>", jadi menekannya ADALAH
+            // pembenaran -- tindakan sadar oleh orang yang memegang labelnya,
+            // dan itulah yang membuat nilai keyakinan sedang boleh dipakai.
+            OrderId.Bacaan b = suara.hasil();
+            if (b == null) return;
+            orderIdFinal = b.nilai;
+            orderIdSumber = "ocr_confirmed";
+            feedback(true);
+        }
         guideNext.setEnabled(false);
         guideNext.setText("Memotret...");
         if (imageCapture == null) {
@@ -2396,6 +2492,9 @@ public class ScanActivity extends AppCompatActivity {
         // one would file this label's codes against the following parcel.
         seenCodes.clear();
         reader.reset();
+        // Suara paket sebelumnya yang terbawa akan memilih nomor
+        // pesanan milik paket yang salah.
+        suara.kosongkan();
         // Alasan yang sama dengan seenCodes di atas: nomor pesanan dan bidikan
         // paket sebelumnya tidak boleh terbawa ke paket berikutnya.
         panduanAktif = false;

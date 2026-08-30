@@ -173,7 +173,7 @@ export class ResiService {
       photoBase64?: string;
       barcodeFormat?: string;
       labelOrderNo?: string;
-      orderNoSource?: "ocr" | "manual";
+      orderNoSource?: "ocr" | "ocr_label" | "ocr_confirmed" | "manual";
       deviceText?: string;
       deviceClarity?: number;
       items?: {
@@ -438,12 +438,29 @@ export class ResiService {
         barcodeFormat: input.barcodeFormat?.slice(0, 32) ?? null,
         // Diperiksa juga meski datang dari ponsel: asal sebuah nilai tidak
         // membuatnya sah, dan APK lama yang belum diperbarui tetap mengirim
-        // kode sortir kurir ke kolom ini. Yang diketik orang dinilai dengan
-        // aturan yang lebih longgar -- lihat catatan di order-id.ts.
+        // kode sortir kurir ke kolom ini.
+        //
+        // Aturan mana yang berlaku ditentukan oleh ASALNYA, dan pembagiannya
+        // adalah inti perbaikan ini:
+        //
+        //   ocr           mesin memutuskan sendiri -- tetap 18 angka murni,
+        //                 karena tidak ada yang menyatakan nilai itu apa;
+        //   ocr_label     tercetak di sebelah tulisan "No. Pesanan", jadi
+        //                 labelnya sendiri yang menyatakannya;
+        //   ocr_confirmed mesin membaca, ORANG membenarkannya di layar;
+        //   manual        diketik orang yang memegang labelnya.
+        //
+        // Tiga yang terakhir dinilai dengan aturan longgar karena masing-masing
+        // punya sesuatu yang menyatakan nilai itu nomor pesanan -- tulisan di
+        // label, atau orang yang melihatnya.
         labelOrderNo:
-          input.orderNoSource === "manual"
+          input.orderNoSource && input.orderNoSource !== "ocr"
             ? normaliseOrderIdTyped(input.labelOrderNo)
             : normaliseOrderId(input.labelOrderNo),
+        // Disimpan supaya audit bisa membedakan nomor yang dibaca mesin dari
+        // nomor yang dibenarkan orang. Sebuah "pesanan hilang" yang nomornya
+        // ditebak mesin adalah tuduhan yang berdiri di atas tebakan.
+        labelOrderNoSource: input.labelOrderNo ? (input.orderNoSource ?? null) : null,
         deviceText: input.deviceText?.slice(0, 20_000) ?? null,
         deviceClarity: input.deviceClarity != null ? input.deviceClarity.toFixed(2) : null,
         // "pending" only when there is something to read. The background task

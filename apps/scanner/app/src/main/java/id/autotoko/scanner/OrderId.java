@@ -1,29 +1,31 @@
 package id.autotoko.scanner;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Order id dari label: mengesahkan, memperbaiki, dan menolak.
+ * Membaca nomor pesanan dari label dengan MENIMBANG BUKTI. Cermin order-id.ts.
  *
- * Cerminan aturan yang sama di server (order-id.ts), ditaruh di sini karena
- * sejak order id diwajibkan, ponsel harus bisa mengatakan "belum" SEBELUM
- * paketnya dilepas -- menunggu server menolaknya berarti menahan orang yang
- * sudah menaruh paket di tumpukan berikutnya.
+ * Versi sebelumnya adalah daftar bentuk yang boleh: 18 angka murni, titik. Di
+ * hasil tes, label Shopee bertuliskan harfiah "No.Pesanan: 260827EXWKKVDE"
+ * terbaca sempurna -- panel bawah menampilkan nomornya -- lalu ditolak, dan
+ * panel panduan berkata "Belum terbaca, 154 frame, kejelasan 99%". Karena
+ * order id sudah diwajibkan, setiap paket Shopee berhenti di langkah pertama.
  *
- * Aturannya diturunkan dari laporan penyelesaian sungguhan: dari 66 baris
- * berjenis "Pesanan", SELURUHNYA angka murni 18 digit. Yang 19 digit bukan
- * pesanan -- ia referensi pencairan di muka dan penyesuaian komisi.
+ * Sekarang setiap kandidat diberi SKOR dari bukti yang ada di label itu
+ * sendiri, dan hasilnya tiga tingkat, bukan dua: tinggi dipakai langsung,
+ * sedang ditawarkan untuk dibenarkan sekali sentuh, rendah diabaikan.
  *
- * Dua jalur, dan pemisahannya disengaja:
- *
- *   dariOcr()     -- 18 digit murni, titik. Melonggarkan di sini persis yang
- *                    dulu menyimpan kode sortir kurir dan nomor pengiriman
- *                    Shopee ke kolom order id; 79% isinya jadi mustahil.
- *   dariKetikan() -- boleh juga bentuk Shopee. Mengetik adalah tindakan sadar
- *                    dengan label di tangan, bukan tebakan mesin. Tanpa jalur
- *                    ini, mewajibkan order id akan membuat paket Shopee
- *                    mustahil disimpan sama sekali.
+ * Tingkat sedang itu inti perubahannya. Kode sortir kurir bentuknya tidak bisa
+ * dibedakan dari nomor pesanan Shopee -- dulu itu alasan menolak SEMUA bentuk
+ * Shopee, yang berarti membuang yang benar bersama yang salah. Menawarkannya
+ * menyerahkan keputusan kepada satu-satunya pihak yang bisa memutuskan: orang
+ * yang sedang memegang labelnya.
  */
 final class OrderId {
 
@@ -31,7 +33,34 @@ final class OrderId {
 
     static final int DIGIT = 18;
 
-    /** Hanya kekeliruan OCR yang benar-benar sering terjadi pada label termal. */
+    /** Hasil pembacaan berikut alasannya. */
+    static final class Bacaan {
+        final String nilai;
+        final double skor;
+        /** "tinggi" | "sedang" */
+        final String keyakinan;
+        final String keluarga;
+        final boolean berjangkar;
+        final String alasan;
+
+        Bacaan(String nilai, double skor, String keluarga, boolean berjangkar, String alasan) {
+            this.nilai = nilai;
+            this.skor = skor;
+            this.keyakinan = skor >= 0.80 ? "tinggi" : "sedang";
+            this.keluarga = keluarga;
+            this.berjangkar = berjangkar;
+            this.alasan = alasan;
+        }
+
+        Bacaan dengan(double skorBaru, String alasanBaru) {
+            return new Bacaan(nilai, skorBaru, keluarga, berjangkar, alasanBaru);
+        }
+
+        boolean pasti() { return "tinggi".equals(keyakinan); }
+    }
+
+    // -----------------------------------------------------------------------
+
     private static String rapikan(String s) {
         StringBuilder b = new StringBuilder(s.length());
         for (int i = 0; i < s.length(); i++) {
@@ -51,63 +80,188 @@ final class OrderId {
 
     private static String bersihkan(String raw) {
         if (raw == null) return "";
-        return raw.replaceAll("[\\s\\-/.]", "");
+        return raw.replaceAll("[\\s\\-/.]", "").toUpperCase(Locale.US);
     }
 
-    /** Order id hasil pembacaan mesin, atau null. */
+    /** Order id 18 digit yang sah, atau null. Ketat, dan sengaja dibiarkan ketat. */
     static String dariOcr(String raw) {
         String bersih = bersihkan(raw);
         if (bersih.isEmpty()) return null;
         if (bersih.matches("\\d{" + DIGIT + "}")) return bersih;
-        // Perbaikan huruf hanya diterima kalau HASILNYA jadi 18 digit penuh;
-        // kalau masih tersisa huruf, kandidatnya memang bukan order id.
         String perbaikan = rapikan(bersih);
         if (perbaikan.matches("\\d{" + DIGIT + "}")) return perbaikan;
         return null;
     }
 
-    /** Bentuk nomor pesanan Shopee: enam angka tanggal lalu huruf/angka. */
-    private static final Pattern SHOPEE = Pattern.compile("^[0-9]{6}[A-Z0-9]{6,10}$");
+    private static final Pattern AWALAN_KURIR = Pattern.compile(
+            "^(SPXID|SPX|JNE|JX|JP|JD|JT|JOB|CM|TKP|SICEPAT|SOCP|IDEXP|NCS|LEX|ANT|BLIB|GKX|GK|SAP|POS|TIKI)");
 
-    /** Order id yang diketik orang, atau null. */
-    static String dariKetikan(String raw) {
-        String ketat = dariOcr(raw);
-        if (ketat != null) return ketat;
-        String bersih = bersihkan(raw).toUpperCase(java.util.Locale.US);
-        return SHOPEE.matcher(bersih).matches() ? bersih : null;
+    /** Bentuk yang sudah pasti bukan nomor pesanan, sekuat apa pun jangkarnya. */
+    private static boolean jelasBukan(String v) {
+        if (AWALAN_KURIR.matcher(v).find()) return true;
+        if (v.matches("0\\d{8,12}")) return true;   // telepon
+        if (v.matches("62\\d{8,13}")) return true;  // telepon +62
+        if (v.matches("\\d{5}")) return true;       // kode pos
+        if (v.matches("\\d{1,4}")) return true;     // terlalu pendek
+        if (v.startsWith("RP") || v.startsWith("IDR")) return true;
+        if (v.matches("\\d{8}") && Integer.parseInt(v.substring(0, 2)) <= 31) return true; // tanggal
+        return false;
     }
 
-    private static final Pattern JANGKAR = Pattern.compile(
-            "(?:order\\s*id|no\\.?\\s*pesanan|nomor\\s*pesanan|no\\.?\\s*order|invoice)"
-                    + "\\s*[:#]?\\s*([0-9OoSsIilBZzGD|]{16,20})",
-            Pattern.CASE_INSENSITIVE);
+    /**
+     * Enam angka pertama masuk akal sebagai tanggal YYMMDD.
+     *
+     * Inilah yang memisahkan nomor pesanan Shopee sungguhan dari untaian
+     * huruf-angka mana pun yang kebetulan panjangnya mirip.
+     */
+    private static boolean tanggalMasukAkal(String v) {
+        if (!v.matches("\\d{6}.*")) return false;
+        int th = Integer.parseInt(v.substring(0, 2));
+        int bl = Integer.parseInt(v.substring(2, 4));
+        int hr = Integer.parseInt(v.substring(4, 6));
+        return th >= 24 && th <= 35 && bl >= 1 && bl <= 12 && hr >= 1 && hr <= 31;
+    }
 
     /**
-     * Cari order id di dalam teks label.
+     * Menilai satu nilai yang sudah bersih, atau null kalau bentuknya tak dikenal.
      *
-     * Berjangkar dulu, baru angka telanjang. Yang telanjang WAJIB berbatas
-     * non-digit: tanpa itu, awalan sebuah angka 19 digit ikut tercocok sebagai
-     * "18 digit" dan menghasilkan order id yang terpotong satu angka -- salah
-     * yang paling sulit terlihat, karena bentuknya sempurna.
+     * Dipisah supaya penghitung suara antar-frame memakai timbangan yang sama
+     * persis dengan pembacaan satu frame. Dua timbangan yang berbeda untuk
+     * pertanyaan yang sama adalah cara membuat panel dan hasil akhir berbeda
+     * pendapat -- persis kegagalan yang sedang diperbaiki di sini.
      */
-    static String cari(String teks) {
-        if (teks == null || teks.isEmpty()) return null;
+    static Bacaan skorkan(String v, boolean berjangkar, boolean diperbaiki) {
+        if (v == null || v.isEmpty() || jelasBukan(v)) return null;
+        String[] kel = keluarga(v);
+        if (kel == null) return null;
 
-        Matcher j = JANGKAR.matcher(teks);
-        if (j.find()) {
-            String v = dariOcr(j.group(1));
-            if (v != null) return v;
+        double skor = Double.parseDouble(kel[1]);
+        StringBuilder alasan = new StringBuilder("bentuk ").append(kel[0]);
+        if (berjangkar) {
+            // Bukti terkuat yang bisa ada di sehelai label: tulisan di
+            // sebelahnya menyatakan bahwa nilai ini nomor pesanan.
+            skor += 0.45;
+            alasan.append(", tertulis di sebelah \"No. Pesanan\"");
         }
+        if (diperbaiki) {
+            skor -= 0.08;
+            alasan.append(", ada huruf yang dibaca sebagai angka");
+        }
+        skor = Math.max(0, Math.min(1, skor));
+        if (skor < 0.45) return null;
+        return new Bacaan(v, skor, kel[0], berjangkar, alasan.toString());
+    }
 
-        Matcher t = Pattern.compile("(?<!\\d)\\d{" + DIGIT + "}(?!\\d)").matcher(teks);
-        String satu = null;
+    /** Nama keluarga bentuk dan skornya TANPA jangkar, atau null kalau tak dikenal. */
+    private static String[] keluarga(String v) {
+        if (v.matches("\\d{18}")) return new String[]{"18 digit", "0.85"};
+        if (v.matches("\\d{6}[A-Z0-9]{6,12}") && tanggalMasukAkal(v))
+            return new String[]{"Shopee", "0.62"};
+        if (v.matches("\\d{19}")) return new String[]{"19 digit", "0.34"};
+        if (v.matches("INV\\d{8}MPL\\d{6,14}")) return new String[]{"Invoice Tokopedia", "0.60"};
+        if (v.matches("\\d{12,16}")) return new String[]{"angka panjang", "0.30"};
+        if (v.matches("[A-Z0-9]{10,24}") && v.matches(".*\\d.*") && v.matches(".*[A-Z].*"))
+            return new String[]{"huruf-angka", "0.18"};
+        return null;
+    }
+
+    private static final Pattern JANGKAR_ADALAH = Pattern.compile(
+            "(?:order\\s*id|order\\s*no\\.?|no\\.?\\s*order|no\\.?\\s*pesanan|nomor\\s*pesanan"
+                    + "|kode\\s*pesanan|id\\s*pesanan|invoice|no\\.?\\s*invoice)\\s*[:#]?\\s*$",
+            Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern JANGKAR_BUKAN = Pattern.compile(
+            "(?:no\\.?\\s*resi|nomor\\s*resi|resi|awb|air\\s*way\\s*bill|tracking|no\\.?\\s*telp"
+                    + "|telepon|hp|berat|weight|kode\\s*pos|batas\\s*kirim)\\s*[:#]?\\s*$",
+            Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern TOKEN =
+            Pattern.compile("[A-Za-z0-9|][A-Za-z0-9|/\\-.]{4,30}");
+
+    /** Semua kandidat di dalam teks, dari yang skornya tertinggi. */
+    static List<Bacaan> semua(String teks) {
+        List<Bacaan> out = new ArrayList<>();
+        if (teks == null || teks.isEmpty()) return out;
+
+        Map<String, Bacaan> unik = new LinkedHashMap<>();
+        Matcher t = TOKEN.matcher(teks);
         while (t.find()) {
-            String v = t.group();
-            if (satu == null) satu = v;
-            // Beberapa angka 18 digit yang BERBEDA: tidak ada dasar memilih
-            // salah satunya, jadi tidak ada yang dipilih.
-            else if (!satu.equals(v)) return null;
+            String sebelum = teks.substring(Math.max(0, t.start() - 24), t.start());
+            if (JANGKAR_BUKAN.matcher(sebelum).find()) continue;
+            boolean berjangkar = JANGKAR_ADALAH.matcher(sebelum).find();
+
+            String bersih = bersihkan(t.group());
+            if (bersih.isEmpty()) continue;
+            // Diperiksa SEBELUM perbaikan huruf, bukan sesudah. "SPXID0641..."
+            // yang diperbaiki menjadi "5PX10064..." tidak lagi berawalan kode
+            // kurir dan akan lolos -- padahal yang tercetak di kertas itu tetap
+            // nomor pengiriman. Yang sudah jelas bukan, tetap bukan.
+            if (jelasBukan(bersih)) continue;
+
+            // Dua bacaan: apa adanya, lalu yang huruf-miripnya diperbaiki.
+            // Yang apa adanya didahulukan -- perbaikan yang tidak mengubah
+            // keluarga hanya menambah kemungkinan salah.
+            String[] coba = bersih.equals(rapikan(bersih))
+                    ? new String[]{bersih}
+                    : new String[]{bersih, rapikan(bersih)};
+
+            for (int i = 0; i < coba.length; i++) {
+                Bacaan b = skorkan(coba[i], berjangkar, i > 0);
+                if (b == null) continue;
+                Bacaan lama = unik.get(b.nilai);
+                if (lama == null || b.skor > lama.skor) unik.put(b.nilai, b);
+                break;
+            }
         }
-        return satu;
+
+        out.addAll(unik.values());
+        java.util.Collections.sort(out, (a, b) -> Double.compare(b.skor, a.skor));
+        return out;
+    }
+
+    /**
+     * Bacaan terbaik, atau null.
+     *
+     * Kalau dua kandidat sama kuat dan nilainya berbeda, tidak ada dasar
+     * memilih salah satunya, jadi keduanya turun ke "sedang" -- biar orangnya
+     * yang menunjuk. Diam-diam memilih yang pertama adalah cara menghasilkan
+     * nomor yang bentuknya sempurna dan isinya salah.
+     */
+    static Bacaan baca(String teks) {
+        List<Bacaan> s = semua(teks);
+        if (s.isEmpty()) return null;
+        Bacaan atas = s.get(0);
+        if (s.size() > 1 && s.get(1).skor == atas.skor) {
+            return atas.dengan(Math.min(atas.skor, 0.70), atas.alasan + ", ada kandidat lain yang sama kuat");
+        }
+        return atas;
+    }
+
+    /** Order id yang boleh dipakai TANPA dibenarkan orang. Hanya keyakinan tinggi. */
+    static String cari(String teks) {
+        Bacaan b = baca(teks);
+        return b != null && b.pasti() ? b.nilai : null;
+    }
+
+    /** True kalau bacaan terbaiknya tercetak tepat di sebelah label nomor pesanan. */
+    static boolean berjangkar(String teks) {
+        Bacaan b = baca(teks);
+        return b != null && b.berjangkar;
+    }
+
+    /**
+     * Order id yang DIKETIK atau DIBENARKAN orang.
+     *
+     * Jauh lebih longgar, dan itu disengaja: orang yang mengetiknya sedang
+     * memegang labelnya. Yang ditolak hanyalah yang jelas-jelas bukan nomor
+     * pesanan -- nomor pengiriman kurir, telepon, nominal.
+     */
+    static String dariKetikan(String raw) {
+        String bersih = bersihkan(raw);
+        if (bersih.isEmpty()) return null;
+        if (bersih.matches("\\d{" + DIGIT + "}")) return bersih;
+        if (jelasBukan(bersih)) return null;
+        if (bersih.length() < 8 || bersih.length() > 26) return null;
+        return bersih.matches("[A-Z0-9]+") ? bersih : null;
     }
 }

@@ -1,22 +1,36 @@
 package id.autotoko.scanner;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
 /**
- * Order id sekarang WAJIB, jadi aturannya menentukan apakah sebuah paket bisa
- * disimpan sama sekali. Terlalu longgar: sampah masuk dan audit menuduh
- * marketplace atas kegagalan kita. Terlalu ketat: paket Shopee mustahil
- * disimpan dan pekerjaan berhenti.
+ * Order id WAJIB, jadi aturannya menentukan apakah sebuah paket bisa disimpan
+ * sama sekali. Terlalu longgar: sampah masuk dan audit menuduh marketplace
+ * atas kegagalan kita. Terlalu ketat: paket Shopee mustahil disimpan dan
+ * pekerjaan berhenti -- itulah yang benar-benar terjadi, dan yang diperbaiki.
  *
- * Nilainya diambil dari data sungguhan -- order id asli dari laporan
- * penyelesaian, dan sampah asli yang pernah tersimpan di kolom ini.
+ * Nilainya diambil dari data sungguhan: order id asli dari laporan
+ * penyelesaian, sampah asli yang pernah tersimpan di kolom ini, dan label
+ * Shopee dari tangkapan layar hasil tes.
  */
 public class OrderIdTest {
 
     private static final String ASLI = "585623070310172189";
+    private static final String SHOPEE = "260827EXWKKVDE";
+
+    /** Label Shopee sungguhan dari hasil tes, apa adanya. */
+    private static final String LABEL_SHOPEE =
+            "Penerima: Ziza\n"
+            + "Berat: 10 gr    COD Cek Dulu: Tidak\n"
+            + "Batas Kirim: 28-08-2026\n"
+            + "No.Pesanan: " + SHOPEE + "\n";
+
+    // --- jalur ketat: dipakai membaca laporan marketplace ------------------
 
     @Test public void ocr_menerima_18_digit() {
         assertEquals(ASLI, OrderId.dariOcr(ASLI));
@@ -28,20 +42,8 @@ public class OrderIdTest {
     }
 
     @Test public void ocr_menolak_yang_masih_bersisa_huruf() {
-        // Nomor pengiriman Shopee, bukan order id: H tidak ada di peta.
         assertNull(OrderId.dariOcr("SH8476199355610969"));
         assertNull(OrderId.dariOcr("SHS4BSTISSIATTO04E"));
-    }
-
-    @Test public void ocr_menolak_kode_sortir_kurir() {
-        assertNull(OrderId.dariOcr("2605149T3NJJJN"));
-        assertNull(OrderId.dariOcr("260B100JHWOY"));
-    }
-
-    @Test public void ocr_menolak_19_digit() {
-        // Di laporan, entri 19 digit seluruhnya referensi pencairan di muka
-        // atau penyesuaian komisi -- bukan pesanan.
-        assertNull(OrderId.dariOcr("3690853782936651237"));
     }
 
     @Test public void ocr_mengabaikan_spasi_dan_pemisah() {
@@ -49,60 +51,108 @@ public class OrderIdTest {
         assertEquals(ASLI, OrderId.dariOcr("585623-070310-172189"));
     }
 
-    /* ------------------------------------------------------------ ketikan */
-
-    @Test public void ketikan_menerima_bentuk_shopee() {
-        // Tanpa ini, mewajibkan order id memblokir seluruh marketplace Shopee.
-        assertEquals("260828H020F080", OrderId.dariKetikan("260828H020F080"));
-        assertEquals("260828H020F080", OrderId.dariKetikan("260828h020f080"));
-    }
-
-    @Test public void ketikan_tetap_menerima_18_digit() {
-        assertEquals(ASLI, OrderId.dariKetikan(ASLI));
-    }
-
-    @Test public void ketikan_tetap_menolak_yang_bukan_apa_apa() {
-        assertNull(OrderId.dariKetikan("abc"));
-        assertNull(OrderId.dariKetikan("12"));
-        assertNull(OrderId.dariKetikan(""));
-        assertNull(OrderId.dariKetikan(null));
-    }
-
-    /* -------------------------------------------------------------- cari */
-
-    @Test public void cari_yang_berjangkar() {
-        assertEquals(ASLI, OrderId.cari("Penerima: Budi\nOrder ID : " + ASLI + "\nJNE REG"));
-        assertEquals(ASLI, OrderId.cari("No. Pesanan " + ASLI));
-    }
-
-    @Test public void cari_angka_telanjang() {
-        assertEquals(ASLI, OrderId.cari("tokopedia Shop\n" + ASLI + "\nJNE"));
-    }
+    // --- yang diperbaiki: label Shopee -------------------------------------
 
     /**
-     * Pemeriksaan paling penting di berkas ini.
+     * Pemeriksaan yang paling penting di berkas ini.
      *
-     * Tanpa batas non-digit, pola 18 angka mencocok DELAPAN BELAS ANGKA PERTAMA
-     * dari package id 19 digit dan menghasilkan order id terpotong satu angka.
-     * Bentuknya sempurna, nilainya salah, dan tidak akan pernah berpasangan
-     * dengan laporan mana pun.
+     * Aplikasi membaca label ini dengan sempurna -- panel bawah menampilkan
+     * "Pesanan 260827EXWKKVDE (3 frame)" -- lalu pengesahnya menolak, dan
+     * panel panduan berkata "Belum terbaca, 154 frame, kejelasan 99%". Karena
+     * order id diwajibkan, setiap paket Shopee berhenti di langkah pertama.
      */
-    @Test public void cari_tidak_memotong_angka_lebih_panjang() {
+    @Test public void label_shopee_dari_hasil_tes_terbaca() {
+        assertEquals(SHOPEE, OrderId.cari(LABEL_SHOPEE));
+        assertTrue(OrderId.berjangkar(LABEL_SHOPEE));
+    }
+
+    @Test public void alasan_bacaan_menyebut_jangkarnya() {
+        OrderId.Bacaan b = OrderId.baca(LABEL_SHOPEE);
+        assertNotNull(b);
+        assertEquals("tinggi", b.keyakinan);
+        assertEquals("Shopee", b.keluarga);
+        assertTrue(b.alasan.contains("No. Pesanan"));
+    }
+
+    // --- yang tidak boleh ikut longgar -------------------------------------
+
+    @Test public void nomor_pengiriman_kurir_ditolak_walau_berjangkar() {
+        assertNull(OrderId.cari("Order ID: SPXID064183635268"));
+        assertNull(OrderId.cari("No. Pesanan: JX1234567890123"));
+    }
+
+    @Test public void nilai_di_sebelah_kata_resi_tidak_pernah_jadi_order_id() {
+        assertNull(OrderId.cari("No. Resi: " + ASLI));
+        assertNull(OrderId.cari("AWB: " + SHOPEE));
+    }
+
+    @Test public void sembilan_belas_digit_bukan_pesanan() {
+        // Di laporan, entri 19 digit seluruhnya referensi pencairan di muka
+        // atau penyesuaian komisi -- bukan pesanan.
         assertNull(OrderId.cari("Package ID 1205938906612515436"));
         assertNull(OrderId.cari("1206362770642142504"));
     }
 
-    @Test public void cari_menolak_memilih_kalau_ada_dua_yang_berbeda() {
-        assertNull(OrderId.cari(ASLI + "\n585688912408380856"));
+    @Test public void tidak_memotong_angka_yang_lebih_panjang() {
+        assertNull(OrderId.cari("1206362770642142504"));
     }
 
-    @Test public void cari_angka_sama_dua_kali_tetap_terbaca() {
-        // Label sering mencetak nomor yang sama di dua tempat; itu bukan
-        // ambiguitas.
-        assertEquals(ASLI, OrderId.cari(ASLI + "\nbla bla\n" + ASLI));
+    @Test public void menolak_memilih_kalau_dua_sama_kuat() {
+        assertNull(OrderId.cari(ASLI + "\n585688912408380856"));
     }
 
     @Test public void jangkar_menang_atas_angka_telanjang() {
         assertEquals(ASLI, OrderId.cari("585688912408380856\nOrder ID: " + ASLI));
+    }
+
+    @Test public void angka_telanjang_18_digit_tetap_diterima() {
+        assertEquals(ASLI, OrderId.cari("tokopedia Shop\n" + ASLI + "\nJNE"));
+    }
+
+    // --- tingkat sedang: ditawarkan, bukan ditolak diam-diam ---------------
+
+    /**
+     * Kode sortir kurir tidak bisa dibedakan bentuknya dari nomor pesanan
+     * Shopee. Dulu itu alasan menolak SEMUA bentuk Shopee dari OCR -- membuang
+     * yang benar bersama yang salah. Sekarang ia ditawarkan untuk dibenarkan,
+     * dan yang memutuskan adalah orang yang memegang labelnya.
+     */
+    @Test public void shopee_tanpa_jangkar_ditawarkan_bukan_diterima() {
+        String teks = "BW-33\n" + SHOPEE + "\nSPX";
+        assertNull(OrderId.cari(teks));              // tidak otomatis
+        OrderId.Bacaan b = OrderId.baca(teks);
+        assertNotNull(b);                             // tapi tidak hilang
+        assertEquals(SHOPEE, b.nilai);
+        assertEquals("sedang", b.keyakinan);
+        assertFalse(b.berjangkar);
+    }
+
+    @Test public void kode_sortir_juga_hanya_sampai_tingkat_sedang() {
+        OrderId.Bacaan b = OrderId.baca("2605149T3NJJJN");
+        assertNotNull(b);
+        assertEquals("sedang", b.keyakinan);
+    }
+
+    // --- ketikan orang -----------------------------------------------------
+
+    @Test public void ketikan_orang_jauh_lebih_longgar() {
+        // Yang mengetik sedang memegang labelnya; bentuk apa pun yang masuk
+        // akal diterima. Menolak di sini berarti menghentikan pekerjaan.
+        assertEquals(SHOPEE, OrderId.dariKetikan(SHOPEE));
+        assertEquals(ASLI, OrderId.dariKetikan(ASLI));
+        assertEquals("INV20260827MPL123456", OrderId.dariKetikan("INV/20260827/MPL/123456"));
+    }
+
+    @Test public void ketikan_tetap_menolak_yang_jelas_bukan() {
+        assertNull(OrderId.dariKetikan("SPXID064183635268"));
+        assertNull(OrderId.dariKetikan("081234567890"));
+        assertNull(OrderId.dariKetikan("12345"));
+    }
+
+    @Test public void kosong_tetap_kosong() {
+        assertNull(OrderId.cari(null));
+        assertNull(OrderId.cari(""));
+        assertNull(OrderId.dariOcr(null));
+        assertNull(OrderId.dariKetikan(null));
     }
 }

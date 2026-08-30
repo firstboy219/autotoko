@@ -96,8 +96,8 @@ class ScanDto {
    * menebak asalnya dari bentuknya sendiri -- itu akan membuat setiap sampah
    * berbentuk-Shopee lolos sebagai "pasti diketik".
    */
-  @IsOptional() @IsIn(["ocr", "manual"])
-  orderNoSource?: "ocr" | "manual";
+  @IsOptional() @IsIn(["ocr", "ocr_label", "ocr_confirmed", "manual"])
+  orderNoSource?: "ocr" | "ocr_label" | "ocr_confirmed" | "manual";
 
   /** Everything ML Kit read, for comparing the two engines. */
   @IsOptional() @IsString() @MaxLength(20_000)

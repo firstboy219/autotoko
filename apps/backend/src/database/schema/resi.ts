@@ -307,6 +307,13 @@ export const resiScans = pgTable(
     // these are filled in by the operator on the Produksi & Packing page. The
     // columns exist so that both routes have somewhere to put an answer.
     labelOrderNo: varchar("label_order_no", { length: 128 }),
+    /**
+     * Dari mana labelOrderNo berasal: ocr, ocr_label, ocr_confirmed, manual.
+     *
+     * NULL berarti asalnya tidak tercatat -- baris lama, atau APK versi lama.
+     * Itu BUKAN sama dengan "dibaca mesin".
+     */
+    labelOrderNoSource: varchar("label_order_no_source", { length: 16 }),
     labelRecipient: varchar("label_recipient", { length: 255 }),
     labelRecipientArea: varchar("label_recipient_area", { length: 200 }),
     labelRecipientAddress: varchar("label_recipient_address", { length: 400 }),
