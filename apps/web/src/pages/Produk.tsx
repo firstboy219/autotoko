@@ -29,6 +29,7 @@ import {
   useToast,
 } from "../components/ui";
 
+import { SaranAi } from "../components/SaranAi";
 interface Master {
   id: string;
   sku: string;
@@ -308,6 +309,9 @@ export function Produk() {
           onChanged={reload}
         />
       )}
+      <div className="mt-4">
+        <SaranAi path="/products/saran" keterangan="Membaca seluruh katalog produk dan membandingkannya dengan tren pasar Indonesia." />
+      </div>
     </Layout>
   );
 }

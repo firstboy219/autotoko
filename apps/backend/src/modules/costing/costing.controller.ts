@@ -14,6 +14,7 @@ import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, TenantOwnerOnly, type JwtPayload } from "../auth/jwt-auth.guard.js";
 import { CostingService } from "./costing.service.js";
+import { SaranService } from "../ai/saran.service.js";
 import {
   AddPackingMaterialDto,
   CreateMaterialDto,
@@ -34,7 +35,43 @@ const ok = <T>(data: T): ApiResponse<T> => ({ success: true, data });
 @UseGuards(JwtAuthGuard)
 @TenantOwnerOnly()
 export class CostingController {
-  constructor(private readonly costing: CostingService) {}
+  constructor(
+    private readonly costing: CostingService,
+    private readonly saran: SaranService,
+  ) {}
+
+  /**
+   * Saran AI atas struktur harga pokok.
+   *
+   * Marginlah yang menentukan apakah sebuah produk layak didorong, dan itu
+   * pertanyaan yang tidak bisa dijawab dari halaman produk saja.
+   */
+  @Get("saran")
+  async saranHpp(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    const baris = (await this.costing.list(uid(req))) as any;
+    const daftar: any[] = Array.isArray(baris) ? baris : (baris?.rows ?? []);
+    const ringkas = daftar.slice(0, 60).map((r) => ({
+      nama: r.name ?? r.productName,
+      hargaJual: r.sellingPrice ?? r.basePrice,
+      hpp: r.totalCost ?? r.hpp,
+      margin: r.margin ?? r.marginPct,
+      biayaBahan: r.materialCost,
+      biayaPacking: r.packingCost,
+    }));
+    return {
+      success: true,
+      data: await this.saran.dariBrief({
+        peran: "Kamu menilai struktur harga pokok dan margin sebuah toko online.",
+        permintaan:
+          "Periksa margin tiap produk di bawah. Tunjukkan produk yang marginnya " +
+          "terlalu tipis atau merugi, komponen biaya mana yang paling layak " +
+          "ditekan, dan produk mana yang harganya masih bisa dinaikkan tanpa " +
+          "kehilangan pembeli. Pertimbangkan tingkat harga pasar di Indonesia.",
+        data: { jumlahProduk: daftar.length, produk: ringkas },
+        tren: true,
+      }),
+    };
+  }
 
   @Get()
   async list(

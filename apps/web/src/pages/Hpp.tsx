@@ -23,6 +23,7 @@ import {
 } from "../components/ui";
 import { PackingMaterialsCard } from "../components/PackingMaterials";
 
+import { SaranAi } from "../components/SaranAi";
 interface Row {
   productId: string;
   sku: string;
@@ -253,6 +254,9 @@ export function Hpp() {
           }}
         />
       )}
+      <div className="mt-4">
+        <SaranAi path="/costing/saran" keterangan="Membaca margin tiap produk dan menunjukkan mana yang perlu dibenahi." />
+      </div>
     </Layout>
   );
 }

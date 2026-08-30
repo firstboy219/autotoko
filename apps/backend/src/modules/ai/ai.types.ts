@@ -20,7 +20,10 @@ export const PROVIDER_API_KEY: Record<AiProvider, string> = {
 
 /** Sensible default model per provider (owner can override in CMS). */
 export const PROVIDER_DEFAULT_MODEL: Record<AiProvider, string> = {
-  anthropic: "claude-opus-4-8",
+  // Alat pencarian web (web_search_20260209) menuntut model 4.6 ke atas;
+  // yang terbaru sekaligus yang paling mampu, dan pemilik toko tetap bisa
+  // menimpanya per fitur dari Admin CMS.
+  anthropic: "claude-opus-5",
   openai: "gpt-4o",
   gemini: "gemini-1.5-pro",
 };
@@ -31,7 +34,8 @@ export type AiFeature =
   | "affiliate_chat"
   | "review_reply"
   | "auto_approve"
-  | "product_optimize";
+  | "product_optimize"
+  | "saran_bisnis";
 
 export interface AiFeatureDef {
   key: AiFeature;
@@ -65,6 +69,15 @@ export const AI_FEATURES: AiFeatureDef[] = [
     label: "Optimasi Produk",
     description: "Menulis ulang judul & deskripsi produk agar lebih menjual (SEO).",
   },
+  {
+    key: "saran_bisnis",
+    label: "Saran Bisnis",
+    description:
+      "Membaca data toko sendiri (produk, HPP, dashboard) dan memberi saran " +
+      "untuk pemiliknya. Kalau penyedianya mendukung pencarian web, tren " +
+      "pasar Indonesia ikut dibaca; kalau tidak, saran tetap jalan dari " +
+      "pengetahuan model dan asalnya dinyatakan apa adanya.",
+  },
 ];
 
 export interface ChatMessage {
@@ -78,6 +91,28 @@ export interface CompleteParams {
   maxTokens?: number;
   temperature?: number;
 }
+
+/** Satu rujukan yang benar-benar dibuka model saat mencari tren. */
+export interface SumberTren {
+  judul: string;
+  url: string;
+}
+
+/**
+ * Hasil lengkap sebuah panggilan, berikut ASAL trennya.
+ *
+ * Asalnya ikut dibawa karena hanya sebagian penyedia yang bisa membaca
+ * internet. Menyebut jawaban dari pengetahuan model sebagai "tren internet"
+ * adalah kebohongan kecil yang persis merusak gunanya fitur ini.
+ */
+export interface HasilLengkap {
+  teks: string;
+  sumber: SumberTren[];
+  caraDapatTren: "pencarian_web" | "pengetahuan_model" | "tidak_ada";
+}
+
+/** Penyedia yang punya alat pencarian web bawaan. */
+export const PENYEDIA_BISA_CARI: AiProvider[] = ["anthropic"];
 
 export interface ResolvedFeatureConfig {
   feature: AiFeature;

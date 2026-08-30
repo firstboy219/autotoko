@@ -6,6 +6,7 @@ import { DashboardService } from "./dashboard.service.js";
 import { DashboardV2Service } from "./dashboard-v2.service.js";
 import { PendingTasksService } from "./pending-tasks.service.js";
 import { ShopInsightsService } from "./shop-insights.service.js";
+import { SaranService } from "../ai/saran.service.js";
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
@@ -19,7 +20,45 @@ export class DashboardController {
     private readonly pending: PendingTasksService,
     private readonly insights: ShopInsightsService,
     private readonly v2Service: DashboardV2Service,
+    private readonly saran: SaranService,
   ) {}
+
+  /**
+   * Saran AI atas seluruh angka Dashboard v2, mengikuti filter yang dipilih.
+   *
+   * Rentang tanggalnya dihitung dengan rumus yang SAMA persis dengan rute
+   * /v2 di bawah. Kalau keduanya berbeda satu hari saja, saran akan berbicara
+   * tentang periode yang tidak sedang dilihat siapa pun.
+   */
+  @Get("v2/saran")
+  async saranV2(
+    @Req() req: FastifyRequest,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ): Promise<ApiResponse<unknown>> {
+    const akhir = to ?? new Date().toISOString().slice(0, 10);
+    const awal =
+      from ??
+      new Date(new Date(akhir + "T00:00:00Z").getTime() - 29 * 86400000)
+        .toISOString()
+        .slice(0, 10);
+    const angka = await this.v2Service.overview(uid(req), awal, akhir);
+    return {
+      success: true,
+      data: await this.saran.dariBrief({
+        peran:
+          "Kamu penasihat untuk pemilik toko yang sedang membaca dashboard-nya.",
+        permintaan:
+          `Ini seluruh angka toko untuk periode ${awal} sampai ${akhir}. ` +
+          "Katakan apa yang paling perlu diperhatikan pemiliknya minggu ini: " +
+          "yang bergerak ke arah salah, yang sedang bekerja dan layak diperbesar, " +
+          "dan satu hal yang sedang tidak dilihat siapa pun. Kaitkan dengan " +
+          "musim belanja dan tren pasar Indonesia kalau relevan.",
+        data: { periode: { awal, akhir }, ...(angka as object) },
+        tren: true,
+      }),
+    };
+  }
 
   /**
    * What is not finished, and what it costs to leave alone.

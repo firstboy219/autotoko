@@ -6,6 +6,7 @@ import { rupiah } from "../lib/fmt";
 import { Icon } from "../components/Icon";
 import { Button, Card, CardHeader, InlineAlert, PageHeader, Skeleton } from "../components/ui";
 
+import { SaranAi } from "../components/SaranAi";
 /* ─────────────────────────────────────────────────────────────────────────
    Palet
    ─────────────────────────────────────────────────────────────────────────
@@ -699,6 +700,9 @@ export default function DashboardV2() {
             </p>
           </>
         )}
+      </div>
+      <div className="mt-4">
+        <SaranAi path="/dashboard/v2/saran" keterangan="Membaca seluruh angka pada rentang tanggal yang sedang dipilih." />
       </div>
     </Layout>
   );

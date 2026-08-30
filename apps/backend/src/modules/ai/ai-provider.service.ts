@@ -1,14 +1,16 @@
 import { BadGatewayException, Injectable, Logger } from "@nestjs/common";
 import { AdminSettingsService } from "../admin-settings/admin-settings.service.js";
-import { callProvider } from "./ai-providers.js";
+import { callAnthropicCari, callProvider } from "./ai-providers.js";
 import {
   AI_FEATURES,
   AI_PROVIDERS,
+  PENYEDIA_BISA_CARI,
   PROVIDER_API_KEY,
   PROVIDER_DEFAULT_MODEL,
   type AiFeature,
   type AiProvider,
   type CompleteParams,
+  type HasilLengkap,
   type ResolvedFeatureConfig,
 } from "./ai.types.js";
 
@@ -59,6 +61,80 @@ export class AiProviderService {
     }
     try {
       return await callProvider(provider, apiKey, model, params);
+    } catch (e) {
+      this.logger.error(
+        `AI ${feature} via ${provider}/${model} failed: ${(e as Error).message}`,
+      );
+      throw new BadGatewayException(
+        `AI gagal (${provider}/${model}): ${(e as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Apakah fitur ini punya API key, TANPA menjalankan apa pun.
+   *
+   * Dipakai supaya layar bisa menjelaskan pengaturan mana yang perlu diisi,
+   * bukan menampilkan kotak merah 502 yang tidak bisa ditindaklanjuti siapa
+   * pun. Sampai sekarang belum ada satu pun kunci AI di admin_settings, jadi
+   * inilah jalan yang sebenarnya paling sering ditempuh.
+   */
+  async kunciTersedia(feature: AiFeature): Promise<{
+    ada: boolean;
+    provider: AiProvider;
+    model: string;
+    pengaturan: string;
+    bisaCariWeb: boolean;
+  }> {
+    const { provider, model } = await this.resolveConfig(feature);
+    const pengaturan = PROVIDER_API_KEY[provider];
+    return {
+      ada: Boolean(await this.settings.get(pengaturan)),
+      provider,
+      model,
+      pengaturan,
+      bisaCariWeb: PENYEDIA_BISA_CARI.includes(provider),
+    };
+  }
+
+  /**
+   * Seperti complete(), tapi membawa ASAL trennya.
+   *
+   * Kalau penyedianya punya alat pencarian web dan pemanggilnya memintanya,
+   * jawabannya benar-benar membaca internet dan membawa daftar sumber. Kalau
+   * tidak, ia tetap dijawab -- dari pengetahuan model -- dan itu dinyatakan
+   * apa adanya, bukan disamarkan sebagai hasil pencarian.
+   */
+  async lengkapiDenganTren(
+    feature: AiFeature,
+    params: CompleteParams,
+    opsi: { cariTren?: boolean; petunjukCari?: string } = {},
+  ): Promise<HasilLengkap> {
+    const { provider, model } = await this.resolveConfig(feature);
+    const apiKey = await this.settings.get(PROVIDER_API_KEY[provider]);
+    if (!apiKey) {
+      throw new BadGatewayException(
+        `API key untuk provider "${provider}" belum diset di Admin CMS (${PROVIDER_API_KEY[provider]}).`,
+      );
+    }
+
+    const bisaCari = PENYEDIA_BISA_CARI.includes(provider);
+    try {
+      if (opsi.cariTren && bisaCari) {
+        const r = await callAnthropicCari(
+          apiKey,
+          model,
+          params,
+          opsi.petunjukCari ?? "Sertakan tren pasar terkini yang relevan.",
+        );
+        return { teks: r.teks, sumber: r.sumber, caraDapatTren: "pencarian_web" };
+      }
+      const teks = await callProvider(provider, apiKey, model, params);
+      return {
+        teks,
+        sumber: [],
+        caraDapatTren: opsi.cariTren ? "pengetahuan_model" : "tidak_ada",
+      };
     } catch (e) {
       this.logger.error(
         `AI ${feature} via ${provider}/${model} failed: ${(e as Error).message}`,
