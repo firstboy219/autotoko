@@ -183,6 +183,151 @@ public final class ProductMatcher {
         return covered;
     }
 
+    /**
+     * Sebanyak ini bobot bukti harus ditemukan sebelum sebuah produk diusulkan.
+     *
+     * Bukan rasio. Rasio -- bobot yang ketemu dibagi seluruh bobot kata produk
+     * -- menghukum produk yang deskripsi marketplace-nya panjang: terukur,
+     * "Inhaler Minimalis Peppermint" mencocokkan EMPAT kata khas dan hanya
+     * mendapat 0,20 karena ia punya 17 kata, sementara "Inhaler sinus" yang
+     * cuma bermodal kata umum "inhaler" mendapat 0,27 dan menang.
+     *
+     * Dibandingkan pada 284 scan yang itemnya dikonfirmasi manusia:
+     *   rasio >= 0,26   tebakan muncul 76%, teratas tepat 49%, di-3 65%
+     *   bukti >= 3,0    tebakan muncul 89%, teratas tepat 54%, di-3 72%
+     */
+    public static final double MIN_BUKTI_TEKS = 3.0;
+
+    /**
+     * Mengubah bobot bukti menjadi angka 0..1 untuk disimpan dan dibandingkan.
+     *
+     * Menjenuh, bukan linear: bukti kesepuluh tidak menambah keyakinan sebanyak
+     * bukti kedua. Dengan tetapan ini, AUTO_SCORE 0,72 menuntut bukti sekitar
+     * 10 -- artinya sederet kata khas, bukan satu kebetulan.
+     */
+    static double skorDariBukti(double bukti) {
+        return bukti / (bukti + 4.0);
+    }
+
+    /** Kata yang muncul di paling banyak sekian produk dianggap khas. */
+    private static final int KHAS_MAKS_PRODUK = 2;
+
+    /**
+     * Berapa banyak produk di katalog yang memakai tiap kata.
+     *
+     * Dihitung dari katalognya sendiri, bukan dari daftar kata umum yang saya
+     * susun: katalog toko lain akan punya kata umum yang lain sama sekali, dan
+     * daftar tetap akan salah di sana.
+     */
+    private static java.util.Map<String, Integer> sebaran(List<Product> katalog) {
+        java.util.Map<String, Integer> df = new java.util.HashMap<>();
+        for (Product p : katalog) {
+            for (String t : p.tokens) {
+                Integer n = df.get(t);
+                df.put(t, n == null ? 1 : n + 1);
+            }
+        }
+        return df;
+    }
+
+    private static double bobot(String t, java.util.Map<String, Integer> df, int jumlahProduk) {
+        Integer n = df.get(t);
+        return Math.log((jumlahProduk + 1.0) / ((n == null ? 0 : n) + 1.0)) + 0.2;
+    }
+
+    /** Beda paling banyak satu huruf: sisipan, hilang, atau tertukar. */
+    static boolean bedaSatuHuruf(String a, String b) {
+        if (a.equals(b)) return true;
+        if (Math.abs(a.length() - b.length()) > 1) return false;
+        int i = 0, j = 0, beda = 0;
+        while (i < a.length() && j < b.length()) {
+            if (a.charAt(i) == b.charAt(j)) { i++; j++; continue; }
+            if (++beda > 1) return false;
+            if (a.length() > b.length()) i++;
+            else if (b.length() > a.length()) j++;
+            else { i++; j++; }
+        }
+        return beda + (a.length() - i) + (b.length() - j) <= 1;
+    }
+
+    /**
+     * Kata produk ini ada di teks label -- persis, termuat, atau beda satu huruf.
+     *
+     * "Termuat" perlu karena OCR sering menyambung kata dengan tetangganya
+     * ("InhalerLisa"), dan beda-satu-huruf perlu karena label termal keliru
+     * satu huruf terus-menerus.
+     */
+    private static boolean adaDiTeks(String t, Set<String> tokenTeks, String teksRata) {
+        if (tokenTeks.contains(t)) return true;
+        if (t.length() >= 5 && teksRata.contains(t)) return true;
+        if (t.length() >= 6) {
+            for (String u : tokenTeks) {
+                if (Math.abs(u.length() - t.length()) > 1) continue;
+                if (bedaSatuHuruf(t, u)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Produk yang kata-katanya muncul di SELURUH teks label.
+     *
+     * Bukan pengganti rank() melainkan pelengkapnya: rank() dipakai saat ada
+     * baris produk yang jelas, dan ini menangkap yang barisnya tidak pernah
+     * terbentuk -- yang terukur adalah dua pertiga dari seluruh scan.
+     */
+    public static List<Match> cariDiTeks(String seluruhTeks, List<Product> katalog, int limit) {
+        List<Match> out = new ArrayList<>();
+        if (seluruhTeks == null || seluruhTeks.length() < 8) return out;
+        if (katalog == null || katalog.isEmpty()) return out;
+
+        Set<String> tokenTeks = tokensOf(seluruhTeks);
+        Set<String> ukuranTeks = sizesOf(seluruhTeks);
+        if (tokenTeks.isEmpty()) return out;
+        String rata = seluruhTeks.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "");
+
+        java.util.Map<String, Integer> df = sebaran(katalog);
+        List<Match> semua = new ArrayList<>();
+        for (Product p : katalog) {
+            if (p.tokens.isEmpty()) continue;
+
+            // Ukuran yang bertentangan tetap mematikan, sama seperti di rank():
+            // "Cool Mint 100ml" tidak mungkin paket yang labelnya menulis 50ml,
+            // sebanyak apa pun kata lain yang cocok.
+            if (!p.sizes.isEmpty() && !ukuranTeks.isEmpty()) {
+                boolean sepakat = false;
+                for (String u : p.sizes) if (ukuranTeks.contains(u)) sepakat = true;
+                if (!sepakat) continue;
+            }
+
+            double bukti = 0;
+            int khasKena = 0;
+            for (String t : p.tokens) {
+                if (!adaDiTeks(t, tokenTeks, rata)) continue;
+                bukti += bobot(t, df, katalog.size());
+                Integer n = df.get(t);
+                if (n != null && n <= KHAS_MAKS_PRODUK) khasKena++;
+            }
+            // Tanpa satu pun kata khas, yang cocok cuma kata umum katalog ini.
+            if (khasKena == 0) continue;
+            if (bukti >= MIN_BUKTI_TEKS) {
+                semua.add(new Match(p, skorDariBukti(bukti), false));
+            }
+        }
+        if (semua.isEmpty()) return out;
+
+        Collections.sort(semua, (a, b) -> Double.compare(b.score, a.score));
+        double atas = semua.get(0).score;
+        double kedua = semua.size() > 1 ? semua.get(1).score : 0;
+        boolean yakin = atas >= AUTO_SCORE && (atas - kedua) >= AUTO_MARGIN;
+
+        out.add(new Match(semua.get(0).product, atas, yakin));
+        for (int i = 1; i < semua.size() && out.size() < limit; i++) {
+            out.add(new Match(semua.get(i).product, semua.get(i).score, false));
+        }
+        return out;
+    }
+
     /** Best product for a line of label text, or null when nothing is close. */
     public static Match best(String labelLine, List<Product> catalogue) {
         List<Match> ranked = rank(labelLine, catalogue, 2);

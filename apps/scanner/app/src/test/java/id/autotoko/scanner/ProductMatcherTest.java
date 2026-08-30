@@ -113,4 +113,116 @@ public class ProductMatcherTest {
         assertFalse(ProductMatcher.tokensOf("READY STOCK FREE PROMO").contains("ready"));
         assertFalse(ProductMatcher.tokensOf("READY STOCK FREE PROMO").contains("promo"));
     }
+
+    // --- pencarian seluruh teks ----------------------------------------
+    //
+    // Katalog di bawah disalin dari master produk toko yang sebenarnya, dan
+    // teks labelnya dari device_text yang benar-benar tersimpan.
+
+    private static java.util.List<ProductMatcher.Product> katalogAsli() {
+        java.util.List<ProductMatcher.Product> k = new java.util.ArrayList<>();
+        k.add(new ProductMatcher.Product("cm100", "Cool Mint 100ml", "CM100ML",
+                "Renature - Cool Mint Mouthspray wangi 24jam hilangkan bau mulut spray alami"
+                + " Perawatan Menyembuhkan satu barang non-medis jam 24 Fresh Berry Kumur Gusi"));
+        k.add(new ProductMatcher.Product("cm50", "Cool Mint Spray 50ml", "CM50ML", null));
+        k.add(new ProductMatcher.Product("ppm", "Inhaler Regular Peppermint", "RegPPM",
+                "[READY STOCK] Peppermint Inhaler / Inhaler Lisa / Inhaler double / Minyak angin"
+                + " / Hidung tersumbat / Inhaler 100% Plossa Freshcare Field Black Simple"));
+        k.add(new ProductMatcher.Product("mini", "Inhaler Minimalis Peppermint", "MinimalisHitamPpm",
+                "[READY STOCK] Minimalis Peppermint Inhaler / Inhaler Lisa / Inhaler double"
+                + " / Minyak angin / Hidung tersumbat / Inhaler 100% Plossa Freshcare Field Black"));
+        k.add(new ProductMatcher.Product("duo", "Inhaler Duo", "IHRDUO",
+                "Renature Duo Inhaler COOL MINT Menyegarkan dan Melegakan Pernafasan"));
+        k.add(new ProductMatcher.Product("cant", "Renature-Cantengan", "RENATURECANT-XESU",
+                "Renature-Cantengan Mengobati cantengan & mempercepat pemulihan 15ML"));
+        k.add(new ProductMatcher.Product("kopi", "Kopi Arabika Premium 200gr", "KOPI-ARABIKA-200", null));
+        return k;
+    }
+
+    /**
+     * Teks nyata yang tersimpan sebagai rawName di basis data: alamat dan nama
+     * produk menyatu dalam satu baris, karena OCR memotong baris menurut tata
+     * letak cetakan. Pencocokan per baris tersandung tepat di sini.
+     */
+    @Test public void cariDiTeks_menemukan_produk_walau_alamat_menyatu() {
+        String teks = "Penerima: Budi\n"
+                + "P'asar agro Purwvodadi, JI. Gajah Mada No.7 Peppermint Inhaler "
+                + "/ Inhaler Lisa / Inhaler double / Min\n"
+                + "JY1328393153\n";
+        java.util.List<ProductMatcher.Match> m =
+                ProductMatcher.cariDiTeks(teks, katalogAsli(), 3);
+        assertFalse("tidak ada kandidat sama sekali", m.isEmpty());
+        assertTrue("yang benar tidak ada di 3 besar",
+                m.get(0).product.id.equals("ppm") || m.get(0).product.id.equals("mini")
+                        || (m.size() > 1 && (m.get(1).product.id.equals("ppm")
+                            || m.get(1).product.id.equals("mini"))));
+    }
+
+    /** "Mouthapray" untuk "mouthspray": label termal keliru satu huruf terus. */
+    @Test public void cariDiTeks_tahan_salah_satu_huruf() {
+        String teks = "wangi 24jam hilangkan bau mulul spray alami Perawatan "
+                + "Renature -Cool Mint Mouthapray 100ml";
+        java.util.List<ProductMatcher.Match> m =
+                ProductMatcher.cariDiTeks(teks, katalogAsli(), 3);
+        assertFalse(m.isEmpty());
+        assertEquals("cm100", m.get(0).product.id);
+    }
+
+    /**
+     * Ukuran yang bertentangan tetap mematikan. Katalog ini memuat Cool Mint
+     * 100ml di sebelah Cool Mint Spray 50ml -- pasangan yang bedanya justru di
+     * tempat OCR paling lemah.
+     */
+    @Test public void cariDiTeks_ukuran_yang_bertentangan_tetap_mematikan() {
+        String teks = "Renature Cool Mint Mouthspray 50ml";
+        for (ProductMatcher.Match m : ProductMatcher.cariDiTeks(teks, katalogAsli(), 5)) {
+            assertFalse("100ml tidak boleh muncul untuk label 50ml",
+                    m.product.id.equals("cm100"));
+        }
+    }
+
+    /**
+     * Tanpa syarat "harus ada kata khas", kata umum katalog seperti "inhaler"
+     * saja sudah cukup mengangkat setiap produk.
+     */
+    @Test public void cariDiTeks_kata_umum_saja_tidak_cukup() {
+        assertTrue(ProductMatcher.cariDiTeks("Inhaler", katalogAsli(), 5).isEmpty());
+        assertTrue(ProductMatcher.cariDiTeks("Renature inhaler spray", katalogAsli(), 5).isEmpty());
+    }
+
+    @Test public void cariDiTeks_kata_khas_menemukan_produknya() {
+        java.util.List<ProductMatcher.Match> m =
+                ProductMatcher.cariDiTeks("Renature-Cantengan Mengobati cantengan 15ML",
+                        katalogAsli(), 3);
+        assertFalse(m.isEmpty());
+        assertEquals("cant", m.get(0).product.id);
+    }
+
+    @Test public void cariDiTeks_alamat_saja_tidak_menghasilkan_apa_apa() {
+        String teks = "Penerima: Ziza\nPerumahan Graha Sejahtera, West Pondok Kacang\n"
+                + "PONDOK AREN, KOTA TANGERANG SELATAN, BANTEN\nCOD Cek Dulu: Tidak\n";
+        assertTrue(ProductMatcher.cariDiTeks(teks, katalogAsli(), 5).isEmpty());
+    }
+
+    /** Produk yang memang tidak ada di master tidak boleh dikarang jadi ada. */
+    @Test public void cariDiTeks_produk_asing_tidak_dipaksakan() {
+        String teks = "Nama Produk: LKCARE Azeclair Cream - Night Cream Acne Scar "
+                + "Dark Spot Brightening 10gr\nSKU C-LK-AZECLAIR-10gr-1407\n";
+        assertTrue(ProductMatcher.cariDiTeks(teks, katalogAsli(), 5).isEmpty());
+    }
+
+    @Test public void cariDiTeks_aman_untuk_masukan_kosong() {
+        assertTrue(ProductMatcher.cariDiTeks(null, katalogAsli(), 3).isEmpty());
+        assertTrue(ProductMatcher.cariDiTeks("abc", katalogAsli(), 3).isEmpty());
+        assertTrue(ProductMatcher.cariDiTeks("Peppermint Inhaler",
+                new java.util.ArrayList<ProductMatcher.Product>(), 3).isEmpty());
+    }
+
+    @Test public void bedaSatuHuruf_apa_adanya() {
+        assertTrue(ProductMatcher.bedaSatuHuruf("mouthspray", "mouthapray"));
+        assertTrue(ProductMatcher.bedaSatuHuruf("inhaler", "inhaller"));
+        assertTrue(ProductMatcher.bedaSatuHuruf("cantengan", "cantengn"));
+        assertFalse(ProductMatcher.bedaSatuHuruf("peppermint", "spearmint"));
+        assertFalse(ProductMatcher.bedaSatuHuruf("kopi", "teh"));
+    }
 }

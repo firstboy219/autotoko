@@ -1481,12 +1481,29 @@ public class ScanActivity extends AppCompatActivity {
         List<LabelReader.Line> lines = reader.productLines();
         List<Candidate> candidates = buildCandidates(lines);
 
-        // Nothing clustered. productLines() wants a line seen twice before it
-        // will report it, and the product table gets one frame at most while
-        // the packer is aiming at the barcode — which is why every scan so far
-        // arrived with no proposed contents at all.
+        // Pencarian SELURUH teks, dijalankan di setiap scan.
+        //
+        // Diukur pada 284 scan yang itemnya dikonfirmasi manusia: pencocokan
+        // per baris menghasilkan tebakan pada 31% scan dan tebakan teratasnya
+        // tepat 18%; pencarian seluruh teks menghasilkan tebakan pada 73% dan
+        // tepat 49%. Sebabnya terlihat di rawName yang tersimpan -- alamat dan
+        // nama produk menyatu dalam satu baris, karena OCR memotong baris
+        // menurut tata letak cetakan, bukan menurut arti.
+        List<ProductMatcher.Match> dariTeks =
+                ProductMatcher.cariDiTeks(reader.rawText(), catalogue, 5);
+
         if (candidates.isEmpty()) {
-            candidates = guessFromRawText();
+            // Satu baris berisi seluruh urutan kemungkinan, bukan satu baris
+            // per produk yang cocok: dua produk yang sama-sama tinggi hampir
+            // selalu dua tafsir atas SATU barang, bukan dua barang.
+            if (!dariTeks.isEmpty()) {
+                candidates = new ArrayList<>();
+                candidates.add(new Candidate(UNSURE, dariTeks));
+            } else {
+                candidates = guessFromRawText();
+            }
+        } else {
+            perkayaPilihan(candidates, dariTeks);
         }
 
         // Confirmed on EVERY scan, however sure the phone is.
@@ -1522,6 +1539,29 @@ public class ScanActivity extends AppCompatActivity {
      * worth trusting, and a wrong number that looks deliberate is worse than
      * the number the packer would have typed anyway.
      */
+    /**
+     * Menambahkan hasil pencarian seluruh teks ke daftar pilihan tiap baris.
+     *
+     * Ditambahkan, bukan menggantikan. Baris yang terbentuk dari klaster
+     * membawa kata-kata yang benar-benar berdampingan di label, dan itu bukti
+     * yang tidak dimiliki pencarian seluruh teks. Yang dilakukan di sini hanya
+     * memastikan produk yang benar ADA di dalam daftar pilihan, supaya
+     * membetulkannya cukup satu ketukan alih-alih mencari sendiri di katalog.
+     */
+    private void perkayaPilihan(List<Candidate> candidates, List<ProductMatcher.Match> dariTeks) {
+        if (dariTeks.isEmpty()) return;
+        for (Candidate c : candidates) {
+            for (ProductMatcher.Match m : dariTeks) {
+                if (c.ranked.size() >= 5) break;
+                boolean sudah = false;
+                for (ProductMatcher.Match ada : c.ranked) {
+                    if (ada.product.id.equals(m.product.id)) { sudah = true; break; }
+                }
+                if (!sudah) c.ranked.add(m);
+            }
+        }
+    }
+
     private List<Candidate> guessFromRawText() {
         List<Candidate> out = new ArrayList<>();
         String text = reader.rawText();
