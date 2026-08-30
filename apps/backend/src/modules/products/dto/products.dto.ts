@@ -20,6 +20,16 @@ const POSTING_STATUS = [
 ] as const;
 
 export class CreateMasterDto {
+  /**
+   * Kategori produk baru ini. Yang pertama menjadi kategori utama.
+   *
+   * Harus dideklarasikan juga di sini, bukan hanya di UpdateMasterDto:
+   * validator membuang field yang tidak dikenal, jadi tanpa baris ini kategori
+   * yang dikirim saat membuat produk hilang tanpa pesan apa pun.
+   */
+  @IsOptional() @IsArray() @IsUUID("4", { each: true })
+  shopCategoryIds?: string[];
+
   @IsString()
   @MaxLength(128)
   sku!: string;
@@ -67,6 +77,14 @@ export class UpdateMasterDto {
   @IsOptional() @IsEnum(PRODUCT_STATUS) status?: (typeof PRODUCT_STATUS)[number];
   /** Which business this product belongs to; null clears it. */
   @IsOptional() @IsUUID() shopCategoryId?: string | null;
+
+  /**
+   * Seluruh kategori produk ini. Yang pertama menjadi kategori utama, yaitu
+   * yang tersimpan di shopCategoryId supaya penyaring lama tetap bekerja.
+   * Kirim array kosong untuk melepas semuanya.
+   */
+  @IsOptional() @IsArray() @IsUUID("4", { each: true })
+  shopCategoryIds?: string[];
 
 }
 

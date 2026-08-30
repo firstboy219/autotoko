@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
+import { CategoryChip, type ShopCategory } from "../components/ShopCategories";
 import { rupiah } from "../lib/fmt";
 import { Icon } from "../components/Icon";
 import {
@@ -39,6 +40,10 @@ interface Master {
   postingCount?: number;
   totalStock?: number;
   gmv7d?: string;
+  /** Kategori utama — tetap ada karena penyaring lama membacanya. */
+  shopCategoryId?: string | null;
+  /** Seluruh kategori produk ini; yang pertama adalah yang utama. */
+  shopCategoryIds?: string[];
 }
 
 interface Posting {
@@ -322,6 +327,8 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
   const [price, setPrice] = useState("");
   const [status, setStatus] = useState("active");
   const [aliases, setAliases] = useState("");
+  const [catIds, setCatIds] = useState<string[]>([]);
+  const kategori = useFetch<ShopCategory[]>("/shops/categories");
 
   // add-posting form state
   const [showAdd, setShowAdd] = useState(false);
@@ -335,7 +342,20 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
     if (!data) return;
     setName(data.name); setPrice(data.basePrice ?? ""); setStatus(data.status);
     setAliases(data.marketplaceAliases ?? "");
+    setCatIds(data.shopCategoryIds ?? []);
     setEditing(true);
+  }
+
+  /**
+   * Urutan yang dipilih ADALAH urutan yang disimpan.
+   *
+   * Yang pertama menjadi kategori utama, dan kolom lama shopCategoryId ikut
+   * diisi dengannya supaya penyaring yang sudah ada tetap menemukan produk
+   * ini. Karena itu ini daftar berurut, bukan sekumpulan centang tanpa urutan:
+   * kalau urutannya tidak terlihat, "yang utama" jadi hasil kebetulan.
+   */
+  function toggleCat(catId: string) {
+    setCatIds((v) => (v.includes(catId) ? v.filter((x) => x !== catId) : [...v, catId]));
   }
 
   async function saveEdit(e: React.FormEvent) {
@@ -346,6 +366,7 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
         basePrice: price || undefined,
         status,
         marketplaceAliases: aliases,
+        shopCategoryIds: catIds,
       });
       setEditing(false); reload(); onChanged();
       toast("Produk diperbarui", "success");
@@ -454,6 +475,43 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
                       </Select>
                     </Field>
                   </div>
+                  <Field
+                    label="Kategori"
+                    hint="Boleh lebih dari satu. Yang pertama dipilih menjadi kategori utama, dan itulah yang dipakai penyaring serta laporan per kategori."
+                  >
+                    <div className="flex flex-wrap gap-2">
+                      {(kategori.data ?? []).map((c) => {
+                        const urut = catIds.indexOf(c.id);
+                        const dipilih = urut >= 0;
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => toggleCat(c.id)}
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition ${
+                              dipilih
+                                ? "border-transparent text-white"
+                                : "border-line bg-white text-ink-2 hover:bg-canvas"
+                            }`}
+                            style={dipilih ? { backgroundColor: c.color ?? "#0E6E55" } : undefined}
+                          >
+                            {dipilih && (
+                              <span className="rounded-full bg-white/25 px-1.5 text-[10px]">
+                                {urut === 0 ? "utama" : urut + 1}
+                              </span>
+                            )}
+                            {c.name}
+                          </button>
+                        );
+                      })}
+                      {(kategori.data ?? []).length === 0 && (
+                        <span className="text-xs text-ink-3">
+                          Belum ada kategori. Buat dulu di halaman Toko Saya.
+                        </span>
+                      )}
+                    </div>
+                  </Field>
+
                   <Field
                     label="Nama di Marketplace (alias)"
                     hint="Satu nama per baris. Dipakai aplikasi scan untuk mengenali produk ini dari judul iklan yang tercetak di resi — judul iklan jarang sama dengan nama master."

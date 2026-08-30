@@ -11,6 +11,7 @@ import {
   unique,
   date,
   boolean,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { shopCategories } from "./shops.js";
@@ -523,5 +524,33 @@ export const productCosting = pgTable(
   },
   (t) => ({
     userIdx: index("product_costing_user_idx").on(t.userId),
+  }),
+);
+
+/**
+ * Kategori sebuah produk, boleh lebih dari satu.
+ *
+ * masterProducts.shopCategoryId tetap ada dan menjadi kategori UTAMA -- yang
+ * pertama dari daftar ini. Penyaring lama di halaman produk dan di
+ * shop-insights membaca kolom itu; membuangnya akan mengubah arti kueri yang
+ * sudah berjalan, jadi yang ditambahkan adalah tabelnya, bukan penggantinya.
+ */
+export const masterProductCategories = pgTable(
+  "master_product_categories",
+  {
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => masterProducts.id, { onDelete: "cascade" }),
+    shopCategoryId: uuid("shop_category_id")
+      .notNull()
+      .references(() => shopCategories.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.productId, t.shopCategoryId] }),
+    userIdx: index("master_product_categories_user_idx").on(t.userId, t.shopCategoryId),
   }),
 );
