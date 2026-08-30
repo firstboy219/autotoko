@@ -78,9 +78,30 @@ final class OrderId {
         return b.toString();
     }
 
+    /**
+     * Batang barcode yang tersenggol bingkai OCR terbaca sebagai "|" di TEPI
+     * untaian. Terukur di korpus: "260815D5EJ88X7|" berubah menjadi
+     * "26081505EJ88X71" setelah "|" ditafsirkan sebagai angka, dan diterima
+     * otomatis. Sisa garis di tepi adalah artefak, bukan angka.
+     */
     private static String bersihkan(String raw) {
         if (raw == null) return "";
-        return raw.replaceAll("[\\s\\-/.]", "").toUpperCase(Locale.US);
+        return raw.replaceAll("^[|:;,'\"`]+|[|:;,'\"`]+$", "")
+                .replaceAll("[\\s\\-/.]", "").toUpperCase(Locale.US);
+    }
+
+    /**
+     * Perbaikan huruf hanya masuk akal pada untaian yang memang angka. Tanpa
+     * ini, "GrotbExpress" -- nama layanan kurir di label yang sama -- menjadi
+     * "6R0T8EXPRE55" dan ditawarkan sebagai nomor pesanan.
+     */
+    private static boolean layakDiperbaiki(String v) {
+        if (v == null || v.isEmpty()) return false;
+        int angka = 0;
+        for (int i = 0; i < v.length(); i++) {
+            if (Character.isDigit(v.charAt(i))) angka++;
+        }
+        return (double) angka / v.length() >= 0.6;
     }
 
     /** Order id 18 digit yang sah, atau null. Ketat, dan sengaja dibiarkan ketat. */
@@ -144,8 +165,12 @@ final class OrderId {
             alasan.append(", tertulis di sebelah \"No. Pesanan\"");
         }
         if (diperbaiki) {
-            skor -= 0.08;
-            alasan.append(", ada huruf yang dibaca sebagai angka");
+            // Batas keras, bukan potongan kecil. Diukur pada korpus 309 label:
+            // perbaikan huruf menghasilkan nilai benar 5 kali dan nilai yang
+            // bentuknya sempurna tapi SALAH 13 kali. Boleh ditawarkan, tidak
+            // pernah dipakai sendiri.
+            skor = Math.min(skor, 0.79);
+            alasan.append(", ada huruf yang dibaca sebagai angka — perlu dibenarkan");
         }
         skor = Math.max(0, Math.min(1, skor));
         if (skor < 0.45) return null;
@@ -201,16 +226,24 @@ final class OrderId {
             // Dua bacaan: apa adanya, lalu yang huruf-miripnya diperbaiki.
             // Yang apa adanya didahulukan -- perbaikan yang tidak mengubah
             // keluarga hanya menambah kemungkinan salah.
-            String[] coba = bersih.equals(rapikan(bersih))
+            String[] coba = (!layakDiperbaiki(bersih) || bersih.equals(rapikan(bersih)))
                     ? new String[]{bersih}
                     : new String[]{bersih, rapikan(bersih)};
 
+            // Keduanya dinilai, yang tertinggi menang -- bukan berhenti di
+            // yang pertama cocok. Yang apa adanya sering hanya menyentuh
+            // keluarga terlemah sementara bentuk 18-angkanya tidak pernah
+            // dilihat, sehingga yang ditawarkan ke orang untaian berhuruf di
+            // depan alih-alih nomor yang bisa dikenali sekali lihat.
+            Bacaan terbaik = null;
             for (int i = 0; i < coba.length; i++) {
                 Bacaan b = skorkan(coba[i], berjangkar, i > 0);
                 if (b == null) continue;
-                Bacaan lama = unik.get(b.nilai);
-                if (lama == null || b.skor > lama.skor) unik.put(b.nilai, b);
-                break;
+                if (terbaik == null || b.skor > terbaik.skor) terbaik = b;
+            }
+            if (terbaik != null) {
+                Bacaan lama = unik.get(terbaik.nilai);
+                if (lama == null || terbaik.skor > lama.skor) unik.put(terbaik.nilai, terbaik);
             }
         }
 

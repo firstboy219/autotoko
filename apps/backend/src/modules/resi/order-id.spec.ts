@@ -184,6 +184,60 @@ describe("order id", () => {
     expect(bestOrderId(null, "tidak ada apa-apa")).toBeNull();
   });
 
+  /**
+   * Nilai-nilai di blok ini diambil apa adanya dari korpus 309 label yang
+   * benar-benar dipindai di meja packing -- bukan dari contoh yang saya
+   * karang. Dua di antaranya adalah cacat yang lolos ke produksi.
+   */
+  describe("dari korpus label sungguhan", () => {
+    it("sisa garis barcode di tepi tidak berubah jadi angka", () => {
+      // Cacat nyata: "|" di tepi ditafsirkan sebagai 1 dan D sebagai 0,
+      // menghasilkan 26081505EJ88X71 -- panjang dan isinya berubah -- lalu
+      // DITERIMA OTOMATIS dengan keyakinan 0,99.
+      const b = bacaOrderId("No. Pesanan: 260815D5EJ88X7|")!;
+      expect(b.nilai).toBe("260815D5EJ88X7");
+      expect(b.keyakinan).toBe("tinggi");
+    });
+
+    it("nama layanan kurir tidak diperbaiki jadi nomor pesanan", () => {
+      // Cacat nyata: "GrotbExpress" menjadi "6R0T8EXPRE55" dan ditawarkan.
+      expect(bacaSemuaOrderId("Layanan GrotbExpress")).toEqual([]);
+      expect(bacaSemuaOrderId("No. Pesanan: GrotbExpress")).toEqual([]);
+    });
+
+    it("hasil perbaikan huruf tidak pernah diterima otomatis", () => {
+      // Diukur: dari 19 untaian yang punya padanan order id sungguhan,
+      // perbaikan huruf benar 5 kali dan SALAH 13 kali. Contoh di bawah
+      // terbaca sempurna sebagai 18 angka dan tetap bukan nomor yang benar.
+      for (const [mentah, diperbaiki] of [
+        ["S85367823326934914", "585367823326934914"],  // sungguhan: ...938914
+        ["S85601186906867702", "585601186906867702"],  // sungguhan: ...805887702
+        ["S8S4896I1730814406", "585489611730814406"],  // sungguhan: sama
+      ]) {
+        const b = bacaOrderId(`Order ID: ${mentah}`)!;
+        expect(b).not.toBeNull();
+        // Yang ditawarkan adalah bentuk 18-angkanya -- bisa dikenali dan
+        // dibenarkan sekali lihat -- tapi TIDAK PERNAH dipakai sendiri.
+        expect(b.nilai).toBe(diperbaiki);
+        expect(b.keyakinan).toBe("sedang");
+        expect(b.skor).toBeLessThan(0.8);
+      }
+    });
+
+    it("yang terbaca bersih tetap diterima otomatis", () => {
+      // Tanpa perbaikan apa pun. Inilah yang tidak boleh ikut terkena batas.
+      expect(findOrderId("Order ID: 588426503116162183")).toBe("588426503116162183");
+      expect(findOrderId("No. Pesanan: 2608246WS3ANCS")).toBe("2608246WS3ANCS");
+      expect(findOrderId("tokopedia\n585382123473437757\nJ&T")).toBe("585382123473437757");
+    });
+
+    it("nomor resi kurir di korpus tetap bukan nomor pesanan", () => {
+      // 287 dari 311 barcode di korpus berbentuk ini.
+      expect(bacaSemuaOrderId("JY1311292924")).toEqual([]);
+      expect(bacaSemuaOrderId("CM67961230459")).toEqual([]);
+    });
+  });
+
   it("kosong tetap kosong", () => {
     expect(normaliseOrderId(null)).toBeNull();
     expect(normaliseOrderId("")).toBeNull();

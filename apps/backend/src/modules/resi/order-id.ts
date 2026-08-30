@@ -72,9 +72,35 @@ function repair(s: string): string {
   return out;
 }
 
+/**
+ * Membersihkan sebuah kandidat.
+ *
+ * Batang barcode yang tersenggol bingkai OCR terbaca sebagai "|" di TEPI
+ * untaian. Terukur di korpus: "260815D5EJ88X7|" dibaca, lalu "|" diubah
+ * menjadi "1" oleh peta perbaikan dan hasilnya "26081505EJ88X71" -- nomor
+ * pesanan Shopee yang berubah panjang dan isinya, diterima OTOMATIS dengan
+ * keyakinan 0,99. Sisa garis di tepi adalah artefak; ia dibuang, bukan
+ * ditafsirkan sebagai angka.
+ */
 function bersihkan(raw: string | null | undefined): string {
   if (!raw) return "";
-  return String(raw).replace(/[\s\-/.]/g, "");
+  return String(raw)
+    .replace(/^[|:;,'"`]+|[|:;,'"`]+$/g, "")
+    .replace(/[\s\-/.]/g, "");
+}
+
+/**
+ * Perbaikan huruf hanya masuk akal pada untaian yang MEMANG angka.
+ *
+ * Tanpa syarat ini, "GrotbExpress" -- nama layanan kurir yang tercetak di
+ * label yang sama -- diperbaiki menjadi "6R0T8EXPRE55" dan ditawarkan sebagai
+ * nomor pesanan. Terukur di korpus. Sebuah kata tidak menjadi nomor hanya
+ * karena hurufnya bisa dipetakan ke angka.
+ */
+function layakDiperbaiki(v: string): boolean {
+  if (!v) return false;
+  const angka = (v.match(/[0-9]/g) ?? []).length;
+  return angka / v.length >= 0.6;
 }
 
 /**
@@ -270,8 +296,17 @@ export function bacaSemuaOrderId(text: string | null | undefined): BacaanOrderId
         sebab.push('tertulis di sebelah "No. Pesanan"');
       }
       if (kandidat.diperbaiki) {
-        skor -= 0.08;
-        sebab.push("ada huruf yang dibaca sebagai angka");
+        // BATAS KERAS, bukan potongan kecil. Diukur pada korpus: dari 19
+        // untaian yang punya padanan order id sungguhan, perbaikan huruf
+        // menghasilkan nilai benar 5 kali dan nilai yang bentuknya sempurna
+        // tapi SALAH 13 kali. Nilai yang salah dan berbentuk sempurna adalah
+        // kegagalan termahal di sini: ia lolos setiap pemeriksaan, gagal
+        // berpasangan dengan laporan marketplace secara diam-diam, lalu
+        // terbaca sebagai "pesanan hilang" padahal yang salah pembacaannya.
+        //
+        // Jadi hasil perbaikan boleh DITAWARKAN, tidak pernah dipakai sendiri.
+        skor = Math.min(skor, 0.79);
+        sebab.push("ada huruf yang dibaca sebagai angka — perlu dibenarkan");
       }
 
       skor = Math.min(1, Math.max(0, skor));
@@ -286,7 +321,15 @@ export function bacaSemuaOrderId(text: string | null | undefined): BacaanOrderId
           alasan: sebab,
         });
       }
-      break; // satu kandidat per token; yang apa adanya didahulukan
+      // TIDAK berhenti di kandidat pertama yang cocok.
+      //
+      // Yang apa adanya sering hanya menyentuh keluarga terlemah: terukur di
+      // korpus, "S85367823326934914" berhenti sebagai huruf-angka (0,63)
+      // sementara bentuk 18-angkanya tidak pernah dilihat, sehingga yang
+      // ditawarkan ke orang untaian berhuruf S di depan alih-alih nomor yang
+      // bisa dikenali sekali lihat. Keduanya dinilai; yang tertinggi menang.
+      // Batas 0,79 untuk hasil perbaikan tetap berlaku, jadi ini menaikkan
+      // mutu yang DITAWARKAN tanpa menambah satu pun yang diterima otomatis.
     }
   }
 
@@ -299,6 +342,7 @@ function kandidatDari(mentah: string): { v: string; diperbaiki: boolean }[] {
   const bersih = bersihkan(mentah).toUpperCase();
   if (!bersih) return [];
   const out = [{ v: bersih, diperbaiki: false }];
+  if (!layakDiperbaiki(bersih)) return out;
   const diperbaiki = repair(bersih);
   if (diperbaiki !== bersih) out.push({ v: diperbaiki, diperbaiki: true });
   return out;

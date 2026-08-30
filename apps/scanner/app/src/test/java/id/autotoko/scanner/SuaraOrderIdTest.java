@@ -78,6 +78,61 @@ public class SuaraOrderIdTest {
         assertEquals(SHOPEE, s.pilihan().get(0).nilai);
     }
 
+    // --- barcode: dari korpus 311 kode sungguhan -----------------------
+    //
+    //   287  panjang 12   JY1311292924        nomor pengiriman J&T
+    //    17  panjang 13   CM67961230459       nomor pengiriman
+    //     5  panjang 14   260814B62PDTY8      NOMOR PESANAN Shopee
+    //     2  panjang 18   585527219881477623  NOMOR PESANAN 18 angka
+
+    @Test public void barcode_dipercaya_lebih_dari_ocr() {
+        SuaraOrderId s = new SuaraOrderId();
+        // Bentuk Shopee dari OCR telanjang hanya sampai "sedang". Dari
+        // barcode -- yang punya checksum -- ia layak dipakai langsung.
+        s.catatBarcode("260814B62PDTY8");
+        OrderId.Bacaan b = s.hasil();
+        assertNotNull(b);
+        assertEquals("260814B62PDTY8", b.nilai);
+        assertEquals("tinggi", b.keyakinan);
+        assertTrue(b.alasan.contains("barcode"));
+    }
+
+    @Test public void barcode_18_angka_juga_langsung_dipakai() {
+        SuaraOrderId s = new SuaraOrderId();
+        s.catatBarcode("585527219881477623");
+        OrderId.Bacaan b = s.hasil();
+        assertNotNull(b);
+        assertEquals("585527219881477623", b.nilai);
+        assertEquals("tinggi", b.keyakinan);
+    }
+
+    /**
+     * 287 dari 311 barcode di korpus justru nomor pengiriman. Kalau jalur
+     * barcode melonggarkan pemeriksaan bentuk, setiap paket akan menyimpan
+     * nomor resi kurir di kolom nomor pesanan -- persis kekacauan yang dulu
+     * memaksa aturan 18-digit yang kaku.
+     */
+    @Test public void barcode_nomor_pengiriman_tetap_ditolak() {
+        SuaraOrderId s = new SuaraOrderId();
+        s.catatBarcode("JY1311292924");
+        s.catatBarcode("CM67961230459");
+        s.catatBarcode("JY1338478473");
+        assertTrue(s.kosong());
+        assertEquals(null, s.hasil());
+    }
+
+    @Test public void barcode_menang_atas_bacaan_ocr_yang_ragu() {
+        SuaraOrderId s = new SuaraOrderId();
+        // OCR telanjang membaca bentuk Shopee berkali-kali: tetap "sedang".
+        for (int i = 0; i < 30; i++) s.catat("BW-33\n260814B62PDTY8\nSPX");
+        assertEquals("sedang", s.hasil().keyakinan);
+        // Satu barcode sudah cukup untuk menyelesaikannya.
+        s.catatBarcode("260814B62PDTY8");
+        OrderId.Bacaan b = s.hasil();
+        assertEquals("260814B62PDTY8", b.nilai);
+        assertEquals("tinggi", b.keyakinan);
+    }
+
     @Test public void kosong_aman() {
         SuaraOrderId s = new SuaraOrderId();
         s.catat(null);

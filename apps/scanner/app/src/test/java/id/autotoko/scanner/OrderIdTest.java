@@ -149,6 +149,47 @@ public class OrderIdTest {
         assertNull(OrderId.dariKetikan("12345"));
     }
 
+    // --- dari korpus 309 label sungguhan -------------------------------
+
+    @Test public void sisa_garis_barcode_di_tepi_tidak_jadi_angka() {
+        // Cacat nyata: "|" ditafsirkan sebagai 1, hasilnya 26081505EJ88X71.
+        assertEquals("260815D5EJ88X7", OrderId.cari("No. Pesanan: 260815D5EJ88X7|"));
+    }
+
+    @Test public void nama_layanan_kurir_tidak_jadi_nomor() {
+        // Cacat nyata: "GrotbExpress" -> "6R0T8EXPRE55", ditawarkan.
+        assertNull(OrderId.baca("Layanan GrotbExpress"));
+        assertNull(OrderId.baca("No. Pesanan: GrotbExpress"));
+    }
+
+    @Test public void hasil_perbaikan_huruf_tidak_pernah_otomatis() {
+        // Diukur di korpus: perbaikan huruf benar 5 kali, salah 13 kali.
+        String[][] mentah = {
+            {"S85367823326934914", "585367823326934914"},
+            {"S85601186906867702", "585601186906867702"},
+            {"S8S4896I1730814406", "585489611730814406"},
+        };
+        for (String[] m : mentah) {
+            OrderId.Bacaan b = OrderId.baca("Order ID: " + m[0]);
+            assertNotNull(m[0], b);
+            // Yang ditawarkan bentuk 18-angkanya, tapi tidak pernah otomatis.
+            assertEquals(m[0], m[1], b.nilai);
+            assertEquals(m[0], "sedang", b.keyakinan);
+            assertTrue(m[0] + " skor " + b.skor, b.skor < 0.80);
+        }
+    }
+
+    @Test public void yang_terbaca_bersih_tetap_otomatis() {
+        assertEquals("588426503116162183", OrderId.cari("Order ID: 588426503116162183"));
+        assertEquals("2608246WS3ANCS", OrderId.cari("No. Pesanan: 2608246WS3ANCS"));
+    }
+
+    @Test public void nomor_resi_kurir_di_korpus_bukan_pesanan() {
+        // 287 dari 311 barcode di korpus berbentuk ini.
+        assertNull(OrderId.baca("JY1311292924"));
+        assertNull(OrderId.baca("CM67961230459"));
+    }
+
     @Test public void kosong_tetap_kosong() {
         assertNull(OrderId.cari(null));
         assertNull(OrderId.cari(""));

@@ -715,7 +715,12 @@ public class ScanActivity extends AppCompatActivity {
                 double dy = (b.exactCenterY() - bestBox.exactCenterY()) / frameHeight;
                 if (Math.sqrt(dx * dx + dy * dy) > SAME_LABEL_RADIUS) continue;
             }
-            if (seenCodes.size() < MAX_CODES_PER_LABEL) seenCodes.add(other);
+            if (seenCodes.size() < MAX_CODES_PER_LABEL) {
+                seenCodes.add(other);
+                // Sebagian kecil label membawa nomor pesanannya di barcode.
+                // Itu satu-satunya pembacaan di sini yang punya checksum.
+                suara.catatBarcode(other);
+            }
         }
 
         String resi = ResiExtractor.normalize(best.getRawValue());

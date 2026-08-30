@@ -46,6 +46,8 @@ final class SuaraOrderId {
 
     private final Map<String, Integer> suara = new HashMap<>();
     private final Map<String, OrderId.Bacaan> terbaik = new HashMap<>();
+    /** Nilai yang datang dari barcode, yang punya checksum. */
+    private final java.util.Set<String> dariBarcode = new java.util.HashSet<>();
     private int frame;
     private int frameBerisi;
 
@@ -72,9 +74,38 @@ final class SuaraOrderId {
         }
     }
 
+    /**
+     * Nilai dari sebuah BARCODE, bukan dari OCR.
+     *
+     * Diberi dorongan besar karena barcode punya checksum: yang terbaca salah
+     * tidak lolos sama sekali, sementara OCR yang terbaca salah menghasilkan
+     * untaian yang bentuknya sempurna dan isinya keliru. Diukur di korpus,
+     * perbaikan huruf pada OCR menghasilkan nilai salah 13 dari 19 kali;
+     * barcode tidak punya mode kegagalan seperti itu.
+     *
+     * Pemeriksaan bentuknya TIDAK dilonggarkan. Nomor pengiriman kurir juga
+     * datang sebagai barcode -- 287 dari 311 kode di korpus justru berbentuk
+     * itu -- dan ia tetap harus lolos keluarga bentuk yang sama seperti
+     * bacaan OCR. Yang berubah hanya seberapa dipercaya sesudah lolos.
+     */
+    synchronized void catatBarcode(String nilai) {
+        OrderId.Bacaan dasar = OrderId.skorkan(nilai, false, false);
+        if (dasar == null) return;
+        double skor = Math.min(1.0, dasar.skor + 0.35);
+        OrderId.Bacaan b = new OrderId.Bacaan(
+                dasar.nilai, skor, dasar.keluarga, dasar.berjangkar,
+                dasar.alasan + ", terbaca dari barcode");
+        dariBarcode.add(b.nilai);
+        Integer n = suara.get(b.nilai);
+        suara.put(b.nilai, n == null ? 1 : n + 1);
+        OrderId.Bacaan lama = terbaik.get(b.nilai);
+        if (lama == null || b.skor > lama.skor) terbaik.put(b.nilai, b);
+    }
+
     synchronized void kosongkan() {
         suara.clear();
         terbaik.clear();
+        dariBarcode.clear();
         frame = 0;
         frameBerisi = 0;
     }
@@ -151,9 +182,24 @@ final class SuaraOrderId {
         String inti = gugus.get(0);
         int total = 0;
         boolean berjangkar = false;
+        String barcode = null;
         for (String v : gugus) {
             total += suaraUntuk(v);
             if (terbaik.get(v).berjangkar) berjangkar = true;
+            if (dariBarcode.contains(v)) barcode = v;
+        }
+
+        // Nilai dari barcode tidak ikut suara per huruf dan tidak terkena
+        // batas "tanpa jangkar". Checksum-nya sudah lolos; merakitnya ulang
+        // dari bacaan OCR di sekitarnya berarti membiarkan yang lebih lemah
+        // mengoreksi yang lebih kuat.
+        if (barcode != null) {
+            OrderId.Bacaan d = OrderId.skorkan(barcode, berjangkar, false);
+            if (d != null) {
+                double sk = Math.min(1.0, d.skor + 0.35 + Math.min(0.10, 0.02 * (total - 1)));
+                return new OrderId.Bacaan(barcode, sk, d.keluarga, berjangkar,
+                        d.alasan + ", terbaca dari barcode");
+            }
         }
 
         // Suara per posisi: setiap huruf diputuskan sendiri, ditimbang jumlah
