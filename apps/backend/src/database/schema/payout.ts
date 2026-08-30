@@ -165,6 +165,15 @@ export const payoutSettings = pgTable("payout_settings", {
     .notNull()
     .default("0.2000"),
   sedekahBankAccount: varchar("sedekah_bank_account", { length: 255 }),
+  /**
+   * Template pesan WhatsApp, per tenant.
+   *
+   * NULL berarti "pakai bawaan", bukan "kirim pesan kosong". Pemilik yang
+   * tidak pernah menyentuh pengaturan ini harus mendapat teks yang sama persis
+   * dengan sebelum fiturnya ada -- lihat TEMPLATE_BAWAAN di payout-wa.ts.
+   */
+  waTemplateSeller: text("wa_template_seller"),
+  waTemplateSubSeller: text("wa_template_sub_seller"),
   /** Where the material reserve is transferred. A different pot from sedekah. */
   materialBankAccount: varchar("material_bank_account", { length: 255 }),
   /**

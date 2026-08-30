@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -39,6 +40,7 @@ import {
   ReleaseCarryoversDto,
 } from "./dto.js";
 
+import { NAMA_TERSEDIA, TEMPLATE_BAWAAN } from "./payout-wa.js";
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
 }
@@ -192,6 +194,32 @@ export class PayoutController {
   @Get("batches/:id")
   async getBatch(@Req() req: FastifyRequest, @Param("id") id: string) {
     return ok(await this.batches.get(uid(req), id));
+  }
+
+  /**
+   * Teks pesan WhatsApp batch ini, sudah jadi.
+   *
+   * Satu pintu untuk web dan APK. Jenis yang tidak dikenal dijawab 400, bukan
+   * diam-diam dianggap "seller": pesan seller memuat nominal yang tidak boleh
+   * sampai ke sub-seller, jadi salah tulis di URL tidak boleh berakhir dengan
+   * pesan yang salah terkirim.
+   */
+  @Get("batches/:id/wa/:jenis")
+  async waPesan(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Param("jenis") jenis: string,
+  ) {
+    if (jenis !== "seller" && jenis !== "sub_seller") {
+      throw new BadRequestException('jenis harus "seller" atau "sub_seller".');
+    }
+    return ok(await this.batches.waText(uid(req), id, jenis));
+  }
+
+  /** Template bawaan dan daftar nama yang bisa dipakai, untuk layar pengaturan. */
+  @Get("wa/template-meta")
+  async waMeta() {
+    return ok({ bawaan: TEMPLATE_BAWAAN, tersedia: NAMA_TERSEDIA });
   }
 
   @Post("batches")

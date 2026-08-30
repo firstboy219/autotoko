@@ -328,183 +328,32 @@ const STEPS = [
 ] as const;
 
 /**
- * Ringkasan untuk pemiliknya sendiri.
+ * Membagikan pesan pencairan lewat WhatsApp.
  *
- * Tanpa rincian per toko: pesan ini ringkasan, dan siapa mendapat berapa di
- * toko mana bukan yang perlu dibaca semua penerimanya. Angkanya tetap lengkap
- * di halaman, CSV, dan PNG. Bagian seller ikut, karena memang untuk seller.
+ * Teksnya disusun SERVER, bukan di sini. Sebelumnya layar ini menyusunnya
+ * sendiri dan APK menyusunnya lagi dengan kode terpisah; begitu isinya bisa
+ * disetel pemiliknya lewat template, dua penyusun berarti dua pesan yang
+ * berbeda dan bedanya baru ketahuan sesudah terkirim ke orang lain.
+ *
+ * Kalau permintaannya gagal, TIDAK ada yang dibuka. Mengirim pesan berformat
+ * bawaan padahal pemiliknya sudah menyetel template sendiri lebih buruk
+ * daripada tidak mengirim: yang terkirim lewat WhatsApp tidak bisa ditarik.
  */
-function pesanSeller(batch: BatchDetail, shops: ShopOpt[]): string {
-  const t = batch.mutations.reduce(
-    (a, m) => {
-      a.credit += Number(m.creditAmount) || 0;
-      a.sedekah += Number(m.sedekahAmount) || 0;
-      a.seller += Number(m.sellerAmount) || 0;
-      a.material += Number(m.sellerMaterialAmount) || 0;
-      a.sub += Number(m.subSellerAmount) || 0;
-      a.subSub += Number(m.subSubSellerAmount) || 0;
-      return a;
-    },
-    { credit: 0, sedekah: 0, seller: 0, material: 0, sub: 0, subSub: 0 },
-  );
-
-  // Tanggal uangnya, bukan tanggal batch dibuka: batch yang dimulai Senin bisa
-  // memuat transfer hari Jumat.
-  const hari = batch.mutations.map((m) => m.payoutDate).filter(Boolean).sort();
-  const rentang =
-    hari.length === 0
-      ? null
-      : hari[0] === hari[hari.length - 1]
-        ? tglPanjang(hari[0]!)
-        : `${tglPanjang(hari[0]!)} – ${tglPanjang(hari[hari.length - 1]!)}`;
-
-  const lines = [
-    `*Rekap Pencairan* (${batch.mutations.length} toko)`,
-    `Batch: ${batch.code ? `#${batch.code}` : batch.id.slice(0, 8)}`,
-    ...(rentang ? [`Tanggal pencairan: ${rentang}`] : []),
-    `Dibuat: ${tglPanjang(batch.createdAt)}`,
-    `Total Kredit: ${rupiah(t.credit)}`,
-    "",
-    "*Hasil Kalkulasi*",
-    `Sedekah: ${rupiah(t.sedekah)}`,
-  ];
-  if (t.sub > 0) lines.push(`Sub-seller: ${rupiah(t.sub)}`);
-  if (t.subSub > 0) lines.push(`Sub-sub-seller: ${rupiah(t.subSub)}`);
-  lines.push(`Seller: ${rupiah(t.seller)}`);
-  if (t.material > 0) {
-    lines.push(`  - Bahan baku: ${rupiah(t.material)}`);
-    lines.push(`  - Sisa seller: ${rupiah(t.seller - t.material)}`);
-  }
-
-  /**
-   * Per toko: namanya, berapa yang cair, dan buktinya.
-   *
-   * Sengaja hanya tiga hal itu. Pecahan sedekah/sub-seller/seller per toko
-   * tidak ikut -- yang ingin dilihat di sini adalah "toko mana mencairkan
-   * berapa, mana buktinya", dan menambahkan pecahannya mengembalikan tepat
-   * rincian yang tadi dibuang.
-   */
-  if (batch.mutations.length > 0) {
-    lines.push("", "*Detail Toko*");
-    batch.mutations.forEach((m, i) => {
-      const nama =
-        shops.find((s) => s.id === m.shopId)?.shopName ?? m.shopId.slice(0, 8);
-      lines.push(`${i + 1}. ${nama} - ${rupiah(m.creditAmount)}`);
-      // Buktinya disebut ada-tidaknya, bukan dilewati diam-diam: baris tanpa
-      // tautan yang tidak diterangkan terbaca seperti bukti yang hilang.
-      lines.push(
-        m.marketplaceProofUrl
-          ? `   ${absoluteUrl(m.marketplaceProofUrl)}`
-          : "   (bukti pencairan belum diunggah)",
-      );
-    });
-  }
-
-  return lines.join("\n");
-}
-
-/**
- * Bukti transfer untuk yang menerimanya.
- *
- * Tanpa ringkasan berhitung di kepala: kebalikan dari pesan seller, di sini
- * yang dikirim justru rinciannya. Jatah bahan baku tidak ikut -- uang itu
- * dipotong dari bagian seller dan masuk ke rekening pemilik sendiri, jadi
- * menampilkannya berarti memperlihatkan nominal seller lewat pintu lain.
- *
- * Transfer yang belum ada buktinya tetap didaftar dan disebut belum ada:
- * menghilangkannya membuat pesan terlihat lengkap sementara ada yang masih
- * menunggu uangnya.
- */
-function pesanSubSeller(batch: BatchDetail): string {
-  const JENIS: Record<string, string> = {
-    sub_seller: "Sub-seller",
-    sub_sub_seller: "Sub-sub-seller",
-    sedekah: "Sedekah",
-  };
-  /**
-   * Berapa yang cair di toko yang menghasilkan bagian tiap orang.
-   *
-   * Dicocokkan lewat id sub-seller, BUKAN lewat mutasi: baris transfer
-   * sub-seller digabung per penerima, jadi payoutMutationId-nya null dan
-   * menghitung lewat mutasi menghasilkan nol untuk semua orang.
-   */
-  const cairPerSub = new Map<string, number>();
-  for (const m of batch.mutations) {
-    const kredit = Number(m.creditAmount) || 0;
-    if (m.subSellerId) {
-      cairPerSub.set(m.subSellerId, (cairPerSub.get(m.subSellerId) ?? 0) + kredit);
+async function bagikanWa(
+  batchId: string,
+  jenis: "seller" | "sub_seller",
+  onGagal: (pesan: string) => void,
+) {
+  try {
+    const r = await api.get<{ teks: string }>(`/payout/batches/${batchId}/wa/${jenis}`);
+    if (!r?.teks) {
+      onGagal("Pesan kosong — periksa template di Pengaturan Pencairan.");
+      return;
     }
-    if (m.subSubSellerId) {
-      cairPerSub.set(m.subSubSellerId, (cairPerSub.get(m.subSubSellerId) ?? 0) + kredit);
-    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(r.teks)}`, "_blank");
+  } catch (e) {
+    onGagal(`Gagal menyusun pesan: ${(e as Error).message}`);
   }
-
-  const per = new Map<
-    string,
-    {
-      nama: string;
-      jenis: string;
-      total: number;
-      bukti: string[];
-      tanpaBukti: number;
-      /** Pencairan toko-toko yang menghasilkan bagian ini. */
-      cair: number;
-      /** Bagian dari batch sebelumnya yang ikut dibayarkan di sini. */
-      bawaan: number;
-    }
-  >();
-  for (const d of batch.disbursements) {
-    if (d.recipientType === "bahan_baku") continue;
-    const kunci = `${d.recipientType}|${d.recipientName}`;
-    const g = per.get(kunci) ?? {
-      nama: d.recipientName,
-      jenis: d.recipientType,
-      total: 0,
-      bukti: [] as string[],
-      tanpaBukti: 0,
-      cair: 0,
-      bawaan: 0,
-    };
-    g.total += Number(d.expectedAmount) || 0;
-    g.bawaan += Number(d.carryoverAmount) || 0;
-    const idPenerima = d.recipientSubSellerId ?? d.recipientSubSubSellerId ?? null;
-    if (idPenerima) g.cair += cairPerSub.get(idPenerima) ?? 0;
-    if (d.proofUrl) g.bukti.push(absoluteUrl(d.proofUrl));
-    else g.tanpaBukti += 1;
-    per.set(kunci, g);
-  }
-
-  const lines = [
-    "*Bukti Transfer Pencairan*",
-    `Batch: ${batch.code ? `#${batch.code}` : batch.id.slice(0, 8)}`,
-    `Tanggal: ${tglPanjang(batch.completedAt ?? batch.closedAt ?? batch.createdAt)}`,
-    "",
-  ];
-  let n = 0;
-  for (const g of [...per.values()].sort((a, b) => b.total - a.total)) {
-    n += 1;
-    lines.push(`${n}. ${g.nama} (${JENIS[g.jenis] ?? g.jenis}) — ${rupiah(g.total)}`);
-    // Hanya untuk penerima yang bagiannya berasal dari toko tertentu. Baris
-    // sedekah digabung untuk seluruh batch, jadi "total pencairan"-nya sama
-    // dengan total seluruh batch — itu ringkasan yang justru tidak diinginkan
-    // di pesan ini.
-    if (g.cair > 0) {
-      lines.push(`   Total pencairan toko: ${rupiah(g.cair)}`);
-    }
-    // Disebut kalau ada, karena tanpa ini penerimanya akan menghitung
-    // persentasenya sendiri dan menyimpulkan angkanya salah.
-    if (g.bawaan > 0) {
-      lines.push(`   (termasuk ${rupiah(g.bawaan)} bawaan batch sebelumnya)`);
-    }
-    for (const url of g.bukti) lines.push(`   ${url}`);
-    if (g.tanpaBukti > 0) lines.push(`   (${g.tanpaBukti} transfer belum ada buktinya)`);
-  }
-  return lines.join("\n");
-}
-
-/** Satu pintu ke WhatsApp, supaya penyusunan pesannya tidak tercecer. */
-function bukaWhatsApp(teks: string) {
-  window.open(`https://wa.me/?text=${encodeURIComponent(teks)}`, "_blank");
 }
 
 function stepIndex(status: BatchDetail["status"]): number {
@@ -755,7 +604,7 @@ function BatchProgress({
                   size="sm"
                   variant="outline"
                   icon="share"
-                  onClick={() => bukaWhatsApp(pesanSeller(batch, shops))}
+                  onClick={() => bagikanWa(batch.id, "seller", (m) => toast(m, "danger"))}
                 >
                   Bagikan WA ke Seller
                 </Button>
@@ -766,7 +615,7 @@ function BatchProgress({
                   size="sm"
                   variant="outline"
                   icon="share"
-                  onClick={() => bukaWhatsApp(pesanSubSeller(batch))}
+                  onClick={() => bagikanWa(batch.id, "sub_seller", (m) => toast(m, "danger"))}
                 >
                   Bagikan WA ke Sub-seller
                 </Button>

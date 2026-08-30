@@ -69,19 +69,15 @@ const NAV_PERM: Record<string, string> = {
 
 const EMPTY_PREFS: NavPrefs = { groups: [], counts: {}, collapsed: [] };
 
-/** Id of the automatic group. Reserved: a user group may not use it. */
-export const FREQUENT_ID = "__sering__";
-
 /**
- * Visits before a menu item is called frequently used.
+ * Id kelompok otomatis yang dulu ada.
  *
- * Not one. With a threshold of one the automatic group fills up with whatever
- * was opened while looking around on the first day and then sits there being
- * wrong, which is worse than not existing — a shortcut list nobody trusts is
- * just more to read.
+ * Tetapannya dipertahankan HANYA untuk menyaringnya keluar: preferensi yang
+ * sudah tersimpan bisa memuat kelompok berid ini, dan kalau tidak disaring ia
+ * akan muncul kembali sebagai kelompok biasa bernama "Sering Digunakan" pada
+ * pemilik yang sudah lama memakai aplikasinya -- justru yang dibuang.
  */
-const FREQUENT_MIN = 3;
-const FREQUENT_MAX = 5;
+const ID_KELOMPOK_LAMA = "__sering__";
 
 /** How long to wait after the last change before writing prefs back. */
 const SAVE_DEBOUNCE_MS = 4000;
@@ -152,13 +148,13 @@ export function Layout({
     };
   }, []);
 
-  // Count the visit, which is the whole input to the automatic group.
-  useEffect(() => {
-    if (!prefsLoaded) return;
-    const path = matchNav(location.pathname);
-    if (!path) return;
-    setPrefs((p) => ({ ...p, counts: { ...p.counts, [path]: (p.counts[path] ?? 0) + 1 } }));
-  }, [location.pathname, prefsLoaded]);
+  // Kunjungan tidak lagi dihitung.
+  //
+  // Dulu setiap pindah halaman menaikkan sebuah penghitung yang menjadi
+  // satu-satunya masukan kelompok otomatis "Sering Digunakan". Kelompok itu
+  // dibuang, jadi penghitungnya ikut berhenti -- membiarkannya berjalan
+  // berarti menulis ke server pada setiap klik menu untuk sesuatu yang tidak
+  // dibaca siapa pun.
 
   // Written back debounced: a click on every menu item would otherwise be a
   // request on every menu item, and nothing here needs to be durable that fast.
@@ -205,20 +201,16 @@ export function Layout({
   const byPath = useMemo(() => new Map(NAV_TAMPIL.map((n) => [n.to, n])), [NAV_TAMPIL]);
 
   /**
-   * The rendered sections: the automatic group, then the seller's own, then
-   * everything they have not filed anywhere.
+   * Bagian-bagian menu: kelompok buatan pemiliknya, lalu sisanya.
    *
-   * Frequently-used entries stay in their group as well as appearing at the
-   * top. Moving them would rearrange the menu as it is used, and a menu whose
-   * items change place is harder to use than one with a short duplicate list.
+   * Kelompok otomatis "Sering Digunakan" dibuang. Yang tersisa hanya susunan
+   * yang memang dibuat sendiri oleh pemiliknya -- menu yang berpindah tempat
+   * mengikuti kebiasaan memaksa orang mencari ulang letak yang kemarin sudah
+   * dihafal.
    */
   const sections = useMemo(() => {
-    const frequent = NAV_TAMPIL.filter((n) => (prefs.counts[n.to] ?? 0) >= FREQUENT_MIN)
-      .sort((a, b) => (prefs.counts[b.to] ?? 0) - (prefs.counts[a.to] ?? 0))
-      .slice(0, FREQUENT_MAX);
-
     const grouped = prefs.groups
-      .filter((g) => g.id !== FREQUENT_ID)
+      .filter((g) => g.id !== ID_KELOMPOK_LAMA)
       .map((g) => ({
         id: g.id,
         label: g.label,
@@ -229,10 +221,7 @@ export function Layout({
     const filed = new Set(grouped.flatMap((g) => g.items.map((i) => i.to)));
     const rest = NAV_TAMPIL.filter((n) => !filed.has(n.to));
 
-    const out: { id: string; label: string | null; items: NavItem[]; auto?: boolean }[] = [];
-    if (frequent.length >= 2) {
-      out.push({ id: FREQUENT_ID, label: "Sering Digunakan", items: frequent, auto: true });
-    }
+    const out: { id: string; label: string | null; items: NavItem[] }[] = [];
     out.push(...grouped);
     if (rest.length) {
       // Unlabelled when nothing has been grouped yet, so a seller who never
@@ -240,7 +229,7 @@ export function Layout({
       out.push({ id: "__lainnya__", label: grouped.length ? "Lainnya" : null, items: rest });
     }
     return out;
-  }, [prefs.groups, prefs.counts, byPath]);
+  }, [prefs.groups, byPath]);
 
   function toggleCollapsed(id: string) {
     setPrefs((p) => ({
@@ -283,7 +272,6 @@ export function Layout({
                     className={`transition-transform ${collapsed ? "-rotate-90" : ""}`}
                   />
                   <span className="truncate">{s.label}</span>
-                  {s.auto && <span className="ml-auto normal-case text-[10px]">otomatis</span>}
                 </button>
               )}
               {!collapsed &&

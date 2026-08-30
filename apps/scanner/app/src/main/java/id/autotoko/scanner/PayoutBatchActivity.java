@@ -695,12 +695,12 @@ public class PayoutBatchActivity extends AppCompatActivity {
         baris.setPadding(0, (int) (8 * d), 0, 0);
 
         if (PayoutShare.bisaBagikanSeller(batch)) {
-            baris.addView(tombolBagi("Bagikan WA ke Seller", v -> bagikanWa(
-                    PayoutShare.pesanSeller(batch, shops, new Session(this).baseUrl()))));
+            baris.addView(tombolBagi("Bagikan WA ke Seller",
+                    v -> bagikanDariServer("seller")));
         }
         if (PayoutShare.bisaBagikanSubSeller(batch)) {
-            baris.addView(tombolBagi("Bagikan WA ke Sub-seller", v -> bagikanWa(
-                    PayoutShare.pesanSubSeller(batch, new Session(this).baseUrl()))));
+            baris.addView(tombolBagi("Bagikan WA ke Sub-seller",
+                    v -> bagikanDariServer("sub_seller")));
         }
         return baris;
     }
@@ -720,6 +720,48 @@ public class PayoutBatchActivity extends AppCompatActivity {
     }
 
     /** Langsung ke WhatsApp kalau terpasang; pemilih aplikasi cadangannya. */
+    /**
+     * Meminta teks pesan ke server, lalu membagikannya.
+     *
+     * Kalau permintaannya gagal -- sinyal hilang di gudang adalah keadaan
+     * biasa -- pesannya disusun di sini memakai susunan BAWAAN, dan orangnya
+     * DIBERI TAHU bahwa template yang disetel tidak terpakai. Diam-diam
+     * mengirim format lain adalah cara membuat orang mengira templatenya tidak
+     * pernah bekerja.
+     */
+    private void bagikanDariServer(final String jenis) {
+        final String id = PayoutUi.str(batch, "id", null);
+        if (id == null) {
+            bagikanBawaan(jenis, "Batch ini belum punya id.");
+            return;
+        }
+        api.payoutWaText(id, jenis, r -> runOnUiThread(() -> {
+            String teks = null;
+            if (r.ok()) {
+                org.json.JSONObject d = r.data();
+                if (d != null) {
+                    String t = d.optString("teks", "");
+                    if (!t.isEmpty()) teks = t;
+                }
+            }
+            if (teks != null) bagikanWa(teks);
+            else bagikanBawaan(jenis, r.message("tidak bisa menghubungi server"));
+        }));
+    }
+
+    /** Susunan bawaan, dipakai hanya saat server tidak terjangkau. */
+    private void bagikanBawaan(String jenis, String alasan) {
+        String base = new Session(this).baseUrl();
+        String teks = "seller".equals(jenis)
+                ? PayoutShare.pesanSeller(batch, shops, base)
+                : PayoutShare.pesanSubSeller(batch, base);
+        Toast.makeText(this,
+                "Memakai susunan bawaan — template dari pengaturan tidak terbaca ("
+                        + alasan + ").",
+                Toast.LENGTH_LONG).show();
+        bagikanWa(teks);
+    }
+
     private void bagikanWa(String teks) {
         Intent send = new Intent(Intent.ACTION_SEND);
         send.setType("text/plain");

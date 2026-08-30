@@ -71,6 +71,14 @@ export class UpdatePayoutSettingsDto {
   @IsOptional() @IsNumber() @Min(0) @Max(10_000_000) minTransferAmount?: number;
   @IsOptional() @IsBoolean() adminFeeEnabled?: boolean;
   @IsOptional() @IsNumber() @Min(0) @Max(10_000_000) adminFeeAmount?: number;
+  /**
+   * Template pesan WhatsApp. String kosong berarti "kembalikan ke bawaan".
+   *
+   * Batas 4000 karakter: pesan WhatsApp sendiri terpotong jauh sebelum itu,
+   * dan tanpa batas kolom ini menjadi tempat menyimpan apa saja.
+   */
+  @IsOptional() @IsString() @MaxLength(4000) waTemplateSeller?: string;
+  @IsOptional() @IsString() @MaxLength(4000) waTemplateSubSeller?: string;
 }
 
 /** Bukti transfer fee admin sebuah batch. */

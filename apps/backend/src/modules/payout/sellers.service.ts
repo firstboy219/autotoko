@@ -351,6 +351,14 @@ export class PayoutSellersService {
         ...(dto.sedekahBankAccount != null
           ? { sedekahBankAccount: dto.sedekahBankAccount }
           : {}),
+        // Kosong berarti kembali ke bawaan, jadi disimpan sebagai NULL --
+        // bukan sebagai string kosong, yang akan menghasilkan pesan kosong.
+        ...(dto.waTemplateSeller != null
+          ? { waTemplateSeller: dto.waTemplateSeller.trim() || null }
+          : {}),
+        ...(dto.waTemplateSubSeller != null
+          ? { waTemplateSubSeller: dto.waTemplateSubSeller.trim() || null }
+          : {}),
         updatedAt: new Date(),
       })
       .where(eq(payoutSettings.userId, userId))

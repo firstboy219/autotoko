@@ -14,6 +14,7 @@ import {
   Input,
   PageHeader,
   Skeleton,
+  Textarea,
   useToast,
 } from "../components/ui";
 
@@ -27,6 +28,15 @@ interface Settings {
   minTransferAmount: string;
   adminFeeEnabled: boolean;
   adminFeeAmount: string;
+  /** Null berarti "pakai bawaan", bukan "pesan kosong". */
+  waTemplateSeller: string | null;
+  waTemplateSubSeller: string | null;
+}
+
+interface TemplateMeta {
+  bawaan: { seller: string; sub_seller: string };
+  tersedia: { seller: { nama: string; arti: string }[];
+              sub_seller: { nama: string; arti: string }[] };
 }
 
 /**
@@ -78,6 +88,9 @@ export function PencairanSettings() {
   const [feeNominal, setFeeNominal] = useState("20000");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [waSeller, setWaSeller] = useState("");
+  const [waSub, setWaSub] = useState("");
+  const meta = useFetch<TemplateMeta>("/payout/wa/template-meta");
 
   useEffect(() => {
     if (!data) return;
@@ -90,6 +103,12 @@ export function PencairanSettings() {
     setMinTransfer(String(Number(data.minTransferAmount ?? 10000)));
     setFeeAktif(Boolean(data.adminFeeEnabled));
     setFeeNominal(String(Number(data.adminFeeAmount ?? 20000)));
+    // Kosong ditampilkan sebagai kosong, bukan diisi bawaannya. Kalau
+    // bawaannya dituliskan ke kotak, pemiliknya tidak bisa lagi membedakan
+    // "saya belum mengubah apa-apa" dari "saya sengaja menulis ini" -- dan
+    // menghapus isinya untuk kembali ke bawaan jadi tidak jelas caranya.
+    setWaSeller(data.waTemplateSeller ?? "");
+    setWaSub(data.waTemplateSubSeller ?? "");
   }, [data]);
 
   const sedekahNum = Number(rate);
@@ -137,6 +156,10 @@ export function PencairanSettings() {
         minTransferAmount: Number(minTransfer) || 0,
         adminFeeEnabled: feeAktif,
         adminFeeAmount: Number(feeNominal) || 0,
+        // Dikirim apa adanya, termasuk saat kosong: string kosong itulah yang
+        // dimengerti server sebagai "kembalikan ke bawaan".
+        waTemplateSeller: waSeller,
+        waTemplateSubSeller: waSub,
       });
       toast("Pengaturan tersimpan", "success");
       reload();
@@ -389,6 +412,99 @@ export function PencairanSettings() {
                   className="font-mono"
                 />
               </Field>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="px-5 py-3.5 border-b border-line">
+              <div className="text-sm font-medium text-ink">Template Pesan WhatsApp</div>
+              <div className="text-xs text-ink-2 mt-0.5">
+                Isi pesan saat menekan &ldquo;Bagikan WA&rdquo; di halaman batch. Kosongkan
+                untuk memakai susunan bawaan.
+              </div>
+            </div>
+            <div className="p-5 space-y-5">
+              <InlineAlert tone="info">
+                Tulis nama dalam kurung kurawal untuk menyisipkan angka, mis.{" "}
+                <code>{"{total_kredit}"}</code>. Baris yang nilainya kosong akan hilang
+                sendiri — itulah sebabnya baris sub-seller tidak muncul pada batch yang
+                memang tidak punya sub-seller.
+              </InlineAlert>
+
+              {(["seller", "sub_seller"] as const).map((jenis) => {
+                const isSeller = jenis === "seller";
+                const nilai = isSeller ? waSeller : waSub;
+                const set = isSeller ? setWaSeller : setWaSub;
+                const daftar = meta.data?.tersedia?.[jenis] ?? [];
+                return (
+                  <div key={jenis}>
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="text-xs font-medium text-ink-2">
+                        {isSeller ? "Pesan ke Seller (rekap)" : "Pesan ke Sub-seller (bukti transfer)"}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {nilai.trim() !== "" && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="text"
+                            onClick={() => set("")}
+                          >
+                            Kembalikan ke bawaan
+                          </Button>
+                        )}
+                        {meta.data?.bawaan?.[jenis] && nilai.trim() === "" && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="text"
+                            onClick={() => set(meta.data!.bawaan[jenis])}
+                          >
+                            Mulai dari bawaan
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    <Textarea
+                      rows={isSeller ? 12 : 7}
+                      value={nilai}
+                      onChange={(e) => set(e.target.value)}
+                      placeholder={meta.data?.bawaan?.[jenis] ?? ""}
+                      className="font-mono text-xs"
+                    />
+                    {daftar.length > 0 && (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-[11px] text-ink-3">
+                          {daftar.length} nama yang bisa dipakai
+                        </summary>
+                        <ul className="mt-1.5 space-y-1">
+                          {daftar.map((x) => (
+                            <li key={x.nama} className="text-[11px] text-ink-3">
+                              <button
+                                type="button"
+                                onClick={() => set(nilai + `{${x.nama}}`)}
+                                className="font-mono text-ink-2 underline underline-offset-2"
+                              >
+                                {`{${x.nama}}`}
+                              </button>{" "}
+                              — {x.arti}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Yang paling penting untuk dikatakan di layar ini. Nominal
+                  seller tidak pernah tersedia di pesan sub-seller, dan itu
+                  bukan kelalaian melainkan aturan: yang terkirim lewat
+                  WhatsApp tidak bisa ditarik kembali. */}
+              <p className="text-[11px] text-ink-3">
+                Pesan sub-seller sengaja tidak punya nama untuk nominal seller. Bila ditulis
+                juga, yang muncul adalah tulisannya — bukan angkanya.
+              </p>
             </div>
           </Card>
 

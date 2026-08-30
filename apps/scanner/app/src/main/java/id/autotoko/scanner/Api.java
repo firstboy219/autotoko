@@ -396,6 +396,18 @@ public final class Api {
         call("POST", session.baseUrl() + "/api/payout/mutations", session.token(), body, cb);
     }
 
+    /**
+     * Teks pesan WhatsApp sebuah batch, disusun server.
+     *
+     * Disusun di sana, bukan di sini, supaya template yang disetel pemiliknya
+     * berlaku sama di web dan di aplikasi. Dua penyusun untuk satu template
+     * berarti dua pesan berbeda, dan bedanya baru ketahuan sesudah terkirim.
+     */
+    public void payoutWaText(String batchId, String jenis, Cb cb) {
+        call("GET", session.baseUrl() + "/api/payout/batches/" + batchId + "/wa/" + jenis,
+                session.token(), null, cb);
+    }
+
     public void payoutSettings(Cb cb) {
         call("GET", session.baseUrl() + "/api/payout/settings", session.token(), null, cb);
     }

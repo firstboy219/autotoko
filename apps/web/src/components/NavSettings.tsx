@@ -26,10 +26,10 @@ function newId(): string {
 /**
  * Where the seller decides how the menu is arranged.
  *
- * Only the grouping is theirs to set. "Sering Digunakan" is built from how
- * often each page is actually opened and is deliberately not editable — a
- * hand-curated list of favourites is just another group, which they can make
- * here if that is what they want.
+ * Susunannya sepenuhnya milik pemiliknya. Kelompok otomatis yang dulu
+ * menyusun dirinya sendiri dari menu yang paling sering dibuka sudah dibuang:
+ * menu yang berpindah tempat mengikuti kebiasaan memaksa orang mencari ulang
+ * letak yang kemarin sudah dihafal.
  *
  * Every edit is handed straight to the parent, which writes it back debounced.
  * There is no Save button because there is nothing to lose: the menu redraws as
@@ -96,9 +96,8 @@ export function NavSettingsModal({
     >
       <div className="space-y-5">
         <InlineAlert tone="info">
-          Buat grup sesuai cara kerjamu, lalu pilih grup untuk tiap menu. Kategori{" "}
-          <strong>Sering Digunakan</strong> disusun sendiri oleh sistem dari menu yang paling
-          sering kamu buka, jadi tidak perlu diatur.
+          Buat grup sesuai cara kerjamu, lalu pilih grup untuk tiap menu. Menu yang belum
+          dimasukkan ke grup mana pun tetap tampil di bagian bawah.
         </InlineAlert>
 
         <div>

@@ -17,11 +17,13 @@ import {
   payoutMutations,
   payoutDisbursements,
   payoutSettings,
+  shops,
   subSellers,
   subSubSellers,
 } from "../../database/schema/index.js";
 import { DisbursementsService } from "./disbursements.service.js";
 
+import { susunPesan, type JenisPesan } from "./payout-wa.js";
 const toCents = (v: string | number | null) => Math.round(Number(v ?? 0) * 100);
 
 /** Used when a tenant has no settings row yet. Banks refuse less than this. */
@@ -61,6 +63,50 @@ export class PayoutBatchService {
       .from(payoutBatches)
       .where(where)
       .orderBy(desc(payoutBatches.createdAt));
+  }
+
+  /**
+   * Teks pesan WhatsApp sebuah batch, sudah jadi.
+   *
+   * Disusun di SERVER, bukan di masing-masing layar. Sebelum ini web dan APK
+   * menyusunnya sendiri-sendiri dengan alasan yang masuk akal saat itu:
+   * datanya memang sudah ada di kedua layar. Begitu isinya bisa disetel
+   * pemiliknya, alasan itu berbalik -- template yang tersimpan di satu tempat
+   * tapi dirender dua penyusun berbeda akan menghasilkan dua pesan berbeda,
+   * dan bedanya baru ketahuan setelah terkirim ke orang lain.
+   */
+  async waText(userId: string, id: string, jenis: JenisPesan): Promise<{ teks: string }> {
+    const batch = (await this.get(userId, id)) as unknown as Parameters<
+      typeof susunPesan
+    >[0]["batch"];
+
+    // Nama toko diambil di sini supaya pemanggilnya tidak perlu tahu apa pun
+    // selain id batch -- layar mana pun, termasuk yang belum memuat daftar
+    // toko, tetap bisa meminta pesannya.
+    const daftar = await this.db
+      .select({ id: shops.id, nama: shops.shopName, tampil: shops.displayName })
+      .from(shops)
+      .where(eq(shops.userId, userId));
+    const namaToko = new Map(daftar.map((s) => [s.id, s.nama ?? s.tampil ?? ""]));
+
+    const [setelan] = await this.db
+      .select({
+        seller: payoutSettings.waTemplateSeller,
+        sub: payoutSettings.waTemplateSubSeller,
+      })
+      .from(payoutSettings)
+      .where(eq(payoutSettings.userId, userId))
+      .limit(1);
+
+    return {
+      teks: susunPesan({
+        jenis,
+        batch,
+        namaToko,
+        baseUrl: process.env.APP_URL ?? "https://viewtoko.cosger.online",
+        template: jenis === "seller" ? setelan?.seller : setelan?.sub,
+      }),
+    };
   }
 
   async get(userId: string, id: string) {
