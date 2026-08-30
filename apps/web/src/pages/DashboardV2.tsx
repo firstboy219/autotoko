@@ -51,9 +51,31 @@ interface Data {
     subSeller: number;
     bahanBaku: number;
     sellerBersih: number;
+    sellerKotor: number;
     rateEfektif: number;
     perHari: number;
     pencairan: number;
+  };
+  /**
+   * Biaya yang BENAR-BENAR keluar, bukan cadangan.
+   *
+   * uang.bahanBaku adalah persentase yang disisihkan; biaya.bahanBaku adalah
+   * uang yang sudah pindah rekening. Keduanya ditampilkan berdampingan supaya
+   * selisihnya terlihat.
+   */
+  biaya: {
+    bahanBaku: number;
+    pembelianBahan: number;
+    upahPacking: number;
+    feeAdmin: number;
+    selisihCadangan: number;
+    labaBersih: number;
+    rateBersih: number;
+  };
+  belumCair: { paket: number; umurTertua: number; umurRata: number };
+  stokMenipis: {
+    total: number;
+    teratas: { id: string; nama: string; satuan: string | null; stok: number; ambang: number }[];
   };
   banding: { kredit: number; sellerBersih: number; paket: number };
   volume: { paket: number; pcs: number; tokoAktif: number; tokoTotal: number; perHari: number };
@@ -491,6 +513,95 @@ export default function DashboardV2() {
                     {data.volume.perHari.toFixed(1)}/hari · {data.volume.tokoAktif} dari{" "}
                     {data.volume.tokoTotal} toko bergerak
                   </p>
+                </Card>
+              </div>
+            </div>
+
+            {/* ── sesudah semua biaya yang benar-benar keluar ──────────── */}
+            <div className="mt-3 grid gap-3 lg:grid-cols-3">
+              <Card className="lg:col-span-2">
+                <div className="text-xs font-medium text-ink-2">
+                  Laba bersih, sesudah biaya yang benar-benar keluar
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3">
+                  <span className="text-2xl font-semibold text-ink tabular-nums">
+                    {rupiah(data.biaya.labaBersih)}
+                  </span>
+                  <span className="text-xs text-ink-3">
+                    {(data.biaya.rateBersih * 100).toFixed(1)}% dari uang yang cair
+                  </span>
+                </div>
+
+                {/* Rincian sebagai daftar, bukan grafik: enam angka berurut
+                    yang saling mengurangi dibaca lebih cepat sebagai baris
+                    daripada sebagai batang. */}
+                <dl className="mt-3 space-y-1 text-xs">
+                  {[
+                    ["Bagian seller (sesudah sedekah & sub-seller)", data.uang.sellerKotor, false],
+                    ["Belanja bahan baku", -data.biaya.bahanBaku, true],
+                    ["Upah packing", -data.biaya.upahPacking, true],
+                    ["Fee admin", -data.biaya.feeAdmin, true],
+                  ].map(([label, nilai, kurang]) => (
+                    <div key={String(label)} className="flex justify-between gap-3">
+                      <dt className={kurang ? "text-ink-3" : "text-ink-2"}>{String(label)}</dt>
+                      <dd className="tabular-nums text-ink-2">{rupiah(Number(nilai))}</dd>
+                    </div>
+                  ))}
+                  <div className="flex justify-between gap-3 border-t border-line pt-1 font-medium">
+                    <dt className="text-ink">Laba bersih</dt>
+                    <dd className="tabular-nums text-ink">{rupiah(data.biaya.labaBersih)}</dd>
+                  </div>
+                </dl>
+
+                {/* Pertanyaan yang sebenarnya dijawab angka ini: cadangannya
+                    kurang atau kelebihan. */}
+                <p className="mt-2 text-xs text-ink-3">
+                  Cadangan bahan baku {rupiah(data.uang.bahanBaku)} ·{" "}
+                  {data.biaya.selisihCadangan >= 0
+                    ? `${rupiah(data.biaya.selisihCadangan)} lebih besar daripada belanja`
+                    : `${rupiah(-data.biaya.selisihCadangan)} kurang dari belanja`}{" "}
+                  ({data.biaya.pembelianBahan} pembelian tercatat)
+                </p>
+              </Card>
+
+              <div className="grid gap-3">
+                <Card>
+                  <div className="text-xs font-medium text-ink-2">Belum cair</div>
+                  <div className="mt-1.5 text-2xl font-semibold text-ink tabular-nums">
+                    {data.belumCair.paket}
+                  </div>
+                  <p className="mt-1 text-xs text-ink-3">
+                    paket sudah dikirim, pesanannya belum muncul di laporan mana pun
+                  </p>
+                  {data.belumCair.paket > 0 && (
+                    <p className="mt-1 text-xs text-ink-3">
+                      tertua {data.belumCair.umurTertua} hari · rata-rata{" "}
+                      {data.belumCair.umurRata.toFixed(0)} hari
+                    </p>
+                  )}
+                </Card>
+                <Card>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div className="text-xs font-medium text-ink-2">Bahan baku menipis</div>
+                    <Link to="/bom" className="text-xs text-brand-ink">
+                      Lihat
+                    </Link>
+                  </div>
+                  <div className="mt-1.5 text-2xl font-semibold text-ink tabular-nums">
+                    {data.stokMenipis.total}
+                  </div>
+                  {data.stokMenipis.teratas.length > 0 && (
+                    <ul className="mt-1.5 space-y-0.5">
+                      {data.stokMenipis.teratas.map((m) => (
+                        <li key={m.id} className="text-xs text-ink-3">
+                          {m.nama}{" "}
+                          <span className="tabular-nums">
+                            {m.stok.toLocaleString("id-ID")} {m.satuan ?? ""}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </Card>
               </div>
             </div>

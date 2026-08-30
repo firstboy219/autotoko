@@ -47,7 +47,8 @@ export class DashboardV2Service {
       .toISOString()
       .slice(0, 10);
 
-    const [uang, uangSebelum, volume, volumeSebelum, seri, toko, produk, keandalan, tugas] =
+    const [uang, uangSebelum, volume, volumeSebelum, seri, toko, produk, keandalan,
+           tugas, biaya, belumCair, stokMenipis] =
       await Promise.all([
         this.uang(userId, from, to),
         this.uang(userId, sebelumFrom, sebelumTo),
@@ -58,9 +59,24 @@ export class DashboardV2Service {
         this.produkTeratas(userId, from, to),
         this.keandalan(userId, from, to),
         this.pending.list(userId),
+        this.biayaNyata(userId, from, to),
+        this.belumCair(userId),
+        this.stokMenipis(userId),
       ]);
 
     const kredit = uang.kredit;
+
+    /**
+     * Laba bersih: bagian seller dikurangi biaya yang BENAR-BENAR keluar.
+     *
+     * Bukan dikurangi cadangan. Cadangan adalah persentase yang disisihkan;
+     * belanja adalah uang yang sudah pindah rekening. Keduanya ditampilkan
+     * berdampingan justru supaya selisihnya terlihat -- itulah yang menjawab
+     * "cadangan saya kurang atau kelebihan".
+     */
+    const labaBersih =
+      uang.sellerKotor - biaya.bahanBaku - biaya.upahPacking - biaya.feeAdmin;
+
     return {
       range: { from, to, hari, bandingFrom: sebelumFrom, bandingTo: sebelumTo },
       uang: {
@@ -76,6 +92,17 @@ export class DashboardV2Service {
         paket: volumeSebelum.paket,
       },
       volume: { ...volume, perHari: volume.paket / hari },
+      biaya: {
+        ...biaya,
+        // Cadangan lawan belanja. Positif berarti cadangannya lebih besar
+        // daripada yang dibelanjakan pada rentang ini.
+        selisihCadangan: uang.bahanBaku - biaya.bahanBaku,
+        labaBersih,
+        // Sisa di tangan dari tiap rupiah yang cair, sesudah semuanya.
+        rateBersih: kredit > 0 ? labaBersih / kredit : 0,
+      },
+      belumCair,
+      stokMenipis,
       seri,
       toko,
       produk,
@@ -92,6 +119,121 @@ export class DashboardV2Service {
         })),
       },
     };
+  }
+
+
+  /**
+   * Biaya yang benar-benar keluar pada rentang ini.
+   *
+   * Dibedakan dari cadangan dengan sengaja: cadangan bahan baku adalah
+   * persentase yang disisihkan dari bagian seller, sedangkan yang di sini uang
+   * yang sudah pindah rekening. Sebuah dashboard yang hanya menampilkan
+   * cadangan menjawab "berapa yang saya niatkan", bukan "berapa yang saya
+   * habiskan".
+   */
+  private async biayaNyata(userId: string, from: string, to: string) {
+    const awal = from + " 00:00:00";
+    const akhir = to + " 23:59:59";
+
+    const bahan = await this.db.execute(sql`
+      select coalesce(sum(total_cost), 0)::float8 as nilai, count(*)::int as n
+        from material_purchases
+       where user_id = ${userId}
+         and purchased_at >= ${awal}::timestamptz
+         and purchased_at <= ${akhir}::timestamptz
+    `);
+    // Upah packing dihitung dari saat DIBAYAR, bukan saat paket discan: yang
+    // ditanyakan di sini uang yang keluar pada rentang ini, dan paket bulan
+    // lalu yang baru dibayar bulan ini keluar bulan ini.
+    const upah = await this.db.execute(sql`
+      select coalesce(sum(packer_paid_amount), 0)::float8 as nilai
+        from resi_scans
+       where user_id = ${userId}
+         and packer_paid_at is not null
+         and packer_paid_at >= ${awal}::timestamptz
+         and packer_paid_at <= ${akhir}::timestamptz
+    `);
+    const fee = await this.db.execute(sql`
+      select coalesce(sum(admin_fee_amount), 0)::float8 as nilai
+        from payout_batches
+       where user_id = ${userId}
+         and admin_fee_amount is not null
+         and created_at >= ${awal}::timestamptz
+         and created_at <= ${akhir}::timestamptz
+    `);
+
+    const satu = (r: unknown, k: string) =>
+      Number((r as Record<string, unknown>[])[0]?.[k] ?? 0);
+    return {
+      bahanBaku: satu(bahan, "nilai"),
+      pembelianBahan: Number((bahan as unknown as Record<string, unknown>[])[0]?.n ?? 0),
+      upahPacking: satu(upah, "nilai"),
+      feeAdmin: satu(fee, "nilai"),
+    };
+  }
+
+  /**
+   * Paket yang sudah dikirim tapi pesanannya belum muncul di laporan mana pun.
+   *
+   * Uang yang sudah bekerja tapi belum pulang. Umur tertua penting: pesanan
+   * yang menggantung tiga hari adalah hal biasa, yang menggantung tiga puluh
+   * hari adalah uang yang perlu ditanyakan ke marketplace-nya.
+   *
+   * TIDAK ditaksir nilainya. Nilai menuntut harga publish tiap produk dan
+   * sebagian belum diisi; angka taksiran di sebelah angka nyata akan dibaca
+   * sama pastinya, padahal tidak.
+   */
+  private async belumCair(userId: string) {
+    const rows = await this.db.execute(sql`
+      select count(*)::int as paket,
+             coalesce(max(extract(day from now() - r.scanned_at)), 0)::int as umur_tertua,
+             coalesce(avg(extract(day from now() - r.scanned_at)), 0)::float8 as umur_rata
+        from resi_scans r
+       where r.user_id = ${userId}
+         and r.label_order_no is not null
+         and not exists (
+           select 1 from marketplace_statement_lines l
+            where l.user_id = r.user_id
+              and l.kind = 'order'
+              and l.external_ref = r.label_order_no
+         )
+    `);
+    const r = (rows as unknown as Record<string, unknown>[])[0] ?? {};
+    return {
+      paket: Number(r.paket ?? 0),
+      umurTertua: Number(r.umur_tertua ?? 0),
+      umurRata: Number(r.umur_rata ?? 0),
+    };
+  }
+
+  /**
+   * Bahan baku yang sudah di bawah ambangnya.
+   *
+   * Terukur: 50 bahan berada di bawah ambang dan tidak satu pun muncul di
+   * dashboard ini. Kehabisan bahan tidak menurunkan angka mana pun hari ini --
+   * ia menghentikan packing besok, dan itu baru terlihat setelah terjadi.
+   */
+  private async stokMenipis(userId: string) {
+    const rows = await this.db.execute(sql`
+      select id, name, unit,
+             coalesce(current_stock, 0)::float8 as stok,
+             coalesce(minimum_threshold, 0)::float8 as ambang
+        from materials
+       where user_id = ${userId}
+         and coalesce(current_stock, 0) <= coalesce(minimum_threshold, 0)
+       order by (coalesce(current_stock, 0) - coalesce(minimum_threshold, 0)) asc,
+                name asc
+    `);
+    const semua = (rows as unknown as Record<string, unknown>[]).map((r) => ({
+      id: String(r.id),
+      nama: String(r.name ?? ""),
+      satuan: (r.unit as string) ?? null,
+      stok: Number(r.stok ?? 0),
+      ambang: Number(r.ambang ?? 0),
+    }));
+    // Daftar penuh tidak dikirim: lima puluh baris di dashboard bukan
+    // peringatan melainkan dinding. Jumlahnya tetap disebut utuh.
+    return { total: semua.length, teratas: semua.slice(0, 5) };
   }
 
   /** Pembagian uang yang cair pada satu rentang. */
