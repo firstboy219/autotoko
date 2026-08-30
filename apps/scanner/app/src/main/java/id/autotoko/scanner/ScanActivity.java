@@ -281,6 +281,40 @@ public class ScanActivity extends AppCompatActivity {
     private final List<ProductMatcher.Product> catalogue = new ArrayList<>();
     /** True between finding the barcode and taking the photo: gather text now. */
     private volatile boolean collecting = false;
+
+    /* ------------------------------------------------------ scan bertahap */
+
+    /**
+     * Satu resi, beberapa bidikan dekat.
+     *
+     * Sebelumnya satu jepretan harus menanggung semuanya sekaligus: nomor
+     * pesanan, nama toko, kurir, dan daftar produk — dari jarak yang cukup
+     * jauh untuk memuat seluruh label. Hasilnya bisa dilihat di datanya
+     * sendiri: order id terbaca pada 7% resi saja.
+     *
+     * Tahap wajib hanya yang pertama. Sisanya boleh dilewati: paket yang
+     * fisiknya sudah di tangan tidak boleh tertahan oleh label yang memang
+     * tidak mencetak informasinya.
+     */
+    private static final String[][] TAHAP = {
+        {"Nomor Pesanan", "Dekatkan kamera ke nomor pesanan (Order ID / No. Pesanan)", "wajib"},
+        {"Toko & Marketplace", "Arahkan ke nama toko pengirim dan logo marketplace", "opsional"},
+        {"Kurir & Layanan", "Arahkan ke nama kurir dan jenis layanannya", "opsional"},
+        {"Daftar Produk", "Arahkan ke daftar produk beserta jumlahnya", "opsional"},
+    };
+
+    private View guide;
+    private TextView guideStep, guideTitle, guideHint, guideFound;
+    private MaterialButton guideSkip, guideNext;
+
+    private boolean panduanAktif = false;
+    private int tahap = 0;
+    private String panduanResi, panduanRaw, panduanFormat;
+    private final List<String> fotoTahap = new ArrayList<>();
+    /** Order id yang akan dikirim. Tanpa ini, paket tidak bisa disimpan. */
+    private String orderIdFinal = null;
+    /** "ocr" atau "manual" — menentukan aturan mana yang dipakai server. */
+    private String orderIdSumber = null;
     /** One text recognition at a time; they take longer than a frame. */
     private volatile boolean readingText = false;
     /** The pending hide for the banner on screen, so only it gets cancelled. */
@@ -323,6 +357,16 @@ public class ScanActivity extends AppCompatActivity {
         Access.muat(api);
         banner = findViewById(R.id.banner);
         bannerText = findViewById(R.id.bannerText);
+
+        guide = findViewById(R.id.guide);
+        guideStep = findViewById(R.id.guideStep);
+        guideTitle = findViewById(R.id.guideTitle);
+        guideHint = findViewById(R.id.guideHint);
+        guideFound = findViewById(R.id.guideFound);
+        guideSkip = findViewById(R.id.guideSkip);
+        guideNext = findViewById(R.id.guideNext);
+        guideNext.setOnClickListener(v -> potretTahap());
+        guideSkip.setOnClickListener(v -> lewatiTahap());
 
         findViewById(R.id.manual).setOnClickListener(v -> promptManual());
 
@@ -699,9 +743,194 @@ public class ScanActivity extends AppCompatActivity {
         } catch (Exception ignored) {
             // Focus is an improvement, not a requirement.
         }
-        main.postDelayed(
-                () -> waitForClarity(resi, raw, format, android.os.SystemClock.uptimeMillis()),
-                FOCUS_SETTLE_MS);
+        main.postDelayed(() -> mulaiPanduan(resi, raw, format), FOCUS_SETTLE_MS);
+    }
+
+    /* ══════════════════════════════════════════════ scan bertahap ══════ */
+
+    private void mulaiPanduan(String resi, String raw, String format) {
+        if (isFinishing() || isDestroyed()) return;
+        panduanAktif = true;
+        tahap = 0;
+        fotoTahap.clear();
+        orderIdFinal = null;
+        orderIdSumber = null;
+        panduanResi = resi;
+        panduanRaw = raw;
+        panduanFormat = format;
+        // Frame terus dibaca sepanjang panduan: itulah yang membuat setiap
+        // bidikan dekat menambah suara, bukan menggantikan yang sebelumnya.
+        collecting = true;
+        guide.setVisibility(View.VISIBLE);
+        renderPanduan();
+        main.postDelayed(this::detakPanduan, 250);
+    }
+
+    /** Menyegarkan panel dan memeriksa apakah tahap wajibnya sudah terpenuhi. */
+    private void detakPanduan() {
+        if (!panduanAktif || isFinishing() || isDestroyed()) return;
+        if (tahap == 0 && orderIdFinal == null) {
+            String v = OrderId.cari(reader.rawText());
+            if (v != null) {
+                orderIdFinal = v;
+                orderIdSumber = "ocr";
+                feedback(true);
+            }
+        }
+        renderPanduan();
+        main.postDelayed(this::detakPanduan, 250);
+    }
+
+    private void renderPanduan() {
+        if (!panduanAktif || tahap >= TAHAP.length) return;
+        String[] t = TAHAP[tahap];
+        boolean wajib = "wajib".equals(t[2]);
+
+        guideStep.setText("Langkah " + (tahap + 1) + " dari " + TAHAP.length
+                + (wajib ? " · wajib" : ""));
+        guideTitle.setText(t[0]);
+        guideHint.setText(t[1]);
+
+        if (tahap == 0) {
+            boolean ada = orderIdFinal != null;
+            guideFound.setText(ada
+                    ? "✓ " + orderIdFinal
+                    : "Belum terbaca — " + reader.frames() + " frame, kejelasan " + clarity + "%");
+            guideFound.setTextColor(Color.parseColor(ada ? "#7BD88F" : "#F2A93B"));
+            guideNext.setEnabled(ada);
+            guideNext.setText(ada ? "Lanjut" : "Menunggu nomor pesanan");
+            // Tidak ada "Lewati" untuk yang wajib. Jalan keluarnya mengetik,
+            // yang tetap menghasilkan order id — bukan melewatkannya.
+            guideSkip.setText("Ketik manual");
+        } else {
+            guideFound.setText(reader.frames() + " frame terbaca");
+            guideFound.setTextColor(Color.parseColor("#9AA0A6"));
+            guideNext.setEnabled(true);
+            guideNext.setText("Lanjut");
+            guideSkip.setText("Lewati");
+        }
+    }
+
+    private void lewatiTahap() {
+        if (!panduanAktif) return;
+        if (tahap == 0) {
+            ketikOrderId();
+            return;
+        }
+        majuTahap();
+    }
+
+    /**
+     * Jalan keluar untuk label yang nomor pesanannya memang tidak terbaca.
+     *
+     * Mengetik adalah tindakan sadar dengan label di tangan, jadi bentuk
+     * Shopee yang alfanumerik diterima di sini sementara jalur OCR tetap
+     * menolaknya. Tanpa jalan keluar ini, satu label buram akan menahan paket
+     * yang fisiknya sudah siap berangkat.
+     */
+    private void ketikOrderId() {
+        final EditText input = new EditText(this);
+        input.setHint("Nomor pesanan seperti tertulis di label");
+        input.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        androidx.appcompat.app.AlertDialog d = new MaterialAlertDialogBuilder(this)
+                .setTitle("Ketik nomor pesanan")
+                .setMessage("Nomor pesanan wajib ada supaya paket ini bisa dicocokkan "
+                        + "dengan laporan marketplace nanti.")
+                .setView(input)
+                .setPositiveButton("Simpan", null)
+                .setNegativeButton("Batal", null)
+                .create();
+        d.setOnShowListener(dd -> d.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    String v2 = OrderId.dariKetikan(input.getText().toString());
+                    if (v2 == null) {
+                        Toast.makeText(this,
+                                "Bentuknya tidak dikenali. Nomor pesanan biasanya 18 angka, "
+                                        + "atau untuk Shopee diawali 6 angka tanggal.",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    orderIdFinal = v2;
+                    orderIdSumber = "manual";
+                    d.dismiss();
+                    renderPanduan();
+                }));
+        d.show();
+    }
+
+    /** Memotret tahap ini, lalu maju. */
+    private void potretTahap() {
+        if (!panduanAktif) return;
+        if (tahap == 0 && orderIdFinal == null) return;
+        guideNext.setEnabled(false);
+        guideNext.setText("Memotret...");
+        if (imageCapture == null) {
+            majuTahap();
+            return;
+        }
+        imageCapture.takePicture(cameraExecutor, new ImageCapture.OnImageCapturedCallback() {
+            @Override public void onCaptureSuccess(@NonNull ImageProxy image) {
+                String b64 = null;
+                try {
+                    b64 = toBase64Jpeg(image);
+                } catch (Throwable ignored) {
+                    // Foto itu bukti tambahan, bukan syarat. Kegagalan encode
+                    // tidak boleh menghilangkan paket yang benar-benar discan.
+                } finally {
+                    image.close();
+                }
+                final String p = b64;
+                main.post(() -> {
+                    if (p != null) fotoTahap.add(p);
+                    majuTahap();
+                });
+            }
+
+            @Override public void onError(@NonNull ImageCaptureException e) {
+                main.post(() -> majuTahap());
+            }
+        });
+    }
+
+    private void majuTahap() {
+        tahap += 1;
+        if (tahap < TAHAP.length) {
+            renderPanduan();
+            return;
+        }
+        selesaiPanduan();
+    }
+
+    private void selesaiPanduan() {
+        panduanAktif = false;
+        collecting = false;
+        busy = true;
+        guide.setVisibility(View.GONE);
+        hint.setText("Membaca hasil...");
+        // Foto pertama jadi bukti utama; sisanya menyusul sebagai halaman
+        // tambahan setelah scan-nya punya id.
+        String utama = fotoTahap.isEmpty() ? null : fotoTahap.get(0);
+        resolve(panduanResi, panduanRaw, panduanFormat, utama);
+    }
+
+    /**
+     * Bidikan tahap kedua dan seterusnya, dikirim setelah scan-nya ada.
+     *
+     * Lewat endpoint halaman yang memang sudah ada untuk resi yang tercetak di
+     * beberapa lembar — pertanyaannya sama: satu waybill, beberapa gambar.
+     */
+    private void kirimFotoSisa(String scanId) {
+        if (scanId == null || scanId.isEmpty() || fotoTahap.size() <= 1) return;
+        final List<String> sisa = new ArrayList<>(fotoTahap.subList(1, fotoTahap.size()));
+        fotoTahap.clear();
+        for (String f : sisa) {
+            api.addPage(scanId, f, null, r -> {
+                // Diam-diam saja kalau gagal: bidikan tambahan memperkaya
+                // buktinya, dan kegagalannya tidak mengubah apa pun yang sudah
+                // tersimpan.
+            });
+        }
     }
 
     /**
@@ -1445,8 +1674,16 @@ public class ScanActivity extends AppCompatActivity {
                 }
                 out.put("codes", codes);
             }
-            String orderNo = reader.orderNo();
-            if (orderNo != null) out.put("labelOrderNo", orderNo);
+            // Yang dipakai adalah hasil panduan, bukan tebakan mentah
+            // pembaca label: ia sudah lulus pemeriksaan bentuk, atau diketik
+            // orang yang memegang labelnya.
+            String orderNo = orderIdFinal != null ? orderIdFinal
+                    : OrderId.cari(reader.rawText());
+            if (orderNo != null) {
+                out.put("labelOrderNo", orderNo);
+                out.put("orderNoSource", orderIdFinal != null && orderIdSumber != null
+                        ? orderIdSumber : "ocr");
+            }
 
             String text = reader.rawText();
             if (text != null && !text.isEmpty()) {
@@ -1548,6 +1785,7 @@ public class ScanActivity extends AppCompatActivity {
                 String scanId = r.data() != null ? r.data().optString("id", "") : "";
                 boolean hadItems = r.data() != null
                         && r.data().optInt("itemCount", 1) != 0;
+                kirimFotoSisa(scanId);
                 if (!scanId.isEmpty() && hadItems) {
                     api.confirmItems(scanId, c -> done(resi));
                 } else {
@@ -2158,6 +2396,13 @@ public class ScanActivity extends AppCompatActivity {
         // one would file this label's codes against the following parcel.
         seenCodes.clear();
         reader.reset();
+        // Alasan yang sama dengan seenCodes di atas: nomor pesanan dan bidikan
+        // paket sebelumnya tidak boleh terbawa ke paket berikutnya.
+        panduanAktif = false;
+        fotoTahap.clear();
+        orderIdFinal = null;
+        orderIdSumber = null;
+        if (guide != null) guide.setVisibility(View.GONE);
         if (liveRead != null) liveRead.setVisibility(View.GONE);
         hint.setText("Arahkan kamera ke barcode pada resi. Tersimpan otomatis.");
     }

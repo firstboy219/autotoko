@@ -88,6 +88,17 @@ class ScanDto {
   @IsOptional() @IsString() @MaxLength(128)
   labelOrderNo?: string;
 
+  /**
+   * Siapa yang menghasilkan labelOrderNo.
+   *
+   * Menentukan aturan mana yang dipakai memeriksanya: yang dibaca mesin harus
+   * 18 digit murni, yang diketik orang boleh berbentuk Shopee. Server tidak
+   * menebak asalnya dari bentuknya sendiri -- itu akan membuat setiap sampah
+   * berbentuk-Shopee lolos sebagai "pasti diketik".
+   */
+  @IsOptional() @IsIn(["ocr", "manual"])
+  orderNoSource?: "ocr" | "manual";
+
   /** Everything ML Kit read, for comparing the two engines. */
   @IsOptional() @IsString() @MaxLength(20_000)
   deviceText?: string;

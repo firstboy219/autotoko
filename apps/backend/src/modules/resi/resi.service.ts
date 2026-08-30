@@ -30,7 +30,7 @@ import {
 } from "./scan-mapping.js";
 import { MaterialConsumptionService } from "../materials/material-consumption.service.js";
 import { OcrMemoryService } from "./ocr-memory.service.js";
-import { normaliseOrderId } from "./order-id.js";
+import { normaliseOrderId, normaliseOrderIdTyped } from "./order-id.js";
 import { ConfigService } from "@nestjs/config";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -173,6 +173,7 @@ export class ResiService {
       photoBase64?: string;
       barcodeFormat?: string;
       labelOrderNo?: string;
+      orderNoSource?: "ocr" | "manual";
       deviceText?: string;
       deviceClarity?: number;
       items?: {
@@ -437,8 +438,12 @@ export class ResiService {
         barcodeFormat: input.barcodeFormat?.slice(0, 32) ?? null,
         // Diperiksa juga meski datang dari ponsel: asal sebuah nilai tidak
         // membuatnya sah, dan APK lama yang belum diperbarui tetap mengirim
-        // kode sortir kurir ke kolom ini.
-        labelOrderNo: normaliseOrderId(input.labelOrderNo),
+        // kode sortir kurir ke kolom ini. Yang diketik orang dinilai dengan
+        // aturan yang lebih longgar -- lihat catatan di order-id.ts.
+        labelOrderNo:
+          input.orderNoSource === "manual"
+            ? normaliseOrderIdTyped(input.labelOrderNo)
+            : normaliseOrderId(input.labelOrderNo),
         deviceText: input.deviceText?.slice(0, 20_000) ?? null,
         deviceClarity: input.deviceClarity != null ? input.deviceClarity.toFixed(2) : null,
         // "pending" only when there is something to read. The background task

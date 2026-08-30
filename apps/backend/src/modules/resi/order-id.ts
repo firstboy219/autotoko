@@ -94,6 +94,30 @@ export function findOrderId(text: string | null | undefined): string | null {
 }
 
 /**
+ * Bentuk nomor pesanan Shopee: enam angka tanggal lalu huruf/angka.
+ *
+ * TIDAK dipakai untuk hasil OCR. Pola selonggar ini persis yang dulu menyerap
+ * kode sortir kurir seperti "2605149T3NJJJN" ke dalam kolom order id. Ia hanya
+ * berlaku untuk yang diketik orang, yang sedang memegang labelnya.
+ */
+const SHOPEE_SN = /^[0-9]{6}[A-Z0-9]{6,10}$/;
+
+/**
+ * Order id yang DIKETIK orang.
+ *
+ * Lebih longgar daripada jalur OCR dengan sengaja: tanpa ini, mewajibkan order
+ * id akan membuat paket Shopee mustahil disimpan sama sekali -- aturan yang
+ * melindungi ketelitian dengan cara menghentikan pekerjaan.
+ */
+export function normaliseOrderIdTyped(raw: string | null | undefined): string | null {
+  const ketat = normaliseOrderId(raw);
+  if (ketat) return ketat;
+  if (!raw) return null;
+  const bersih = String(raw).trim().toUpperCase().replace(/[\s\-/.]/g, "");
+  return SHOPEE_SN.test(bersih) ? bersih : null;
+}
+
+/**
  * Nilai terbaik dari dua sumber: yang sudah tersimpan, lalu teks mentahnya.
  *
  * Yang tersimpan didahulukan karena ia datang dari ponsel yang melihat puluhan

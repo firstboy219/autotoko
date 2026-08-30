@@ -67,6 +67,87 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
+        <!--
+            Panduan menumpuk di atas kamera, bukan di panel bawah.
+
+            Instruksinya harus bersebelahan dengan yang sedang dibidik: begitu
+            ia pindah ke bawah layar, orang membaca instruksi lalu menunduk,
+            dan kameranya ikut turun.
+        -->
+        <LinearLayout
+            android:id="@+id/guide"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:orientation="vertical"
+            android:background="#E6000000"
+            android:padding="@dimen/space_lg"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/guideStep"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#9AA0A6"
+                android:textSize="@dimen/text_caption"
+                android:textAllCaps="true"
+                android:letterSpacing="0.06" />
+
+            <TextView
+                android:id="@+id/guideTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_xs"
+                android:textColor="#FFFFFF"
+                android:textSize="@dimen/text_title"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/guideHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_xs"
+                android:textColor="#E7E5DF"
+                android:textSize="@dimen/text_small" />
+
+            <TextView
+                android:id="@+id/guideFound"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:textColor="#7BD88F"
+                android:textSize="@dimen/text_small"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="@dimen/space_md">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/guideSkip"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#E7E5DF"
+                    android:textAllCaps="false"
+                    android:text="Lewati" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="1dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/guideNext"
+                    style="@style/Button.Primary"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Lanjut" />
+            </LinearLayout>
+        </LinearLayout>
+
         <LinearLayout
             android:id="@+id/banner"
             android:layout_width="match_parent"
