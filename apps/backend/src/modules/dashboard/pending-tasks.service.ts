@@ -2,7 +2,12 @@ import { Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { resiScans, resiScanItems } from "../../database/schema/resi.js";
-import { bomItems, masterProducts, materials } from "../../database/schema/products.js";
+import {
+  bomItems,
+  masterProducts,
+  materialPurchases,
+  materials,
+} from "../../database/schema/products.js";
 import { shops } from "../../database/schema/shops.js";
 
 /**
@@ -40,17 +45,25 @@ export class PendingTasksService {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
   async list(userId: string): Promise<{ total: number; highCount: number; tasks: PendingTask[] }> {
-    const [unmappedOrigin, unconfirmedItems, unpricedMaterials, recipelessProducts, uncategorisedShops] =
-      await Promise.all([
-        this.unmappedOrigin(userId),
-        this.unconfirmedItems(userId),
-        this.unpricedMaterials(userId),
-        this.recipelessProducts(userId),
-        this.uncategorisedShops(userId),
-      ]);
+    const [
+      unmappedOrigin,
+      unconfirmedItems,
+      unpricedMaterials,
+      unpricedPurchases,
+      recipelessProducts,
+      uncategorisedShops,
+    ] = await Promise.all([
+      this.unmappedOrigin(userId),
+      this.unconfirmedItems(userId),
+      this.unpricedMaterials(userId),
+      this.unpricedPurchases(userId),
+      this.recipelessProducts(userId),
+      this.uncategorisedShops(userId),
+    ]);
 
     const tasks = [
       unpricedMaterials,
+      unpricedPurchases,
       unmappedOrigin,
       unconfirmedItems,
       recipelessProducts,
@@ -172,6 +185,55 @@ export class PendingTasksService {
         id: r.id,
         label: r.name,
         detail: r.unit ?? undefined,
+      })),
+    };
+  }
+
+  /**
+   * Kedatangan bahan yang tercatat tanpa nominal.
+   *
+   * Berbeda dari unpricedMaterials di atas: yang itu soal bahan yang belum
+   * pernah punya harga sama sekali, yang ini soal satu kedatangan yang
+   * harganya terlewat -- bahannya bisa saja sudah punya harga rata-rata dari
+   * pembelian sebelumnya, tapi yang ini tidak ikut memperbaruinya.
+   *
+   * Muncul di sini karena layar Bahan Datang di APK membolehkannya dengan
+   * centang "harga belum diketahui". Kebolehan itu perlu jalan pulang, kalau
+   * tidak ia cuma memindahkan lupa satu langkah.
+   */
+  private async unpricedPurchases(userId: string): Promise<PendingTask | null> {
+    const rows = await this.db
+      .select({
+        id: materialPurchases.id,
+        purchasedAt: materialPurchases.purchasedAt,
+        resi: materialPurchases.resi,
+        supplierName: materialPurchases.supplierName,
+      })
+      .from(materialPurchases)
+      .where(
+        and(
+          eq(materialPurchases.userId, userId),
+          or(isNull(materialPurchases.totalCost), lte(materialPurchases.totalCost, "0")),
+        ),
+      )
+      .orderBy(desc(materialPurchases.purchasedAt))
+      .limit(200);
+    if (!rows.length) return null;
+
+    return {
+      key: "purchase_no_price",
+      title: "Bahan datang belum diisi nominalnya",
+      why:
+        "Bahannya sudah masuk rak tapi tidak membawa biaya, jadi harga " +
+        "rata-rata bahan itu tidak ikut diperbarui dan HPP produk yang " +
+        "memakainya dihitung lebih murah dari biaya sebenarnya.",
+      count: rows.length,
+      severity: "high",
+      href: "/pembelian",
+      samples: rows.slice(0, 5).map((r) => ({
+        id: r.id,
+        label: r.resi ?? r.supplierName ?? "(tanpa resi)",
+        detail: String(r.purchasedAt),
       })),
     };
   }

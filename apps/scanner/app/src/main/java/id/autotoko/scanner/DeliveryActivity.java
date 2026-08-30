@@ -690,6 +690,29 @@ public class DeliveryActivity extends AppCompatActivity {
                 + "hanya berisi satu bahan.");
         root.addView(codNote);
 
+        // Jalan keluar yang harus dicentang sadar.
+        //
+        // Nominal wajib, tapi kadang benar-benar tidak ada yang tahu harganya
+        // saat paketnya sampai. Menolak seluruh kedatangan karena satu angka
+        // akan menghilangkan catatan barang yang fisiknya sudah di rak. Jadi
+        // yang dilarang bukan menyimpan tanpa harga -- yang dilarang adalah
+        // menyimpannya tanpa sadar.
+        final CheckBox hargaBelumTahu = new CheckBox(this);
+        hargaBelumTahu.setText("Harga belum diketahui, isi nanti");
+        root.addView(hargaBelumTahu);
+
+        final TextView belumTahuNote = new TextView(this);
+        belumTahuNote.setTextSize(11);
+        belumTahuNote.setTextColor(Color.parseColor("#B3261E"));
+        belumTahuNote.setVisibility(View.GONE);
+        belumTahuNote.setText("Bahan ini akan masuk rak tanpa harga, jadi HPP produk "
+                + "yang memakainya dihitung lebih murah dari biaya sebenarnya. "
+                + "Pembelian ini muncul di Data Belum Lengkap sampai harganya diisi.");
+        root.addView(belumTahuNote);
+
+        hargaBelumTahu.setOnCheckedChangeListener((v, checked) ->
+                belumTahuNote.setVisibility(checked ? View.VISIBLE : View.GONE));
+
         cod.setOnCheckedChangeListener((v, checked) -> {
             codAmount.setHint(checked ? "Nominal COD (Rp)" : "Nominal pembelian (Rp)");
             // Said plainly, because it decides whether HPP learns anything from
@@ -759,12 +782,24 @@ public class DeliveryActivity extends AppCompatActivity {
                     boolean isCod = cod.isChecked();
                     double amount = parse(codAmount, 0);
                     if (isCod && amount <= 0) {
+                        // COD tidak punya versi "belum diketahui": uangnya
+                        // baru saja diserahkan ke kurir, jadi angkanya ada.
                         Toast.makeText(this, "Nominal COD wajib diisi.", Toast.LENGTH_LONG).show();
                         return;
                     }
-                    // Not required when it is not COD: sometimes nobody at the
-                    // bench knows what it cost, and refusing the whole parcel
-                    // over a number they do not have would lose the delivery.
+                    if (!isCod && amount <= 0 && !hargaBelumTahu.isChecked()) {
+                        // Inti perubahannya. Dulu baris ini tidak ada, dan
+                        // nominal yang terlupa lolos diam-diam -- terukur: 7
+                        // dari 25 pembelian tercatat tanpa harga.
+                        Toast.makeText(this,
+                                "Nominal pembelian wajib diisi. Kalau memang belum tahu "
+                                        + "harganya, centang \"Harga belum diketahui\".",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    // Nominal tetap dikirim kalau terisi, meski kotak "belum
+                    // diketahui" tercentang: centangnya membebaskan kewajiban,
+                    // bukan membuang angka yang terlanjur ada.
                     // Only a sheet the server will accept closes the dialog.
                     if (submit(finalResi, photoBase64, rows, isCod, amount)) {
                         dialog.dismiss();
