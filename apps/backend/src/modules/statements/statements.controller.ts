@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -16,6 +17,29 @@ import { StatementsService } from "./statements.service.js";
 interface ApiResponse<T> {
   success: boolean;
   data: T;
+}
+
+/**
+ * Rentang tanggal yang benar-benar bisa dipakai, atau 400 yang menyebutkan
+ * parameternya.
+ *
+ * Tanpa ini, from/to yang hilang menempuh seluruh jalur sampai ke drizzle dan
+ * meledak sebagai "RangeError: Invalid time value" -- 500 yang tidak
+ * memberitahu siapa pun bahwa yang kurang hanyalah dua parameter.
+ */
+function rentang(from?: string, to?: string): { from: string; to: string } {
+  const sah = (v?: string) =>
+    typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)
+      && !Number.isNaN(new Date(v + "T00:00:00Z").getTime());
+  if (!sah(from) || !sah(to)) {
+    throw new BadRequestException(
+      'Rentang tanggal wajib diisi: "from" dan "to" dalam bentuk YYYY-MM-DD.',
+    );
+  }
+  if (from! > to!) {
+    throw new BadRequestException('"from" tidak boleh lewat dari "to".');
+  }
+  return { from: from!, to: to! };
 }
 
 function uid(req: FastifyRequest): string {
@@ -77,7 +101,10 @@ export class StatementsController {
   ): Promise<ApiResponse<unknown>> {
     return {
       success: true,
-      data: await this.statements.auditOrders(uid(req), { from, to, shopId }),
+      data: await this.statements.auditOrders(uid(req), {
+        ...rentang(from, to),
+        shopId,
+      }),
     };
   }
 
@@ -91,7 +118,10 @@ export class StatementsController {
   ): Promise<ApiResponse<unknown>> {
     return {
       success: true,
-      data: await this.statements.reconcile(uid(req), { from, to, shopId }),
+      data: await this.statements.reconcile(uid(req), {
+        ...rentang(from, to),
+        shopId,
+      }),
     };
   }
 }
