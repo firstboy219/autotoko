@@ -779,6 +779,94 @@ function MaterialRow({
   );
 }
 
+/* --------------------------------------- saran biaya marketplace nyata */
+
+interface RingkasanBiaya {
+  toko: string;
+  sumber: string;
+  pesanan: number;
+  pendapatan: number;
+  biaya: number;
+  persenTertimbang: number;
+  persenMedian: number;
+  persenTerendah: number;
+  persenTertinggi: number;
+  dari: string;
+  sampai: string;
+}
+
+interface SaranBiaya {
+  cukup: RingkasanBiaya[];
+  belumCukup: RingkasanBiaya[];
+}
+
+/**
+ * Berapa persen yang SEBENARNYA dipotong marketplace.
+ *
+ * Kolom di sebelahnya berisi angka yang diketik sendiri, dan bawaannya 15%.
+ * Diukur pada laporan penyelesaian sungguhan, yang benar-benar dipotong 42%
+ * untuk pesanan TikTok Shop dan 36% untuk Tokopedia. Selisih sebesar itu masuk
+ * seluruhnya ke perhitungan margin, dan produk yang terlihat untung di layar
+ * bisa merugi di rekening.
+ *
+ * Yang disarankan adalah MEDIAN per pesanan, bukan rata-rata tertimbang: satu
+ * pesanan besar dengan biaya tak lazim menggeser yang tertimbang, tidak yang
+ * median. Keduanya tetap ditampilkan -- menyembunyikan salah satunya berarti
+ * memilihkan kesimpulan tanpa memperlihatkan dasarnya.
+ */
+function SaranBiayaMarketplace({ onPakai }: { onPakai: (persen: number) => void }) {
+  const { data } = useFetch<SaranBiaya>("/statements/biaya-marketplace");
+  if (!data) return null;
+  const semua = [...data.cukup, ...data.belumCukup];
+  if (semua.length === 0) return null;
+
+  const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+  return (
+    <div className="mt-3 rounded-lg border border-line bg-canvas p-3">
+      <div className="text-xs font-medium text-ink mb-1">
+        Biaya marketplace yang sebenarnya, dari laporan pencairan
+      </div>
+      <div className="space-y-2">
+        {semua.map((r) => {
+          const cukup = data.cukup.includes(r);
+          return (
+            <div key={`${r.toko}|${r.sumber}`} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="text-xs text-ink-2">
+                {r.toko} · {r.sumber}
+              </span>
+              <span className="text-sm font-medium text-ink tabular-nums">{pct(r.persenMedian)}</span>
+              <span className="text-[11px] text-ink-3 tabular-nums">
+                (tertimbang {pct(r.persenTertimbang)}, rentang {pct(r.persenTerendah)}–
+                {pct(r.persenTertinggi)}, {r.pesanan} pesanan {r.dari}–{r.sampai})
+              </span>
+              {cukup ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="text"
+                  onClick={() => onPakai(r.persenMedian * 100)}
+                >
+                  Pakai
+                </Button>
+              ) : (
+                // Angkanya tetap ditampilkan -- menyembunyikan data yang ada
+                // membuat orang mengira fiturnya rusak -- tapi tidak
+                // ditawarkan, karena satu-dua pesanan dengan ongkir tak lazim
+                // menggeser persentasenya belasan angka.
+                <span className="text-[11px] text-ink-3">datanya belum cukup</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-[11px] text-ink-3">
+        Angka utama adalah median tiap pesanan. Impor laporan lain di menu Rekonsiliasi untuk
+        memperkuat dasarnya.
+      </p>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------- publish section */
 const RATE_FIELDS: { key: keyof Costing; label: string; hint?: string }[] = [
   { key: "marketplaceFeeRate", label: "Biaya Marketplace", hint: "% dari harga publish" },
@@ -969,6 +1057,13 @@ function PublishSection({
                 </div>
               </Field>
             ))}
+            <div className="col-span-2">
+              <SaranBiayaMarketplace
+                onPakai={(persen) =>
+                  setRates((r) => ({ ...r, marketplaceFeeRate: persen.toFixed(1) }))
+                }
+              />
+            </div>
             <Field label="Iklan Tetap / pcs" hint="Rupiah, di luar persentase">
               <Input
                 inputMode="numeric"

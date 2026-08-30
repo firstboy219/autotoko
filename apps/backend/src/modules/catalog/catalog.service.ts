@@ -64,10 +64,41 @@ export class CatalogService {
       .groupBy(productPostings.masterProductId);
     const byId = new Map(aggs.map((a) => [a.masterId, a]));
 
+    /**
+     * Barang yang benar-benar dikirim lewat alur manual, tujuh hari terakhir.
+     *
+     * Tanpa ini, setiap produk toko yang belum terhubung API tertulis "Tidak
+     * ada penjualan 7 hari" -- padahal paketnya dipacking tiap hari. Terukur:
+     * tabel orders berisi 16 baris sementara scan resi memuat 114 baris item
+     * dalam tujuh hari yang sama.
+     *
+     * Yang ditambahkan hanya JUMLAH BARANG. Nominalnya tidak: scan resi
+     * mencatat bahwa paket dikirim, bukan berapa harganya, dan mengarang
+     * omzet dari harga publish akan mencampur angka yang nyata dengan angka
+     * yang diandaikan di dalam satu skor yang sama.
+     */
+    const manualRows = await this.db.execute(sql`
+      SELECT i.master_product_id AS id, COALESCE(SUM(i.qty), 0)::numeric AS qty
+        FROM resi_scan_items i
+        JOIN resi_scans r ON r.id = i.resi_scan_id
+       WHERE r.user_id = ${userId}
+         AND i.master_product_id IS NOT NULL
+         AND r.scanned_at >= now() - interval '7 days'
+       GROUP BY i.master_product_id
+    `);
+    const manualById = new Map(
+      (manualRows as unknown as Record<string, unknown>[]).map((r) => [
+        r.id as string,
+        Math.round(Number(r.qty) || 0),
+      ]),
+    );
+
     const result: ProductHealth[] = [];
     for (const m of masters) {
       const a = byId.get(m.id);
-      const sold = a?.sold7d ?? 0;
+      const soldApi = a?.sold7d ?? 0;
+      const soldManual = manualById.get(m.id) ?? 0;
+      const sold = soldApi + soldManual;
       const views = a?.views7d ?? 0;
       const gmv = Number(a?.gmv7d ?? 0);
       const reviewCount = a?.reviewCount ?? 0;
@@ -79,11 +110,21 @@ export class CatalogService {
       if (gmv >= 1_000_000) points += 3;
       else if (gmv >= 300_000) points += 2;
       else if (gmv > 0) points += 1;
-      else reasons.push("Tidak ada GMV 7 hari");
+      else if (soldManual > 0) {
+        // Ada penjualannya, yang tidak ada nominalnya. Menulis "tidak ada GMV"
+        // di sini terbaca sebagai "produk ini tidak laku", padahal yang tidak
+        // ada justru datanya -- dan itu dua kesimpulan yang sangat berbeda.
+        reasons.push(`Nominal belum ada — ${soldManual} pcs terkirim dari scan manual`);
+      } else reasons.push("Tidak ada GMV 7 hari");
 
       if (sold >= 20) points += 2;
       else if (sold >= 5) points += 1;
       else if (sold === 0) reasons.push("Tidak ada penjualan 7 hari");
+      // Disebut asalnya supaya angkanya bisa ditelusuri. Skor yang naik tanpa
+      // penjelasan membuat orang mengira penilaiannya berubah sendiri.
+      if (soldManual > 0 && soldApi === 0) {
+        reasons.push(`Penjualan dari scan manual: ${soldManual} pcs`);
+      }
 
       if (conversion >= 0.1) points += 2;
       else if (conversion >= 0.03) points += 1;
@@ -98,8 +139,11 @@ export class CatalogService {
       }
 
       const score = this.scoreOf(points);
+      // Produk yang paketnya benar-benar dikirim tidak pernah jadi calon
+      // dihapus hanya karena API-nya belum tersambung.
       const eliminationCandidate =
-        (sold === 0 && gmv === 0) || (reviewScore != null && reviewScore < 3.0);
+        (sold === 0 && gmv === 0 && soldManual === 0)
+        || (reviewScore != null && reviewScore < 3.0);
       if (eliminationCandidate && reasons.length === 0) reasons.push("Performa rendah");
 
       // Persist the health score on the master product (existing column).

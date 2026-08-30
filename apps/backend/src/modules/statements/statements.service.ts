@@ -19,6 +19,7 @@ import {
 import { normaliseOrderId } from "../resi/order-id.js";
 import { uraiLaporanTiktok } from "./tiktok-statement.js";
 
+import { cukupUntukDisarankan, ringkasBiaya } from "./biaya-marketplace.js";
 /**
  * Laporan marketplace, dan pembandingannya dengan catatan manual.
  *
@@ -521,6 +522,45 @@ export class StatementsService {
       // Tanpa laporan sama sekali, "tidak ada selisih" akan terbaca sebagai
       // lolos audit padahal tidak ada yang diaudit.
       adaPembanding: sisaLaporan.length > 0,
+    };
+  }
+
+  /**
+   * Berapa persen sebenarnya yang dipotong marketplace, per toko dan sumber.
+   *
+   * Dibaca dari laporan penyelesaian, bukan disimpulkan dari selisih apa pun:
+   * tiap baris pesanan membawa "Total Pendapatan" dan "Total Biaya" yang
+   * ditulis marketplace-nya sendiri.
+   *
+   * Dipakai halaman HPP untuk menyarankan angka pada kolom "Biaya
+   * Marketplace", yang bawaannya 15% -- sementara yang benar-benar dipotong
+   * pada data toko ini 42% untuk TikTok Shop dan 36% untuk Tokopedia.
+   */
+  async biayaMarketplace(userId: string) {
+    const rows = await this.db.execute(sql`
+      SELECT l.raw AS raw,
+             COALESCE(sh.shop_name, sh.display_name) AS nama_toko,
+             s.marketplace AS marketplace,
+             s.period_from AS dari,
+             s.period_to   AS sampai
+        FROM marketplace_statement_lines l
+        JOIN marketplace_statements s ON s.id = l.statement_id
+        LEFT JOIN shops sh ON sh.id = s.shop_id
+       WHERE l.user_id = ${userId} AND l.kind = 'order'
+    `);
+    const baris = (rows as unknown as Record<string, unknown>[]).map((r) => ({
+      raw: r.raw,
+      namaToko: (r.nama_toko as string) ?? null,
+      marketplace: (r.marketplace as string) ?? null,
+      periodeDari: (r.dari as string) ?? null,
+      periodeSampai: (r.sampai as string) ?? null,
+    }));
+    const ringkas = ringkasBiaya(baris);
+    return {
+      // Yang layak dipakai langsung, dan yang datanya masih terlalu sedikit --
+      // dipisah supaya layar tidak perlu tahu ambangnya.
+      cukup: ringkas.filter(cukupUntukDisarankan),
+      belumCukup: ringkas.filter((r) => !cukupUntukDisarankan(r)),
     };
   }
 }

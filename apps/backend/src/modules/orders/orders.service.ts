@@ -35,13 +35,76 @@ export class OrdersService {
     if (opts.shopId) conds.push(eq(orders.shopId, opts.shopId));
     if (opts.dateFrom) conds.push(gte(orders.createdAt, opts.dateFrom));
     if (opts.dateTo) conds.push(lte(orders.createdAt, opts.dateTo));
-    return this.db
+    const dariApi = await this.db
       .select()
       .from(orders)
       .where(and(...conds))
       .orderBy(desc(orders.createdAt))
       .limit(Math.min(opts.limit ?? 100, 500))
       .offset(opts.offset ?? 0);
+
+    // Paket yang dipindai lewat aplikasi ikut terdaftar di sini.
+    //
+    // Sebelumnya menu ini hanya membaca tabel orders yang diisi API
+    // marketplace -- terukur 16 baris -- sementara ratusan paket sudah
+    // dikirim lewat alur manual dan tidak muncul sama sekali.
+    //
+    // Nominalnya SENGAJA null, bukan nol. Scan resi mencatat bahwa paket
+    // dikirim, bukan berapa harganya; menaruh angka di sana akan menghasilkan
+    // omzet yang tidak pernah ada di rekening mana pun. Nol terbaca sebagai
+    // "terjual nol rupiah", null terbaca sebagai "tidak diketahui" -- dan yang
+    // kedua itulah yang benar.
+    const manual = await this.db.execute(sql`
+      SELECT r.id                AS id,
+             r.user_id           AS user_id,
+             r.shop_id           AS shop_id,
+             r.label_order_no    AS marketplace_order_id,
+             COALESCE(r.marketplace, 'manual') AS marketplace,
+             r.resi              AS tracking_number,
+             r.scanned_at        AS created_at,
+             r.label_recipient   AS buyer_name,
+             r.courier_confirmed AS shipping_courier,
+             COALESCE(
+               (SELECT json_agg(json_build_object(
+                          'name', COALESCE(p.name, i.raw_name),
+                          'qty',  i.qty))
+                  FROM resi_scan_items i
+                  LEFT JOIN master_products p ON p.id = i.master_product_id
+                 WHERE i.resi_scan_id = r.id),
+               '[]'::json) AS items
+        FROM resi_scans r
+       WHERE r.user_id = ${userId}
+         ${opts.shopId ? sql`AND r.shop_id = ${opts.shopId}` : sql``}
+         ${opts.dateFrom ? sql`AND r.scanned_at >= ${opts.dateFrom.toISOString()}` : sql``}
+         ${opts.dateTo ? sql`AND r.scanned_at <= ${opts.dateTo.toISOString()}` : sql``}
+       ORDER BY r.scanned_at DESC
+    `);
+
+    const barisManual = (manual as unknown as Record<string, unknown>[]).map((r) => ({
+      id: r.id as string,
+      userId: r.user_id as string,
+      shopId: (r.shop_id as string) ?? null,
+      marketplaceOrderId: (r.marketplace_order_id as string) ?? null,
+      marketplace: r.marketplace as string,
+      trackingNumber: (r.tracking_number as string) ?? null,
+      buyerName: (r.buyer_name as string) ?? null,
+      shippingCourier: (r.shipping_courier as string) ?? null,
+      // Paket yang sudah discan berarti sudah diserahkan ke kurir.
+      fulfillmentStatus: "dikirim" as const,
+      totalAmount: null,
+      platformFee: null,
+      feeDeducted: false,
+      items: r.items,
+      createdAt: r.created_at as Date,
+      sumber: "manual" as const,
+    }));
+
+    // Penyaring status hanya berlaku pada yang dari API: status paket manual
+    // selalu "dikirim", jadi menyaring status lain berarti membuangnya semua.
+    const manualTerpilih = opts.status && opts.status !== "dikirim" ? [] : barisManual;
+
+    return [...dariApi.map((o) => ({ ...o, sumber: "api" as const })), ...manualTerpilih]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   /** Lightweight counters for the dashboard. */

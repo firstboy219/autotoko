@@ -47,6 +47,14 @@ interface Order {
   feeDeducted: boolean;
   items: OrderItem[] | null;
   createdAt: string;
+  /**
+   * "api" dari marketplace, "manual" dari scan resi di aplikasi.
+   *
+   * Yang manual tidak punya nominal: scan mencatat bahwa paket dikirim, bukan
+   * berapa harganya.
+   */
+  sumber?: "api" | "manual";
+  trackingNumber?: string | null;
 }
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
@@ -228,6 +236,7 @@ export function Orders() {
               <THead>
                 <tr>
                   <TH>Order</TH>
+                  <TH>Sumber</TH>
                   <TH>Marketplace</TH>
                   <TH>Status Proses</TH>
                   <TH>Pembeli</TH>
@@ -271,7 +280,14 @@ export function Orders() {
                       className="cursor-pointer hover:bg-canvas"
                       onClick={() => setSelected(o)}
                     >
-                      <TD className="font-mono text-xs">{o.marketplaceOrderId}</TD>
+                      <TD className="font-mono text-xs">
+                        {o.marketplaceOrderId || o.trackingNumber || "-"}
+                      </TD>
+                      <TD>
+                        <Badge tone={o.sumber === "manual" ? "warning" : "info"}>
+                          {o.sumber === "manual" ? "Scan manual" : "API"}
+                        </Badge>
+                      </TD>
                       <TD>
                         <Badge tone={MP_TONE[o.marketplace] ?? "neutral"}>
                           {MP_LABEL[o.marketplace] ?? o.marketplace}
@@ -284,10 +300,20 @@ export function Orders() {
                       </TD>
                       <TD>{o.buyerName ?? "-"}</TD>
                       <TD align="right" className="tabular-nums whitespace-nowrap">
-                        {rupiah(o.totalAmount)}
+                        {o.totalAmount == null ? (
+                          // Bukan "Rp 0". Nol berarti terjual nol rupiah;
+                          // yang benar di sini adalah "belum diketahui".
+                          <span className="text-ink-3" title="Scan resi tidak mencatat nominal">
+                            —
+                          </span>
+                        ) : (
+                          rupiah(o.totalAmount)
+                        )}
                       </TD>
                       <TD align="right" className="tabular-nums whitespace-nowrap">
-                        {o.feeDeducted ? (
+                        {o.platformFee == null ? (
+                          <span className="text-ink-3">—</span>
+                        ) : o.feeDeducted ? (
                           rupiah(o.platformFee)
                         ) : (
                           <span className="text-xs text-amber-600">pending</span>

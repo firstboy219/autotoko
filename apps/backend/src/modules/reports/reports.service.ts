@@ -15,6 +15,14 @@ interface DateRange {
 export interface Report {
   type: ReportType;
   range: { start: string; end: string; label: string };
+  /**
+   * Angka dari alur manual, TERPISAH dari totals.
+   *
+   * Sengaja tidak digabung: totals berisi uang yang tercatat marketplace,
+   * sementara paket yang dipindai belum punya nominal sama sekali.
+   * Menjumlahkannya berarti mencampur yang nyata dengan yang tidak ada.
+   */
+  manual: { paket: number; barang: number };
   totals: { orders: number; revenue: number; platform_fee: number };
   by_shop: { shop: string; orders: number; revenue: number }[];
   by_status: { status: string; orders: number }[];
@@ -122,9 +130,34 @@ export class ReportsService {
       .where(where);
     const top_products = this.topProducts(itemRows.map((r) => r.items));
 
+    /**
+     * Angka dari alur manual, dihitung terpisah dan dilaporkan terpisah.
+     *
+     * Digabung ke "revenue" akan mencampur uang yang tercatat marketplace
+     * dengan paket yang belum punya nominal sama sekali. Yang manual membawa
+     * jumlah paket dan jumlah barang; uangnya datang dari pencairan, dan itu
+     * pertanyaan yang dijawab menu Pencairan -- bukan dikarang di sini.
+     */
+    const [man] = (await this.db.execute(sql`
+      SELECT COUNT(*)::int AS paket,
+             COALESCE((SELECT SUM(i.qty) FROM resi_scan_items i
+                        JOIN resi_scans r2 ON r2.id = i.resi_scan_id
+                       WHERE r2.user_id = ${userId}
+                         AND r2.scanned_at >= ${range.start.toISOString()}
+                         AND r2.scanned_at <  ${range.end.toISOString()}), 0)::numeric AS barang
+        FROM resi_scans r
+       WHERE r.user_id = ${userId}
+         AND r.scanned_at >= ${range.start.toISOString()}
+         AND r.scanned_at <  ${range.end.toISOString()}
+    `)) as unknown as Record<string, unknown>[];
+
     return {
       type,
       range: { start: range.start.toISOString(), end: range.end.toISOString(), label: range.label },
+      manual: {
+        paket: Number(man?.paket ?? 0),
+        barang: Math.round(Number(man?.barang ?? 0)),
+      },
       totals: {
         orders: tot?.orders ?? 0,
         revenue: Number(tot?.revenue ?? 0),

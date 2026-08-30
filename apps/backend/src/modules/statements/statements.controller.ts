@@ -108,6 +108,18 @@ export class StatementsController {
     };
   }
 
+  /**
+   * Saran persentase biaya marketplace, dari laporan yang sudah diimpor.
+   *
+   * Tanpa rentang tanggal: yang dicari kebiasaan potongan marketplace, bukan
+   * keadaan satu periode, dan mempersempitnya justru mengurangi dasar
+   * angkanya.
+   */
+  @Get("biaya-marketplace")
+  async biayaMarketplace(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.statements.biayaMarketplace(uid(req)) };
+  }
+
   /** Manual lawan marketplace, pada satu toko dan satu rentang. */
   @Get("reconcile")
   async reconcile(

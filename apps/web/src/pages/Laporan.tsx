@@ -8,6 +8,8 @@ interface Report {
   type: ReportType;
   range: { label: string };
   totals: { orders: number; revenue: number; platform_fee: number };
+  /** Dari scan resi di aplikasi. Terpisah karena belum punya nominal. */
+  manual?: { paket: number; barang: number };
   by_shop: { shop: string; orders: number; revenue: number }[];
   by_status: { status: string; orders: number }[];
   top_products: { name: string; qty: number }[];
@@ -64,6 +66,17 @@ export function Laporan() {
             <Card title="Total Order" value={String(data.totals.orders)} />
             <Card title="Revenue" value={rp(data.totals.revenue)} />
             <Card title="Fee Platform" value={rp(data.totals.platform_fee)} />
+            {/* Terpisah dari Revenue, dan itu disengaja: paket yang dipindai
+                belum punya nominal, jadi menjumlahkannya ke omzet berarti
+                mencampur uang yang tercatat dengan yang tidak ada. */}
+            <Card
+              title="Paket dikirim (scan)"
+              value={String(data.manual?.paket ?? 0)}
+            />
+            <Card
+              title="Barang dikirim (scan)"
+              value={String(data.manual?.barang ?? 0)}
+            />
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 p-4">
