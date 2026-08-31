@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   MIN_PESANAN,
+  SELISIH_CURIGA,
   angka,
+  biayaPerPesanan,
   cukupUntukDisarankan,
   ringkasBiaya,
   type BarisPesanan,
@@ -145,5 +147,100 @@ describe("biaya marketplace dari laporan", () => {
       ...Array.from({ length: 3 }, () => baris("50000", "-20000", "TikTok Shop")),
     ]);
     expect(hasil[0]!.sumber).toBe("TikTok Shop");
+  });
+});
+
+/**
+ * Menu audit menanyakan hal yang berbeda dari halaman HPP.
+ *
+ * HPP bertanya "berapa biasanya dipotong"; audit bertanya "pesanan MANA yang
+ * dipotong tidak seperti biasanya". Yang kedua harus menghasilkan sesuatu yang
+ * bisa ditanyakan ke marketplace-nya satu per satu.
+ */
+describe("biaya per nomor pesanan", () => {
+  const p = (
+    orderNo: string, pendapatan: string, biaya: string, cair: string,
+    sumber = "TikTok Shop",
+  ): BarisPesanan => ({
+    raw: {
+      "ID Pesanan/Penyesuaian": orderNo,
+      "Total Pendapatan": pendapatan,
+      "Total Biaya": biaya,
+      "Jumlah penyelesaian pembayaran": cair,
+      "Sumber pesanan": sumber,
+      "Waktu pemesanan": "2026/08/19",
+    },
+    namaToko: "Bulanjacom", marketplace: "tiktok",
+    periodeDari: "2026-08-01", periodeSampai: "2026-08-31",
+  });
+
+  /** Baris nyata dari laporan: 49.300 pendapatan, 23.442 biaya, 25.858 cair. */
+  it("menghitung persentase satu pesanan sungguhan", () => {
+    const h = biayaPerPesanan([p("585623070310172189", "49300", "-23442", "25858")]);
+    const b = h.baris[0]!;
+    expect(b.orderNo).toBe("585623070310172189");
+    expect(b.pendapatan).toBe(49300);
+    expect(b.biaya).toBe(23442);
+    expect(b.cair).toBe(25858);
+    expect(b.persen).toBeCloseTo(0.4755, 3);
+    expect(b.sumber).toBe("TikTok Shop");
+  });
+
+  /**
+   * Pesanan batal tidak punya persentase. Null, bukan nol -- nol terbaca
+   * sebagai "tidak dipotong sama sekali", yang justru kesimpulan salah.
+   */
+  it("pesanan berpendapatan nol tidak dipaksa punya persentase", () => {
+    const h = biayaPerPesanan([p("X1", "0", "0", "0")]);
+    expect(h.baris[0]!.persen).toBeNull();
+    expect(h.ringkas.tanpaPendapatan).toBe(1);
+    expect(h.ringkas.persenMedian).toBe(0);
+  });
+
+  it("menandai yang dipotong jauh di atas kebiasaan", () => {
+    const biasa = Array.from({ length: 9 }, (_, i) => p(`N${i}`, "100000", "-40000", "60000"));
+    const h = biayaPerPesanan([...biasa, p("ANEH", "100000", "-70000", "30000")]);
+    expect(h.ringkas.persenMedian).toBeCloseTo(0.4, 2);
+    expect(h.ringkas.ambangCuriga).toBeCloseTo(0.4 + SELISIH_CURIGA, 3);
+    expect(h.ringkas.mencurigakan).toBe(1);
+    const aneh = h.baris.find((x) => x.orderNo === "ANEH")!;
+    expect(aneh.mencurigakan).toBe(true);
+    // Yang biasa tidak ikut ditandai: daftar yang semuanya merah sama tidak
+    // bergunanya dengan daftar yang semuanya hijau.
+    expect(h.baris.filter((x) => x.mencurigakan)).toHaveLength(1);
+  });
+
+  it("yang dipotong paling banyak muncul lebih dulu", () => {
+    const h = biayaPerPesanan([
+      p("KECIL", "100000", "-30000", "70000"),
+      p("BESAR", "100000", "-60000", "40000"),
+      p("BATAL", "0", "0", "0"),
+    ]);
+    expect(h.baris[0]!.orderNo).toBe("BESAR");
+    expect(h.baris[1]!.orderNo).toBe("KECIL");
+    // Yang tanpa persentase di ekor, bukan di kepala.
+    expect(h.baris[2]!.orderNo).toBe("BATAL");
+  });
+
+  it("ringkasan konsisten dengan barisnya", () => {
+    const h = biayaPerPesanan([
+      p("A", "50000", "-20000", "30000"),
+      p("B", "50000", "-30000", "20000"),
+    ]);
+    expect(h.ringkas.pesanan).toBe(2);
+    expect(h.ringkas.pendapatan).toBe(100000);
+    expect(h.ringkas.biaya).toBe(50000);
+    expect(h.ringkas.cair).toBe(50000);
+    expect(h.ringkas.persenTertimbang).toBeCloseTo(0.5, 3);
+    expect(h.ringkas.persenTerendah).toBeCloseTo(0.4, 3);
+    expect(h.ringkas.persenTertinggi).toBeCloseTo(0.6, 3);
+  });
+
+  it("tanpa baris sama sekali tetap bentuk yang bisa dibaca", () => {
+    const h = biayaPerPesanan([]);
+    expect(h.baris).toEqual([]);
+    expect(h.ringkas.pesanan).toBe(0);
+    expect(h.ringkas.persenTertimbang).toBe(0);
+    expect(h.ringkas.mencurigakan).toBe(0);
   });
 });

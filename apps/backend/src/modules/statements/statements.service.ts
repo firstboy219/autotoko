@@ -19,7 +19,7 @@ import {
 import { normaliseOrderId } from "../resi/order-id.js";
 import { uraiLaporanTiktok } from "./tiktok-statement.js";
 
-import { cukupUntukDisarankan, ringkasBiaya } from "./biaya-marketplace.js";
+import { biayaPerPesanan, cukupUntukDisarankan, ringkasBiaya } from "./biaya-marketplace.js";
 /**
  * Laporan marketplace, dan pembandingannya dengan catatan manual.
  *
@@ -248,6 +248,13 @@ export class StatementsService {
         occurredOn: marketplaceStatementLines.occurredOn,
         amount: marketplaceStatementLines.amount,
         shopId: marketplaceStatements.shopId,
+        // Kolom mentah laporan: di sinilah "Total Pendapatan" dan "Total
+        // Biaya" tertulis, dan tanpa keduanya persentase potongan per pesanan
+        // tidak bisa dihitung sama sekali.
+        raw: marketplaceStatementLines.raw,
+        marketplace: marketplaceStatements.marketplace,
+        periodeDari: marketplaceStatements.periodFrom,
+        periodeSampai: marketplaceStatements.periodTo,
       })
       .from(marketplaceStatementLines)
       .innerJoin(
@@ -348,6 +355,23 @@ export class StatementsService {
       // Tanpa laporan sama sekali, "semua belum cair" bukan temuan -- itu
       // hanya berarti belum ada yang diunggah.
       adaPembanding: pesanan.length > 0,
+      /**
+       * Berapa persen yang sebenarnya dipotong pada TIAP nomor pesanan.
+       *
+       * Halaman HPP bertanya "berapa biasanya dipotong"; menu audit bertanya
+       * "pesanan MANA yang dipotong tidak seperti biasanya". Yang kedua itulah
+       * yang bisa ditanyakan ke marketplace-nya satu per satu, dan itu
+       * pekerjaan sebuah menu audit.
+       */
+      biayaPesanan: biayaPerPesanan(
+        pesanan.map((p) => ({
+          raw: p.raw,
+          namaToko: null,
+          marketplace: p.marketplace ?? null,
+          periodeDari: p.periodeDari ?? null,
+          periodeSampai: p.periodeSampai ?? null,
+        })),
+      ),
       cocok,
       belumCair,
       belumDiscan,

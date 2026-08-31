@@ -43,6 +43,38 @@ interface Audit {
     umurRata: number;
   };
   adaPembanding: boolean;
+  /**
+   * Berapa persen yang sebenarnya dipotong marketplace pada TIAP pesanan.
+   *
+   * persen null berarti pesanannya batal atau retur -- berpendapatan nol, jadi
+   * tidak punya persentase. Bukan nol: nol terbaca sebagai "tidak dipotong
+   * sama sekali", yang justru kesimpulan yang salah.
+   */
+  biayaPesanan: {
+    ringkas: {
+      pesanan: number;
+      tanpaPendapatan: number;
+      pendapatan: number;
+      biaya: number;
+      cair: number;
+      persenTertimbang: number;
+      persenMedian: number;
+      persenTerendah: number;
+      persenTertinggi: number;
+      ambangCuriga: number;
+      mencurigakan: number;
+    };
+    baris: {
+      orderNo: string;
+      tanggal: string;
+      sumber: string;
+      pendapatan: number;
+      biaya: number;
+      cair: number;
+      persen: number | null;
+      mencurigakan: boolean;
+    }[];
+  };
   cocok: {
     resi: string;
     orderNo: string;
@@ -59,6 +91,9 @@ interface Audit {
     tersimpanTapiTidakSah: string | null;
   }[];
 }
+
+/** Satu angka di belakang koma: dua sudah lebih presisi daripada artinya. */
+const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
 
 const hariIni = () => new Date().toISOString().slice(0, 10);
 const awalBulan = () => hariIni().slice(0, 8) + "01";
@@ -278,6 +313,88 @@ export default function AuditPesanan() {
                 </Table>
               </TableWrap>
             </Card>
+          )}
+
+          {data.biayaPesanan && data.biayaPesanan.ringkas.pesanan > 0 && (
+              <Card className="mt-4" padded={false}>
+                <CardHeader
+                  title={`Potongan marketplace per pesanan (${data.biayaPesanan.ringkas.pesanan})`}
+                  subtitle={
+                    `Biasanya ${pct(data.biayaPesanan.ringkas.persenMedian)} dari harga jual. `
+                    + `Rentang ${pct(data.biayaPesanan.ringkas.persenTerendah)}–`
+                    + `${pct(data.biayaPesanan.ringkas.persenTertinggi)}. `
+                    + `${data.biayaPesanan.ringkas.mencurigakan} pesanan dipotong di atas `
+                    + `${pct(data.biayaPesanan.ringkas.ambangCuriga)}.`
+                  }
+                />
+                <div className="px-5 pb-3 grid gap-2 sm:grid-cols-3 text-xs">
+                  <div>
+                    <div className="text-ink-3">Harga jual</div>
+                    <div className="tabular-nums text-ink">
+                      {rupiah(data.biayaPesanan.ringkas.pendapatan)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-ink-3">Dipotong marketplace</div>
+                    <div className="tabular-nums text-ink">
+                      {rupiah(data.biayaPesanan.ringkas.biaya)}{" "}
+                      <span className="text-ink-3">
+                        ({pct(data.biayaPesanan.ringkas.persenTertimbang)})
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-ink-3">Benar-benar cair</div>
+                    <div className="tabular-nums text-ink">
+                      {rupiah(data.biayaPesanan.ringkas.cair)}
+                    </div>
+                  </div>
+                </div>
+                {data.biayaPesanan.ringkas.tanpaPendapatan > 0 && (
+                  <p className="px-5 pb-3 text-xs text-ink-3">
+                    {data.biayaPesanan.ringkas.tanpaPendapatan} pesanan berpendapatan nol
+                    (batal atau retur) tidak punya persentase — ditampilkan di bagian bawah
+                    daftar tanpa angka.
+                  </p>
+                )}
+                <TableWrap>
+                  <Table>
+                    <THead>
+                      <TR>
+                        <TH>Order ID</TH>
+                        <TH>Sumber</TH>
+                        <TH align="right">Harga jual</TH>
+                        <TH align="right">Dipotong</TH>
+                        <TH align="right">Cair</TH>
+                        <TH align="right">Potongan</TH>
+                      </TR>
+                    </THead>
+                    <tbody>
+                      {data.biayaPesanan.baris.map((x) => (
+                        <TR key={x.orderNo || `${x.tanggal}-${x.cair}`}>
+                          <TD className="font-mono text-xs">{x.orderNo || "-"}</TD>
+                          <TD className="text-xs text-ink-2">{x.sumber}</TD>
+                          <TD align="right" className="tabular-nums">{rupiah(x.pendapatan)}</TD>
+                          <TD align="right" className="tabular-nums">{rupiah(x.biaya)}</TD>
+                          <TD align="right" className="tabular-nums">{rupiah(x.cair)}</TD>
+                          <TD align="right" className="tabular-nums">
+                            {x.persen == null ? (
+                              // Bukan "0%". Pesanan yang dibatalkan tidak
+                              // dipotong nol persen -- ia tidak punya
+                              // persentase sama sekali.
+                              <span className="text-ink-3" title="Batal atau retur">—</span>
+                            ) : x.mencurigakan ? (
+                              <Badge tone="danger">{pct(x.persen)}</Badge>
+                            ) : (
+                              <span>{pct(x.persen)}</span>
+                            )}
+                          </TD>
+                        </TR>
+                      ))}
+                    </tbody>
+                  </Table>
+                </TableWrap>
+              </Card>
           )}
 
           {data.belumDiscan.length > 0 && (

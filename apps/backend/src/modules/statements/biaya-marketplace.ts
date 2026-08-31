@@ -156,3 +156,128 @@ export const MIN_PESANAN = 10;
 export function cukupUntukDisarankan(r: RingkasanBiaya): boolean {
   return r.pesanan >= MIN_PESANAN;
 }
+
+// ------------------------------------------------- per nomor pesanan
+
+export interface BarisBiayaPesanan {
+  orderNo: string;
+  tanggal: string;
+  sumber: string;
+  pendapatan: number;
+  biaya: number;
+  cair: number;
+  /** biaya / pendapatan. Null bila pendapatannya nol (batal/retur). */
+  persen: number | null;
+  /**
+   * Potongannya jauh di atas kebiasaan toko ini.
+   *
+   * Inilah yang dicari di menu audit: bukan berapa rata-ratanya, melainkan
+   * pesanan MANA yang dipotong tidak seperti biasanya -- itu yang bisa
+   * ditanyakan ke marketplace-nya satu per satu.
+   */
+  mencurigakan: boolean;
+}
+
+export interface BiayaPerPesanan {
+  ringkas: {
+    pesanan: number;
+    /** Pesanan berpendapatan nol: batal atau retur. Tidak punya persentase. */
+    tanpaPendapatan: number;
+    pendapatan: number;
+    biaya: number;
+    cair: number;
+    persenTertimbang: number;
+    persenMedian: number;
+    persenTerendah: number;
+    persenTertinggi: number;
+    /** Di atas ini sebuah pesanan ditandai mencurigakan. */
+    ambangCuriga: number;
+    mencurigakan: number;
+  };
+  baris: BarisBiayaPesanan[];
+}
+
+/**
+ * Sekian angka persen di atas median sudah dianggap tidak seperti biasanya.
+ *
+ * Diukur pada laporan sungguhan toko ini, sebaran per pesanan membentang 32%
+ * sampai 60% dengan median 42% -- jadi selisih sepuluh angka persen memisahkan
+ * ekor atas tanpa menandai separuh daftar. Ambang yang terlalu ketat membuat
+ * setiap pesanan tampak mencurigakan, dan daftar yang semuanya merah sama
+ * tidak berguna dengan daftar yang semuanya hijau.
+ */
+export const SELISIH_CURIGA = 0.10;
+
+/**
+ * Berapa persen yang dipotong marketplace pada TIAP nomor pesanan.
+ *
+ * Yang agregat menjawab "berapa biasanya"; yang ini menjawab "pesanan mana
+ * yang tidak biasa". Dua pertanyaan berbeda, dan yang kedua itulah pekerjaan
+ * sebuah menu audit -- ia harus menghasilkan sesuatu yang bisa ditanyakan,
+ * bukan sekadar sesuatu yang bisa dibaca.
+ */
+export function biayaPerPesanan(baris: BarisPesanan[]): BiayaPerPesanan {
+  const isi: BarisBiayaPesanan[] = [];
+  let tanpaPendapatan = 0;
+
+  for (const b of baris) {
+    const r = (b.raw ?? {}) as Record<string, unknown>;
+    const orderNo = String(r["ID Pesanan/Penyesuaian"] ?? "").trim();
+    const pendapatan = angka(r["Total Pendapatan"]);
+    const biaya = Math.abs(angka(r["Total Biaya"]));
+    const cair = angka(r["Jumlah penyelesaian pembayaran"]);
+    const sumber = String(r["Sumber pesanan"] ?? "").trim()
+      || (b.marketplace ?? "").trim()
+      || "(tidak disebut)";
+    const tanggal = String(r["Waktu pemesanan"] ?? r["Waktu pembayaran pesanan"] ?? "").trim();
+
+    if (pendapatan <= 0) tanpaPendapatan += 1;
+    isi.push({
+      orderNo, tanggal, sumber, pendapatan, biaya, cair,
+      // Null, bukan nol. Nol terbaca sebagai "tidak dipotong sama sekali",
+      // sedangkan yang benar adalah "tidak bisa dihitung" -- pesanan yang
+      // dibatalkan tidak punya persentase potongan.
+      persen: pendapatan > 0 ? biaya / pendapatan : null,
+      mencurigakan: false,
+    });
+  }
+
+  const persen = isi.map((x) => x.persen).filter((v): v is number => v != null);
+  const urut = [...persen].sort((a, b) => a - b);
+  const tengah = urut.length
+    ? (urut.length % 2 ? urut[(urut.length - 1) / 2]! : (urut[urut.length / 2 - 1]! + urut[urut.length / 2]!) / 2)
+    : 0;
+  const ambangCuriga = tengah + SELISIH_CURIGA;
+
+  let mencurigakan = 0;
+  for (const x of isi) {
+    if (x.persen != null && x.persen > ambangCuriga) {
+      x.mencurigakan = true;
+      mencurigakan += 1;
+    }
+  }
+
+  const totalPendapatan = isi.reduce((a, x) => a + x.pendapatan, 0);
+  const totalBiaya = isi.reduce((a, x) => a + x.biaya, 0);
+
+  // Yang dipotong paling banyak lebih dulu: menu audit dibuka untuk mencari
+  // yang tidak beres, bukan untuk membaca seluruh daftar dari atas.
+  isi.sort((a, b) => (b.persen ?? -1) - (a.persen ?? -1));
+
+  return {
+    ringkas: {
+      pesanan: isi.length,
+      tanpaPendapatan,
+      pendapatan: Math.round(totalPendapatan),
+      biaya: Math.round(totalBiaya),
+      cair: Math.round(isi.reduce((a, x) => a + x.cair, 0)),
+      persenTertimbang: totalPendapatan > 0 ? totalBiaya / totalPendapatan : 0,
+      persenMedian: tengah,
+      persenTerendah: urut[0] ?? 0,
+      persenTertinggi: urut[urut.length - 1] ?? 0,
+      ambangCuriga,
+      mencurigakan,
+    },
+    baris: isi,
+  };
+}
