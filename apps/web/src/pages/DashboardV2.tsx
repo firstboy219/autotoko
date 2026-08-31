@@ -77,6 +77,16 @@ interface Data {
     total: number;
     teratas: { id: string; nama: string; satuan: string | null; stok: number; ambang: number }[];
   };
+  /**
+   * Dua hal yang tidak menurunkan angka mana pun sampai terlambat.
+   *
+   * walletRendah null berarti saldonya cukup -- peringatan yang selalu muncul
+   * berhenti dibaca.
+   */
+  peringatan: {
+    walletRendah: { saldo: number; ambang: number } | null;
+    tokenHabis: { id: string; nama: string; kadaluarsa: string | null }[];
+  };
   banding: { kredit: number; sellerBersih: number; paket: number };
   volume: { paket: number; pcs: number; tokoAktif: number; tokoTotal: number; perHari: number };
   seri: Titik[];
@@ -516,6 +526,34 @@ export default function DashboardV2() {
                 </Card>
               </div>
             </div>
+
+            {/* Ditaruh di atas angka, bukan di bawah: yang perlu
+                ditindaklanjuti hari ini kalah cepat terbaca kalau harus
+                digulung dulu melewati grafik. */}
+            {(data.peringatan.walletRendah || data.peringatan.tokenHabis.length > 0) && (
+              <div className="mt-3 space-y-2">
+                {data.peringatan.walletRendah && (
+                  <InlineAlert tone="warning">
+                    Saldo wallet {rupiah(data.peringatan.walletRendah.saldo)} — di bawah{" "}
+                    {rupiah(data.peringatan.walletRendah.ambang)}.{" "}
+                    <Link to="/wallet" className="underline underline-offset-2">
+                      Isi saldo
+                    </Link>
+                  </InlineAlert>
+                )}
+                {data.peringatan.tokenHabis.length > 0 && (
+                  <InlineAlert tone="danger">
+                    {data.peringatan.tokenHabis.length} toko tokennya habis dalam 3 hari —{" "}
+                    {data.peringatan.tokenHabis.map((t) => t.nama).join(", ")}. Kalau lewat,
+                    toko terputus dari marketplace dan pesanan berhenti masuk tanpa pesan
+                    galat.{" "}
+                    <Link to="/toko" className="underline underline-offset-2">
+                      Sambungkan ulang
+                    </Link>
+                  </InlineAlert>
+                )}
+              </div>
+            )}
 
             {/* ── sesudah semua biaya yang benar-benar keluar ──────────── */}
             <div className="mt-3 grid gap-3 lg:grid-cols-3">

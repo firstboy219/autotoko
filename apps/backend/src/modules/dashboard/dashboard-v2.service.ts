@@ -48,7 +48,7 @@ export class DashboardV2Service {
       .slice(0, 10);
 
     const [uang, uangSebelum, volume, volumeSebelum, seri, toko, produk, keandalan,
-           tugas, biaya, belumCair, stokMenipis] =
+           tugas, biaya, belumCair, stokMenipis, peringatan] =
       await Promise.all([
         this.uang(userId, from, to),
         this.uang(userId, sebelumFrom, sebelumTo),
@@ -62,6 +62,7 @@ export class DashboardV2Service {
         this.biayaNyata(userId, from, to),
         this.belumCair(userId),
         this.stokMenipis(userId),
+        this.peringatan(userId),
       ]);
 
     const kredit = uang.kredit;
@@ -103,6 +104,7 @@ export class DashboardV2Service {
       },
       belumCair,
       stokMenipis,
+      peringatan,
       seri,
       toko,
       produk,
@@ -234,6 +236,56 @@ export class DashboardV2Service {
     // Daftar penuh tidak dikirim: lima puluh baris di dashboard bukan
     // peringatan melainkan dinding. Jumlahnya tetap disebut utuh.
     return { total: semua.length, teratas: semua.slice(0, 5) };
+  }
+
+
+  /**
+   * Dua peringatan dari dashboard lama yang belum ada di sini.
+   *
+   * Keduanya penting justru karena tidak menurunkan angka mana pun sampai
+   * terlambat. Saldo wallet yang habis menghentikan fitur berbayar; token toko
+   * yang lewat memutus toko dari marketplace dan pesanan berhenti masuk tanpa
+   * satu pun pesan galat.
+   *
+   * Ambangnya disamakan dengan dashboard lama -- Rp 150.000 dan tiga hari --
+   * supaya dua layar tidak memberi peringatan berbeda tentang keadaan yang
+   * sama.
+   */
+  private async peringatan(userId: string) {
+    const AMBANG_SALDO = 150000;
+
+    const dompet = await this.db.execute(sql`
+      select coalesce(balance, 0)::float8 as saldo
+        from wallets
+       where user_id = ${userId}
+       limit 1
+    `);
+    const saldo = Number(
+      (dompet as unknown as Record<string, unknown>[])[0]?.saldo ?? 0,
+    );
+
+    const token = await this.db.execute(sql`
+      select id, coalesce(display_name, shop_name) as nama,
+             access_token_expire_at as kadaluarsa
+        from shops
+       where user_id = ${userId}
+         and shop_status = 'active'
+         and access_token_expire_at is not null
+         and access_token_expire_at < now() + interval '3 days'
+       order by access_token_expire_at asc
+    `);
+
+    return {
+      // null, bukan objek bersaldo -- layar menampilkannya hanya kalau ada
+      // yang perlu ditindaklanjuti, dan peringatan yang selalu muncul
+      // berhenti dibaca.
+      walletRendah: saldo < AMBANG_SALDO ? { saldo, ambang: AMBANG_SALDO } : null,
+      tokenHabis: (token as unknown as Record<string, unknown>[]).map((r) => ({
+        id: String(r.id),
+        nama: (r.nama as string) ?? "",
+        kadaluarsa: r.kadaluarsa as string | null,
+      })),
+    };
   }
 
   /** Pembagian uang yang cair pada satu rentang. */

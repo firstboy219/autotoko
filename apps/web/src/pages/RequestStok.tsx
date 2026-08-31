@@ -89,6 +89,8 @@ export function RequestStok() {
   const [rows, setRows] = useState<ItemRow[]>([{ ...BARIS_KOSONG }]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /** Id draft yang sedang disunting, atau null untuk permintaan baru. */
+  const [sunting, setSunting] = useState<string | null>(null);
 
   const bahanById = useMemo(
     () => new Map((materials.data ?? []).map((m) => [m.id, m])),
@@ -156,7 +158,12 @@ export function RequestStok() {
             unitPrice: r.unitPrice ? Number(r.unitPrice) : undefined,
           })),
       };
-      const dibuat = await api.post<{ id: string }>("/stock-requests", body);
+      // PATCH saat menyunting, POST saat baru. Tanpa ini "Simpan saja"
+      // menumpuk draft baru setiap kali disimpan, dan yang lama tertinggal
+      // sebagai sampah yang mirip satu sama lain.
+      const dibuat = sunting
+        ? await api.patch<{ id: string }>(`/stock-requests/${sunting}`, body)
+        : await api.post<{ id: string }>("/stock-requests", body);
       if (!kirim) {
         toast("Permintaan tersimpan", "success");
       } else {
@@ -166,15 +173,70 @@ export function RequestStok() {
         window.open(`https://wa.me/?text=${encodeURIComponent(wa.teks)}`, "_blank");
         toast("Permintaan dikirim lewat WhatsApp", "success");
       }
-      setScreenshot("");
-      setNote("");
-      setRows([{ ...BARIS_KOSONG }]);
+      batalSunting();
       daftar.reload();
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * Membuka draft ke dalam form.
+   *
+   * Hanya draft. Yang sudah dikirim tidak dibuka untuk disunting -- pemasok
+   * sudah memegang versinya, dan mengubah catatan di sini akan membuat kedua
+   * pihak memegang daftar yang berbeda tanpa ada yang tahu.
+   */
+  async function bukaDraft(id: string) {
+    setErr(null);
+    try {
+      const d = await api.get<{
+        screenshotUrl: string;
+        note: string | null;
+        status: string;
+        items: {
+          materialId: string | null;
+          rawName: string | null;
+          qtyPack: string;
+          packLabel: string | null;
+          contentPerPack: string | null;
+          contentUnit: string | null;
+          unitPrice: string | null;
+        }[];
+      }>(`/stock-requests/${id}`);
+      if (d.status === "dikirim") {
+        toast("Permintaan ini sudah dikirim — buat yang baru untuk perubahan.", "warning");
+        return;
+      }
+      setSunting(id);
+      setScreenshot(d.screenshotUrl ?? "");
+      setNote(d.note ?? "");
+      setRows(
+        d.items.length
+          ? d.items.map((i) => ({
+              materialId: i.materialId ?? "",
+              rawName: i.rawName ?? "",
+              qtyPack: String(Number(i.qtyPack) || 0),
+              packLabel: i.packLabel ?? "pcs",
+              contentPerPack: i.contentPerPack == null ? "" : String(Number(i.contentPerPack)),
+              contentUnit: i.contentUnit ?? "",
+              unitPrice: i.unitPrice == null ? "" : String(Math.round(Number(i.unitPrice))),
+            }))
+          : [{ ...BARIS_KOSONG }],
+      );
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  }
+
+  function batalSunting() {
+    setSunting(null);
+    setScreenshot("");
+    setNote("");
+    setRows([{ ...BARIS_KOSONG }]);
   }
 
   async function bagikanUlang(id: string) {
@@ -196,8 +258,15 @@ export function RequestStok() {
       <div className="grid gap-3 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader
-            title="Permintaan baru"
+            title={sunting ? "Menyunting draft" : "Permintaan baru"}
             subtitle="Satu permintaan boleh memuat banyak bahan."
+            action={
+              sunting ? (
+                <Button type="button" size="sm" variant="text" onClick={batalSunting}>
+                  Batal, buat baru
+                </Button>
+              ) : undefined
+            }
           />
           <div className="p-5 space-y-4">
             <Field
@@ -389,14 +458,26 @@ export function RequestStok() {
                     <div className="mt-0.5 text-sm font-medium text-ink tabular-nums">
                       {rupiah(Number(r.totalCost))}
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="text"
-                      onClick={() => bagikanUlang(r.id)}
-                    >
-                      Bagikan lagi
-                    </Button>
+                    <div className="flex gap-1">
+                      {r.status !== "dikirim" && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="text"
+                          onClick={() => bukaDraft(r.id)}
+                        >
+                          Sunting
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="text"
+                        onClick={() => bagikanUlang(r.id)}
+                      >
+                        Bagikan lagi
+                      </Button>
+                    </div>
                   </li>
                 ))}
               </ul>
