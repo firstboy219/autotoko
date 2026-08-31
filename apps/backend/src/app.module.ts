@@ -33,6 +33,7 @@ import { CostingModule } from "./modules/costing/costing.module.js";
 import { MaterialsModule } from "./modules/materials/materials.module.js";
 import { ResiModule } from "./modules/resi/resi.module.js";
 
+import { StockRequestsModule } from "./modules/stock-requests/stock-requests.module.js";
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -71,6 +72,7 @@ import { ResiModule } from "./modules/resi/resi.module.js";
     UploadsModule,
     CostingModule,
     MaterialsModule,
+    StockRequestsModule,
     ResiModule,
   ],
   providers: [

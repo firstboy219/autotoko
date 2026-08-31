@@ -42,6 +42,7 @@ import { PencairanMutasi } from "./pages/PencairanMutasi";
 import { PencairanMapping } from "./pages/PencairanMapping";
 import { PencairanProfit } from "./pages/PencairanProfit";
 
+import { RequestStok } from "./pages/RequestStok";
 function Protected({ children }: { children: React.ReactNode }) {
   const authed = useAuth((s) => s.authenticated);
   return authed ? <>{children}</> : <Navigate to="/login" replace />;
@@ -75,6 +76,7 @@ export function App() {
         <Route path="/aplikasi" element={<Protected><AplikasiVersi /></Protected>} />
         <Route path="/pending" element={<Protected><PendingPage /></Protected>} />
         <Route path="/pembelian" element={<Protected><Pembelian /></Protected>} />
+        <Route path="/request-stok" element={<Protected><RequestStok /></Protected>} />
         <Route path="/hpp" element={<Protected><Hpp /></Protected>} />
         <Route path="/hpp/:id" element={<Protected><HppDetail /></Protected>} />
         <Route path="/autopilot" element={<Protected><Autopilot /></Protected>} />

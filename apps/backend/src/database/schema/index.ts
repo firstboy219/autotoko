@@ -10,3 +10,4 @@ export * from "./system";
 export * from "./payout";
 export * from "./resi";
 export * from "./statements";
+export * from "./stock-requests.js";

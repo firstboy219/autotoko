@@ -49,10 +49,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
         <TextView style="@style/Text.Body" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:text="Kontrol Stok" />
+            android:layout_height="wrap_content" android:text="Request Pembelian Stok" />
         <TextView style="@style/Text.Caption" android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Isi kondisi tiap bahan, bagikan kebutuhan restock" />
+            android:text="Lampirkan tangkapan layar, petakan ke bahan baku, kirim ke pemasok" />
     </LinearLayout>
 
     <LinearLayout

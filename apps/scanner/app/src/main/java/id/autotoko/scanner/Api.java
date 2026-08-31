@@ -408,6 +408,23 @@ public final class Api {
                 session.token(), null, cb);
     }
 
+    /**
+     * Permintaan pembelian stok, disimpan di server.
+     *
+     * Disimpan dulu baru dibagikan, bukan langsung menyusun pesan di sini:
+     * permintaan yang terkirim ke pemasok tapi tidak tercatat di mana pun
+     * tidak bisa dicocokkan saat barangnya datang.
+     */
+    public void stockRequestCreate(JSONObject body, Cb cb) {
+        call("POST", session.baseUrl() + "/api/stock-requests", session.token(), body, cb);
+    }
+
+    /** Teks pesan permintaan; tandai=true menandainya sudah dikirim. */
+    public void stockRequestWa(String id, boolean tandai, Cb cb) {
+        call("GET", session.baseUrl() + "/api/stock-requests/" + id + "/wa"
+                + (tandai ? "?tandai=1" : ""), session.token(), null, cb);
+    }
+
     public void payoutSettings(Cb cb) {
         call("GET", session.baseUrl() + "/api/payout/settings", session.token(), null, cb);
     }
