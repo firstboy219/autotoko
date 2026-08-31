@@ -280,41 +280,6 @@ export default function AuditPesanan() {
             </Card>
           </div>
 
-          {data.belumCair.length > 0 && (
-            <Card className="mt-4" padded={false}>
-              <CardHeader
-                title={`Sudah dikirim, belum dibayar (${data.belumCair.length})`}
-                subtitle="Diurut dari yang paling lama menggantung."
-              />
-              <TableWrap>
-                <Table>
-                  <THead>
-                    <TR>
-                      <TH>Umur</TH>
-                      <TH>Order ID</TH>
-                      <TH>Resi</TH>
-                      <TH>Discan</TH>
-                    </TR>
-                  </THead>
-                  <tbody>
-                    {[...data.belumCair]
-                      .sort((a, b) => b.umurHari - a.umurHari)
-                      .map((x) => (
-                        <TR key={x.resi}>
-                          <TD>
-                            <Umur hari={x.umurHari} />
-                          </TD>
-                          <TD>{x.orderNo}</TD>
-                          <TD>{x.resi}</TD>
-                          <TD>{new Date(x.scannedAt).toLocaleDateString("id-ID")}</TD>
-                        </TR>
-                      ))}
-                  </tbody>
-                </Table>
-              </TableWrap>
-            </Card>
-          )}
-
           {data.biayaPesanan && data.biayaPesanan.ringkas.pesanan > 0 && (
               <Card className="mt-4" padded={false}>
                 <CardHeader
@@ -395,6 +360,41 @@ export default function AuditPesanan() {
                   </Table>
                 </TableWrap>
               </Card>
+          )}
+
+          {data.belumCair.length > 0 && (
+            <Card className="mt-4" padded={false}>
+              <CardHeader
+                title={`Sudah dikirim, belum dibayar (${data.belumCair.length})`}
+                subtitle="Diurut dari yang paling lama menggantung."
+              />
+              <TableWrap>
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>Umur</TH>
+                      <TH>Order ID</TH>
+                      <TH>Resi</TH>
+                      <TH>Discan</TH>
+                    </TR>
+                  </THead>
+                  <tbody>
+                    {[...data.belumCair]
+                      .sort((a, b) => b.umurHari - a.umurHari)
+                      .map((x) => (
+                        <TR key={x.resi}>
+                          <TD>
+                            <Umur hari={x.umurHari} />
+                          </TD>
+                          <TD>{x.orderNo}</TD>
+                          <TD>{x.resi}</TD>
+                          <TD>{new Date(x.scannedAt).toLocaleDateString("id-ID")}</TD>
+                        </TR>
+                      ))}
+                  </tbody>
+                </Table>
+              </TableWrap>
+            </Card>
           )}
 
           {data.belumDiscan.length > 0 && (
