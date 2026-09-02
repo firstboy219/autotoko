@@ -56,6 +56,18 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/menuHpp"
+        style="@style/SheetRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView style="@style/Text.Body" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="HPP &amp; Harga Jual" />
+        <TextView style="@style/Text.Caption" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Hitung harga pokok dari bahan baku, susun harga publish, lihat profit bersih" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/menuTextScan"
         style="@style/SheetRow"
         android:layout_width="match_parent"

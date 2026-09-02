@@ -28,6 +28,13 @@
  * kesimpulan tanpa memperlihatkan dasarnya.
  */
 
+import {
+  uraikanDetailProduk,
+  cocokkanKeKatalog,
+  type ItemProdukPesanan,
+  type PetaSku,
+} from "./detail-produk";
+
 export interface BarisPesanan {
   /** Isi kolom mentah satu baris laporan. */
   raw: unknown;
@@ -176,6 +183,37 @@ export interface BarisBiayaPesanan {
    * ditanyakan ke marketplace-nya satu per satu.
    */
   mencurigakan: boolean;
+  /**
+   * Produk yang ada di pesanan ini, dari kolom "Detail produk terjual".
+   *
+   * Nama bernilai null bila ID SKU-nya belum dipetakan ke katalog. Sengaja
+   * tidak ditebak dari harga: satu harga dipakai beberapa produk di katalog
+   * ini, jadi tebakannya akan terbaca meyakinkan dan tetap keliru.
+   */
+  produk: ItemProdukPesanan[];
+}
+
+export interface SkuBelumDipetakan {
+  sku: string;
+  /**
+   * Marketplace asal SKU ini.
+   *
+   * Ikut dibawa karena ID SKU hanya unik di dalam satu marketplace, dan
+   * pemetaan yang disimpan tanpa menyebut asalnya akan salah dipakai begitu
+   * toko kedua diunggah laporannya.
+   */
+  marketplace: string;
+  /** Berapa nomor pesanan memuat SKU ini. */
+  pesanan: number;
+  qty: number;
+  /**
+   * Harga jual satuan yang teramati, bila bisa dihitung.
+   *
+   * Hanya diambil dari pesanan yang isinya satu SKU saja -- pada pesanan
+   * campuran, pendapatannya milik beberapa produk sekaligus dan membaginya
+   * akan mengarang angka.
+   */
+  hargaSatuan: number | null;
 }
 
 export interface BiayaPerPesanan {
@@ -195,6 +233,13 @@ export interface BiayaPerPesanan {
     mencurigakan: number;
   };
   baris: BarisBiayaPesanan[];
+  /**
+   * SKU yang muncul di laporan tapi belum punya nama di katalog.
+   *
+   * Ditampilkan supaya pemetaan bisa diselesaikan sekali di layar, bukan
+   * dibiarkan jadi deretan angka yang tidak berarti apa-apa bagi pembacanya.
+   */
+  skuBelumDipetakan: SkuBelumDipetakan[];
 }
 
 /**
@@ -216,9 +261,19 @@ export const SELISIH_CURIGA = 0.10;
  * sebuah menu audit -- ia harus menghasilkan sesuatu yang bisa ditanyakan,
  * bukan sekadar sesuatu yang bisa dibaca.
  */
-export function biayaPerPesanan(baris: BarisPesanan[]): BiayaPerPesanan {
+export function biayaPerPesanan(
+  baris: BarisPesanan[],
+  petaSku?: PetaSku,
+): BiayaPerPesanan {
   const isi: BarisBiayaPesanan[] = [];
   let tanpaPendapatan = 0;
+  // Dikumpulkan sambil jalan supaya laporan "belum dipetakan" berasal dari
+  // baris yang benar-benar ditampilkan, bukan dari kueri terpisah yang bisa
+  // menyimpang darinya.
+  const belum = new Map<
+    string,
+    { marketplace: string; pesanan: number; qty: number; harga: number[] }
+  >();
 
   for (const b of baris) {
     const r = (b.raw ?? {}) as Record<string, unknown>;
@@ -231,9 +286,29 @@ export function biayaPerPesanan(baris: BarisPesanan[]): BiayaPerPesanan {
       || "(tidak disebut)";
     const tanggal = String(r["Waktu pemesanan"] ?? r["Waktu pembayaran pesanan"] ?? "").trim();
 
+    const produk = cocokkanKeKatalog(
+      uraikanDetailProduk(r["Detail produk terjual"]),
+      petaSku,
+    );
+    const totalQty = produk.reduce((a, x) => a + x.qty, 0);
+    for (const p of produk) {
+      if (p.produkId) continue;
+      const g = belum.get(p.sku)
+        ?? { marketplace: (b.marketplace ?? "").trim() || "(tidak disebut)",
+             pesanan: 0, qty: 0, harga: [] };
+      g.pesanan += 1;
+      g.qty += p.qty;
+      // Harga satuan hanya bisa dibaca dari pesanan berisi satu SKU. Pada
+      // pesanan campuran, pendapatannya milik beberapa produk sekaligus.
+      if (produk.length === 1 && pendapatan > 0 && totalQty > 0) {
+        g.harga.push(pendapatan / totalQty);
+      }
+      belum.set(p.sku, g);
+    }
+
     if (pendapatan <= 0) tanpaPendapatan += 1;
     isi.push({
-      orderNo, tanggal, sumber, pendapatan, biaya, cair,
+      orderNo, tanggal, sumber, pendapatan, biaya, cair, produk,
       // Null, bukan nol. Nol terbaca sebagai "tidak dipotong sama sekali",
       // sedangkan yang benar adalah "tidak bisa dihitung" -- pesanan yang
       // dibatalkan tidak punya persentase potongan.
@@ -279,5 +354,30 @@ export function biayaPerPesanan(baris: BarisPesanan[]): BiayaPerPesanan {
       mencurigakan,
     },
     baris: isi,
+    skuBelumDipetakan: [...belum.entries()]
+      .map(([sku, g]) => ({
+        sku,
+        marketplace: g.marketplace,
+        pesanan: g.pesanan,
+        qty: g.qty,
+        // Yang paling sering teramati, bukan rata-rata: harga promo sesekali
+        // tidak boleh menggeser angka yang dipakai untuk mengenali produk.
+        hargaSatuan: g.harga.length ? modus(g.harga) : null,
+      }))
+      // Yang paling banyak pesanannya lebih dulu: memetakan satu SKU itu
+      // menerangkan tiga puluh satu pesanan sekaligus.
+      .sort((a, b) => b.pesanan - a.pesanan),
   };
+}
+
+/** Nilai yang paling sering muncul; seri dimenangkan yang terkecil. */
+function modus(a: number[]): number {
+  const n = new Map<number, number>();
+  for (const v of a) n.set(v, (n.get(v) ?? 0) + 1);
+  let terbaik = a[0]!;
+  let banyak = 0;
+  for (const [v, c] of [...n.entries()].sort((x, y) => x[0] - y[0])) {
+    if (c > banyak) { banyak = c; terbaik = v; }
+  }
+  return Math.round(terbaik);
 }

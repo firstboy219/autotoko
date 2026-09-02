@@ -2603,6 +2603,10 @@ public class ScanActivity extends AppCompatActivity {
             dialog.dismiss();
             startActivity(new Intent(this, StockActivity.class));
         });
+        sheet.findViewById(R.id.menuHpp).setOnClickListener(v -> {
+            dialog.dismiss();
+            startActivity(new Intent(this, HppActivity.class));
+        });
         sheet.findViewById(R.id.menuTextScan).setOnClickListener(v -> {
             dialog.dismiss();
             startActivity(new Intent(this, TextScanActivity.class));
@@ -2679,6 +2683,7 @@ public class ScanActivity extends AppCompatActivity {
         final int[][] menuIzin = {
             {R.id.menuDashboard, 0}, {R.id.menuDelivery, 1}, {R.id.menuStock, 1},
             {R.id.menuTextScan, 2}, {R.id.menuHistory, 3}, {R.id.menuRecap, 3},
+            {R.id.menuHpp, 2},
             {R.id.menuPayout, 4}, {R.id.menuPending, 0},
         };
         final String[] kunci = {"dashboard", "bahan", "produk", "scan", "pencairan"};

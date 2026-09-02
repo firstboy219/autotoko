@@ -6,12 +6,14 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
+  marketplaceSkuMap,
   marketplaceStatementLines,
   marketplaceStatements,
+  masterProducts,
   payoutMutations,
   resiScans,
   shops,
@@ -335,6 +337,82 @@ export class StatementsService {
       xs.reduce((a, b) => a + b.nominal, 0);
 
     const umurBelumCair = (belumCair as { umurHari: number }[]).map((x) => x.umurHari);
+
+    // ------------------------------------------- produk di tiap pesanan
+    //
+    // Laporan menyebut isi pesanan sebagai ID SKU, bukan nama. Nama hanya bisa
+    // muncul lewat peta yang dibuat penggunanya sendiri -- lihat detail-produk.ts
+    // untuk alasan kenapa harga TIDAK dipakai untuk menebaknya.
+    const marketplaces = [
+      ...new Set(pesanan.map((p) => p.marketplace).filter((m): m is string => !!m)),
+    ];
+    const barisPeta = marketplaces.length
+      ? await this.db
+          .select({
+            sku: marketplaceSkuMap.sku,
+            produkId: marketplaceSkuMap.masterProductId,
+            nama: masterProducts.name,
+          })
+          .from(marketplaceSkuMap)
+          .innerJoin(masterProducts, eq(masterProducts.id, marketplaceSkuMap.masterProductId))
+          .where(and(
+            eq(marketplaceSkuMap.userId, userId),
+            inArray(marketplaceSkuMap.marketplace, marketplaces),
+          ))
+      : [];
+    const peta = new Map(
+      barisPeta.map((r) => [r.sku, { id: r.produkId, nama: r.nama }] as const),
+    );
+
+    const katalog = await this.db
+      .select({
+        id: masterProducts.id,
+        nama: masterProducts.name,
+        sku: masterProducts.sku,
+        hargaDasar: masterProducts.basePrice,
+      })
+      .from(masterProducts)
+      .where(eq(masterProducts.userId, userId))
+      .orderBy(asc(masterProducts.name));
+
+    const biayaPesanan = biayaPerPesanan(
+      pesanan.map((p) => ({
+        raw: p.raw,
+        namaToko: null,
+        marketplace: p.marketplace ?? null,
+        periodeDari: p.periodeDari ?? null,
+        periodeSampai: p.periodeSampai ?? null,
+      })),
+      peta,
+    );
+
+    // Saran, bukan keputusan. Calon diurutkan dari yang harganya paling dekat
+    // dengan harga jual yang teramati, dan yang persis sama ditandai -- tapi
+    // tidak satu pun dipasang sendiri, karena satu harga di katalog ini
+    // dipakai beberapa produk sekaligus dan tebakan yang keliru akan terbaca
+    // sama meyakinkannya dengan yang benar.
+    const skuBelumDipetakan = biayaPesanan.skuBelumDipetakan.map((s) => ({
+      ...s,
+      saran: s.hargaSatuan == null
+        ? []
+        : katalog
+            .map((p) => ({
+              id: p.id,
+              nama: p.nama,
+              hargaDasar: p.hargaDasar == null ? null : Number(p.hargaDasar),
+            }))
+            .filter((p) => p.hargaDasar != null)
+            .map((p) => ({ ...p, selisih: Math.abs(p.hargaDasar! - s.hargaSatuan!) }))
+            .sort((a, b) => a.selisih - b.selisih)
+            .slice(0, 5)
+            .map((p) => ({
+              id: p.id,
+              nama: p.nama,
+              hargaDasar: p.hargaDasar,
+              hargaSama: p.selisih < 1,
+            })),
+    }));
+
     return {
       range: { from: q.from, to: q.to },
       shopId: q.shopId ?? null,
@@ -363,20 +441,80 @@ export class StatementsService {
        * yang bisa ditanyakan ke marketplace-nya satu per satu, dan itu
        * pekerjaan sebuah menu audit.
        */
-      biayaPesanan: biayaPerPesanan(
-        pesanan.map((p) => ({
-          raw: p.raw,
-          namaToko: null,
-          marketplace: p.marketplace ?? null,
-          periodeDari: p.periodeDari ?? null,
-          periodeSampai: p.periodeSampai ?? null,
-        })),
-      ),
+      biayaPesanan: { ...biayaPesanan, skuBelumDipetakan },
+      /** Untuk memilih produk saat memetakan SKU, tanpa panggilan terpisah. */
+      produkKatalog: katalog.map((p) => ({
+        id: p.id,
+        nama: p.nama,
+        sku: p.sku,
+        hargaDasar: p.hargaDasar == null ? null : Number(p.hargaDasar),
+      })),
       cocok,
       belumCair,
       belumDiscan,
       tanpaOrderId,
     };
+  }
+
+  /**
+   * Menyimpan terjemahan satu ID SKU marketplace ke satu produk di katalog.
+   *
+   * Pemetaan ini keputusan manusia. Sistem hanya menyarankan calon berdasarkan
+   * harga, dan harga saja tidak cukup membedakan produk di katalog nyata --
+   * satu angka bisa dipakai tiga produk. Karena itu tidak ada jalur otomatis
+   * ke fungsi ini: yang memutuskan selalu penggunanya.
+   */
+  async petakanSku(
+    userId: string,
+    b: { marketplace: string; sku: string; masterProductId: string | null },
+  ) {
+    const marketplace = (b.marketplace ?? "").trim();
+    const sku = (b.sku ?? "").trim();
+    if (!marketplace || !sku) {
+      throw new BadRequestException("marketplace dan sku wajib diisi");
+    }
+
+    // Membatalkan pemetaan berarti kembali ke "belum dipetakan", bukan ke
+    // sebuah nama kosong yang tetap terlihat seperti sudah dipetakan.
+    if (!b.masterProductId) {
+      await this.db
+        .delete(marketplaceSkuMap)
+        .where(and(
+          eq(marketplaceSkuMap.userId, userId),
+          eq(marketplaceSkuMap.marketplace, marketplace),
+          eq(marketplaceSkuMap.sku, sku),
+        ));
+      return { sku, marketplace, masterProductId: null };
+    }
+
+    const [produk] = await this.db
+      .select({ id: masterProducts.id })
+      .from(masterProducts)
+      .where(and(
+        eq(masterProducts.id, b.masterProductId),
+        // Diperiksa kepemilikannya di sini, bukan dipercaya dari badan
+        // permintaan: tanpa ini sebuah SKU bisa dipetakan ke produk milik
+        // tenant lain, dan namanya akan muncul di layar audit yang salah.
+        eq(masterProducts.userId, userId),
+      ))
+      .limit(1);
+    if (!produk) throw new NotFoundException("Produk tidak ditemukan");
+
+    await this.db
+      .insert(marketplaceSkuMap)
+      .values({
+        userId,
+        marketplace,
+        sku,
+        masterProductId: produk.id,
+        mappedBy: userId,
+      })
+      .onConflictDoUpdate({
+        target: [marketplaceSkuMap.userId, marketplaceSkuMap.marketplace, marketplaceSkuMap.sku],
+        set: { masterProductId: produk.id, mappedBy: userId, updatedAt: new Date() },
+      });
+
+    return { sku, marketplace, masterProductId: produk.id };
   }
 
   /* ------------------------------------------------------ rekonsiliasi */

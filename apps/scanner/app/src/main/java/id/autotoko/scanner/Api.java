@@ -792,6 +792,163 @@ public final class Api {
         call("DELETE", session.baseUrl() + "/api/resi/scans/" + id, session.token(), null, cb);
     }
 
+    /* --------------------------------------------- HPP & Harga Jual */
+
+    /*
+     * Query string disusun langsung tanpa penyandian: seluruh nilainya berasal
+     * dari daftar tetap di layar (nama urutan, jumlah hari) atau berupa UUID.
+     * Tidak ada teks bebas dari pengguna yang masuk ke sini.
+     */
+
+    /**
+     * Daftar produk beserta HPP, harga publish, dan marginnya.
+     *
+     * brandId kosong berarti SEMUA brand; "none" berarti yang belum punya
+     * brand. Dua hal yang berbeda -- menggabungkannya menyembunyikan produk
+     * yang justru paling sering lupa diberi brand.
+     */
+    public void costingList(String brandId, String sort, String days, Cb cb) {
+        String q = "?brandId=" + (brandId == null ? "" : brandId)
+                + "&sort=" + (sort == null ? "nama" : sort)
+                + "&days=" + (days == null ? "30" : days);
+        call("GET", session.baseUrl() + "/api/costing" + q, session.token(), null, cb);
+    }
+
+    /** Satu produk: resep, bahan packing, tarif, rincian HPP, dan harganya. */
+    public void costingDetail(String productId, Cb cb) {
+        call("GET", session.baseUrl() + "/api/costing/" + productId,
+                session.token(), null, cb);
+    }
+
+    /** Menyimpan tarif/biaya satu produk. Field yang tidak dikirim tidak diubah. */
+    public void costingUpdate(String productId, JSONObject body, Cb cb) {
+        call("PATCH", session.baseUrl() + "/api/costing/" + productId,
+                session.token(), body, cb);
+    }
+
+    /**
+     * Satu set tarif untuk banyak produk sekaligus.
+     *
+     * Field yang tidak disertakan di body TIDAK ditulis. Itulah seluruh
+     * keamanan layar ini: mengatur tarif afiliator pada empat puluh produk
+     * tidak boleh diam-diam menolkan tarif iklannya hanya karena formulirnya
+     * punya kotak untuk itu.
+     */
+    public void costingUpdateMany(JSONObject body, Cb cb) {
+        call("PATCH", session.baseUrl() + "/api/costing/bulk", session.token(), body, cb);
+    }
+
+    public void costingAddMaterial(String productId, JSONObject body, Cb cb) {
+        call("POST", session.baseUrl() + "/api/costing/" + productId + "/materials",
+                session.token(), body, cb);
+    }
+
+    /** Takaran dan harga satuan satu baris resep. */
+    public void costingUpdateMaterial(String bomItemId, Double quantity, Double unitCost,
+                                      Cb cb) {
+        JSONObject body = new JSONObject();
+        try {
+            if (quantity != null) body.put("quantity", quantity);
+            if (unitCost != null) body.put("unitCost", unitCost);
+        } catch (Exception ignored) {}
+        call("PATCH", session.baseUrl() + "/api/costing/materials/" + bomItemId,
+                session.token(), body, cb);
+    }
+
+    /** Menautkan baris resep lama ke bahan di master data. */
+    public void costingLinkMaterial(String bomItemId, String materialId, Cb cb) {
+        JSONObject body = new JSONObject();
+        try {
+            if (materialId != null) body.put("materialId", materialId);
+        } catch (Exception ignored) {}
+        call("PATCH", session.baseUrl() + "/api/costing/materials/" + bomItemId + "/link",
+                session.token(), body, cb);
+    }
+
+    public void costingRemoveMaterial(String bomItemId, Cb cb) {
+        call("DELETE", session.baseUrl() + "/api/costing/materials/" + bomItemId,
+                session.token(), null, cb);
+    }
+
+    /** Harga publish yang dihitung server untuk target margin/laba tertentu. */
+    public void costingSuggestPrice(String productId, String kind, double value, Cb cb) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("kind", kind);
+            body.put("value", value);
+        } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/costing/" + productId + "/suggest-price",
+                session.token(), body, cb);
+    }
+
+    /** Rata-rata pcs per resi, dihitung dari riwayat order sungguhan. */
+    public void costingAvgUnits(Cb cb) {
+        call("GET", session.baseUrl() + "/api/costing/meta/avg-units-per-order",
+                session.token(), null, cb);
+    }
+
+    /* ---- bahan packing: daftarnya bersama, jumlahnya per produk ---- */
+
+    public void costingPackingList(Cb cb) {
+        call("GET", session.baseUrl() + "/api/costing/packing-materials",
+                session.token(), null, cb);
+    }
+
+    public void costingPackingAdd(JSONObject body, Cb cb) {
+        call("POST", session.baseUrl() + "/api/costing/packing-materials",
+                session.token(), body, cb);
+    }
+
+    public void costingPackingUpdate(String id, double defaultQuantity, Cb cb) {
+        JSONObject body = new JSONObject();
+        try { body.put("defaultQuantity", defaultQuantity); } catch (Exception ignored) {}
+        call("PATCH", session.baseUrl() + "/api/costing/packing-materials/" + id,
+                session.token(), body, cb);
+    }
+
+    public void costingPackingRemove(String id, Cb cb) {
+        call("DELETE", session.baseUrl() + "/api/costing/packing-materials/" + id,
+                session.token(), null, cb);
+    }
+
+    /**
+     * Jumlah bahan packing yang dipakai SATU produk.
+     *
+     * quantity null menghapus jumlah khusus itu dan mengembalikannya ke
+     * default bersama -- bukan menyetelnya ke nol, yang berarti hal lain.
+     */
+    public void costingSetProductPacking(String productId, String packingMaterialId,
+                                         Double quantity, Cb cb) {
+        JSONObject body = new JSONObject();
+        try {
+            if (quantity != null) body.put("quantity", quantity);
+        } catch (Exception ignored) {}
+        call("PATCH", session.baseUrl() + "/api/costing/" + productId
+                + "/packing/" + packingMaterialId, session.token(), body, cb);
+    }
+
+    /** Saran AI atas struktur margin seluruh katalog. */
+    public void costingSaran(Cb cb) {
+        call("GET", session.baseUrl() + "/api/costing/saran", session.token(), null, cb);
+    }
+
+    /**
+     * Persentase potongan marketplace yang SEBENARNYA, dari laporan pencairan.
+     *
+     * Dipakai untuk menyarankan isi kolom "Biaya Marketplace", yang bawaannya
+     * 15% dan diketik sendiri. Terukur pada laporan sungguhan toko ini: 42%
+     * untuk TikTok Shop, 36% untuk Tokopedia.
+     */
+    public void biayaMarketplace(Cb cb) {
+        call("GET", session.baseUrl() + "/api/statements/biaya-marketplace",
+                session.token(), null, cb);
+    }
+
+    /** Brand/kategori toko, untuk penyaring daftar HPP. */
+    public void shopCategories(Cb cb) {
+        call("GET", session.baseUrl() + "/api/shops/categories", session.token(), null, cb);
+    }
+
     private void call(String method, String url, String token, JSONObject payload, Cb cb) {
         POOL.execute(() -> {
             Resp r = blocking(method, url, token, payload);

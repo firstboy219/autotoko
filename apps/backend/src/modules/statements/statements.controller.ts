@@ -120,6 +120,21 @@ export class StatementsController {
     return { success: true, data: await this.statements.biayaMarketplace(uid(req)) };
   }
 
+  /**
+   * Memetakan satu ID SKU marketplace ke satu produk di katalog.
+   *
+   * Laporan penyelesaian menyebut isi pesanan sebagai ID SKU, dan ID itu tidak
+   * ada di katalog mana pun -- jadi terjemahannya harus ditetapkan sekali oleh
+   * penggunanya. Mengirim masterProductId null membatalkan pemetaan.
+   */
+  @Post("sku-map")
+  async petakanSku(
+    @Req() req: FastifyRequest,
+    @Body() body: { marketplace: string; sku: string; masterProductId: string | null },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.statements.petakanSku(uid(req), body) };
+  }
+
   /** Manual lawan marketplace, pada satu toko dan satu rentang. */
   @Get("reconcile")
   async reconcile(

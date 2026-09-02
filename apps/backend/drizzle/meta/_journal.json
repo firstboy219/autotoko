@@ -393,6 +393,13 @@
       "when": 1786148727342,
       "tag": "0055_stock_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1786148727343,
+      "tag": "0056_marketplace_sku_map",
+      "breakpoints": true
     }
   ]
 }

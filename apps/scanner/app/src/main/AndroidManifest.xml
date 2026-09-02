@@ -130,6 +130,19 @@
             android:name=".StockActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".HppActivity"
+            android:exported="false"
+            android:label="HPP &amp; Harga Jual"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".HppDetailActivity"
+            android:exported="false"
+            android:label="Hitung HPP &amp; Harga Jual"
+            android:parentActivityName=".HppActivity"
+            android:screenOrientation="portrait" />
         <activity
             android:name=".PhotoActivity"
             android:exported="false"
