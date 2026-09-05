@@ -38,7 +38,7 @@ public class DashboardActivity extends AppCompatActivity {
     private LinearLayout root;
     private TextView status;
     private int hari = 30;
-    private JSONObject insights, ringkasHariIni, peringatan, tugas;
+    private JSONObject insights, ringkasHariIni, peringatan, tugas, v2;
     private String tglDari, tglSampai, gagalInsights;
     private int menunggu = 0;
 
@@ -88,8 +88,9 @@ public class DashboardActivity extends AppCompatActivity {
         tglDari = f.format(new Date(System.currentTimeMillis() - (hari - 1L) * 86400000L));
 
         insights = null; ringkasHariIni = null; peringatan = null; tugas = null;
+        v2 = null;
         gagalInsights = null;
-        menunggu = 4;
+        menunggu = 5;
         api.shopInsights(tglDari, tglSampai, r -> {
             if (r.ok()) insights = r.data();
             else gagalInsights = r.message("Gagal memuat dashboard.");
@@ -98,6 +99,7 @@ public class DashboardActivity extends AppCompatActivity {
         api.dashboardSummary(r -> { if (r.ok()) ringkasHariIni = r.data(); siap(); });
         api.dashboardAlerts(r -> { if (r.ok()) peringatan = r.data(); siap(); });
         api.pendingTasks(r -> { if (r.ok()) tugas = r.data(); siap(); });
+        api.dashboardV2(tglDari, tglSampai, r -> { if (r.ok()) v2 = r.data(); siap(); });
     }
 
     private void siap() {
@@ -116,8 +118,11 @@ public class DashboardActivity extends AppCompatActivity {
         status.setText("Periode " + hari + " hari terakhir");
         root.addView(pilihPeriode());
 
+        uangDanLaba();
+        belumCairV2();
         hariIni();
         perluPerhatian();
+        stokMenipisV2();
         belumLengkap();
         ringkasan(d);
         sorotan(d);
@@ -178,6 +183,136 @@ public class DashboardActivity extends AppCompatActivity {
                 ringkasHariIni.optInt("total_orders", 0) + " order"
                         + "\n" + rp(ringkasHariIni.optDouble("total_revenue", 0)) + " omzet"
                         + "\n" + rp(ringkasHariIni.optDouble("total_fee_charged", 0)) + " fee terpakai"));
+    }
+
+    /**
+     * Uang yang masuk, ke mana perginya, dan berapa yang BENAR-BENAR tersisa.
+     *
+     * Bagian "bagian pemilik" di bawah menjawab siapa mendapat berapa dari
+     * pencairan. Yang ini menjawab pertanyaan yang berbeda dan lebih penting:
+     * setelah bahan baku benar-benar dibeli dan fee dibayar, berapa yang
+     * tinggal. Dua angka itu sering dikira sama, dan tidak.
+     *
+     * SELISIH CADANGAN ditampilkan terang-terangan. Yang disisihkan untuk
+     * bahan baku bukan yang dibelanjakan; memakai cadangan sebagai biaya
+     * membuat laba terlihat lebih kecil daripada yang sebenarnya, dan itu
+     * membuat orang menahan pengeluaran yang sebetulnya mampu.
+     */
+    private void uangDanLaba() {
+        if (v2 == null) return;
+        JSONObject u = v2.optJSONObject("uang");
+        if (u == null) return;
+        JSONObject b = v2.optJSONObject("biaya");
+        JSONObject bd = v2.optJSONObject("banding");
+
+        root.addView(judul("Uang " + hari + " hari terakhir"));
+        root.addView(angkaBesar(rp(u.optDouble("kredit", 0)),
+                u.optInt("pencairan", 0) + " pencairan · " + rp(u.optDouble("perHari", 0)) + " per hari"));
+
+        if (bd != null && bd.optDouble("kredit", 0) > 0) {
+            // Angka tanpa pembandingnya tidak memberi tahu apakah bulan ini
+            // bagus atau buruk -- ia hanya besar.
+            root.addView(kotak("Dibanding periode sebelumnya",
+                    "Uang cair " + selisih(u.optDouble("kredit", 0), bd.optDouble("kredit", 0))
+                            + "\nPaket " + selisih(v2.optJSONObject("volume") == null ? 0
+                                    : v2.optJSONObject("volume").optDouble("paket", 0),
+                                    bd.optDouble("paket", 0))));
+        }
+
+        StringBuilder ke = new StringBuilder();
+        ke.append("Sedekah ").append(rp(u.optDouble("sedekah", 0))).append("\n");
+        ke.append("Sub-seller ").append(rp(u.optDouble("subSeller", 0))).append("\n");
+        ke.append("Disisihkan untuk bahan baku ").append(rp(u.optDouble("bahanBaku", 0))).append("\n");
+        ke.append("Sisa untuk seller ").append(rp(u.optDouble("sellerBersih", 0)));
+        root.addView(kotak("Ke mana uang itu pergi", ke.toString()));
+
+        if (b == null) return;
+        StringBuilder l = new StringBuilder();
+        l.append(rp(b.optDouble("labaBersih", 0)))
+         .append("  (").append(Math.round(b.optDouble("rateBersih", 0) * 100))
+         .append("% dari yang cair)\n\n");
+        l.append("Sudah dikurangi belanja bahan yang SEBENARNYA ")
+         .append(rp(b.optDouble("bahanBaku", 0)))
+         .append(" dari ").append(b.optInt("pembelianBahan", 0)).append(" pembelian");
+        if (b.optDouble("upahPacking", 0) > 0) {
+            l.append(", upah packing ").append(rp(b.optDouble("upahPacking", 0)));
+        }
+        if (b.optDouble("feeAdmin", 0) > 0) {
+            l.append(", fee admin ").append(rp(b.optDouble("feeAdmin", 0)));
+        }
+        l.append(".");
+        double selisihCad = b.optDouble("selisihCadangan", 0);
+        if (Math.abs(selisihCad) > 1) {
+            l.append("\n\nDisisihkan ").append(rp(u.optDouble("bahanBaku", 0)))
+             .append(", dibelanjakan ").append(rp(b.optDouble("bahanBaku", 0)))
+             .append(" — selisih ").append(rp(Math.abs(selisihCad)))
+             .append(selisihCad > 0 ? " belum terpakai." : " lebih dari cadangan.");
+        }
+        root.addView(kotak("Laba bersih seller", l.toString()));
+    }
+
+    /**
+     * Paket yang sudah diserahkan ke kurir tapi uangnya belum masuk.
+     *
+     * Ini piutang yang tidak pernah ditagih siapa pun kalau tidak ada yang
+     * melihatnya. Umur tertua disebut karena itu yang menentukan apakah ini
+     * jeda pencairan biasa atau ada yang tersangkut.
+     */
+    private void belumCairV2() {
+        if (v2 == null) return;
+        JSONObject c = v2.optJSONObject("belumCair");
+        if (c == null || c.optInt("paket", 0) <= 0) return;
+        LinearLayout box = kotak("Sudah dikirim, belum cair",
+                c.optInt("paket", 0) + " paket"
+                        + "\nTertua " + c.optInt("umurTertua", 0) + " hari"
+                        + " · rata-rata " + Math.round(c.optDouble("umurRata", 0)) + " hari");
+        if (c.optInt("umurTertua", 0) >= 14) box.setBackgroundColor(Color.parseColor("#FBF0DC"));
+        root.addView(box);
+    }
+
+    /**
+     * Bahan yang stoknya di bawah ambang, DENGAN angkanya.
+     *
+     * Peringatan di atas menyebut namanya saja. Nama tanpa angka tidak bisa
+     * dipakai memutuskan apa pun -- dan pada data toko ini sebagian stoknya
+     * MINUS, yang artinya bukan "menipis" melainkan pembukuannya sudah tidak
+     * cocok dengan raknya dan perlu opname.
+     */
+    private void stokMenipisV2() {
+        if (v2 == null) return;
+        JSONObject s = v2.optJSONObject("stokMenipis");
+        if (s == null || s.optInt("total", 0) <= 0) return;
+        JSONArray a = s.optJSONArray("teratas");
+        if (a == null || a.length() == 0) return;
+
+        StringBuilder isi = new StringBuilder();
+        int minus = 0;
+        for (int i = 0; i < a.length(); i++) {
+            JSONObject m = a.optJSONObject(i);
+            if (m == null) continue;
+            double stok = m.optDouble("stok", 0);
+            if (stok < 0) minus++;
+            isi.append("• ").append(m.optString("nama", "-")).append(": ")
+               .append(Math.round(stok)).append(" ").append(m.optString("satuan", ""))
+               .append("  (ambang ").append(Math.round(m.optDouble("ambang", 0))).append(")\n");
+        }
+        if (s.optInt("total", 0) > a.length()) {
+            isi.append("dan ").append(s.optInt("total", 0) - a.length()).append(" bahan lagi");
+        }
+        root.addView(judul("Stok di bawah ambang (" + s.optInt("total", 0) + ")"));
+        root.addView(kotak("", isi.toString().trim()));
+        if (minus > 0) {
+            root.addView(catatan(minus + " di antaranya MINUS — itu bukan menipis, itu "
+                    + "pembukuan yang tidak lagi cocok dengan rak. Perlu opname."));
+        }
+    }
+
+    /** "+38% dari Rp 2.775.391" — arah dan dasarnya sekaligus. */
+    private String selisih(double sekarang, double lalu) {
+        if (lalu <= 0) return rp(sekarang) + " (tidak ada pembanding)";
+        double p = (sekarang - lalu) / lalu * 100;
+        String tanda = p >= 0 ? "+" : "−";
+        return rp(sekarang) + "  " + tanda + Math.round(Math.abs(p)) + "% dari " + rp(lalu);
     }
 
     /** Stok menipis, saldo rendah, token toko yang mau habis. */

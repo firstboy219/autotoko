@@ -1,6 +1,7 @@
 package id.autotoko.scanner;
 
 import android.os.Bundle;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
@@ -13,6 +14,7 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -41,6 +43,9 @@ public class PayoutSettingsActivity extends AppCompatActivity {
     private TextView status;
 
     private EditText sedekah, subSeller, bahan, minTransfer, rekSedekah, rekBahan, feeNominal;
+    private EditText waSeller, waSubSeller;
+    /** Template bawaan + daftar placeholder yang dikenal, dari server. */
+    private JSONObject meta;
     private Spinner basis;
     private CheckBox feeAktif;
     private boolean sibuk = false;
@@ -80,7 +85,14 @@ public class PayoutSettingsActivity extends AppCompatActivity {
                 status.setText(r.message("Gagal memuat pengaturan."));
                 return;
             }
-            gambar(r.data());
+            final JSONObject s = r.data();
+            // Meta diambil setelah pengaturannya, bukan berbarengan: tanpa
+            // pengaturan tidak ada yang bisa digambar, sedangkan tanpa meta
+            // layarnya tetap berguna -- hanya kehilangan daftar placeholder.
+            api.payoutWaTemplateMeta(rm -> {
+                meta = rm.ok() ? rm.data() : null;
+                gambar(s);
+            });
         });
     }
 
@@ -153,8 +165,99 @@ public class PayoutSettingsActivity extends AppCompatActivity {
                         + "direkam saat batch dibuat, jadi mengubahnya di sini tidak "
                         + "mengubah batch yang sudah jalan."));
 
+        templateWa(s);
+
         root.addView(PayoutUi.tombol(this, "Simpan Pengaturan", v -> simpan()),
                 PayoutUi.lebar(this));
+    }
+
+    /**
+     * Isi pesan WhatsApp pencairan, bisa disunting dari ponsel.
+     *
+     * APK sudah MEMAKAI template ini sejak 5.8 -- teksnya dirender server saat
+     * tombol bagikan ditekan. Yang belum ada adalah cara mengubahnya, jadi
+     * satu-satunya jalan adalah membuka web. Padahal yang menemukan kalimatnya
+     * kurang pas justru orang yang sedang mengirimnya dari HP.
+     *
+     * DIKOSONGKAN berarti kembali ke bawaan, bukan mengirim pesan kosong --
+     * server mengubah teks kosong menjadi null, dan null berarti pakai bawaan.
+     */
+    private void templateWa(JSONObject s) {
+        root.addView(PayoutUi.judul(this, "Template Pesan WhatsApp"));
+        root.addView(PayoutUi.catatan(this,
+                "Dipakai saat membagikan rekap pencairan. Kosongkan untuk kembali "
+                        + "ke teks bawaan."));
+
+        root.addView(PayoutUi.label(this, "Pesan ke seller"));
+        waSeller = isianPanjang(PayoutUi.str(s, "waTemplateSeller", ""));
+        root.addView(waSeller);
+        root.addView(tombolBawaan("seller", waSeller));
+        root.addView(daftarPlaceholder("seller"));
+
+        root.addView(PayoutUi.label(this, "Pesan ke sub-seller"));
+        waSubSeller = isianPanjang(PayoutUi.str(s, "waTemplateSubSeller", ""));
+        root.addView(waSubSeller);
+        root.addView(tombolBawaan("sub_seller", waSubSeller));
+        root.addView(daftarPlaceholder("sub_seller"));
+
+        root.addView(PayoutUi.catatan(this,
+                "Baris yang SELURUH placeholder-nya kosong akan dibuang otomatis — "
+                        + "misalnya baris sub-seller pada batch tanpa sub-seller. Baris "
+                        + "yang memuat nama tak dikenal TIDAK dibuang, supaya salah ketik "
+                        + "kelihatan alih-alih menghilang diam-diam."));
+    }
+
+    /** Kotak teks banyak baris; PayoutUi.isian selalu satu baris. */
+    private EditText isianPanjang(String nilai) {
+        EditText e = new EditText(this);
+        e.setText(nilai == null ? "" : nilai);
+        e.setTextSize(13);
+        e.setSingleLine(false);
+        e.setMinLines(5);
+        e.setMaxLines(14);
+        e.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
+        e.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        e.setHint("Kosong = pakai teks bawaan");
+        return e;
+    }
+
+    private View tombolBawaan(String jenis, EditText tujuan) {
+        return PayoutUi.tombol(this, "Isi dengan teks bawaan", v -> {
+            String t = meta == null ? null
+                    : PayoutUi.str(meta.optJSONObject("bawaan"), jenis, null);
+            if (t == null || t.isEmpty()) {
+                Toast.makeText(this, "Teks bawaan belum bisa diambil dari server.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            tujuan.setText(t);
+        });
+    }
+
+    /**
+     * Nama yang boleh dipakai, beserta artinya.
+     *
+     * Ditulis apa adanya alih-alih disembunyikan di balik tombol bantuan:
+     * template tanpa daftar nama hanya bisa disunting dengan menebak, dan
+     * tebakan yang salah baru ketahuan setelah pesannya terkirim.
+     */
+    private View daftarPlaceholder(String jenis) {
+        StringBuilder b = new StringBuilder();
+        JSONArray a = meta == null ? null
+                : (meta.optJSONObject("tersedia") == null ? null
+                        : meta.optJSONObject("tersedia").optJSONArray(jenis));
+        if (a == null || a.length() == 0) {
+            b.append("Daftar nama belum bisa diambil dari server.");
+        } else {
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.optJSONObject(i);
+                if (o == null) continue;
+                b.append("{").append(PayoutUi.str(o, "nama", "?")).append("} — ")
+                 .append(PayoutUi.str(o, "arti", "")).append("\n");
+            }
+        }
+        return PayoutUi.catatan(this, b.toString().trim());
     }
 
     private static String angkaPersen(double pecahan) {
@@ -200,6 +303,12 @@ public class PayoutSettingsActivity extends AppCompatActivity {
             body.put("minTransferAmount", Math.round(PayoutUi.angka(minTransfer)));
             body.put("adminFeeEnabled", feeAktif.isChecked());
             body.put("adminFeeAmount", Math.round(PayoutUi.angka(feeNominal)));
+            // Dikirim apa adanya termasuk saat kosong: server mengubah teks
+            // kosong menjadi null, dan null berarti "pakai bawaan". Tidak
+            // mengirimnya sama sekali berarti "jangan ubah", yang membuat
+            // penghapusan template mustahil dilakukan dari sini.
+            body.put("waTemplateSeller", waSeller.getText().toString());
+            body.put("waTemplateSubSeller", waSubSeller.getText().toString());
         } catch (Exception ignored) {}
 
         sibuk = true;

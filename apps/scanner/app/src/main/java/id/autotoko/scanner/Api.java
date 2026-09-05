@@ -949,6 +949,29 @@ public final class Api {
         call("GET", session.baseUrl() + "/api/shops/categories", session.token(), null, cb);
     }
 
+    /**
+     * Angka dashboard versi kedua.
+     *
+     * Berbeda sumber dari shop-insights yang dipakai bagian lain layar ini:
+     * yang ini membawa pembanding periode sebelumnya dan LABA BERSIH yang
+     * sudah dikurangi belanja bahan baku yang sebenarnya -- bukan cadangan
+     * yang disisihkan. Dua angka itu bisa berselisih jutaan, dan yang dipakai
+     * menilai untung-rugi harus yang dibelanjakan.
+     */
+    public void dashboardV2(String dari, String sampai, Cb cb) {
+        // from/to, BUKAN days. Nama yang salah tidak ditolak -- ia diabaikan,
+        // dan endpoint-nya diam-diam memakai bawaan 30 hari. Terukur: days=7
+        // dan days=365 mengembalikan angka yang persis sama.
+        call("GET", session.baseUrl() + "/api/dashboard/v2?from=" + dari + "&to=" + sampai,
+                session.token(), null, cb);
+    }
+
+    /** Template WA bawaan beserta daftar placeholder yang dikenal. */
+    public void payoutWaTemplateMeta(Cb cb) {
+        call("GET", session.baseUrl() + "/api/payout/wa/template-meta",
+                session.token(), null, cb);
+    }
+
     private void call(String method, String url, String token, JSONObject payload, Cb cb) {
         POOL.execute(() -> {
             Resp r = blocking(method, url, token, payload);
