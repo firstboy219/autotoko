@@ -447,16 +447,31 @@ export function Toko() {
                       Hubungkan Sekarang
                     </Button>
                   ) : (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      icon="refresh"
-                      disabled={busy !== null}
-                      loading={busy === s.id}
-                      onClick={() => refresh(s.id)}
-                    >
-                      Refresh Token
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        icon="refresh"
+                        disabled={busy !== null}
+                        loading={busy === s.id}
+                        onClick={() => refresh(s.id)}
+                      >
+                        Refresh Token
+                      </Button>
+                      {/* Re-run the OAuth flow on the SAME shop row (passes its id
+                          as placeholderId) — needed to pick up newly-granted API
+                          scopes, which a token refresh alone cannot do. */}
+                      <Button
+                        size="sm"
+                        variant="filled"
+                        icon="link"
+                        disabled={busy !== null}
+                        loading={busy === s.id}
+                        onClick={() => connect(s.marketplace as Marketplace, s.id)}
+                      >
+                        Sambungkan Ulang
+                      </Button>
+                    </>
                   )}
                   <Button
                     size="sm"
