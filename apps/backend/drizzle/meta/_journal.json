@@ -393,6 +393,13 @@
       "when": 1789211400000,
       "tag": "0055_order_api_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1789212000000,
+      "tag": "0056_fulfillment_api_snapshots",
+      "breakpoints": true
     }
   ]
 }

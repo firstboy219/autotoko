@@ -89,6 +89,35 @@ export const orderApiSnapshots = pgTable(
   }),
 );
 
+// Audit mirror of marketplace fulfillment packages pulled from the API. Separate
+// audit table (like order_api_snapshots) — local resi/OCR data is never touched.
+export const fulfillmentApiSnapshots = pgTable(
+  "fulfillment_api_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    shopId: uuid("shop_id")
+      .notNull()
+      .references(() => shops.id, { onDelete: "cascade" }),
+    marketplace: marketplaceEnum("marketplace").notNull(),
+    packageId: varchar("package_id", { length: 128 }).notNull(),
+    marketplaceOrderId: varchar("marketplace_order_id", { length: 128 }),
+    status: varchar("status", { length: 64 }),
+    trackingNumber: varchar("tracking_number", { length: 128 }),
+    shippingProvider: varchar("shipping_provider", { length: 128 }),
+    raw: jsonb("raw"),
+    updatedAtMarketplace: timestamp("updated_at_marketplace", { withTimezone: true }),
+    apiSyncedAt: timestamp("api_synced_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    shopPkgUnique: unique("fulfillment_api_snapshots_shop_pkg_unique").on(
+      t.shopId,
+      t.packageId,
+    ),
+    shopIdx: index("fulfillment_api_snapshots_shop_idx").on(t.shopId),
+  }),
+);
+
 // PRD Bagian 9.1 — webhook idempotency (marketplaces may send the same event >1x).
 export const webhookEvents = pgTable(
   "webhook_events",

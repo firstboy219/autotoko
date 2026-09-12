@@ -92,6 +92,19 @@ export interface OrderData {
   raw?: unknown;
 }
 
+/** Flattened package/fulfillment shape for the audit sync. */
+export interface FulfillmentData {
+  packageId: string;
+  orderId?: string;
+  status?: string;
+  trackingNumber?: string;
+  shippingProvider?: string;
+  /** Unix seconds when the package was last updated on the marketplace. */
+  updatedAtMarketplace?: number;
+  /** Full raw API payload. */
+  raw?: unknown;
+}
+
 export interface StockUpdate {
   marketplaceItemId: string;
   modelId?: string;

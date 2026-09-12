@@ -1,6 +1,7 @@
 import { Injectable, BadGatewayException, Logger } from "@nestjs/common";
 import type {
   ConnectResult,
+  FulfillmentData,
   MarketplaceAuthPort,
   OrderData,
   ProductData,
@@ -238,6 +239,46 @@ export class TikTokAdapter implements MarketplaceAuthPort {
       if (!pageToken) break;
     }
     return out;
+  }
+
+  /**
+   * Pull the shop's fulfillment packages (all pages) via
+   * POST /fulfillment/{version}/packages/search. Read-only — audit sync.
+   */
+  async listPackages(accessToken: string, shopCipher: string): Promise<FulfillmentData[]> {
+    const path = `/fulfillment/${VERSION}/packages/search`;
+    const out: FulfillmentData[] = [];
+    let pageToken = "";
+    for (let page = 0; page < 500; page++) {
+      const query: Record<string, string | number> = { page_size: 50 };
+      if (pageToken) query.page_token = pageToken;
+      const data = await this.signedPost(path, accessToken, shopCipher, query, {});
+      const packages: any[] = data?.packages ?? [];
+      for (const p of packages) out.push(this.mapPackage(p));
+      pageToken = data?.next_page_token ?? "";
+      if (!pageToken) break;
+    }
+    return out;
+  }
+
+  private mapPackage(p: any): FulfillmentData {
+    const orderId =
+      p?.order_id ??
+      (Array.isArray(p?.orders) ? p.orders[0]?.id : undefined) ??
+      (Array.isArray(p?.order_line_item_ids) ? undefined : undefined);
+    const updateTime = Number(p?.update_time ?? 0);
+    return {
+      packageId: String(p?.id ?? p?.package_id ?? ""),
+      orderId: orderId ? String(orderId) : undefined,
+      status: p?.status ? String(p.status) : p?.package_status ? String(p.package_status) : undefined,
+      trackingNumber: p?.tracking_number ? String(p.tracking_number) : undefined,
+      shippingProvider:
+        p?.shipping_provider_name ?? p?.shipping_provider
+          ? String(p.shipping_provider_name ?? p.shipping_provider)
+          : undefined,
+      updatedAtMarketplace: updateTime > 0 ? updateTime : undefined,
+      raw: p,
+    };
   }
 
   private mapOrder(o: any): OrderData {

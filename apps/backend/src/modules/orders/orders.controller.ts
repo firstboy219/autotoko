@@ -22,6 +22,7 @@ import {
   type FulfillmentStatus,
 } from "./orders.service.js";
 import { OrderSyncService } from "./order-sync.service.js";
+import { FulfillmentSyncService } from "./fulfillment-sync.service.js";
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
@@ -71,6 +72,7 @@ export class OrdersController {
   constructor(
     private readonly orders: OrdersService,
     private readonly sync: OrderSyncService,
+    private readonly fulfillment: FulfillmentSyncService,
   ) {}
 
   // --- API order sync (audit) ---------------------------------------------
@@ -95,6 +97,32 @@ export class OrdersController {
     return {
       success: true,
       data: await this.sync.listSnapshots(targetUser(req, userId), shopId),
+    };
+  }
+
+  // Pull a connected shop's fulfillment packages into fulfillment_api_snapshots.
+  @Post("fulfillment/sync/:shopId")
+  async syncFulfillment(
+    @Req() req: FastifyRequest,
+    @Param("shopId") shopId: string,
+    @Query("userId") userId?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.fulfillment.syncFulfillment(targetUser(req, userId), shopId),
+    };
+  }
+
+  // Audit view of the API-pulled fulfillment/package snapshots for a shop.
+  @Get("fulfillment/snapshots/:shopId")
+  async fulfillmentSnapshots(
+    @Req() req: FastifyRequest,
+    @Param("shopId") shopId: string,
+    @Query("userId") userId?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.fulfillment.listSnapshots(targetUser(req, userId), shopId),
     };
   }
 

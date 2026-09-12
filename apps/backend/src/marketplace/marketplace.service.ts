@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import type {
+  FulfillmentData,
   Marketplace,
   MarketplaceAuthPort,
   OrderData,
@@ -55,6 +56,22 @@ export class MarketplaceService {
       default:
         throw new BadRequestException(
           `Order sync not implemented for marketplace: ${marketplace}`,
+        );
+    }
+  }
+
+  /** Read-only fulfillment/package pull for the audit sync. TikTok only for now. */
+  async listPackages(
+    marketplace: Marketplace,
+    accessToken: string,
+    shopCipher: string,
+  ): Promise<FulfillmentData[]> {
+    switch (marketplace) {
+      case "tiktok":
+        return this.tiktok.listPackages(accessToken, shopCipher);
+      default:
+        throw new BadRequestException(
+          `Fulfillment sync not implemented for marketplace: ${marketplace}`,
         );
     }
   }
