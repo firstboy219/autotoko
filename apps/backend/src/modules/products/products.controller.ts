@@ -1,11 +1,14 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -23,6 +26,20 @@ import {
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Resolve the target user: normally the caller, but an admin may act on behalf
+// of a specific seller via ?userId= (mirrors ShopsController.connect).
+function targetUser(req: FastifyRequest, override?: string): string {
+  const caller = (req as FastifyRequest & { user: JwtPayload }).user;
+  if (!override) return caller.sub;
+  if (caller.role !== "admin") {
+    throw new ForbiddenException("Only admins may act on behalf of another user");
+  }
+  if (!UUID_RE.test(override)) throw new BadRequestException("Invalid userId");
+  return override;
 }
 
 @Controller("products")
@@ -45,14 +62,21 @@ export class ProductsController {
   async syncProducts(
     @Req() req: FastifyRequest,
     @Param("shopId") shopId: string,
+    @Query("userId") userId?: string,
   ): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.sync.syncProducts(uid(req), shopId) };
+    return {
+      success: true,
+      data: await this.sync.syncProducts(targetUser(req, userId), shopId),
+    };
   }
 
   // Review queue: API postings not yet linked to a master product.
   @Get("postings/pending")
-  async pendingPostings(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.sync.listPending(uid(req)) };
+  async pendingPostings(
+    @Req() req: FastifyRequest,
+    @Query("userId") userId?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.listPending(targetUser(req, userId)) };
   }
 
   // Merge an API posting onto a master (existing or newly created from it).

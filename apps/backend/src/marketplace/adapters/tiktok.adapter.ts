@@ -157,15 +157,18 @@ export class TikTokAdapter implements MarketplaceAuthPort {
     path: string,
     accessToken: string,
     shopCipher: string,
+    extraQuery: Record<string, string | number>,
     body: Record<string, unknown>,
   ): Promise<any> {
     const { appKey, appSecret } = await this.creds();
     const timestamp = unixNow();
     const bodyStr = JSON.stringify(body);
+    // Common params + endpoint params (e.g. page_size, page_token) are all signed.
     const query: Record<string, string | number> = {
       app_key: appKey,
       shop_cipher: shopCipher,
       timestamp,
+      ...extraQuery,
     };
     const sign = signTikTok({ appSecret, path, query, body: bodyStr });
     const qs = new URLSearchParams({ ...query, timestamp: String(timestamp), sign } as Record<
@@ -199,9 +202,11 @@ export class TikTokAdapter implements MarketplaceAuthPort {
     let pageToken = "";
     // Hard cap on pages to avoid an unbounded loop on a misbehaving cursor.
     for (let page = 0; page < 200; page++) {
-      const body: Record<string, unknown> = { page_size: 100 };
-      if (pageToken) body.page_token = pageToken;
-      const data = await this.signedPost(path, accessToken, shopCipher, body);
+      // page_size/page_token are query params for this endpoint; body carries
+      // optional filters (none — we want the full catalog).
+      const query: Record<string, string | number> = { page_size: 100 };
+      if (pageToken) query.page_token = pageToken;
+      const data = await this.signedPost(path, accessToken, shopCipher, query, {});
       const products: any[] = data?.products ?? [];
       for (const p of products) out.push(this.mapProduct(p));
       pageToken = data?.next_page_token ?? "";
