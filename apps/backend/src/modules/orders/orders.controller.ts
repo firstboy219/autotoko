@@ -1,9 +1,12 @@
 import {
+  BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Patch,
+  Post,
   Query,
   Req,
   UseGuards,
@@ -18,9 +21,23 @@ import {
   FULFILLMENT_STATUSES,
   type FulfillmentStatus,
 } from "./orders.service.js";
+import { OrderSyncService } from "./order-sync.service.js";
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Normally the caller; an admin may act on behalf of a seller via ?userId=.
+function targetUser(req: FastifyRequest, override?: string): string {
+  const caller = (req as FastifyRequest & { user: JwtPayload }).user;
+  if (!override) return caller.sub;
+  if (caller.role !== "admin") {
+    throw new ForbiddenException("Only admins may act on behalf of another user");
+  }
+  if (!UUID_RE.test(override)) throw new BadRequestException("Invalid userId");
+  return override;
 }
 
 class UpdateStatusDto {
@@ -51,7 +68,35 @@ class ListOrdersQuery {
 @Controller("orders")
 @UseGuards(JwtAuthGuard)
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly sync: OrderSyncService,
+  ) {}
+
+  // --- API order sync (audit) ---------------------------------------------
+  // Pull a connected shop's orders from the marketplace API into
+  // order_api_snapshots (separate from local `orders`, which is never touched).
+  @Post("sync/:shopId")
+  async syncOrders(
+    @Req() req: FastifyRequest,
+    @Param("shopId") shopId: string,
+    @Query("userId") userId?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.syncOrders(targetUser(req, userId), shopId) };
+  }
+
+  // Audit view of the API-pulled order snapshots for a shop.
+  @Get("api-snapshots/:shopId")
+  async apiSnapshots(
+    @Req() req: FastifyRequest,
+    @Param("shopId") shopId: string,
+    @Query("userId") userId?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.sync.listSnapshots(targetUser(req, userId), shopId),
+    };
+  }
 
   @Get()
   async list(

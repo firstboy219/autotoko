@@ -1,5 +1,10 @@
 import { Injectable, BadGatewayException, Logger } from "@nestjs/common";
-import type { ConnectResult, MarketplaceAuthPort, ProductData } from "@autotoko/shared";
+import type {
+  ConnectResult,
+  MarketplaceAuthPort,
+  OrderData,
+  ProductData,
+} from "@autotoko/shared";
 import { AdminSettingsService } from "../../modules/admin-settings/admin-settings.service.js";
 import { signTikTok, unixNow } from "../signing/tiktok.signer.js";
 
@@ -213,6 +218,44 @@ export class TikTokAdapter implements MarketplaceAuthPort {
       if (!pageToken) break;
     }
     return out;
+  }
+
+  /**
+   * Pull the shop's orders (all pages) via POST /order/{version}/orders/search.
+   * Read-only — used by the audit sync. No filters = full history the API allows.
+   */
+  async listOrders(accessToken: string, shopCipher: string): Promise<OrderData[]> {
+    const path = `/order/${VERSION}/orders/search`;
+    const out: OrderData[] = [];
+    let pageToken = "";
+    for (let page = 0; page < 500; page++) {
+      const query: Record<string, string | number> = { page_size: 50 };
+      if (pageToken) query.page_token = pageToken;
+      const data = await this.signedPost(path, accessToken, shopCipher, query, {});
+      const orders: any[] = data?.orders ?? [];
+      for (const o of orders) out.push(this.mapOrder(o));
+      pageToken = data?.next_page_token ?? "";
+      if (!pageToken) break;
+    }
+    return out;
+  }
+
+  private mapOrder(o: any): OrderData {
+    const recipient = o?.recipient_address ?? {};
+    const total = Number(o?.payment?.total_amount ?? o?.payment?.total ?? 0);
+    const createTime = Number(o?.create_time ?? 0);
+    return {
+      marketplaceOrderId: String(o?.id ?? ""),
+      status: o?.status ? String(o.status) : undefined,
+      buyerName: recipient?.name ? String(recipient.name) : undefined,
+      totalAmount: Number.isFinite(total) ? total : undefined,
+      shippingCourier: o?.shipping_provider ? String(o.shipping_provider) : undefined,
+      trackingNumber: o?.tracking_number ? String(o.tracking_number) : undefined,
+      paymentMethod: o?.payment_method_name ? String(o.payment_method_name) : undefined,
+      items: Array.isArray(o?.line_items) ? o.line_items : undefined,
+      createdAtMarketplace: createTime > 0 ? createTime : undefined,
+      raw: o,
+    };
   }
 
   private mapProduct(p: any): ProductData {

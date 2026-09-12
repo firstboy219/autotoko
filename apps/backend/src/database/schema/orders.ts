@@ -55,6 +55,40 @@ export const orders = pgTable(
   }),
 );
 
+// Audit mirror of marketplace orders pulled from the API. Kept SEPARATE from
+// `orders` (local/OCR/webhook baseline) because orders has a UNIQUE
+// (marketplace, marketplace_order_id) constraint — the two can't coexist there.
+// The audit compares this table against `orders`; local rows are never touched.
+export const orderApiSnapshots = pgTable(
+  "order_api_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    shopId: uuid("shop_id")
+      .notNull()
+      .references(() => shops.id, { onDelete: "cascade" }),
+    marketplace: marketplaceEnum("marketplace").notNull(),
+    marketplaceOrderId: varchar("marketplace_order_id", { length: 128 }).notNull(),
+    status: varchar("status", { length: 64 }),
+    buyerName: varchar("buyer_name", { length: 255 }),
+    totalAmount: numeric("total_amount", { precision: 15, scale: 2 }),
+    shippingCourier: varchar("shipping_courier", { length: 128 }),
+    trackingNumber: varchar("tracking_number", { length: 128 }),
+    paymentMethod: varchar("payment_method", { length: 64 }),
+    items: jsonb("items"),
+    raw: jsonb("raw"),
+    createdAtMarketplace: timestamp("created_at_marketplace", { withTimezone: true }),
+    apiSyncedAt: timestamp("api_synced_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    shopOrderUnique: unique("order_api_snapshots_shop_order_unique").on(
+      t.shopId,
+      t.marketplaceOrderId,
+    ),
+    shopIdx: index("order_api_snapshots_shop_idx").on(t.shopId),
+  }),
+);
+
 // PRD Bagian 9.1 — webhook idempotency (marketplaces may send the same event >1x).
 export const webhookEvents = pgTable(
   "webhook_events",

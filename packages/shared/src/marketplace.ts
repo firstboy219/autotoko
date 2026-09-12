@@ -76,6 +76,22 @@ export interface ProductData {
   raw?: unknown;
 }
 
+/** Flattened order shape for the audit sync (stored in order_api_snapshots). */
+export interface OrderData {
+  marketplaceOrderId: string;
+  status?: string;
+  buyerName?: string;
+  totalAmount?: number;
+  shippingCourier?: string;
+  trackingNumber?: string;
+  paymentMethod?: string;
+  items?: unknown;
+  /** Unix seconds when the order was created on the marketplace. */
+  createdAtMarketplace?: number;
+  /** Full raw API payload. */
+  raw?: unknown;
+}
+
 export interface StockUpdate {
   marketplaceItemId: string;
   modelId?: string;
