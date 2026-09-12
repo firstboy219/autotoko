@@ -1,0 +1,16 @@
+-- Dari mana nomor pesanan sebuah scan berasal.
+--
+-- Sampai sekarang kolom label_order_no tidak menyimpan asal-usulnya, jadi
+-- nomor yang dibaca mesin dan nomor yang dibenarkan orang terlihat persis
+-- sama. Untuk menu audit -- yang tugasnya menuduh marketplace atas pesanan
+-- yang tidak dicairkan -- perbedaan itu menentukan: sebuah "pesanan hilang"
+-- yang nomornya ditebak mesin adalah tuduhan yang berdiri di atas tebakan.
+--
+-- Aditif dan boleh kosong. Baris yang sudah ada tetap NULL, dan NULL berarti
+-- persis apa adanya: asalnya tidak tercatat, bukan bahwa ia dibaca mesin.
+--
+--   ocr           dibaca mesin, bentuknya sendiri sudah cukup meyakinkan
+--   ocr_label     dibaca mesin, tercetak di sebelah tulisan "No. Pesanan"
+--   ocr_confirmed dibaca mesin, lalu dibenarkan orang yang memegang labelnya
+--   manual        diketik orang
+ALTER TABLE resi_scans ADD COLUMN IF NOT EXISTS label_order_no_source varchar(16);

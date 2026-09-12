@@ -1,0 +1,12 @@
+-- The names a product is actually sold under.
+--
+-- A shipping label prints the marketplace listing title, not the master
+-- product name: "Renature - Cool Mint Mouthspray wangi 24jam hilangkan bau
+-- mulut..." has to become "Cool Mint 100ml". The scanner matches on shared
+-- words, which works when the two overlap and fails when the listing is named
+-- something else entirely — a brand prefix, a bundle name, a seasonal title.
+--
+-- One free-text column, one alias per line, rather than a table: nothing
+-- queries inside it, it is read whole by the scanner along with the product,
+-- and a seller typing three alternative names should not need a second screen.
+ALTER TABLE "master_products" ADD COLUMN IF NOT EXISTS "marketplace_aliases" text;

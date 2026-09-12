@@ -8,11 +8,15 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { Throttle } from "@nestjs/throttler";
 import type { ApiResponse } from "@autotoko/shared";
 import { AuthService } from "./auth.service.js";
 import { EmailOtpService } from "./email-otp.service.js";
 import { LoginDto, WaVerifyDto, EmailStartDto, EmailVerifyDto } from "./dto/auth.dto.js";
 
+// Tighter limit on auth: max 30 requests/min per IP (brute-force protection
+// without blocking legit retries/OTP).
+@Throttle({ default: { limit: 30, ttl: 60_000 } })
 @Controller("auth")
 export class AuthController {
   constructor(
@@ -25,6 +29,12 @@ export class AuthController {
   @Post("login")
   async login(@Body() dto: LoginDto): Promise<ApiResponse<{ accessToken: string }>> {
     return { success: true, data: await this.auth.login(dto.username, dto.password) };
+  }
+
+  // Passwordless demo login for the TikTok App Review (DEMO_LOGIN_ENABLED=true).
+  @Post("demo-login")
+  async demoLogin(): Promise<ApiResponse<{ accessToken: string }>> {
+    return { success: true, data: await this.auth.demoLogin() };
   }
 
   @Post("email/start")

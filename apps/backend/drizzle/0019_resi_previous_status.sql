@@ -1,0 +1,1 @@
+ALTER TABLE "resi_scans" ADD COLUMN "previous_status" varchar(32);

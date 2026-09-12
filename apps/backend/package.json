@@ -9,12 +9,13 @@
     "start:prod": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "test": "echo \"(backend) no tests yet\"",
+    "test": "vitest run",
     "clean": "rm -rf dist .turbo *.tsbuildinfo",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@autotoko/shared": "workspace:*",
@@ -25,6 +26,7 @@
     "@nestjs/platform-fastify": "^10.4.4",
     "@nestjs/platform-socket.io": "^11.1.27",
     "@nestjs/schedule": "^4.1.1",
+    "@nestjs/throttler": "^6.5.0",
     "@nestjs/websockets": "^11.1.27",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
@@ -34,7 +36,8 @@
     "postgres": "^3.4.5",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.5",
@@ -43,6 +46,7 @@
     "@types/nodemailer": "^8.0.1",
     "dotenv": "^16.4.5",
     "drizzle-kit": "^0.28.1",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
   }
 }

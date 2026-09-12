@@ -2,6 +2,7 @@ import {
   Inject,
   Injectable,
   BadRequestException,
+  NotFoundException,
   Logger,
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
@@ -155,6 +156,39 @@ export class ShopsService {
       this.logger.log(`Token refresh: ${refreshed} ok, ${failed} failed`);
     }
     return { refreshed, failed };
+  }
+
+  /** Manually refresh a single shop's token (user-triggered from Toko page). */
+  async refreshOne(userId: string, shopId: string): Promise<{ accessTokenExpireAt: Date | null }> {
+    const [shop] = await this.db
+      .select()
+      .from(shops)
+      .where(and(eq(shops.id, shopId), eq(shops.userId, userId)))
+      .limit(1);
+    if (!shop) throw new NotFoundException("Toko tidak ditemukan");
+    await this.refreshShop(shop);
+    const [updated] = await this.db
+      .select({ exp: shops.accessTokenExpireAt })
+      .from(shops)
+      .where(eq(shops.id, shopId))
+      .limit(1);
+    return { accessTokenExpireAt: updated?.exp ?? null };
+  }
+
+  /** Disconnect a shop (mark disconnected; keeps orders/history intact). */
+  async disconnect(userId: string, shopId: string): Promise<{ id: string; shopStatus: string }> {
+    const [shop] = await this.db
+      .select({ id: shops.id })
+      .from(shops)
+      .where(and(eq(shops.id, shopId), eq(shops.userId, userId)))
+      .limit(1);
+    if (!shop) throw new NotFoundException("Toko tidak ditemukan");
+    await this.db
+      .update(shops)
+      .set({ shopStatus: "disconnected", accessToken: null, refreshToken: null })
+      .where(eq(shops.id, shopId));
+    this.logger.log(`Shop ${shopId} disconnected by user ${userId}`);
+    return { id: shopId, shopStatus: "disconnected" };
   }
 
   private async refreshShop(shop: typeof shops.$inferSelect): Promise<void> {

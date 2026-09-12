@@ -12,6 +12,9 @@ import {
 import { WalletService } from "../billing/wallet.service.js";
 import { EventsGateway } from "../events/events.gateway.js";
 import { BomService } from "../bom/bom.service.js";
+import { AiService } from "../ai/ai.service.js";
+import { AiProviderService } from "../ai/ai-provider.service.js";
+import { AutopilotLogService } from "../ai/autopilot-log.service.js";
 
 interface OrderEvent {
   marketplace: Marketplace;
@@ -69,6 +72,9 @@ export class WebhooksService {
     private readonly wallet: WalletService,
     private readonly events: EventsGateway,
     private readonly bom: BomService,
+    private readonly ai: AiService,
+    private readonly aiProvider: AiProviderService,
+    private readonly autopilotLog: AutopilotLogService,
   ) {}
 
   /**
@@ -269,7 +275,82 @@ export class WebhooksService {
     }
     // Real-time push to the seller's dashboard.
     this.events.emitNewOrder(shop.userId, order);
-    return { order: order!.id, action: "created", billing, bom };
+    // AI autopilot: auto-approve the order if the owner enabled it (CMS toggle).
+    const autopilot = await this.maybeAutoApprove(shop.userId, order!);
+    return { order: order!.id, action: "created", billing, bom, autopilot };
+  }
+
+  /**
+   * Auto Approve autopilot (PRD): when the owner switches the `auto_approve`
+   * feature ON in the Admin CMS, let the AI decide whether each new order is
+   * safe to approve. On approve → fulfillmentStatus "masuk" → "approved" and a
+   * realtime order_update so a human can watch it happen. On reject or any
+   * error we leave the order at "masuk" for manual review (fail-safe). Never
+   * blocks order ingestion.
+   */
+  private async maybeAutoApprove(
+    userId: string,
+    order: typeof orders.$inferSelect,
+  ): Promise<Record<string, unknown>> {
+    try {
+      if (!(await this.aiProvider.isFeatureEnabled("auto_approve"))) {
+        return { enabled: false };
+      }
+      const itemCount = Array.isArray(order.items) ? order.items.length : undefined;
+      const verdict = await this.ai.autoApprove({
+        total: order.totalAmount ? Number(order.totalAmount) : undefined,
+        buyerName: order.buyerName ?? undefined,
+        itemCount,
+        raw: order.items,
+      });
+      const provider = (await this.aiProvider.resolveConfig("auto_approve")).provider;
+      if (verdict.approve) {
+        const [updated] = await this.db
+          .update(orders)
+          .set({ fulfillmentStatus: "approved", updatedAt: new Date() })
+          .where(eq(orders.id, order.id))
+          .returning();
+        this.events.emitOrderUpdate(userId, updated);
+        this.logger.log(`Autopilot approved order ${order.id}: ${verdict.reason}`);
+        await this.autopilotLog.record({
+          userId,
+          feature: "auto_approve",
+          action: "auto_approve",
+          status: "done",
+          provider,
+          summary: `Disetujui otomatis: ${verdict.reason}`,
+          refType: "order",
+          refId: order.id,
+        });
+        return { enabled: true, approved: true, reason: verdict.reason };
+      }
+      this.logger.log(`Autopilot held order ${order.id} for review: ${verdict.reason}`);
+      await this.autopilotLog.record({
+        userId,
+        feature: "auto_approve",
+        action: "auto_approve",
+        status: "held",
+        provider,
+        summary: `Ditahan untuk review manual: ${verdict.reason}`,
+        refType: "order",
+        refId: order.id,
+      });
+      return { enabled: true, approved: false, reason: verdict.reason };
+    } catch (err) {
+      this.logger.warn(
+        `Autopilot auto-approve failed for order ${order.id}: ${(err as Error).message}`,
+      );
+      await this.autopilotLog.record({
+        userId,
+        feature: "auto_approve",
+        action: "auto_approve",
+        status: "error",
+        summary: (err as Error).message,
+        refType: "order",
+        refId: order.id,
+      });
+      return { enabled: true, error: (err as Error).message };
+    }
   }
 
   /** Per-transaction billing (PRD Bagian 4.3): deduct fee on new order. */
