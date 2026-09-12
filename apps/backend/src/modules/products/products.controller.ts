@@ -13,10 +13,12 @@ import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, type JwtPayload } from "../auth/jwt-auth.guard.js";
 import { ProductsService } from "./products.service.js";
+import { ProductSyncService } from "./product-sync.service.js";
 import {
   CreateMasterDto,
   UpdateMasterDto,
   CreatePostingDto,
+  MergePostingDto,
 } from "./dto/products.dto.js";
 
 function uid(req: FastifyRequest): string {
@@ -26,11 +28,47 @@ function uid(req: FastifyRequest): string {
 @Controller("products")
 @UseGuards(JwtAuthGuard)
 export class ProductsController {
-  constructor(private readonly products: ProductsService) {}
+  constructor(
+    private readonly products: ProductsService,
+    private readonly sync: ProductSyncService,
+  ) {}
 
   @Get()
   async list(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.products.listMasters(uid(req)) };
+  }
+
+  // --- API product sync (audit) -------------------------------------------
+  // Pull a connected shop's catalog from the marketplace API into product_postings
+  // as source="api" rows. Manual (audit) rows are never overwritten.
+  @Post("sync/:shopId")
+  async syncProducts(
+    @Req() req: FastifyRequest,
+    @Param("shopId") shopId: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.syncProducts(uid(req), shopId) };
+  }
+
+  // Review queue: API postings not yet linked to a master product.
+  @Get("postings/pending")
+  async pendingPostings(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.listPending(uid(req)) };
+  }
+
+  // Merge an API posting onto a master (existing or newly created from it).
+  @Post("postings/:postingId/merge")
+  async mergePosting(
+    @Req() req: FastifyRequest,
+    @Param("postingId") postingId: string,
+    @Body() dto: MergePostingDto,
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.sync.merge(uid(req), postingId, {
+        masterProductId: dto.masterProductId,
+        createMaster: dto.createMaster,
+      }),
+    };
   }
 
   @Post()

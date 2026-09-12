@@ -60,6 +60,8 @@ export interface Order {
 }
 
 export interface ProductData {
+  /** Marketplace product/item id (TikTok product.id) — stable key for upserts. */
+  marketplaceItemId?: string;
   sku: string;
   title: string;
   description: string;
@@ -68,6 +70,10 @@ export interface ProductData {
   images: string[];
   categoryId?: string;
   weightGram?: number;
+  /** Marketplace listing status (e.g. TikTok ACTIVATE/DEACTIVATED), verbatim. */
+  status?: string;
+  /** Full raw API payload for the row (audit/debug). */
+  raw?: unknown;
 }
 
 export interface StockUpdate {

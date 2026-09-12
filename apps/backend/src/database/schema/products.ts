@@ -16,6 +16,7 @@ import {
   productStatusEnum,
   healthScoreEnum,
   postingStatusEnum,
+  postingSourceEnum,
   restockMethodEnum,
 } from "./enums";
 
@@ -91,9 +92,11 @@ export const productPostings = pgTable(
   "product_postings",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    masterProductId: uuid("master_product_id")
-      .notNull()
-      .references(() => masterProducts.id, { onDelete: "cascade" }),
+    // Nullable: API-pulled postings arrive unlinked and stay "pending review"
+    // until a user merges them onto a master (or one is auto-matched by SKU).
+    masterProductId: uuid("master_product_id").references(() => masterProducts.id, {
+      onDelete: "cascade",
+    }),
     shopId: uuid("shop_id")
       .notNull()
       .references(() => shops.id, { onDelete: "cascade" }),
@@ -103,6 +106,13 @@ export const productPostings = pgTable(
     price: numeric("price", { precision: 15, scale: 2 }),
     stock: integer("stock"),
     status: postingStatusEnum("status").notNull().default("active"),
+    // Where this row came from. "manual" = existing audit baseline (untouched by
+    // sync); "api" = pulled from the marketplace API and owned by the sync job.
+    source: postingSourceEnum("source").notNull().default("manual"),
+    // Raw API payload for the row (audit/debug + fields we don't model yet).
+    raw: jsonb("raw"),
+    // Set on API rows each time the sync writes them.
+    apiSyncedAt: timestamp("api_synced_at", { withTimezone: true }),
     views7d: integer("views_7d").notNull().default(0),
     sold7d: integer("sold_7d").notNull().default(0),
     gmv7d: numeric("gmv_7d", { precision: 15, scale: 2 }).notNull().default("0"),
@@ -116,5 +126,7 @@ export const productPostings = pgTable(
     shopIdx: index("postings_shop_idx").on(t.shopId),
     // SKU matching is the heart of master<->posting linking (PRD Bagian 17.4)
     skuIdx: index("postings_mp_sku_idx").on(t.marketplaceSku),
+    // An API row is unique per (shop, marketplace item) — lets sync upsert.
+    shopItemIdx: index("postings_shop_item_idx").on(t.shopId, t.marketplaceItemId),
   }),
 );

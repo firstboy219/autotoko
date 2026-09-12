@@ -46,6 +46,11 @@ export const restockMethodEnum = pgEnum("restock_method", [
   "supplier_api",
 ]);
 
+// Origin of a product posting row: hand-entered (audit baseline) vs pulled from
+// the marketplace API. API rows never overwrite manual rows; they coexist and
+// are reconciled via the review/merge flow.
+export const postingSourceEnum = pgEnum("posting_source", ["manual", "api"]);
+
 export const invoiceTypeEnum = pgEnum("invoice_type", [
   "setup_fee",
   "subscription",
