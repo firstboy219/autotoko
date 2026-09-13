@@ -55,6 +55,8 @@ interface Order {
    */
   sumber?: "api" | "manual";
   trackingNumber?: string | null;
+  /** Nama toko (label seller bila ada, jika tidak nama marketplace). */
+  shopName?: string | null;
 }
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
@@ -238,6 +240,7 @@ export function Orders() {
                   <TH>Order</TH>
                   <TH>Sumber</TH>
                   <TH>Marketplace</TH>
+                  <TH>Toko</TH>
                   <TH>Status Proses</TH>
                   <TH>Pembeli</TH>
                   <TH align="right">Total</TH>
@@ -247,10 +250,10 @@ export function Orders() {
               </THead>
               <tbody>
                 {loading ? (
-                  <SkeletonRows n={8} cols={7} />
+                  <SkeletonRows n={8} cols={8} />
                 ) : !rows.length ? (
                   <tr>
-                    <td colSpan={7}>
+                    <td colSpan={8}>
                       <EmptyState
                         icon="cart"
                         title={hasFilters ? "Tidak ada order yang cocok" : "Belum ada order"}
@@ -293,6 +296,7 @@ export function Orders() {
                           {MP_LABEL[o.marketplace] ?? o.marketplace}
                         </Badge>
                       </TD>
+                      <TD className="text-ink-2">{o.shopName ?? "-"}</TD>
                       <TD>
                         <Badge tone={FS_TONE[o.fulfillmentStatus] ?? "neutral"}>
                           {FS_LABEL[o.fulfillmentStatus] ?? o.fulfillmentStatus}
@@ -541,6 +545,7 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
 
   const rowsMeta: [string, React.ReactNode][] = [
     ["Platform", MP_LABEL[order.marketplace] ?? order.marketplace],
+    ["Toko", order.shopName ?? "-"],
     ["Status marketplace", order.status ?? "-"],
     ["Pembeli", order.buyerName ?? "-"],
     ["Total", <span className="tabular-nums">{rupiah(order.totalAmount)}</span>],

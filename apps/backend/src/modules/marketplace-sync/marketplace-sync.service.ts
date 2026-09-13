@@ -11,6 +11,7 @@ import {
 import { CryptoService } from "../../common/crypto/crypto.service.js";
 import { TenantService } from "../../database/tenant.service.js";
 import { TikTokAdapter } from "../../marketplace/adapters/tiktok.adapter.js";
+import { EventsGateway } from "../events/events.gateway.js";
 import { ShopsService } from "../shops/shops.service.js";
 import { TikTokApiError, TikTokClient } from "./tiktok-client.js";
 import {
@@ -60,6 +61,7 @@ export class MarketplaceSyncService {
     private readonly tiktok: TikTokAdapter,
     private readonly shops: ShopsService,
     private readonly tenant: TenantService,
+    private readonly events: EventsGateway,
   ) {}
 
   /**
@@ -119,19 +121,22 @@ export class MarketplaceSyncService {
   }
 
   /** Semua toko yang siap. Satu toko gagal tidak menghentikan yang lain. */
-  async syncSemua(jenis: JenisSync, pemicu: Pemicu): Promise<{ toko: number; gagal: number }> {
+  async syncSemua(jenis: JenisSync, pemicu: Pemicu): Promise<{ toko: number; gagal: number; upserted: number }> {
     const daftar = await this.tokoSiap();
     let gagal = 0;
+    let upserted = 0;
     for (const t of daftar) {
       try {
-        if (jenis === "products") await this.syncProduk(t, pemicu);
-        else await this.syncPesanan(t, pemicu);
+        const r = jenis === "products"
+          ? await this.syncProduk(t, pemicu)
+          : await this.syncPesanan(t, pemicu);
+        upserted += r.upserted;
       } catch (e) {
         gagal += 1;
         this.logger.error(`Sync ${jenis} ${t.shopName}: ${(e as Error).message}`);
       }
     }
-    return { toko: daftar.length, gagal };
+    return { toko: daftar.length, gagal, upserted };
   }
 
   async riwayat(userId: string, shopId: string, limit = 10) {
@@ -195,6 +200,12 @@ export class MarketplaceSyncService {
       await this.selesaikanRun(run.id, "ok", { pages, fetched, upserted, watermark });
       await this.bypass(() =>
         this.db.update(shops).set({ lastSyncAt: new Date() }).where(eq(shops.id, toko.id)));
+      // Dorong ke dashboard yang sedang terbuka -- memakai kanal realtime yang
+      // sama dengan webhook, jadi halaman Orders memuat ulang tanpa diklik.
+      // Hanya bila ada yang berubah: reload kosong tiap dua menit itu gangguan.
+      if (upserted > 0) {
+        this.events.emitOrderUpdate(toko.userId, { sync: true, shopId: toko.id, upserted });
+      }
       return { runId: run.id, status: "ok", pages, fetched, upserted, watermark, since };
     } catch (e) {
       const pesan = (e as Error).message;

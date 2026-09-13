@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { orders, resiScans } from "../../database/schema/index.js";
+import { orders, resiScans, shops } from "../../database/schema/index.js";
 
 export interface ListOrdersOpts {
   status?: FulfillmentStatus;
@@ -42,6 +42,14 @@ export class OrdersService {
       .orderBy(desc(orders.createdAt))
       .limit(Math.min(opts.limit ?? 100, 500))
       .offset(opts.offset ?? 0);
+
+    // Nama toko per baris. Label yang diberi seller (displayName) menang atas
+    // nama resmi marketplace -- itu yang dia kenali sebagai "tokonya".
+    const tokoRows = await this.db
+      .select({ id: shops.id, nama: shops.shopName, display: shops.displayName })
+      .from(shops)
+      .where(eq(shops.userId, userId));
+    const namaToko = new Map(tokoRows.map((s) => [s.id, s.display ?? s.nama ?? null]));
 
     // Apakah pesanan dari API ini juga sudah discan lewat aplikasi. Di
     // sinilah dua sumber itu bertemu: pesanan yang kata marketplace sudah
@@ -110,6 +118,7 @@ export class OrdersService {
       feeDeducted: false,
       items: r.items,
       createdAt: r.created_at as Date,
+      shopName: r.shop_id ? namaToko.get(r.shop_id as string) ?? null : null,
       sumber: "manual" as const,
     }));
 
@@ -120,6 +129,7 @@ export class OrdersService {
     return [
       ...dariApi.map((o) => ({
         ...o, sumber: "api" as const, terscan: terscan.has(o.marketplaceOrderId),
+        shopName: o.shopId ? namaToko.get(o.shopId) ?? null : null,
       })),
       ...manualTerpilih,
     ]

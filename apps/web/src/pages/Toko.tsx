@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
@@ -142,6 +142,130 @@ function ShopPayoutBlock({ row, loading }: { row?: ShopPayout; loading: boolean 
   );
 }
 
+/** Satu catatan sinkronisasi dari /marketplace-sync/shops/:id/runs. */
+interface SyncRun {
+  id: string;
+  kind: "orders" | "products";
+  status: "running" | "ok" | "failed";
+  pages: number;
+  fetched: number;
+  upserted: number;
+  since: string | null;
+  watermark: string | null;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+const KIND_LABEL: Record<string, string> = { orders: "Pesanan", products: "Produk" };
+
+/**
+ * Tombol tarik pesanan & produk dari marketplace untuk SATU toko.
+ *
+ * Sinkronisasi berjalan di latar dan bisa makan menit untuk toko besar (terukur
+ * 9.045 pesanan / 91 halaman), jadi tombol ini TIDAK menunggu selesai: ia
+ * memicu lalu memantau /runs. Karena tiap langkah sinkronisasi commit
+ * sendiri-sendiri di server, baris "running" beserta kemajuannya benar-benar
+ * terlihat sambil berjalan -- bukan muncul sekaligus di akhir.
+ *
+ * Hanya untuk toko TikTok yang tersambung. Shopee belum punya penariknya, dan
+ * tombol yang pasti gagal saat diklik terbaca sebagai aplikasi rusak.
+ */
+function SyncBlock({ shopId }: { shopId: string }) {
+  const toast = useToast();
+  const [runs, setRuns] = useState<SyncRun[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const muat = useCallback(async () => {
+    try {
+      setRuns(await api.get<SyncRun[]>(`/marketplace-sync/shops/${shopId}/runs?limit=4`));
+    } catch {
+      /* diamkan: daftar run kosong tidak menghalangi tombolnya */
+    }
+  }, [shopId]);
+
+  useEffect(() => { void muat(); }, [muat]);
+
+  // Selama masih ada yang berjalan, periksa lagi tiap 3 detik. Berhenti
+  // sendiri begitu tidak ada lagi yang "running" -- tanpa interval abadi.
+  const adaBerjalan = (runs ?? []).some((r) => r.status === "running");
+  useEffect(() => {
+    if (!adaBerjalan) return;
+    const t = setTimeout(() => { void muat(); }, 3000);
+    return () => clearTimeout(t);
+  }, [adaBerjalan, runs, muat]);
+
+  async function jalankan() {
+    setBusy(true);
+    try {
+      await api.post(`/marketplace-sync/shops/${shopId}`, { kind: "all" });
+      toast("Sinkronisasi dimulai — menarik pesanan & produk", "success");
+      // Beri jeda sebentar agar baris "running" sempat tercatat, lalu pantau.
+      setTimeout(() => { void muat(); }, 1200);
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const terakhir = (kind: string) => (runs ?? []).find((r) => r.kind === kind);
+  const baris = (r: SyncRun | undefined, kind: string) => {
+    if (!r) return `${KIND_LABEL[kind]}: belum pernah`;
+    if (r.status === "running") {
+      return `${KIND_LABEL[kind]}: menarik… ${r.pages} halaman, ${r.fetched}`;
+    }
+    if (r.status === "failed") return `${KIND_LABEL[kind]}: gagal`;
+    // ok
+    return `${KIND_LABEL[kind]}: ${r.fetched} tersimpan${r.since ? " (perbarui)" : " (penuh)"}`;
+  };
+
+  const runOrders = terakhir("orders");
+  const runProducts = terakhir("products");
+  const gagal = (runs ?? []).find((r) => r.status === "failed");
+
+  return (
+    <div className="mt-3 rounded-lg border border-line bg-canvas px-3.5 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-medium text-ink">Data dari marketplace</div>
+        <Button
+          size="sm"
+          variant={adaBerjalan ? "outline" : "filled"}
+          icon="refresh"
+          loading={busy || adaBerjalan}
+          disabled={busy || adaBerjalan}
+          onClick={jalankan}
+        >
+          {adaBerjalan ? "Menyinkronkan…" : "Sinkronkan"}
+        </Button>
+      </div>
+      <div className="mt-2 space-y-0.5 text-xs text-ink-2 tabular-nums">
+        <div>{baris(runOrders, "orders")}</div>
+        <div>{baris(runProducts, "products")}</div>
+        {(runOrders?.finishedAt || runProducts?.finishedAt) && !adaBerjalan && (
+          <div className="text-ink-3">
+            Terakhir: {dateShort(
+              [runOrders?.finishedAt, runProducts?.finishedAt]
+                .filter(Boolean)
+                .sort()
+                .at(-1) as string,
+            )}
+          </div>
+        )}
+      </div>
+      {gagal?.error && !adaBerjalan && (
+        <div className="mt-2 text-[11px] text-red-600">
+          Gagal: {gagal.error.slice(0, 140)}
+        </div>
+      )}
+      <p className="mt-2 text-[11px] text-ink-3">
+        Berjalan otomatis tiap 15 menit; tombol ini menariknya sekarang. Data
+        marketplace dipakai memeriksa catatan manual, bukan menggantikannya.
+      </p>
+    </div>
+  );
+}
+
 export function Toko() {
   const toast = useToast();
   const { data, loading, reload } = useFetch<Shop[]>("/shops");
@@ -155,6 +279,9 @@ export function Toko() {
     (payout.data?.byShop ?? []).map((r) => [r.id, r]),
   );
   const categories = useFetch<ShopCategory[]>("/shops/categories");
+  // Toko yang endpoint sinkronisasi anggap siap (TikTok, token + cipher ada).
+  const syncShops = useFetch<{ id: string }[]>("/marketplace-sync/shops");
+  const bisaSync = new Set((syncShops.data ?? []).map((x) => x.id));
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [managingCategories, setManagingCategories] = useState(false);
 
@@ -433,6 +560,8 @@ export function Toko() {
                     a single "profit" figure would have to silently pick one of
                     them to mean. */}
                 <ShopPayoutBlock row={payoutByShop.get(s.id)} loading={payout.loading} />
+
+                {bisaSync.has(s.id) && <SyncBlock shopId={s.id} />}
 
                 <div className="flex flex-wrap gap-2 mt-4">
                   {isPlaceholder ? (
