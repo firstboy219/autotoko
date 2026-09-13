@@ -9,6 +9,9 @@ import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   masterProductCategories,
   masterProducts,
+  marketplaceProducts,
+  marketplaceSkus,
+  marketplaceSkuMap,
   shopCategories,
   productPostings,
   shops,
@@ -242,6 +245,197 @@ export class ProductsService {
       .where(and(eq(masterProducts.userId, userId), eq(masterProducts.sku, sku)))
       .limit(1);
     return master ?? null;
+  }
+
+
+  /**
+   * Produk yang ditarik dari API marketplace, dikelompokkan menurut master.
+   *
+   * DIPETAKAN LEWAT SKU. Sebuah produk API menempel ke master bila salah satu
+   * SKU-nya sudah dipetakan (marketplace_sku_map) ATAU seller_sku-nya sama
+   * dengan sku master. Yang belum menempel dikembalikan terpisah supaya
+   * penggunanya bisa menautkannya -- bukan disembunyikan.
+   *
+   * KENYATAAN DATA: toko TikTok ini nyaris tidak mengisi seller_sku (4 dari
+   * 542), jadi pencocokan otomatis nyaris nol dan hampir semua masuk "belum
+   * dipetakan". Itu bukan bug; itu keadaan katalognya, dan penautan manual di
+   * sinilah jalannya -- yang sekaligus mengisi marketplace_sku_map yang juga
+   * dipakai audit untuk memberi NAMA pada produk di laporan penyelesaian.
+   *
+   * HARGA dari API: rentang harga jual antar-SKU produk (min-max).
+   */
+  async marketplaceCatalog(userId: string) {
+    const masters = await this.db
+      .select({ id: masterProducts.id, sku: masterProducts.sku, name: masterProducts.name })
+      .from(masterProducts)
+      .where(eq(masterProducts.userId, userId));
+    const masterBySku = new Map<string, { id: string; name: string }>();
+    for (const m of masters) {
+      if (m.sku) masterBySku.set(m.sku.trim().toLowerCase(), { id: m.id, name: m.name });
+    }
+    const masterName = new Map(masters.map((m) => [m.id, m.name] as const));
+
+    const maps = await this.db
+      .select({ sku: marketplaceSkuMap.sku, masterId: marketplaceSkuMap.masterProductId })
+      .from(marketplaceSkuMap)
+      .where(eq(marketplaceSkuMap.userId, userId));
+    const masterBySkuId = new Map(maps.map((m) => [m.sku, m.masterId] as const));
+
+    const prods = await this.db
+      .select({
+        productId: marketplaceProducts.productId,
+        title: marketplaceProducts.title,
+        status: marketplaceProducts.status,
+        marketplace: marketplaceProducts.marketplace,
+        shopName: sql<string>`coalesce(${shops.displayName}, ${shops.shopName})`,
+      })
+      .from(marketplaceProducts)
+      .innerJoin(shops, eq(shops.id, marketplaceProducts.shopId))
+      .where(eq(marketplaceProducts.userId, userId));
+
+    const skus = await this.db
+      .select({
+        productId: marketplaceSkus.productId,
+        skuId: marketplaceSkus.skuId,
+        sellerSku: marketplaceSkus.sellerSku,
+        price: marketplaceSkus.price,
+        currency: marketplaceSkus.currency,
+        stock: marketplaceSkus.stock,
+      })
+      .from(marketplaceSkus)
+      .where(eq(marketplaceSkus.userId, userId));
+    const skusByProduct = new Map<string, typeof skus>();
+    for (const s of skus) {
+      if (!s.productId) continue;
+      const arr = skusByProduct.get(s.productId) ?? [];
+      arr.push(s);
+      skusByProduct.set(s.productId, arr);
+    }
+
+    const item = (p: (typeof prods)[number]) => {
+      const ps = skusByProduct.get(p.productId) ?? [];
+      let masterId: string | null = null;
+      let via: "map" | "sku" | null = null;
+      for (const s of ps) {
+        const mm = masterBySkuId.get(s.skuId);
+        if (mm && masterName.has(mm)) { masterId = mm; via = "map"; break; }
+      }
+      if (!masterId) {
+        for (const s of ps) {
+          const key = (s.sellerSku ?? "").trim().toLowerCase();
+          const m = key ? masterBySku.get(key) : undefined;
+          if (m) { masterId = m.id; via = "sku"; break; }
+        }
+      }
+      const harga = ps
+        .map((s) => Number(s.price))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      return {
+        productId: p.productId,
+        title: p.title,
+        status: p.status,
+        marketplace: p.marketplace,
+        shopName: p.shopName,
+        skuCount: ps.length,
+        hargaMin: harga.length ? Math.min(...harga) : null,
+        hargaMax: harga.length ? Math.max(...harga) : null,
+        currency: ps.find((s) => s.currency)?.currency ?? "IDR",
+        stok: ps.reduce((a, s) => a + (s.stock ?? 0), 0),
+        masterId,
+        masterName: masterId ? masterName.get(masterId) ?? null : null,
+        via,
+      };
+    };
+
+    const items = prods.map(item);
+    // Yang aktif dulu, lalu harga tertinggi: yang mati/terhapus di marketplace
+    // tetap ditampilkan tapi tidak menutupi yang masih jualan.
+    items.sort((a, b) => {
+      const aktif = (x: typeof a) => (x.status === "ACTIVATE" || x.status === "activate" ? 0 : 1);
+      if (aktif(a) !== aktif(b)) return aktif(a) - aktif(b);
+      return (b.hargaMax ?? 0) - (a.hargaMax ?? 0);
+    });
+
+    const perMaster = new Map<string, { masterId: string; masterName: string | null; postings: typeof items }>();
+    const belum: typeof items = [];
+    for (const it of items) {
+      if (it.masterId) {
+        const g = perMaster.get(it.masterId)
+          ?? { masterId: it.masterId, masterName: it.masterName, postings: [] as typeof items };
+        g.postings.push(it);
+        perMaster.set(it.masterId, g);
+      } else {
+        belum.push(it);
+      }
+    }
+
+    return {
+      ringkas: {
+        totalProduk: items.length,
+        terpetakan: items.length - belum.length,
+        belum: belum.length,
+        denganHarga: items.filter((i) => i.hargaMin != null).length,
+      },
+      terpetakan: [...perMaster.values()],
+      belumDipetakan: belum,
+      // Untuk dropdown penautan.
+      masters: masters.map((m) => ({ id: m.id, name: m.name, sku: m.sku })),
+    };
+  }
+
+  /**
+   * Menautkan (atau melepas) satu produk marketplace ke satu master.
+   *
+   * Menautkan berarti memetakan SEMUA sku_id produk itu ke master di
+   * marketplace_sku_map -- tabel yang sama yang dipakai audit, jadi sekali
+   * tautkan di sini, nama produk di laporan penyelesaian pun ikut terisi.
+   * masterId null melepas tautan (kembali ke "belum dipetakan").
+   */
+  async linkMarketplaceProduct(userId: string, productId: string, masterId: string | null) {
+    const rows = await this.db
+      .select({ skuId: marketplaceSkus.skuId, marketplace: marketplaceSkus.marketplace })
+      .from(marketplaceSkus)
+      .where(and(eq(marketplaceSkus.userId, userId), eq(marketplaceSkus.productId, productId)));
+    if (rows.length === 0) throw new NotFoundException("Produk marketplace tidak ditemukan");
+
+    if (!masterId) {
+      for (const r of rows) {
+        await this.db
+          .delete(marketplaceSkuMap)
+          .where(and(
+            eq(marketplaceSkuMap.userId, userId),
+            eq(marketplaceSkuMap.marketplace, r.marketplace),
+            eq(marketplaceSkuMap.sku, r.skuId),
+          ));
+      }
+      return { productId, masterId: null, dilepas: rows.length };
+    }
+
+    // Kepemilikan master diperiksa di sini, bukan dipercaya dari badan
+    // permintaan: tanpa ini sebuah SKU bisa dipetakan ke produk tenant lain.
+    const [master] = await this.db
+      .select({ id: masterProducts.id })
+      .from(masterProducts)
+      .where(and(eq(masterProducts.id, masterId), eq(masterProducts.userId, userId)))
+      .limit(1);
+    if (!master) throw new NotFoundException("Master produk tidak ditemukan");
+
+    for (const r of rows) {
+      await this.db
+        .insert(marketplaceSkuMap)
+        .values({
+          userId,
+          marketplace: r.marketplace,
+          sku: r.skuId,
+          masterProductId: masterId,
+          mappedBy: userId,
+        })
+        .onConflictDoUpdate({
+          target: [marketplaceSkuMap.userId, marketplaceSkuMap.marketplace, marketplaceSkuMap.sku],
+          set: { masterProductId: masterId, mappedBy: userId, updatedAt: new Date() },
+        });
+    }
+    return { productId, masterId, ditautkan: rows.length };
   }
 
   /** Link orphan postings (same SKU, no/other master) to this master. */

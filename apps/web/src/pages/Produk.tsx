@@ -76,6 +76,35 @@ interface ShopGroup { shopId: string; shopName: string | null; marketplace: stri
 interface MasterDetail extends Master { shops: ShopGroup[]; }
 interface Shop { id: string; shopName: string | null; marketplace: string; }
 
+interface CatalogItem {
+  productId: string;
+  title: string | null;
+  status: string | null;
+  marketplace: string;
+  shopName: string | null;
+  skuCount: number;
+  hargaMin: number | null;
+  hargaMax: number | null;
+  currency: string;
+  stok: number;
+  masterId: string | null;
+  masterName: string | null;
+  via: "map" | "sku" | null;
+}
+interface Catalog {
+  ringkas: { totalProduk: number; terpetakan: number; belum: number; denganHarga: number };
+  terpetakan: { masterId: string; masterName: string | null; postings: CatalogItem[] }[];
+  belumDipetakan: CatalogItem[];
+  masters: { id: string; name: string; sku: string | null }[];
+}
+
+/** "Rp 39.300" atau "Rp 39.300 – 49.300" bila antar-varian beda. */
+function hargaRange(min: number | null, max: number | null): string {
+  if (min == null) return "—";
+  if (max == null || max === min) return rupiah(min);
+  return `${rupiah(min)} – ${rupiah(max)}`;
+}
+
 export function Produk() {
   const [sort, setSort] = useState("nama");
   const [days, setDays] = useState("30");
@@ -274,6 +303,8 @@ export function Produk() {
         </TableWrap>
       </Card>
 
+      <MarketplaceCatalog />
+
       <Modal open={open} onClose={closeCreate} title="Produk Baru">
         <form onSubmit={create} className="space-y-3.5">
           {err && <InlineAlert tone="danger">{err}</InlineAlert>}
@@ -313,6 +344,184 @@ export function Produk() {
         <SaranAi path="/products/saran" keterangan="Membaca seluruh katalog produk dan membandingkannya dengan tren pasar Indonesia." />
       </div>
     </Layout>
+  );
+}
+
+function MarketplaceCatalog() {
+  const toast = useToast();
+  const { data, loading, reload } = useFetch<Catalog>("/products/marketplace-catalog");
+  const [pick, setPick] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [lihatSemua, setLihatSemua] = useState(false);
+
+  async function tautkan(productId: string, masterId: string | null) {
+    setBusy(productId);
+    try {
+      await api.post("/products/marketplace-catalog/link", { productId, masterId });
+      toast(masterId ? "Ditautkan ke master produk" : "Tautan dilepas", "success");
+      reload();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (loading) return <Card className="mt-4"><Skeleton className="h-24 w-full" /></Card>;
+  if (!data || data.ringkas.totalProduk === 0) {
+    // Belum ada produk API sama sekali -- diamkan, jangan tampilkan kartu kosong
+    // yang membingungkan. Sinkronisasi mengisinya; lihat menu Toko Saya.
+    return null;
+  }
+
+  const r = data.ringkas;
+  const belum = data.belumDipetakan;
+  const tampil = lihatSemua ? belum : belum.slice(0, 15);
+
+  return (
+    <Card padded={false} className="mt-4 overflow-hidden">
+      <CardHeader
+        title="Produk dari Marketplace"
+        subtitle={
+          `${r.totalProduk} produk API · ${r.terpetakan} sudah jadi postingan master · `
+          + `${r.belum} belum dipetakan · ${r.denganHarga} punya harga`
+        }
+      />
+
+      {/* Sudah terpetakan: postingan API yang menempel ke master, dengan harga. */}
+      {data.terpetakan.length > 0 && (
+        <div className="border-b border-line">
+          <div className="px-5 py-2 text-xs font-medium text-ink-2">
+            Sudah jadi postingan master ({data.terpetakan.length} master)
+          </div>
+          <TableWrap>
+            <Table className="min-w-[720px]">
+              <THead>
+                <tr>
+                  <TH>Master</TH>
+                  <TH>Postingan (dari API)</TH>
+                  <TH>Toko</TH>
+                  <TH align="right">Harga API</TH>
+                  <TH />
+                </tr>
+              </THead>
+              <tbody>
+                {data.terpetakan.flatMap((g) =>
+                  g.postings.map((p, i) => (
+                    <TR key={p.productId}>
+                      <TD className="text-ink font-medium">
+                        {i === 0 ? g.masterName ?? "-" : ""}
+                      </TD>
+                      <TD>
+                        <div className="text-ink-2 text-xs">{p.title ?? "-"}</div>
+                        <div className="text-[10px] text-ink-3">
+                          {p.via === "sku" ? "cocok SKU" : "dipetakan manual"} · {p.skuCount} varian
+                        </div>
+                      </TD>
+                      <TD className="text-xs text-ink-2">{p.shopName ?? "-"}</TD>
+                      <TD align="right" className="tabular-nums whitespace-nowrap">
+                        {hargaRange(p.hargaMin, p.hargaMax)}
+                      </TD>
+                      <TD align="right">
+                        <Button
+                          size="sm"
+                          variant="text"
+                          loading={busy === p.productId}
+                          onClick={() => tautkan(p.productId, null)}
+                        >
+                          Lepas
+                        </Button>
+                      </TD>
+                    </TR>
+                  )),
+                )}
+              </tbody>
+            </Table>
+          </TableWrap>
+        </div>
+      )}
+
+      {/* Belum dipetakan: tarik ke master via dropdown SKU/nama. */}
+      <div className="px-5 py-2 text-xs font-medium text-ink-2">
+        Belum dipetakan ({belum.length})
+      </div>
+      {belum.length === 0 ? (
+        <div className="px-5 pb-4 text-xs text-ink-3">
+          Semua produk marketplace sudah menempel ke master.
+        </div>
+      ) : (
+        <TableWrap>
+          <Table className="min-w-[760px]">
+            <THead>
+              <tr>
+                <TH>Produk (dari API)</TH>
+                <TH>Toko</TH>
+                <TH align="right">Harga API</TH>
+                <TH>Status</TH>
+                <TH>Tautkan ke master</TH>
+              </tr>
+            </THead>
+            <tbody>
+              {tampil.map((p) => (
+                <TR key={p.productId}>
+                  <TD>
+                    <div className="text-ink">{p.title ?? "-"}</div>
+                    <div className="text-[10px] text-ink-3">{p.skuCount} varian</div>
+                  </TD>
+                  <TD className="text-xs text-ink-2">{p.shopName ?? "-"}</TD>
+                  <TD align="right" className="tabular-nums whitespace-nowrap">
+                    {hargaRange(p.hargaMin, p.hargaMax)}
+                  </TD>
+                  <TD>
+                    <Badge tone={p.status === "ACTIVATE" ? "success" : "neutral"}>
+                      <span className="lowercase">{p.status ?? "-"}</span>
+                    </Badge>
+                  </TD>
+                  <TD>
+                    <div className="flex items-center gap-1.5">
+                      <Select
+                        value={pick[p.productId] ?? ""}
+                        onChange={(e) => setPick((s) => ({ ...s, [p.productId]: e.target.value }))}
+                        className="min-w-[170px]"
+                      >
+                        <option value="">— pilih master —</option>
+                        {data.masters.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}{m.sku ? ` (${m.sku})` : ""}
+                          </option>
+                        ))}
+                      </Select>
+                      <Button
+                        size="sm"
+                        variant="filled"
+                        disabled={!pick[p.productId]}
+                        loading={busy === p.productId}
+                        onClick={() => tautkan(p.productId, pick[p.productId] ?? null)}
+                      >
+                        Tautkan
+                      </Button>
+                    </div>
+                  </TD>
+                </TR>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+      {belum.length > tampil.length && (
+        <div className="px-5 py-3 border-t border-line">
+          <Button variant="text" onClick={() => setLihatSemua(true)}>
+            Tampilkan semua {belum.length}
+          </Button>
+        </div>
+      )}
+      <p className="px-5 py-3 text-[11px] text-ink-3 border-t border-line">
+        Data ini dari sinkronisasi API marketplace. Produk menempel otomatis ke
+        master bila seller SKU-nya sama; toko ini jarang mengisi seller SKU, jadi
+        sebagian besar perlu ditautkan sekali di sini. Menautkan juga mengisi nama
+        produk di menu Audit Pesanan.
+      </p>
+    </Card>
   );
 }
 

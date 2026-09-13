@@ -84,6 +84,24 @@ export class ProductsController {
     return { success: true, data: await this.products.createMaster(uid(req), dto) };
   }
 
+  /** Produk dari API marketplace, dikelompokkan menurut master (peta SKU). */
+  @Get("marketplace-catalog")
+  async marketplaceCatalog(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.products.marketplaceCatalog(uid(req)) };
+  }
+
+  /** Tautkan/lepas satu produk marketplace ke master. masterId null = lepas. */
+  @Post("marketplace-catalog/link")
+  async linkMarketplace(
+    @Req() req: FastifyRequest,
+    @Body() body: { productId: string; masterId: string | null },
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.products.linkMarketplaceProduct(uid(req), body.productId, body.masterId ?? null),
+    };
+  }
+
   @Get(":id")
   async detail(
     @Req() req: FastifyRequest,
