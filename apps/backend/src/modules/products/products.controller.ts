@@ -14,11 +14,13 @@ import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, type JwtPayload } from "../auth/jwt-auth.guard.js";
 import { ProductsService } from "./products.service.js";
+import { ProductSyncService } from "./product-sync.service.js";
 import { SaranService } from "../ai/saran.service.js";
 import {
   CreateMasterDto,
   UpdateMasterDto,
   CreatePostingDto,
+  MergePostingDto,
 } from "./dto/products.dto.js";
 
 function uid(req: FastifyRequest): string {
@@ -30,8 +32,46 @@ function uid(req: FastifyRequest): string {
 export class ProductsController {
   constructor(
     private readonly products: ProductsService,
+    private readonly sync: ProductSyncService,
     private readonly saran: SaranService,
   ) {}
+
+  // --- API catalog sync (audit) --------------------------------------------
+  // Pull a connected shop's catalog from the marketplace API into
+  // product_postings as source="api" rows. Manual (audit) rows are never
+  // overwritten, and API rows are never auto-linked to a master.
+  @Post("sync/:shopId")
+  async syncProducts(
+    @Req() req: FastifyRequest,
+    @Param("shopId") shopId: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.syncProducts(uid(req), shopId) };
+  }
+
+  // Review queue: API postings not yet linked to a master product.
+  @Get("postings/pending")
+  async pendingPostings(
+    @Req() req: FastifyRequest,
+    @Query("shopId") shopId?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.listPending(uid(req), shopId) };
+  }
+
+  // Merge an API posting onto a master (existing or newly created from it).
+  @Post("postings/:postingId/merge")
+  async mergePosting(
+    @Req() req: FastifyRequest,
+    @Param("postingId") postingId: string,
+    @Body() dto: MergePostingDto,
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.sync.merge(uid(req), postingId, {
+        masterProductId: dto.masterProductId,
+        createMaster: dto.createMaster,
+      }),
+    };
+  }
 
   /**
    * Saran AI atas katalog produk, dibandingkan dengan tren pasar Indonesia.

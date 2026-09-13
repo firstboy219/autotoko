@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNumberString,
@@ -102,4 +103,11 @@ export class CreatePostingDto {
   @IsOptional() @IsNumberString() price?: string;
   @IsOptional() @IsInt() @Min(0) stock?: number;
   @IsOptional() @IsEnum(POSTING_STATUS) status?: (typeof POSTING_STATUS)[number];
+}
+
+export class MergePostingDto {
+  // Link the API posting to this existing master product…
+  @IsOptional() @IsUUID() masterProductId?: string;
+  // …or create a new master from the posting (uses its SKU/title/price).
+  @IsOptional() @IsBoolean() createMaster?: boolean;
 }

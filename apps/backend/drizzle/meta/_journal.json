@@ -400,6 +400,13 @@
       "when": 1786148727343,
       "tag": "0056_marketplace_sku_map",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1786148727344,
+      "tag": "0057_product_postings_source",
+      "breakpoints": true
     }
   ]
 }

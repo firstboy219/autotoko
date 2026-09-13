@@ -1,5 +1,5 @@
 import { Injectable, BadGatewayException, Logger } from "@nestjs/common";
-import type { ConnectResult, MarketplaceAuthPort } from "@autotoko/shared";
+import type { ConnectResult, MarketplaceAuthPort, ProductData } from "@autotoko/shared";
 import { AdminSettingsService } from "../../modules/admin-settings/admin-settings.service.js";
 import { signTikTok, unixNow } from "../signing/tiktok.signer.js";
 
@@ -145,6 +145,101 @@ export class TikTokAdapter implements MarketplaceAuthPort {
       shopName: shop?.name,
       sellerRegion: shop?.region ?? token.seller_base_region,
       openId: token.open_id,
+    };
+  }
+
+  /**
+   * Signed POST to a business Open API endpoint. `shop_cipher` and the JSON body
+   * are both part of the signature base (see tiktok.signer). access_token rides
+   * in the header and is excluded from the signature.
+   */
+  private async signedPost(
+    path: string,
+    accessToken: string,
+    shopCipher: string,
+    extraQuery: Record<string, string | number>,
+    body: Record<string, unknown>,
+  ): Promise<any> {
+    const { appKey, appSecret } = await this.creds();
+    const timestamp = unixNow();
+    const bodyStr = JSON.stringify(body);
+    // Common params + endpoint params (e.g. page_size, page_token) are all signed.
+    const query: Record<string, string | number> = {
+      app_key: appKey,
+      shop_cipher: shopCipher,
+      timestamp,
+      ...extraQuery,
+    };
+    const sign = signTikTok({ appSecret, path, query, body: bodyStr });
+    const qs = new URLSearchParams({ ...query, timestamp: String(timestamp), sign } as Record<
+      string,
+      string
+    >).toString();
+    const res = await fetch(`${TIKTOK_BASE}${path}?${qs}`, {
+      method: "POST",
+      headers: {
+        "x-tts-access-token": accessToken,
+        "content-type": "application/json",
+      },
+      body: bodyStr,
+    });
+    const json = (await res.json()) as { code: number; message?: string; data?: any };
+    if (json.code !== 0) {
+      throw new BadGatewayException(`TikTok API ${path} error: ${json.message ?? json.code}`);
+    }
+    return json.data;
+  }
+
+  /**
+   * Pull the shop's full product catalog (all pages) via
+   * POST /product/{version}/products/search. Read-only — used by the catalog sync.
+   * page_size/page_token are query params for this endpoint (they still ride in
+   * the signature); putting them in the body instead gets "PageSize is a
+   * required field" back from TikTok.
+   */
+  async listProducts(accessToken: string, shopCipher: string): Promise<ProductData[]> {
+    const path = `/product/${VERSION}/products/search`;
+    const out: ProductData[] = [];
+    let pageToken = "";
+    // Hard cap on pages to avoid an unbounded loop on a misbehaving cursor.
+    for (let page = 0; page < 200; page++) {
+      const query: Record<string, string | number> = { page_size: 100 };
+      if (pageToken) query.page_token = pageToken;
+      const data = await this.signedPost(path, accessToken, shopCipher, query, {});
+      const products: any[] = data?.products ?? [];
+      for (const p of products) out.push(this.mapProduct(p));
+      pageToken = data?.next_page_token ?? "";
+      if (!pageToken) break;
+    }
+    return out;
+  }
+
+  private mapProduct(p: any): ProductData {
+    const skus: any[] = Array.isArray(p?.skus) ? p.skus : [];
+    const firstSku = skus[0] ?? {};
+    const price = Number(
+      firstSku?.price?.tax_exclusive_price ??
+        firstSku?.price?.sale_price ??
+        firstSku?.price?.original_price ??
+        0,
+    );
+    const stock = skus.reduce((sum, s) => {
+      const inv: any[] = Array.isArray(s?.inventory) ? s.inventory : [];
+      return sum + inv.reduce((a, i) => a + Number(i?.quantity ?? 0), 0);
+    }, 0);
+    const images: string[] = Array.isArray(p?.main_images)
+      ? p.main_images.flatMap((im: any) => (Array.isArray(im?.urls) ? im.urls : [])).filter(Boolean)
+      : [];
+    return {
+      marketplaceItemId: String(p?.id ?? ""),
+      sku: String(firstSku?.seller_sku ?? ""),
+      title: String(p?.title ?? ""),
+      description: "",
+      price: Number.isFinite(price) ? price : 0,
+      stock,
+      images,
+      status: p?.status ? String(p.status) : undefined,
+      raw: p,
     };
   }
 }

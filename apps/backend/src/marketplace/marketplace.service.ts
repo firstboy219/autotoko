@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import type { Marketplace, MarketplaceAuthPort } from "@autotoko/shared";
+import type { Marketplace, MarketplaceAuthPort, ProductData } from "@autotoko/shared";
 import { TikTokAdapter } from "./adapters/tiktok.adapter.js";
 import { ShopeeAdapter } from "./adapters/shopee.adapter.js";
 
@@ -20,5 +20,15 @@ export class MarketplaceService {
       default:
         throw new BadRequestException(`Unsupported marketplace: ${marketplace}`);
     }
+  }
+
+  /** Pull a shop's full catalog from the marketplace API. TikTok only for now. */
+  async listProducts(
+    marketplace: Marketplace,
+    accessToken: string,
+    shopCipher: string,
+  ): Promise<ProductData[]> {
+    if (marketplace === "tiktok") return this.tiktok.listProducts(accessToken, shopCipher);
+    throw new BadRequestException(`Catalog sync not supported yet for: ${marketplace}`);
   }
 }

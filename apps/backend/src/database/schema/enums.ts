@@ -40,6 +40,11 @@ export const postingStatusEnum = pgEnum("posting_status", [
   "banned",
 ]);
 
+// Where a product_postings row came from: hand-entered (the audit baseline,
+// never overwritten) or pulled from the marketplace API (arrives unlinked,
+// merged onto a master only by explicit user action).
+export const postingSourceEnum = pgEnum("posting_source", ["manual", "api"]);
+
 export const restockMethodEnum = pgEnum("restock_method", [
   "wa_owner",
   "wa_supplier",

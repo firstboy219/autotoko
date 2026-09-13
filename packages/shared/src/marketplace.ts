@@ -68,6 +68,12 @@ export interface ProductData {
   images: string[];
   categoryId?: string;
   weightGram?: number;
+  /** Marketplace's own item/product id — the identity key for a pulled posting. */
+  marketplaceItemId?: string;
+  /** Listing status as reported by the marketplace (raw string, not normalized). */
+  status?: string;
+  /** Full item payload, kept for audit/debugging. */
+  raw?: unknown;
 }
 
 export interface StockUpdate {

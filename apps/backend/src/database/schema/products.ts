@@ -20,6 +20,7 @@ import {
   productStatusEnum,
   healthScoreEnum,
   postingStatusEnum,
+  postingSourceEnum,
   restockMethodEnum,
 } from "./enums";
 
@@ -431,9 +432,12 @@ export const productPostings = pgTable(
   "product_postings",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    masterProductId: uuid("master_product_id")
-      .notNull()
-      .references(() => masterProducts.id, { onDelete: "cascade" }),
+    // Nullable: an API-pulled posting arrives unlinked and sits in the review
+    // queue until a user merges it onto a master — never assigned automatically,
+    // even when its SKU matches one exactly (owner's call, not a guess).
+    masterProductId: uuid("master_product_id").references(() => masterProducts.id, {
+      onDelete: "cascade",
+    }),
     shopId: uuid("shop_id")
       .notNull()
       .references(() => shops.id, { onDelete: "cascade" }),
@@ -450,12 +454,21 @@ export const productPostings = pgTable(
     reviewCount: integer("review_count").notNull().default(0),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // Where this row came from — see posting_source. "manual" (the default) is
+    // the pre-existing hand-entered audit baseline; sync only ever writes rows
+    // marked "api", and never touches a "manual" row.
+    source: postingSourceEnum("source").notNull().default("manual"),
+    /** Full marketplace payload for this item, kept for audit/debugging. */
+    raw: jsonb("raw"),
+    apiSyncedAt: timestamp("api_synced_at", { withTimezone: true }),
   },
   (t) => ({
     masterIdx: index("postings_master_idx").on(t.masterProductId),
     shopIdx: index("postings_shop_idx").on(t.shopId),
     // SKU matching is the heart of master<->posting linking (PRD Bagian 17.4)
     skuIdx: index("postings_mp_sku_idx").on(t.marketplaceSku),
+    // Identity key for an API-sourced row on re-sync (one shop, one item id).
+    shopItemIdx: index("postings_shop_item_idx").on(t.shopId, t.marketplaceItemId),
   }),
 );
 

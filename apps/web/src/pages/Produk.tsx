@@ -55,6 +55,32 @@ interface Posting {
   price: string | null;
   stock: number | null;
   status: string;
+  /** "manual" = hand-entered audit baseline; "api" = pulled from the marketplace. */
+  source?: "manual" | "api";
+}
+
+/** An API-pulled posting waiting to be merged onto a master (or left as-is). */
+interface PendingPosting {
+  id: string;
+  shopId: string;
+  shopName: string | null;
+  marketplace: string;
+  marketplaceItemId: string | null;
+  marketplaceSku: string | null;
+  title: string | null;
+  price: string | null;
+  stock: number | null;
+  apiSyncedAt: string | null;
+  /** Same-SKU hint only — never assigned automatically. */
+  suggestedMasterId: string | null;
+}
+
+interface SyncResult {
+  shopId: string;
+  fetched: number;
+  inserted: number;
+  updated: number;
+  pendingReview: number;
 }
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
@@ -74,7 +100,7 @@ const STATUS_TONE: Record<string, Tone> = {
 
 interface ShopGroup { shopId: string; shopName: string | null; marketplace: string; postings: Posting[]; }
 interface MasterDetail extends Master { shops: ShopGroup[]; }
-interface Shop { id: string; shopName: string | null; marketplace: string; }
+interface Shop { id: string; shopName: string | null; marketplace: string; shopStatus?: string }
 
 export function Produk() {
   const [sort, setSort] = useState("nama");
@@ -110,6 +136,8 @@ export function Produk() {
   const [saving, setSaving] = useState(false);
   const [q, setQ] = useState("");
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [syncOpen, setSyncOpen] = useState(false);
+  const pending = useFetch<PendingPosting[]>("/products/postings/pending");
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -143,9 +171,15 @@ export function Produk() {
         title="Master Produk"
         subtitle="Satu master produk menaungi seluruh postingan di tiap marketplace."
         actions={
-          <Button variant="filled" icon="plus" onClick={() => setOpen(true)}>
-            Produk Baru
-          </Button>
+          <>
+            <Button variant="outline" icon="refresh" onClick={() => setSyncOpen(true)}>
+              Sinkron Marketplace
+              {pending.data && pending.data.length > 0 ? ` (${pending.data.length})` : ""}
+            </Button>
+            <Button variant="filled" icon="plus" onClick={() => setOpen(true)}>
+              Produk Baru
+            </Button>
+          </>
         }
       />
 
@@ -309,10 +343,204 @@ export function Produk() {
           onChanged={reload}
         />
       )}
+
+      {syncOpen && (
+        <SyncPanel
+          masters={data ?? []}
+          onClose={() => setSyncOpen(false)}
+          onChanged={() => { reload(); pending.reload(); }}
+        />
+      )}
       <div className="mt-4">
         <SaranAi path="/products/saran" keterangan="Membaca seluruh katalog produk dan membandingkannya dengan tren pasar Indonesia." />
       </div>
     </Layout>
+  );
+}
+
+/**
+ * Pull a shop's catalog from the marketplace API, then reconcile by hand.
+ * Sync only ever writes source="api" postings and never touches source="manual"
+ * rows or assigns a master — merging onto a master is always the user's call,
+ * even when a posting's SKU matches one exactly (see product-sync.service.ts).
+ */
+function SyncPanel({
+  masters,
+  onClose,
+  onChanged,
+}: {
+  masters: Master[];
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const shops = useFetch<Shop[]>("/shops");
+  const { data: pending, loading: pendingLoading, reload: reloadPending } =
+    useFetch<PendingPosting[]>("/products/postings/pending");
+  const toast = useToast();
+  const [err, setErr] = useState<string | null>(null);
+  const [busyShop, setBusyShop] = useState<string | null>(null);
+  const [results, setResults] = useState<Record<string, SyncResult>>({});
+  const [choice, setChoice] = useState<Record<string, string>>({});
+  const [busyPosting, setBusyPosting] = useState<string | null>(null);
+
+  const connected = (shops.data ?? []).filter((s) => s.shopStatus === "active");
+
+  async function sync(shop: Shop) {
+    setBusyShop(shop.id); setErr(null);
+    try {
+      const r = await api.post<SyncResult>(`/products/sync/${shop.id}`);
+      setResults((prev) => ({ ...prev, [shop.id]: r }));
+      reloadPending(); onChanged();
+      toast(`${shop.shopName ?? shop.id}: ${r.fetched} produk ditarik`, "success");
+    } catch (e) { setErr((e as Error).message); } finally { setBusyShop(null); }
+  }
+
+  async function merge(p: PendingPosting, body: { masterProductId?: string; createMaster?: boolean }) {
+    setBusyPosting(p.id); setErr(null);
+    try {
+      await api.post(`/products/postings/${p.id}/merge`, body);
+      reloadPending(); onChanged();
+      toast("Postingan digabungkan", "success");
+    } catch (e) { setErr((e as Error).message); } finally { setBusyPosting(null); }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Sinkron Marketplace" width="max-w-3xl">
+      <div className="max-h-[75vh] overflow-y-auto -mx-1 px-1">
+        {err && (
+          <div className="mb-4">
+            <InlineAlert tone="danger">{err}</InlineAlert>
+          </div>
+        )}
+
+        <div className="mb-5">
+          <div className="text-sm font-medium text-ink mb-1">Tarik katalog dari toko terhubung</div>
+          <p className="text-xs text-ink-2 mb-3">
+            Postingan hasil tarikan ditandai sumbernya sebagai <span className="font-medium">API</span> dan
+            tidak pernah menimpa data yang sudah dicatat manual. Yang belum tertaut ke master masuk ke
+            antrean di bawah — Anda yang memutuskan penggabungannya.
+          </p>
+          {shops.loading ? (
+            <Skeleton className="h-16 w-full" />
+          ) : !connected.length ? (
+            <EmptyState
+              icon="store"
+              title="Belum ada toko aktif"
+              description="Hubungkan toko dulu di halaman Toko Saya."
+              className="py-6"
+            />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {connected.map((s) => {
+                const badge = MP_BADGE[s.marketplace] ?? { label: s.marketplace, tone: "neutral" as Tone };
+                const r = results[s.id];
+                return (
+                  <div key={s.id} className="flex items-center justify-between gap-3 rounded-lg border border-line px-3.5 py-2.5">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm text-ink truncate">{s.shopName ?? s.id}</span>
+                        <Badge tone={badge.tone}>{badge.label}</Badge>
+                      </div>
+                      <div className="text-xs text-ink-3 mt-0.5">
+                        {r
+                          ? `${r.fetched} produk · ${r.inserted} baru · ${r.updated} update · ${r.pendingReview} menunggu review`
+                          : "Belum disinkron sesi ini"}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      icon="refresh"
+                      loading={busyShop === s.id}
+                      disabled={busyShop !== null}
+                      onClick={() => sync(s)}
+                    >
+                      Sinkron
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="pt-4 border-t border-line">
+          <div className="text-sm font-medium text-ink mb-2.5">
+            Antrean Review{pending ? ` (${pending.length})` : ""}
+          </div>
+          {pendingLoading ? (
+            <Skeleton className="h-20 w-full" />
+          ) : !pending?.length ? (
+            <EmptyState
+              icon="check"
+              title="Tidak ada yang perlu direview"
+              description="Semua postingan API sudah tertaut, atau belum ada sinkron yang dijalankan."
+              className="py-6"
+            />
+          ) : (
+            <div className="space-y-2.5">
+              {pending.map((p) => {
+                const selected = choice[p.id] ?? p.suggestedMasterId ?? "";
+                return (
+                  <div key={p.id} className="rounded-lg border border-line p-3.5">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm text-ink truncate">{p.title ?? p.marketplaceItemId ?? p.id}</span>
+                          <Badge tone="info">API</Badge>
+                        </div>
+                        <div className="text-xs text-ink-3 font-mono mt-0.5">
+                          SKU: {p.marketplaceSku ?? "—"} · item {p.marketplaceItemId ?? "—"}
+                        </div>
+                        <div className="text-xs text-ink-2 mt-0.5 tabular-nums">
+                          {rupiah(p.price)} · stok {p.stock ?? 0} · {p.shopName ?? p.shopId}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Select
+                        value={selected}
+                        onChange={(e) => setChoice((c) => ({ ...c, [p.id]: e.target.value }))}
+                        className="min-w-[220px] flex-1"
+                      >
+                        <option value="">Pilih master produk…</option>
+                        {masters.map((m) => (
+                          <option key={m.id} value={m.id}>{m.name} ({m.sku})</option>
+                        ))}
+                      </Select>
+                      {p.suggestedMasterId && selected === p.suggestedMasterId && (
+                        <span className="text-xs text-ink-3">SKU cocok — disarankan, bukan otomatis</span>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="filled"
+                        icon="link"
+                        loading={busyPosting === p.id}
+                        disabled={busyPosting !== null || !selected}
+                        onClick={() => merge(p, { masterProductId: selected })}
+                      >
+                        Gabung
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        icon="plus"
+                        loading={busyPosting === p.id}
+                        disabled={busyPosting !== null || !p.marketplaceSku}
+                        title={p.marketplaceSku ? undefined : "Postingan tanpa SKU tidak bisa jadi master baru"}
+                        onClick={() => merge(p, { createMaster: true })}
+                      >
+                        Master baru
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -325,6 +553,8 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [delPosting, setDelPosting] = useState<Posting | null>(null);
+  /** Audit filter: view only manually-entered or only API-pulled postings. */
+  const [srcFilter, setSrcFilter] = useState<"all" | "manual" | "api">("all");
 
   // edit form state
   const [name, setName] = useState("");
@@ -541,14 +771,25 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
 
               <div className="flex items-center justify-between gap-2 mb-2.5">
                 <div className="text-sm font-medium text-ink">Postingan per Toko</div>
-                <Button
-                  size="sm"
-                  variant="text"
-                  icon={showAdd ? "close" : "plus"}
-                  onClick={() => setShowAdd(!showAdd)}
-                >
-                  {showAdd ? "Tutup" : "Tambah postingan"}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={srcFilter}
+                    onChange={(e) => setSrcFilter(e.target.value as "all" | "manual" | "api")}
+                    className="h-8 text-xs"
+                  >
+                    <option value="all">Semua sumber</option>
+                    <option value="manual">Manual saja</option>
+                    <option value="api">API saja</option>
+                  </Select>
+                  <Button
+                    size="sm"
+                    variant="text"
+                    icon={showAdd ? "close" : "plus"}
+                    onClick={() => setShowAdd(!showAdd)}
+                  >
+                    {showAdd ? "Tutup" : "Tambah postingan"}
+                  </Button>
+                </div>
               </div>
 
               {showAdd && (
@@ -595,9 +836,22 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
                   description="Tambahkan postingan agar stok dan harga tersinkron per marketplace."
                   className="py-8"
                 />
+              ) : !data.shops.some((sg) =>
+                  sg.postings.some((p) => srcFilter === "all" || (p.source ?? "manual") === srcFilter),
+                ) ? (
+                <EmptyState
+                  icon="filter"
+                  title="Tidak ada postingan dengan sumber ini"
+                  description="Coba pilih sumber lain, atau kembali ke 'Semua sumber'."
+                  className="py-8"
+                />
               ) : (
                 data.shops.map((sg) => {
                   const badge = MP_BADGE[sg.marketplace] ?? { label: sg.marketplace, tone: "neutral" as Tone };
+                  const postings = sg.postings.filter(
+                    (p) => srcFilter === "all" || (p.source ?? "manual") === srcFilter,
+                  );
+                  if (!postings.length) return null;
                   return (
                     <div key={sg.shopId} className="mb-4">
                       <div className="flex items-center gap-2 mb-1.5">
@@ -605,11 +859,16 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
                         <Badge tone={badge.tone}>{badge.label}</Badge>
                       </div>
                       <div className="border border-line rounded-lg divide-y divide-line">
-                        {sg.postings.map((p) => (
+                        {postings.map((p) => (
                           <div key={p.id} className="flex items-start justify-between gap-3 px-3.5 py-2.5">
                             <div className="min-w-0">
-                              <div className="text-sm text-ink truncate">
-                                {p.title ?? p.marketplaceSku ?? p.id}
+                              <div className="flex items-center gap-1.5">
+                                <div className="text-sm text-ink truncate">
+                                  {p.title ?? p.marketplaceSku ?? p.id}
+                                </div>
+                                <Badge tone={p.source === "api" ? "info" : "neutral"}>
+                                  {p.source === "api" ? "API" : "Manual"}
+                                </Badge>
                               </div>
                               {p.marketplaceItemId && (
                                 <div className="text-xs font-mono text-ink-3 mt-0.5">
