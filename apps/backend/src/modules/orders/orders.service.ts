@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { orders } from "../../database/schema/index.js";
+import { orders, resiScans } from "../../database/schema/index.js";
 
 export interface ListOrdersOpts {
   status?: FulfillmentStatus;
@@ -42,6 +42,20 @@ export class OrdersService {
       .orderBy(desc(orders.createdAt))
       .limit(Math.min(opts.limit ?? 100, 500))
       .offset(opts.offset ?? 0);
+
+    // Apakah pesanan dari API ini juga sudah discan lewat aplikasi. Di
+    // sinilah dua sumber itu bertemu: pesanan yang kata marketplace sudah
+    // dikirim tapi tidak pernah discan, atau sebaliknya, adalah temuan --
+    // dan tanpa penanda ini keduanya hanya dua baris yang kebetulan mirip.
+    const noPesanan = dariApi.map((o) => o.marketplaceOrderId).filter((x): x is string => !!x);
+    const terscan = new Set<string>();
+    if (noPesanan.length) {
+      const r = await this.db
+        .selectDistinct({ no: resiScans.labelOrderNo })
+        .from(resiScans)
+        .where(and(eq(resiScans.userId, userId), inArray(resiScans.labelOrderNo, noPesanan)));
+      for (const x of r) if (x.no) terscan.add(x.no);
+    }
 
     // Paket yang dipindai lewat aplikasi ikut terdaftar di sini.
     //
@@ -103,7 +117,12 @@ export class OrdersService {
     // selalu "dikirim", jadi menyaring status lain berarti membuangnya semua.
     const manualTerpilih = opts.status && opts.status !== "dikirim" ? [] : barisManual;
 
-    return [...dariApi.map((o) => ({ ...o, sumber: "api" as const })), ...manualTerpilih]
+    return [
+      ...dariApi.map((o) => ({
+        ...o, sumber: "api" as const, terscan: terscan.has(o.marketplaceOrderId),
+      })),
+      ...manualTerpilih,
+    ]
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 

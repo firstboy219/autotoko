@@ -7,6 +7,6 @@ import { MarketplaceService } from "./marketplace.service.js";
 @Module({
   imports: [AdminSettingsModule],
   providers: [TikTokAdapter, ShopeeAdapter, MarketplaceService],
-  exports: [MarketplaceService],
+  exports: [MarketplaceService, TikTokAdapter],
 })
 export class MarketplaceModule {}

@@ -45,6 +45,15 @@ export const orders = pgTable(
     labelPrinted: boolean("label_printed").notNull().default(false),
     items: jsonb("items"),
     createdAtMarketplace: timestamp("created_at_marketplace", { withTimezone: true }),
+    /**
+     * Tiga kolom dari sinkronisasi API (migrasi 0057). Nullable: 16 baris
+     * yang ada sebelum sinkronisasi tetap utuh tanpa nilai di sini.
+     */
+    updatedAtMarketplace: timestamp("updated_at_marketplace", { withTimezone: true }),
+    /** "TIKTOK_SHOP" / "TOKOPEDIA" -- satu toko TikTok memuat keduanya. */
+    commercePlatform: varchar("commerce_platform", { length: 32 }),
+    /** Pesanan apa adanya dari marketplace, untuk audit. */
+    raw: jsonb("raw"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

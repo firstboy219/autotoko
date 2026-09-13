@@ -43,6 +43,17 @@ export class TikTokAdapter implements MarketplaceAuthPort {
    * service_id comes from Admin CMS (`tiktok_service_id`); if the admin pasted a
    * full authorize URL that already carries service_id, we keep it.
    */
+  /**
+   * App key/secret untuk menandatangani permintaan DATA (pesanan, produk).
+   *
+   * Dibuka dari creds() yang privat karena sinkronisasi tinggal di modul
+   * lain; yang dibuka hanya dua nilai ini, bukan URL otorisasi.
+   */
+  async credentials(): Promise<{ appKey: string; appSecret: string }> {
+    const { appKey, appSecret } = await this.creds();
+    return { appKey, appSecret };
+  }
+
   async getAuthUrl(state: string): Promise<string> {
     const { authUrl, serviceId } = await this.creds();
     const url = new URL(authUrl);

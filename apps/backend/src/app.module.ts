@@ -30,6 +30,7 @@ import { HealthModule } from "./modules/health/health.module.js";
 import { PayoutModule } from "./modules/payout/payout.module.js";
 import { UploadsModule } from "./modules/uploads/uploads.module.js";
 import { CostingModule } from "./modules/costing/costing.module.js";
+import { MarketplaceSyncModule } from "./modules/marketplace-sync/marketplace-sync.module.js";
 import { MaterialsModule } from "./modules/materials/materials.module.js";
 import { ResiModule } from "./modules/resi/resi.module.js";
 
@@ -71,6 +72,7 @@ import { StockRequestsModule } from "./modules/stock-requests/stock-requests.mod
     PayoutModule,
     UploadsModule,
     CostingModule,
+    MarketplaceSyncModule,
     MaterialsModule,
     StockRequestsModule,
     ResiModule,
