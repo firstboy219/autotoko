@@ -9,6 +9,7 @@ import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   masterProductCategories,
   masterProducts,
+  marketplaceCatalogs,
   marketplaceProducts,
   marketplaceSkus,
   marketplaceSkuMap,
@@ -21,6 +22,22 @@ import type {
   UpdateMasterDto,
   CreatePostingDto,
 } from "./dto/products.dto.js";
+
+/**
+ * Kunci pengelompokan "produk yang sama lintas toko" dari judul postingan.
+ *
+ * Judul toko berbeda untuk produk yang sama nyaris selalu beda di ekor
+ * (embel-embel promo) dan kadang di spasi/tanda baca ("COOL MINT" vs
+ * "COOLMINT"). Jadi: huruf kecilkan, buang segala non-alfanumerik (spasi
+ * termasuk), lalu ambil awalannya. Awalan cukup panjang untuk memisahkan
+ * produk berbeda dari brand yang sama, cukup pendek untuk memaafkan ekor yang
+ * berbeda. Ini heuristik awal; pengguna tetap bisa gabung/pisah manual.
+ */
+export const CATALOG_KEY_LEN = 24;
+export function catalogMatchKey(title: string | null | undefined): string {
+  const norm = String(title ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return norm.slice(0, CATALOG_KEY_LEN);
+}
 
 @Injectable()
 export class ProductsService {
@@ -249,193 +266,270 @@ export class ProductsService {
 
 
   /**
-   * Produk yang ditarik dari API marketplace, dikelompokkan menurut master.
+   * Pohon Katalog > Postingan > Varian, dengan harga API dan master tiap varian.
    *
-   * DIPETAKAN LEWAT SKU. Sebuah produk API menempel ke master bila salah satu
-   * SKU-nya sudah dipetakan (marketplace_sku_map) ATAU seller_sku-nya sama
-   * dengan sku master. Yang belum menempel dikembalikan terpisah supaya
-   * penggunanya bisa menautkannya -- bukan disembunyikan.
+   * Postingan  = satu listing marketplace (marketplace_products) di satu toko.
+   * Varian     = satu SKU (marketplace_skus), dipetakan ke master lewat
+   *              marketplace_sku_map (per-varian) atau seller_sku==sku master.
+   * Katalog    = kumpulan postingan produk yang sama lintas toko.
    *
-   * KENYATAAN DATA: toko TikTok ini nyaris tidak mengisi seller_sku (4 dari
-   * 542), jadi pencocokan otomatis nyaris nol dan hampir semua masuk "belum
-   * dipetakan". Itu bukan bug; itu keadaan katalognya, dan penautan manual di
-   * sinilah jalannya -- yang sekaligus mengisi marketplace_sku_map yang juga
-   * dipakai audit untuk memberi NAMA pada produk di laporan penyelesaian.
-   *
-   * HARGA dari API: rentang harga jual antar-SKU produk (min-max).
+   * Postingan tanpa katalog dikembalikan di bucket "tanpaKatalog" -- terlihat,
+   * bukan hilang, dan bisa dikelompokkan lewat regroup atau dipindah manual.
    */
-  async marketplaceCatalog(userId: string) {
-    const masters = await this.db
-      .select({ id: masterProducts.id, sku: masterProducts.sku, name: masterProducts.name })
-      .from(masterProducts)
-      .where(eq(masterProducts.userId, userId));
-    const masterBySku = new Map<string, { id: string; name: string }>();
-    for (const m of masters) {
-      if (m.sku) masterBySku.set(m.sku.trim().toLowerCase(), { id: m.id, name: m.name });
-    }
+  async catalogTree(userId: string) {
+    const [catalogs, postings, skus, masters, maps] = await Promise.all([
+      this.db.select().from(marketplaceCatalogs).where(eq(marketplaceCatalogs.userId, userId)),
+      this.db
+        .select({
+          productId: marketplaceProducts.productId,
+          catalogId: marketplaceProducts.catalogId,
+          title: marketplaceProducts.title,
+          status: marketplaceProducts.status,
+          marketplace: marketplaceProducts.marketplace,
+          shopName: sql`coalesce(${shops.displayName}, ${shops.shopName})`.as("shop_name"),
+        })
+        .from(marketplaceProducts)
+        .innerJoin(shops, eq(shops.id, marketplaceProducts.shopId))
+        .where(eq(marketplaceProducts.userId, userId)),
+      this.db
+        .select({
+          productId: marketplaceSkus.productId,
+          skuId: marketplaceSkus.skuId,
+          sellerSku: marketplaceSkus.sellerSku,
+          skuName: marketplaceSkus.skuName,
+          productName: marketplaceSkus.productName,
+          price: marketplaceSkus.price,
+          currency: marketplaceSkus.currency,
+          stock: marketplaceSkus.stock,
+        })
+        .from(marketplaceSkus)
+        .where(eq(marketplaceSkus.userId, userId)),
+      this.db
+        .select({ id: masterProducts.id, sku: masterProducts.sku, name: masterProducts.name })
+        .from(masterProducts)
+        .where(eq(masterProducts.userId, userId)),
+      this.db
+        .select({ sku: marketplaceSkuMap.sku, masterId: marketplaceSkuMap.masterProductId })
+        .from(marketplaceSkuMap)
+        .where(eq(marketplaceSkuMap.userId, userId)),
+    ]);
+
     const masterName = new Map(masters.map((m) => [m.id, m.name] as const));
+    const masterBySku = new Map<string, string>();
+    for (const m of masters) if (m.sku) masterBySku.set(m.sku.trim().toLowerCase(), m.id);
+    const mapBySkuId = new Map(maps.map((m) => [m.sku, m.masterId] as const));
 
-    const maps = await this.db
-      .select({ sku: marketplaceSkuMap.sku, masterId: marketplaceSkuMap.masterProductId })
-      .from(marketplaceSkuMap)
-      .where(eq(marketplaceSkuMap.userId, userId));
-    const masterBySkuId = new Map(maps.map((m) => [m.sku, m.masterId] as const));
-
-    const prods = await this.db
-      .select({
-        productId: marketplaceProducts.productId,
-        title: marketplaceProducts.title,
-        status: marketplaceProducts.status,
-        marketplace: marketplaceProducts.marketplace,
-        shopName: sql<string>`coalesce(${shops.displayName}, ${shops.shopName})`,
-      })
-      .from(marketplaceProducts)
-      .innerJoin(shops, eq(shops.id, marketplaceProducts.shopId))
-      .where(eq(marketplaceProducts.userId, userId));
-
-    const skus = await this.db
-      .select({
-        productId: marketplaceSkus.productId,
-        skuId: marketplaceSkus.skuId,
-        sellerSku: marketplaceSkus.sellerSku,
-        price: marketplaceSkus.price,
-        currency: marketplaceSkus.currency,
-        stock: marketplaceSkus.stock,
-      })
-      .from(marketplaceSkus)
-      .where(eq(marketplaceSkus.userId, userId));
-    const skusByProduct = new Map<string, typeof skus>();
-    for (const s of skus) {
-      if (!s.productId) continue;
-      const arr = skusByProduct.get(s.productId) ?? [];
-      arr.push(s);
-      skusByProduct.set(s.productId, arr);
-    }
-
-    const item = (p: (typeof prods)[number]) => {
-      const ps = skusByProduct.get(p.productId) ?? [];
-      let masterId: string | null = null;
-      let via: "map" | "sku" | null = null;
-      for (const s of ps) {
-        const mm = masterBySkuId.get(s.skuId);
-        if (mm && masterName.has(mm)) { masterId = mm; via = "map"; break; }
+    const varByProduct = new Map<string, unknown[]>();
+    let totalVar = 0;
+    let mapped = 0;
+    for (const s2 of skus) {
+      if (!s2.productId) continue;
+      totalVar += 1;
+      let masterId: string | null = mapBySkuId.get(s2.skuId) ?? null;
+      let via: "map" | "sku" | null = masterId ? "map" : null;
+      if (masterId && !masterName.has(masterId)) { masterId = null; via = null; }
+      if (!masterId && s2.sellerSku) {
+        const mm = masterBySku.get(s2.sellerSku.trim().toLowerCase());
+        if (mm) { masterId = mm; via = "sku"; }
       }
-      if (!masterId) {
-        for (const s of ps) {
-          const key = (s.sellerSku ?? "").trim().toLowerCase();
-          const m = key ? masterBySku.get(key) : undefined;
-          if (m) { masterId = m.id; via = "sku"; break; }
-        }
-      }
-      const harga = ps
-        .map((s) => Number(s.price))
-        .filter((n) => Number.isFinite(n) && n > 0);
-      return {
-        productId: p.productId,
-        title: p.title,
-        status: p.status,
-        marketplace: p.marketplace,
-        shopName: p.shopName,
-        skuCount: ps.length,
-        hargaMin: harga.length ? Math.min(...harga) : null,
-        hargaMax: harga.length ? Math.max(...harga) : null,
-        currency: ps.find((s) => s.currency)?.currency ?? "IDR",
-        stok: ps.reduce((a, s) => a + (s.stock ?? 0), 0),
+      if (masterId) mapped += 1;
+      const arr = varByProduct.get(s2.productId) ?? [];
+      arr.push({
+        skuId: s2.skuId,
+        nama: s2.skuName ?? s2.productName ?? "(varian)",
+        sellerSku: s2.sellerSku,
+        harga: s2.price != null ? Number(s2.price) : null,
+        currency: s2.currency ?? "IDR",
+        stok: s2.stock,
         masterId,
         masterName: masterId ? masterName.get(masterId) ?? null : null,
         via,
-      };
-    };
+      });
+      varByProduct.set(s2.productId, arr);
+    }
 
-    const items = prods.map(item);
-    // Yang aktif dulu, lalu harga tertinggi: yang mati/terhapus di marketplace
-    // tetap ditampilkan tapi tidak menutupi yang masih jualan.
-    items.sort((a, b) => {
-      const aktif = (x: typeof a) => (x.status === "ACTIVATE" || x.status === "activate" ? 0 : 1);
-      if (aktif(a) !== aktif(b)) return aktif(a) - aktif(b);
-      return (b.hargaMax ?? 0) - (a.hargaMax ?? 0);
+    const asPosting = (p: (typeof postings)[number]) => ({
+      productId: p.productId,
+      title: p.title,
+      status: p.status,
+      marketplace: p.marketplace,
+      shopName: p.shopName as string | null,
+      varian: varByProduct.get(p.productId) ?? [],
     });
 
-    const perMaster = new Map<string, { masterId: string; masterName: string | null; postings: typeof items }>();
-    const belum: typeof items = [];
-    for (const it of items) {
-      if (it.masterId) {
-        const g = perMaster.get(it.masterId)
-          ?? { masterId: it.masterId, masterName: it.masterName, postings: [] as typeof items };
-        g.postings.push(it);
-        perMaster.set(it.masterId, g);
+    const perCatalog = new Map<string, { postings: (typeof postings) }>();
+    const tanpaKatalog: unknown[] = [];
+    for (const p of postings) {
+      if (p.catalogId) {
+        const g = perCatalog.get(p.catalogId) ?? { postings: [] as typeof postings };
+        g.postings.push(p);
+        perCatalog.set(p.catalogId, g);
       } else {
-        belum.push(it);
+        tanpaKatalog.push(asPosting(p));
       }
     }
 
+    const katalog = catalogs
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        note: c.note,
+        postingan: (perCatalog.get(c.id)?.postings ?? []).map(asPosting),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
     return {
       ringkas: {
-        totalProduk: items.length,
-        terpetakan: items.length - belum.length,
-        belum: belum.length,
-        denganHarga: items.filter((i) => i.hargaMin != null).length,
+        katalog: katalog.length,
+        postingan: postings.length,
+        varian: totalVar,
+        varianTerpetakan: mapped,
+        postinganTanpaKatalog: tanpaKatalog.length,
       },
-      terpetakan: [...perMaster.values()],
-      belumDipetakan: belum,
-      // Untuk dropdown penautan.
+      katalog,
+      tanpaKatalog,
       masters: masters.map((m) => ({ id: m.id, name: m.name, sku: m.sku })),
     };
   }
 
   /**
-   * Menautkan (atau melepas) satu produk marketplace ke satu master.
+   * Mengelompokkan postingan yang belum berkatalog menurut kesamaan judul.
    *
-   * Menautkan berarti memetakan SEMUA sku_id produk itu ke master di
-   * marketplace_sku_map -- tabel yang sama yang dipakai audit, jadi sekali
-   * tautkan di sini, nama produk di laporan penyelesaian pun ikut terisi.
-   * masterId null melepas tautan (kembali ke "belum dipetakan").
+   * Hanya menyentuh postingan ber-catalog_id NULL: pengelompokan/pemindahan
+   * manual yang sudah ada TIDAK ditimpa. Postingan baru dari kesamaan judul
+   * menempel ke katalog lama yang match_key-nya sama; sisanya bikin katalog
+   * baru bernama judul postingannya.
    */
-  async linkMarketplaceProduct(userId: string, productId: string, masterId: string | null) {
+  async regroupCatalogs(userId: string) {
+    const belum = await this.db
+      .select({ productId: marketplaceProducts.productId, title: marketplaceProducts.title })
+      .from(marketplaceProducts)
+      .where(and(eq(marketplaceProducts.userId, userId), isNull(marketplaceProducts.catalogId)));
+
+    const existing = await this.db
+      .select({ id: marketplaceCatalogs.id, key: marketplaceCatalogs.matchKey })
+      .from(marketplaceCatalogs)
+      .where(eq(marketplaceCatalogs.userId, userId));
+    const byKey = new Map<string, string>();
+    for (const c of existing) if (c.key) byKey.set(c.key, c.id);
+
+    let dibuat = 0;
+    let ditugaskan = 0;
+    for (const p of belum) {
+      const key = catalogMatchKey(p.title);
+      if (!key) continue; // tak berjudul -> biarkan tanpa katalog
+      let catId = byKey.get(key);
+      if (!catId) {
+        const [c] = await this.db
+          .insert(marketplaceCatalogs)
+          .values({ userId, name: (p.title ?? "Tanpa nama").slice(0, 120), matchKey: key })
+          .returning({ id: marketplaceCatalogs.id });
+        catId = c!.id;
+        byKey.set(key, catId);
+        dibuat += 1;
+      }
+      await this.db
+        .update(marketplaceProducts)
+        .set({ catalogId: catId })
+        .where(and(eq(marketplaceProducts.userId, userId), eq(marketplaceProducts.productId, p.productId)));
+      ditugaskan += 1;
+    }
+    return { dibuat, ditugaskan, sisaTanpaKatalog: belum.length - ditugaskan };
+  }
+
+  async createCatalog(userId: string, name: string) {
+    const nm = (name ?? "").trim();
+    if (!nm) throw new BadRequestException("Nama katalog wajib diisi");
+    const [c] = await this.db
+      .insert(marketplaceCatalogs)
+      .values({ userId, name: nm })
+      .returning();
+    return c;
+  }
+
+  async renameCatalog(userId: string, id: string, name: string) {
+    const nm = (name ?? "").trim();
+    if (!nm) throw new BadRequestException("Nama katalog wajib diisi");
+    const [c] = await this.db
+      .update(marketplaceCatalogs)
+      .set({ name: nm, updatedAt: new Date() })
+      .where(and(eq(marketplaceCatalogs.id, id), eq(marketplaceCatalogs.userId, userId)))
+      .returning();
+    if (!c) throw new NotFoundException("Katalog tidak ditemukan");
+    return c;
+  }
+
+  async deleteCatalog(userId: string, id: string) {
+    // ON DELETE SET NULL melepas postingannya, tidak menghapusnya.
+    const [c] = await this.db
+      .delete(marketplaceCatalogs)
+      .where(and(eq(marketplaceCatalogs.id, id), eq(marketplaceCatalogs.userId, userId)))
+      .returning({ id: marketplaceCatalogs.id });
+    if (!c) throw new NotFoundException("Katalog tidak ditemukan");
+    return { deleted: id };
+  }
+
+  /** Memindah satu postingan ke sebuah katalog (atau lepas: catalogId null). */
+  async assignPostingCatalog(userId: string, productId: string, catalogId: string | null) {
+    if (catalogId) {
+      const [c] = await this.db
+        .select({ id: marketplaceCatalogs.id })
+        .from(marketplaceCatalogs)
+        .where(and(eq(marketplaceCatalogs.id, catalogId), eq(marketplaceCatalogs.userId, userId)))
+        .limit(1);
+      if (!c) throw new NotFoundException("Katalog tidak ditemukan");
+    }
     const rows = await this.db
-      .select({ skuId: marketplaceSkus.skuId, marketplace: marketplaceSkus.marketplace })
+      .update(marketplaceProducts)
+      .set({ catalogId })
+      .where(and(eq(marketplaceProducts.userId, userId), eq(marketplaceProducts.productId, productId)))
+      .returning({ productId: marketplaceProducts.productId });
+    if (rows.length === 0) throw new NotFoundException("Postingan tidak ditemukan");
+    return { productId, catalogId };
+  }
+
+  /**
+   * Memetakan (atau melepas) satu VARIAN (SKU) ke satu master.
+   *
+   * Inti revisi: yang menempel ke master adalah varian di dalam postingan,
+   * bukan seluruh postingan. Disimpan di marketplace_sku_map (per sku_id) --
+   * tabel yang sama dgn audit, jadi nama produk di laporan penyelesaian ikut
+   * terisi. masterId null melepas tautan.
+   */
+  async linkVariant(userId: string, skuId: string, masterId: string | null) {
+    const [row] = await this.db
+      .select({ marketplace: marketplaceSkus.marketplace })
       .from(marketplaceSkus)
-      .where(and(eq(marketplaceSkus.userId, userId), eq(marketplaceSkus.productId, productId)));
-    if (rows.length === 0) throw new NotFoundException("Produk marketplace tidak ditemukan");
+      .where(and(eq(marketplaceSkus.userId, userId), eq(marketplaceSkus.skuId, skuId)))
+      .limit(1);
+    if (!row) throw new NotFoundException("Varian tidak ditemukan");
 
     if (!masterId) {
-      for (const r of rows) {
-        await this.db
-          .delete(marketplaceSkuMap)
-          .where(and(
-            eq(marketplaceSkuMap.userId, userId),
-            eq(marketplaceSkuMap.marketplace, r.marketplace),
-            eq(marketplaceSkuMap.sku, r.skuId),
-          ));
-      }
-      return { productId, masterId: null, dilepas: rows.length };
+      await this.db
+        .delete(marketplaceSkuMap)
+        .where(and(
+          eq(marketplaceSkuMap.userId, userId),
+          eq(marketplaceSkuMap.marketplace, row.marketplace),
+          eq(marketplaceSkuMap.sku, skuId),
+        ));
+      return { skuId, masterId: null };
     }
 
-    // Kepemilikan master diperiksa di sini, bukan dipercaya dari badan
-    // permintaan: tanpa ini sebuah SKU bisa dipetakan ke produk tenant lain.
-    const [master] = await this.db
+    const [m] = await this.db
       .select({ id: masterProducts.id })
       .from(masterProducts)
       .where(and(eq(masterProducts.id, masterId), eq(masterProducts.userId, userId)))
       .limit(1);
-    if (!master) throw new NotFoundException("Master produk tidak ditemukan");
+    if (!m) throw new NotFoundException("Master produk tidak ditemukan");
 
-    for (const r of rows) {
-      await this.db
-        .insert(marketplaceSkuMap)
-        .values({
-          userId,
-          marketplace: r.marketplace,
-          sku: r.skuId,
-          masterProductId: masterId,
-          mappedBy: userId,
-        })
-        .onConflictDoUpdate({
-          target: [marketplaceSkuMap.userId, marketplaceSkuMap.marketplace, marketplaceSkuMap.sku],
-          set: { masterProductId: masterId, mappedBy: userId, updatedAt: new Date() },
-        });
-    }
-    return { productId, masterId, ditautkan: rows.length };
+    await this.db
+      .insert(marketplaceSkuMap)
+      .values({ userId, marketplace: row.marketplace, sku: skuId, masterProductId: masterId, mappedBy: userId })
+      .onConflictDoUpdate({
+        target: [marketplaceSkuMap.userId, marketplaceSkuMap.marketplace, marketplaceSkuMap.sku],
+        set: { masterProductId: masterId, mappedBy: userId, updatedAt: new Date() },
+      });
+    return { skuId, masterId };
   }
 
   /** Link orphan postings (same SKU, no/other master) to this master. */

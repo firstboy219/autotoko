@@ -414,6 +414,13 @@
       "when": 1786148727345,
       "tag": "0058_fix_sync_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1786148727346,
+      "tag": "0059_catalogs",
+      "breakpoints": true
     }
   ]
 }

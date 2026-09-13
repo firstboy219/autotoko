@@ -84,21 +84,65 @@ export class ProductsController {
     return { success: true, data: await this.products.createMaster(uid(req), dto) };
   }
 
-  /** Produk dari API marketplace, dikelompokkan menurut master (peta SKU). */
-  @Get("marketplace-catalog")
-  async marketplaceCatalog(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.products.marketplaceCatalog(uid(req)) };
+  /** Pohon Katalog > Postingan > Varian, dengan harga API & master tiap varian. */
+  @Get("catalog-tree")
+  async catalogTree(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.products.catalogTree(uid(req)) };
   }
 
-  /** Tautkan/lepas satu produk marketplace ke master. masterId null = lepas. */
-  @Post("marketplace-catalog/link")
-  async linkMarketplace(
+  /** Kelompokkan otomatis postingan tak berkatalog menurut kesamaan judul. */
+  @Post("catalogs/regroup")
+  async regroup(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.products.regroupCatalogs(uid(req)) };
+  }
+
+  @Post("catalogs")
+  async createCatalog(
     @Req() req: FastifyRequest,
-    @Body() body: { productId: string; masterId: string | null },
+    @Body() body: { name: string },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.products.createCatalog(uid(req), body.name) };
+  }
+
+  @Patch("catalogs/:id")
+  async renameCatalog(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() body: { name: string },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.products.renameCatalog(uid(req), id, body.name) };
+  }
+
+  @Delete("catalogs/:id")
+  async deleteCatalog(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.products.deleteCatalog(uid(req), id) };
+  }
+
+  /** Pindahkan satu postingan ke sebuah katalog (catalogId null = lepas). */
+  @Patch("postings/:productId/catalog")
+  async assignCatalog(
+    @Req() req: FastifyRequest,
+    @Param("productId") productId: string,
+    @Body() body: { catalogId: string | null },
   ): Promise<ApiResponse<unknown>> {
     return {
       success: true,
-      data: await this.products.linkMarketplaceProduct(uid(req), body.productId, body.masterId ?? null),
+      data: await this.products.assignPostingCatalog(uid(req), productId, body.catalogId ?? null),
+    };
+  }
+
+  /** Tautkan/lepas satu VARIAN (SKU) ke master. masterId null = lepas. */
+  @Post("variants/link")
+  async linkVariant(
+    @Req() req: FastifyRequest,
+    @Body() body: { skuId: string; masterId: string | null },
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.products.linkVariant(uid(req), body.skuId, body.masterId ?? null),
     };
   }
 

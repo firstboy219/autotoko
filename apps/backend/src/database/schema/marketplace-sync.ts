@@ -22,6 +22,30 @@ import { shops } from "./shops.js";
  * marketplace_sku_map; tabel ini hanya membuat keputusan itu punya nama untuk
  * dibaca, bukan deretan angka.
  */
+/**
+ * Katalog: kumpulan postingan yang merupakan PRODUK yang sama lintas toko.
+ *
+ * Dikelompokkan dari kesamaan judul (match_key) atau ditata manual. Satu level
+ * di atas postingan; postingan menunjuk ke sini lewat catalog_id.
+ */
+export const marketplaceCatalogs = pgTable(
+  "marketplace_catalogs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    note: text("note"),
+    /** Kunci judul ternormalisasi untuk auto-group; null bila dibuat manual. */
+    matchKey: varchar("match_key", { length: 64 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("marketplace_catalogs_user_idx").on(t.userId),
+    keyIdx: index("marketplace_catalogs_key_idx").on(t.userId, t.matchKey),
+  }),
+);
+
 export const marketplaceProducts = pgTable(
   "marketplace_products",
   {
@@ -35,10 +59,13 @@ export const marketplaceProducts = pgTable(
     raw: jsonb("raw"),
     updatedAtMarketplace: timestamp("updated_at_marketplace", { withTimezone: true }),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Katalog yang menaungi postingan ini; null = belum dikelompokkan. */
+    catalogId: uuid("catalog_id").references(() => marketplaceCatalogs.id, { onDelete: "set null" }),
   },
   (t) => ({
     unik: uniqueIndex("marketplace_products_unik").on(t.userId, t.marketplace, t.productId),
     shopIdx: index("marketplace_products_shop_idx").on(t.shopId),
+    catalogIdx: index("marketplace_products_catalog_idx").on(t.catalogId),
   }),
 );
 

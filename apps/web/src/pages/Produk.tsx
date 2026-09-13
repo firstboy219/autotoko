@@ -76,33 +76,51 @@ interface ShopGroup { shopId: string; shopName: string | null; marketplace: stri
 interface MasterDetail extends Master { shops: ShopGroup[]; }
 interface Shop { id: string; shopName: string | null; marketplace: string; }
 
-interface CatalogItem {
+interface Varian {
+  skuId: string;
+  nama: string;
+  sellerSku: string | null;
+  harga: number | null;
+  currency: string;
+  stok: number | null;
+  masterId: string | null;
+  masterName: string | null;
+  via: "map" | "sku" | null;
+}
+interface Postingan {
   productId: string;
   title: string | null;
   status: string | null;
   marketplace: string;
   shopName: string | null;
-  skuCount: number;
-  hargaMin: number | null;
-  hargaMax: number | null;
-  currency: string;
-  stok: number;
-  masterId: string | null;
-  masterName: string | null;
-  via: "map" | "sku" | null;
+  varian: Varian[];
 }
-interface Catalog {
-  ringkas: { totalProduk: number; terpetakan: number; belum: number; denganHarga: number };
-  terpetakan: { masterId: string; masterName: string | null; postings: CatalogItem[] }[];
-  belumDipetakan: CatalogItem[];
+interface Katalog {
+  id: string;
+  name: string;
+  note: string | null;
+  postingan: Postingan[];
+}
+interface CatalogTree {
+  ringkas: {
+    katalog: number;
+    postingan: number;
+    varian: number;
+    varianTerpetakan: number;
+    postinganTanpaKatalog: number;
+  };
+  katalog: Katalog[];
+  tanpaKatalog: Postingan[];
   masters: { id: string; name: string; sku: string | null }[];
 }
 
-/** "Rp 39.300" atau "Rp 39.300 – 49.300" bila antar-varian beda. */
-function hargaRange(min: number | null, max: number | null): string {
-  if (min == null) return "—";
-  if (max == null || max === min) return rupiah(min);
-  return `${rupiah(min)} – ${rupiah(max)}`;
+/** Rentang harga API sebuah postingan: "Rp 39.300" atau "Rp 39.300 – 49.300". */
+function hargaPostingan(vs: Varian[]): string {
+  const h = vs.map((v) => v.harga).filter((n): n is number => n != null && n > 0);
+  if (!h.length) return "—";
+  const min = Math.min(...h);
+  const max = Math.max(...h);
+  return min === max ? rupiah(min) : `${rupiah(min)} – ${rupiah(max)}`;
 }
 
 export function Produk() {
@@ -349,177 +367,247 @@ export function Produk() {
 
 function MarketplaceCatalog() {
   const toast = useToast();
-  const { data, loading, reload } = useFetch<Catalog>("/products/marketplace-catalog");
-  const [pick, setPick] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState<string | null>(null);
-  const [lihatSemua, setLihatSemua] = useState(false);
+  const { data, loading, reload } = useFetch<CatalogTree>("/products/catalog-tree");
+  const [q, setQ] = useState("");
+  const [openCat, setOpenCat] = useState<Set<string>>(new Set());
+  const [openPost, setOpenPost] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
 
-  async function tautkan(productId: string, masterId: string | null) {
-    setBusy(productId);
+  function toggle(set: Set<string>, id: string, setter: (s: Set<string>) => void) {
+    const n = new Set(set);
+    if (n.has(id)) n.delete(id);
+    else n.add(id);
+    setter(n);
+  }
+
+  async function aksi(fn: () => Promise<unknown>, sukses: string) {
+    setBusy(true);
     try {
-      await api.post("/products/marketplace-catalog/link", { productId, masterId });
-      toast(masterId ? "Ditautkan ke master produk" : "Tautan dilepas", "success");
+      await fn();
+      if (sukses) toast(sukses, "success");
       reload();
     } catch (e) {
       toast((e as Error).message, "danger");
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   }
 
   if (loading) return <Card className="mt-4"><Skeleton className="h-24 w-full" /></Card>;
-  if (!data || data.ringkas.totalProduk === 0) {
-    // Belum ada produk API sama sekali -- diamkan, jangan tampilkan kartu kosong
-    // yang membingungkan. Sinkronisasi mengisinya; lihat menu Toko Saya.
-    return null;
-  }
+  if (!data || data.ringkas.postingan === 0) return null;
 
   const r = data.ringkas;
-  const belum = data.belumDipetakan;
-  const tampil = lihatSemua ? belum : belum.slice(0, 15);
+  const cats = (data.katalog ?? []).filter((c) =>
+    !q ? true : c.name.toLowerCase().includes(q.toLowerCase())
+    || c.postingan.some((p) => (p.title ?? "").toLowerCase().includes(q.toLowerCase())),
+  );
+
+  const masterSelect = (v: Varian) => (
+    <Select
+      value={v.masterId ?? ""}
+      disabled={busy}
+      onChange={(e) =>
+        aksi(
+          () => api.post("/products/variants/link", { skuId: v.skuId, masterId: e.target.value || null }),
+          e.target.value ? "Varian ditautkan ke master" : "Tautan dilepas",
+        )
+      }
+      className="min-w-[180px]"
+    >
+      <option value="">— belum dipetakan —</option>
+      {(data.masters ?? []).map((m) => (
+        <option key={m.id} value={m.id}>
+          {m.name}{m.sku ? ` (${m.sku})` : ""}
+        </option>
+      ))}
+    </Select>
+  );
+
+  const posting = (p: Postingan, dalamKatalog: boolean) => {
+    const terpetakan = p.varian.filter((v) => v.masterId).length;
+    return (
+      <div key={p.productId} className="border-t border-line">
+        <button
+          type="button"
+          onClick={() => toggle(openPost, p.productId, setOpenPost)}
+          className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-canvas"
+        >
+          <Icon name={openPost.has(p.productId) ? "chevronDown" : "chevronRight"} size={14} />
+          <span className="text-xs text-ink-2">{p.shopName ?? "-"}</span>
+          <span className="flex-1 text-sm text-ink truncate">{p.title ?? "-"}</span>
+          <Badge tone={p.status === "ACTIVATE" ? "success" : "neutral"}>
+            <span className="lowercase">{p.status ?? "-"}</span>
+          </Badge>
+          <span className="text-xs text-ink-3 whitespace-nowrap">
+            {p.varian.length} varian · {terpetakan} terpetakan
+          </span>
+          <span className="text-xs text-ink tabular-nums whitespace-nowrap">{hargaPostingan(p.varian)}</span>
+        </button>
+        {openPost.has(p.productId) && (
+          <div className="px-4 pb-3">
+            {dalamKatalog && (
+              <div className="flex items-center gap-2 py-2 text-xs">
+                <span className="text-ink-3">Pindah postingan ke katalog:</span>
+                <Select
+                  value=""
+                  disabled={busy}
+                  onChange={(e) => {
+                    if (e.target.value)
+                      aksi(
+                        () => api.patch(`/products/postings/${p.productId}/catalog`, { catalogId: e.target.value === "__lepas__" ? null : e.target.value }),
+                        "Postingan dipindah",
+                      );
+                  }}
+                  className="min-w-[180px]"
+                >
+                  <option value="">— pilih tujuan —</option>
+                  <option value="__lepas__">(lepas dari katalog)</option>
+                  {(data.katalog ?? []).map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </Select>
+              </div>
+            )}
+            <TableWrap>
+              <Table className="min-w-[560px]">
+                <THead>
+                  <tr>
+                    <TH>Varian (SKU)</TH>
+                    <TH align="right">Harga API</TH>
+                    <TH align="right">Stok</TH>
+                    <TH>Master Produk</TH>
+                  </tr>
+                </THead>
+                <tbody>
+                  {p.varian.map((v) => (
+                    <TR key={v.skuId}>
+                      <TD>
+                        <div className="text-ink">{v.nama}</div>
+                        {v.masterName && (
+                          <div className="text-[10px] text-ink-3">
+                            → {v.masterName}{v.via === "sku" ? " (cocok SKU)" : ""}
+                          </div>
+                        )}
+                      </TD>
+                      <TD align="right" className="tabular-nums whitespace-nowrap">
+                        {v.harga != null ? rupiah(v.harga) : "—"}
+                      </TD>
+                      <TD align="right" className="tabular-nums text-ink-2">{v.stok ?? "—"}</TD>
+                      <TD>{masterSelect(v)}</TD>
+                    </TR>
+                  ))}
+                </tbody>
+              </Table>
+            </TableWrap>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <Card padded={false} className="mt-4 overflow-hidden">
       <CardHeader
-        title="Produk dari Marketplace"
+        title="Katalog Marketplace"
         subtitle={
-          `${r.totalProduk} produk API · ${r.terpetakan} sudah jadi postingan master · `
-          + `${r.belum} belum dipetakan · ${r.denganHarga} punya harga`
+          `${r.katalog} katalog · ${r.postingan} postingan · ${r.varian} varian `
+          + `(${r.varianTerpetakan} dipetakan ke master)`
+          + (r.postinganTanpaKatalog ? ` · ${r.postinganTanpaKatalog} postingan belum berkatalog` : "")
+        }
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="tonal"
+              icon="refresh"
+              loading={busy}
+              onClick={() => aksi(() => api.post("/products/catalogs/regroup", {}), "Postingan dikelompokkan ulang")}
+            >
+              Kelompokkan otomatis
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              icon="plus"
+              disabled={busy}
+              onClick={() => {
+                const name = window.prompt("Nama katalog baru:");
+                if (name && name.trim()) aksi(() => api.post("/products/catalogs", { name: name.trim() }), "Katalog dibuat");
+              }}
+            >
+              Katalog Baru
+            </Button>
+          </div>
         }
       />
 
-      {/* Sudah terpetakan: postingan API yang menempel ke master, dengan harga. */}
-      {data.terpetakan.length > 0 && (
-        <div className="border-b border-line">
-          <div className="px-5 py-2 text-xs font-medium text-ink-2">
-            Sudah jadi postingan master ({data.terpetakan.length} master)
+      <div className="px-4 py-2 border-b border-line">
+        <div className="relative sm:w-72">
+          <Icon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none" />
+          <Input className="pl-9" placeholder="Cari katalog / postingan…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+      </div>
+
+      {cats.map((c) => {
+        const nVar = c.postingan.reduce((a, p) => a + p.varian.length, 0);
+        return (
+          <div key={c.id} className="border-b border-line">
+            <div className="flex items-center gap-2 px-3 py-2.5 bg-canvas">
+              <button
+                type="button"
+                onClick={() => toggle(openCat, c.id, setOpenCat)}
+                className="flex items-center gap-2 flex-1 text-left"
+              >
+                <Icon name={openCat.has(c.id) ? "chevronDown" : "chevronRight"} size={16} />
+                <span className="text-sm font-medium text-ink truncate">{c.name}</span>
+                <span className="text-xs text-ink-3 whitespace-nowrap">
+                  {c.postingan.length} postingan · {nVar} varian
+                </span>
+              </button>
+              <button
+                type="button"
+                title="Ubah nama"
+                disabled={busy}
+                onClick={() => {
+                  const name = window.prompt("Ubah nama katalog:", c.name);
+                  if (name && name.trim() && name.trim() !== c.name)
+                    aksi(() => api.patch(`/products/catalogs/${c.id}`, { name: name.trim() }), "Nama katalog diubah");
+                }}
+                className="p-1 text-ink-3 hover:text-ink"
+              >
+                <Icon name="pencil" size={14} />
+              </button>
+              <button
+                type="button"
+                title="Hapus katalog (postingan tidak ikut terhapus)"
+                disabled={busy}
+                onClick={() => {
+                  if (window.confirm(`Hapus katalog "${c.name}"? Postingan di dalamnya tidak terhapus, hanya lepas dari katalog.`))
+                    aksi(() => api.del(`/products/catalogs/${c.id}`), "Katalog dihapus");
+                }}
+                className="p-1 text-ink-3 hover:text-red-600"
+              >
+                <Icon name="trash" size={14} />
+              </button>
+            </div>
+            {openCat.has(c.id) && c.postingan.map((p) => posting(p, true))}
           </div>
-          <TableWrap>
-            <Table className="min-w-[720px]">
-              <THead>
-                <tr>
-                  <TH>Master</TH>
-                  <TH>Postingan (dari API)</TH>
-                  <TH>Toko</TH>
-                  <TH align="right">Harga API</TH>
-                  <TH />
-                </tr>
-              </THead>
-              <tbody>
-                {data.terpetakan.flatMap((g) =>
-                  g.postings.map((p, i) => (
-                    <TR key={p.productId}>
-                      <TD className="text-ink font-medium">
-                        {i === 0 ? g.masterName ?? "-" : ""}
-                      </TD>
-                      <TD>
-                        <div className="text-ink-2 text-xs">{p.title ?? "-"}</div>
-                        <div className="text-[10px] text-ink-3">
-                          {p.via === "sku" ? "cocok SKU" : "dipetakan manual"} · {p.skuCount} varian
-                        </div>
-                      </TD>
-                      <TD className="text-xs text-ink-2">{p.shopName ?? "-"}</TD>
-                      <TD align="right" className="tabular-nums whitespace-nowrap">
-                        {hargaRange(p.hargaMin, p.hargaMax)}
-                      </TD>
-                      <TD align="right">
-                        <Button
-                          size="sm"
-                          variant="text"
-                          loading={busy === p.productId}
-                          onClick={() => tautkan(p.productId, null)}
-                        >
-                          Lepas
-                        </Button>
-                      </TD>
-                    </TR>
-                  )),
-                )}
-              </tbody>
-            </Table>
-          </TableWrap>
+        );
+      })}
+
+      {(data.tanpaKatalog ?? []).length > 0 && (
+        <div className="border-b border-line">
+          <div className="px-3 py-2.5 bg-amber-50 text-sm font-medium text-amber-800">
+            Belum berkatalog ({data.tanpaKatalog.length}) — klik "Kelompokkan otomatis" di atas
+          </div>
+          {data.tanpaKatalog.map((p) => posting(p, false))}
         </div>
       )}
 
-      {/* Belum dipetakan: tarik ke master via dropdown SKU/nama. */}
-      <div className="px-5 py-2 text-xs font-medium text-ink-2">
-        Belum dipetakan ({belum.length})
-      </div>
-      {belum.length === 0 ? (
-        <div className="px-5 pb-4 text-xs text-ink-3">
-          Semua produk marketplace sudah menempel ke master.
-        </div>
-      ) : (
-        <TableWrap>
-          <Table className="min-w-[760px]">
-            <THead>
-              <tr>
-                <TH>Produk (dari API)</TH>
-                <TH>Toko</TH>
-                <TH align="right">Harga API</TH>
-                <TH>Status</TH>
-                <TH>Tautkan ke master</TH>
-              </tr>
-            </THead>
-            <tbody>
-              {tampil.map((p) => (
-                <TR key={p.productId}>
-                  <TD>
-                    <div className="text-ink">{p.title ?? "-"}</div>
-                    <div className="text-[10px] text-ink-3">{p.skuCount} varian</div>
-                  </TD>
-                  <TD className="text-xs text-ink-2">{p.shopName ?? "-"}</TD>
-                  <TD align="right" className="tabular-nums whitespace-nowrap">
-                    {hargaRange(p.hargaMin, p.hargaMax)}
-                  </TD>
-                  <TD>
-                    <Badge tone={p.status === "ACTIVATE" ? "success" : "neutral"}>
-                      <span className="lowercase">{p.status ?? "-"}</span>
-                    </Badge>
-                  </TD>
-                  <TD>
-                    <div className="flex items-center gap-1.5">
-                      <Select
-                        value={pick[p.productId] ?? ""}
-                        onChange={(e) => setPick((s) => ({ ...s, [p.productId]: e.target.value }))}
-                        className="min-w-[170px]"
-                      >
-                        <option value="">— pilih master —</option>
-                        {data.masters.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.name}{m.sku ? ` (${m.sku})` : ""}
-                          </option>
-                        ))}
-                      </Select>
-                      <Button
-                        size="sm"
-                        variant="filled"
-                        disabled={!pick[p.productId]}
-                        loading={busy === p.productId}
-                        onClick={() => tautkan(p.productId, pick[p.productId] ?? null)}
-                      >
-                        Tautkan
-                      </Button>
-                    </div>
-                  </TD>
-                </TR>
-              ))}
-            </tbody>
-          </Table>
-        </TableWrap>
-      )}
-      {belum.length > tampil.length && (
-        <div className="px-5 py-3 border-t border-line">
-          <Button variant="text" onClick={() => setLihatSemua(true)}>
-            Tampilkan semua {belum.length}
-          </Button>
-        </div>
-      )}
-      <p className="px-5 py-3 text-[11px] text-ink-3 border-t border-line">
-        Data ini dari sinkronisasi API marketplace. Produk menempel otomatis ke
-        master bila seller SKU-nya sama; toko ini jarang mengisi seller SKU, jadi
-        sebagian besar perlu ditautkan sekali di sini. Menautkan juga mengisi nama
-        produk di menu Audit Pesanan.
+      <p className="px-4 py-3 text-[11px] text-ink-3">
+        Katalog mengelompokkan postingan produk yang sama lintas toko (dari kemiripan judul; bisa
+        diubah manual). Tiap VARIAN (SKU) dipetakan ke satu master produk — pemetaan ini juga mengisi
+        nama produk di menu Audit Pesanan.
       </p>
     </Card>
   );
