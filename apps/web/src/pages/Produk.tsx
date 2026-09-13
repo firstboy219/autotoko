@@ -401,17 +401,9 @@ function MarketplaceCatalog() {
   const toast = useToast();
   const { data, loading, reload } = useFetch<CatalogTree>("/products/catalog-tree");
   const [q, setQ] = useState("");
-  const [openCat, setOpenCat] = useState<Set<string>>(new Set());
-  const [openPost, setOpenPost] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
   const [onlyUnmapped, setOnlyUnmapped] = useState(false);
-
-  function toggle(set: Set<string>, id: string, setter: (s: Set<string>) => void) {
-    const n = new Set(set);
-    if (n.has(id)) n.delete(id);
-    else n.add(id);
-    setter(n);
-  }
+  const [busy, setBusy] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
 
   async function aksi(fn: () => Promise<unknown>, sukses: string) {
     setBusy(true);
@@ -426,14 +418,24 @@ function MarketplaceCatalog() {
     }
   }
 
-  if (loading) return <Card className="mt-4"><Skeleton className="h-24 w-full" /></Card>;
+  if (loading) return <Card className="mt-4"><Skeleton className="h-40 w-full" /></Card>;
   if (!data || data.ringkas.postingan === 0) return null;
-
   const r = data.ringkas;
-  const cats = (data.katalog ?? []).filter((c) =>
-    !q ? true : c.name.toLowerCase().includes(q.toLowerCase())
-    || c.postingan.some((p) => (p.title ?? "").toLowerCase().includes(q.toLowerCase())),
-  );
+
+  function ringkas(posts: Postingan[]) {
+    const shops = Array.from(new Set(posts.map((p) => p.shopName).filter((x): x is string => !!x)));
+    const vs = posts.flatMap((p) => p.varian);
+    const mapped = vs.filter((v) => v.masterId).length;
+    const prices = vs.map((v) => v.harga).filter((n): n is number => n != null && n > 0);
+    return {
+      shops, total: vs.length, mapped,
+      min: prices.length ? Math.min(...prices) : null,
+      max: prices.length ? Math.max(...prices) : null,
+    };
+  }
+  const hargaTeks = (min: number | null, max: number | null) =>
+    min == null ? "—" : min === max ? rupiah(min) : `${rupiah(min)} – ${rupiah(max)}`;
+  const punyaUnmapped = (posts: Postingan[]) => posts.some((p) => p.varian.some((v) => !v.masterId));
 
   const masterSelect = (v: Varian) => (
     <Select
@@ -445,225 +447,208 @@ function MarketplaceCatalog() {
           e.target.value ? "Varian ditautkan ke master" : "Tautan dilepas",
         )
       }
-      className="min-w-[180px]"
+      className="min-w-[170px]"
     >
       <option value="">— belum dipetakan —</option>
       {(data.masters ?? []).map((m) => (
-        <option key={m.id} value={m.id}>
-          {m.name}{m.sku ? ` (${m.sku})` : ""}
-        </option>
+        <option key={m.id} value={m.id}>{m.name}{m.sku ? ` (${m.sku})` : ""}</option>
       ))}
     </Select>
   );
 
-  const posting = (p: Postingan, dalamKatalog: boolean) => {
-    const terpetakan = p.varian.filter((v) => v.masterId).length;
-    const vs = onlyUnmapped ? p.varian.filter((v) => !v.masterId) : p.varian;
+  const needle = q.trim().toLowerCase();
+  const cats = data.katalog
+    .filter((c) => !needle || c.name.toLowerCase().includes(needle) || c.postingan.some((p) => (p.title ?? "").toLowerCase().includes(needle)))
+    .filter((c) => !onlyUnmapped || punyaUnmapped(c.postingan));
+  const orphans = (data.tanpaKatalog ?? [])
+    .filter((p) => !needle || (p.title ?? "").toLowerCase().includes(needle))
+    .filter((p) => !onlyUnmapped || punyaUnmapped([p]));
+
+  // Satu kartu untuk katalog maupun postingan lepas (kunci "orphan:<id>").
+  const kartu = (key: string, name: string, posts: Postingan[]) => {
+    const g = ringkas(posts);
+    const pct = g.total ? Math.round((g.mapped / g.total) * 100) : 0;
+    const status =
+      g.mapped >= g.total && g.total > 0 ? <Badge tone="success">✓ lengkap</Badge>
+      : g.mapped > 0 ? <Badge tone="warning">{g.mapped}/{g.total} dipetakan</Badge>
+      : <Badge tone="neutral">belum dipetakan</Badge>;
     return (
-      <div key={p.productId} className="border-t border-line">
-        <button
-          type="button"
-          onClick={() => toggle(openPost, p.productId, setOpenPost)}
-          className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-canvas"
-        >
-          <Icon name={openPost.has(p.productId) ? "chevronDown" : "chevronRight"} size={14} />
-          <span className="text-xs text-ink-2">{p.shopName ?? "-"}</span>
-          <span className="flex-1 text-sm text-ink truncate">{p.title ?? "-"}</span>
-          <Badge tone={p.status === "ACTIVATE" ? "success" : "neutral"}>
-            <span className="lowercase">{p.status ?? "-"}</span>
-          </Badge>
-          <span className="text-xs text-ink-3 whitespace-nowrap">
-            {p.varian.length} varian · {terpetakan} terpetakan
-          </span>
-          <span className="text-xs text-ink tabular-nums whitespace-nowrap">{hargaPostingan(p.varian)}</span>
-        </button>
-        {openPost.has(p.productId) && (
-          <div className="px-4 pb-3">
-            {dalamKatalog && (
-              <div className="flex items-center gap-2 py-2 text-xs">
-                <span className="text-ink-3">Pindah postingan ke katalog:</span>
-                <Select
-                  value=""
-                  disabled={busy}
-                  onChange={(e) => {
-                    if (e.target.value)
-                      aksi(
-                        () => api.patch(`/products/postings/${p.productId}/catalog`, { catalogId: e.target.value === "__lepas__" ? null : e.target.value }),
-                        "Postingan dipindah",
-                      );
-                  }}
-                  className="min-w-[180px]"
-                >
-                  <option value="">— pilih tujuan —</option>
-                  <option value="__lepas__">(lepas dari katalog)</option>
-                  {(data.katalog ?? []).map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </Select>
-              </div>
-            )}
-            <TableWrap>
-              <Table className="min-w-[560px]">
-                <THead>
-                  <tr>
-                    <TH>Varian (SKU)</TH>
-                    <TH align="right">Harga API</TH>
-                    <TH align="right">Stok</TH>
-                    <TH>Master Produk</TH>
-                  </tr>
-                </THead>
-                <tbody>
-                  {vs.map((v) => (
-                    <TR key={v.skuId}>
-                      <TD>
-                        <div className="text-ink">{v.nama}</div>
-                        {v.masterName && (
-                          <div className="text-[10px] text-ink-3">
-                            → {v.masterName}{v.via === "sku" ? " (cocok SKU)" : ""}
-                          </div>
-                        )}
-                      </TD>
-                      <TD align="right" className="tabular-nums whitespace-nowrap">
-                        {v.harga != null ? rupiah(v.harga) : "—"}
-                      </TD>
-                      <TD align="right" className="tabular-nums text-ink-2">{v.stok ?? "—"}</TD>
-                      <TD>{masterSelect(v)}</TD>
-                    </TR>
-                  ))}
-                </tbody>
-              </Table>
-            </TableWrap>
+      <button
+        key={key}
+        type="button"
+        onClick={() => setOpenId(key)}
+        className="text-left bg-white border border-line rounded-xl p-4 flex flex-col gap-3 hover:border-brand transition"
+      >
+        <div className="font-medium text-ink leading-snug line-clamp-2" title={name}>{name}</div>
+        <div className="flex flex-wrap gap-1.5">
+          {g.shops.map((sh) => (
+            <span key={sh} className="text-[11px] text-ink-2 bg-canvas border border-line rounded-full px-2 py-0.5">{sh}</span>
+          ))}
+        </div>
+        <div className="flex gap-4 text-xs text-ink-2">
+          <span><b className="text-ink">{posts.length}</b> postingan</span>
+          <span><b className="text-ink">{g.total}</b> varian</span>
+        </div>
+        <div className="text-sm font-medium text-ink tabular-nums">{hargaTeks(g.min, g.max)}</div>
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-1.5 rounded-full bg-line overflow-hidden">
+            <div className="h-full bg-brand rounded-full" style={{ width: `${pct}%` }} />
           </div>
-        )}
-      </div>
+          <span className="text-[11px] text-ink-2 tabular-nums whitespace-nowrap">{g.mapped}/{g.total}</span>
+        </div>
+        <div className="flex items-center justify-between border-t border-line pt-2.5 mt-auto">
+          {status}
+          <span className="text-sm text-brand-ink">Kelola →</span>
+        </div>
+      </button>
     );
   };
 
+  const openCat = openId && !openId.startsWith("orphan:") ? data.katalog.find((c) => c.id === openId) : null;
+  const openOrphan = openId && openId.startsWith("orphan:")
+    ? (data.tanpaKatalog ?? []).find((p) => `orphan:${p.productId}` === openId) ?? null
+    : null;
+  const detailPosts: Postingan[] = openCat ? openCat.postingan : openOrphan ? [openOrphan] : [];
+  const detailG = ringkas(detailPosts);
+
   return (
-    <Card padded={false} className="mt-4 overflow-hidden">
-      <CardHeader
-        title="Katalog Marketplace"
-        subtitle={
-          `${r.katalog} katalog · ${r.postingan} postingan · ${r.varian} varian `
-          + `(${r.varianTerpetakan} dipetakan ke master)`
-          + (r.postinganTanpaKatalog ? ` · ${r.postinganTanpaKatalog} postingan belum berkatalog` : "")
-        }
-        action={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="tonal"
-              icon="refresh"
-              loading={busy}
-              onClick={() => aksi(() => api.post("/products/catalogs/regroup", {}), "Postingan dikelompokkan ulang")}
-            >
-              Kelompokkan otomatis
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              icon="plus"
-              disabled={busy}
-              onClick={() => {
-                const name = window.prompt("Nama katalog baru:");
-                if (name && name.trim()) aksi(() => api.post("/products/catalogs", { name: name.trim() }), "Katalog dibuat");
-              }}
-            >
-              Katalog Baru
-            </Button>
-          </div>
-        }
-      />
-
-      <div className="px-4 pt-3">
-        <div className="flex items-center justify-between text-xs text-ink-2 mb-1">
-          <span>Pemetaan varian ke master</span>
-          <span className="tabular-nums">{r.varianTerpetakan} / {r.varian}</span>
-        </div>
-        <div className="h-1.5 rounded-full bg-line overflow-hidden">
-          <div
-            className="h-full bg-brand"
-            style={{ width: `${r.varian ? Math.round((r.varianTerpetakan / r.varian) * 100) : 0}%` }}
-          />
-        </div>
-      </div>
-      <div className="px-4 py-2 border-b border-line flex flex-wrap items-center gap-3">
-        <div className="relative sm:w-72">
-          <Icon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none" />
-          <Input className="pl-9" placeholder="Cari katalog / postingan…" value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
-        <label className="flex items-center gap-1.5 text-xs text-ink-2 cursor-pointer">
-          <input type="checkbox" checked={onlyUnmapped} onChange={(e) => setOnlyUnmapped(e.target.checked)} />
-          Hanya yang belum dipetakan
-        </label>
-      </div>
-
-      {cats.map((c) => {
-        const posts = onlyUnmapped
-          ? c.postingan.filter((p) => p.varian.some((v) => !v.masterId))
-          : c.postingan;
-        if (onlyUnmapped && posts.length === 0) return null;
-        const nVar = posts.reduce((a, p) => a + p.varian.length, 0);
-        return (
-          <div key={c.id} className="border-b border-line">
-            <div className="flex items-center gap-2 px-3 py-2.5 bg-canvas">
-              <button
-                type="button"
-                onClick={() => toggle(openCat, c.id, setOpenCat)}
-                className="flex items-center gap-2 flex-1 text-left"
-              >
-                <Icon name={openCat.has(c.id) ? "chevronDown" : "chevronRight"} size={16} />
-                <span className="text-sm font-medium text-ink truncate">{c.name}</span>
-                <span className="text-xs text-ink-3 whitespace-nowrap">
-                  {posts.length} postingan · {nVar} varian
-                </span>
-              </button>
-              <button
-                type="button"
-                title="Ubah nama"
-                disabled={busy}
+    <>
+      <Card padded={false} className="mt-4 overflow-hidden">
+        <CardHeader
+          title="Katalog Marketplace"
+          subtitle={`${r.katalog} katalog · ${r.postingan} postingan · ${r.varian} varian`}
+          action={
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="tonal" icon="refresh" loading={busy}
+                onClick={() => aksi(() => api.post("/products/catalogs/regroup", {}), "Postingan dikelompokkan ulang")}>
+                Kelompokkan otomatis
+              </Button>
+              <Button size="sm" variant="outline" icon="plus" disabled={busy}
                 onClick={() => {
-                  const name = window.prompt("Ubah nama katalog:", c.name);
-                  if (name && name.trim() && name.trim() !== c.name)
-                    aksi(() => api.patch(`/products/catalogs/${c.id}`, { name: name.trim() }), "Nama katalog diubah");
-                }}
-                className="p-1 text-ink-3 hover:text-ink"
-              >
-                <Icon name="pencil" size={14} />
-              </button>
-              <button
-                type="button"
-                title="Hapus katalog (postingan tidak ikut terhapus)"
-                disabled={busy}
-                onClick={() => {
-                  if (window.confirm(`Hapus katalog "${c.name}"? Postingan di dalamnya tidak terhapus, hanya lepas dari katalog.`))
-                    aksi(() => api.del(`/products/catalogs/${c.id}`), "Katalog dihapus");
-                }}
-                className="p-1 text-ink-3 hover:text-red-600"
-              >
-                <Icon name="trash" size={14} />
-              </button>
+                  const name = window.prompt("Nama katalog baru:");
+                  if (name && name.trim()) aksi(() => api.post("/products/catalogs", { name: name.trim() }), "Katalog dibuat");
+                }}>
+                Katalog baru
+              </Button>
             </div>
-            {openCat.has(c.id) && posts.map((p) => posting(p, true))}
-          </div>
-        );
-      })}
+          }
+        />
 
-      {(data.tanpaKatalog ?? []).length > 0 && (
-        <div className="border-b border-line">
-          <div className="px-3 py-2.5 bg-amber-50 text-sm font-medium text-amber-800">
-            Belum berkatalog ({data.tanpaKatalog.length}) — klik "Kelompokkan otomatis" di atas
+        <div className="px-4 pt-3">
+          <div className="flex items-center justify-between text-xs text-ink-2 mb-1">
+            <span>Pemetaan varian ke master</span>
+            <span className="tabular-nums">{r.varianTerpetakan} / {r.varian}</span>
           </div>
-          {(onlyUnmapped ? data.tanpaKatalog.filter((p) => p.varian.some((v) => !v.masterId)) : data.tanpaKatalog).map((p) => posting(p, false))}
+          <div className="h-1.5 rounded-full bg-line overflow-hidden">
+            <div className="h-full bg-brand" style={{ width: `${r.varian ? Math.round((r.varianTerpetakan / r.varian) * 100) : 0}%` }} />
+          </div>
         </div>
-      )}
 
-      <p className="px-4 py-3 text-[11px] text-ink-3">
-        Katalog mengelompokkan postingan produk yang sama lintas toko (dari kemiripan judul; bisa
-        diubah manual). Tiap VARIAN (SKU) dipetakan ke satu master produk — pemetaan ini juga mengisi
-        nama produk di menu Audit Pesanan.
-      </p>
-    </Card>
+        <div className="px-4 py-3 flex flex-wrap items-center gap-3">
+          <div className="relative sm:w-72">
+            <Icon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none" />
+            <Input className="pl-9" placeholder="Cari katalog / postingan…" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <label className="flex items-center gap-1.5 text-xs text-ink-2 cursor-pointer">
+            <input type="checkbox" checked={onlyUnmapped} onChange={(e) => setOnlyUnmapped(e.target.checked)} />
+            Hanya yang belum dipetakan
+          </label>
+        </div>
+
+        <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {cats.map((c) => kartu(c.id, c.name, c.postingan))}
+        </div>
+        {cats.length === 0 && <p className="px-4 pb-4 text-sm text-ink-3">Tidak ada katalog yang cocok.</p>}
+
+        {orphans.length > 0 && (
+          <>
+            <div className="px-4 pt-1 pb-1 text-xs font-semibold uppercase tracking-wide text-amber-700">
+              Belum berkatalog ({orphans.length})
+            </div>
+            <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {orphans.map((p) => kartu(`orphan:${p.productId}`, p.title ?? "(tanpa judul)", [p]))}
+            </div>
+          </>
+        )}
+
+        <p className="px-4 py-3 text-[11px] text-ink-3 border-t border-line">
+          Katalog mengelompokkan postingan produk yang sama lintas toko (dari kemiripan judul; bisa diubah manual).
+          Klik sebuah kartu untuk memetakan varian di dalamnya ke master produk — pemetaan ini juga mengisi nama
+          produk di menu Audit Pesanan.
+        </p>
+      </Card>
+
+      {(openCat || openOrphan) && (
+        <Modal open onClose={() => setOpenId(null)} title="Kelola Katalog" width="max-w-2xl">
+          <div className="max-h-[72vh] overflow-y-auto -mx-1 px-1">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="min-w-0">
+                <div className="text-lg font-medium text-ink truncate">{openCat ? openCat.name : openOrphan?.title ?? "(tanpa judul)"}</div>
+                <div className="text-xs text-ink-3 mt-0.5">
+                  {detailPosts.length} postingan · {detailG.mapped}/{detailG.total} varian dipetakan
+                  {!openCat && " · belum berkatalog"}
+                </div>
+              </div>
+              {openCat && (
+                <div className="flex gap-1.5 shrink-0">
+                  <Button size="sm" variant="outline" icon="pencil"
+                    onClick={() => {
+                      const name = window.prompt("Ubah nama katalog:", openCat.name);
+                      if (name && name.trim() && name.trim() !== openCat.name)
+                        aksi(() => api.patch(`/products/catalogs/${openCat.id}`, { name: name.trim() }), "Nama katalog diubah");
+                    }}>
+                    Ubah nama
+                  </Button>
+                  <Button size="sm" variant="danger" icon="trash"
+                    onClick={() => {
+                      if (window.confirm(`Hapus katalog "${openCat.name}"? Postingan di dalamnya tidak terhapus, hanya lepas dari katalog.`)) {
+                        aksi(() => api.del(`/products/catalogs/${openCat.id}`), "Katalog dihapus");
+                        setOpenId(null);
+                      }
+                    }}>
+                    Hapus
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {detailPosts.map((p) => (
+              <div key={p.productId} className="border border-line rounded-lg mb-3 overflow-hidden">
+                <div className="flex items-center gap-2 px-3.5 py-2 bg-canvas border-b border-line">
+                  <span className="text-xs font-medium text-ink">{p.shopName ?? "-"}</span>
+                  <span className="text-xs text-ink-2 flex-1 truncate">{p.title ?? "-"}</span>
+                </div>
+                <div className="flex items-center gap-2 px-3.5 py-2 text-xs border-b border-line">
+                  <span className="text-ink-3 whitespace-nowrap">Masuk katalog:</span>
+                  <Select
+                    value={openCat?.id ?? ""}
+                    disabled={busy}
+                    onChange={(e) =>
+                      aksi(() => api.patch(`/products/postings/${p.productId}/catalog`, { catalogId: e.target.value || null }), "Postingan dipindah")
+                    }
+                    className="min-w-[180px]"
+                  >
+                    <option value="">— tanpa katalog —</option>
+                    {data.katalog.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </Select>
+                </div>
+                {p.varian.map((v) => (
+                  <div key={v.skuId} className="flex items-center gap-3 px-3.5 py-2 border-t border-line">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-ink truncate">{v.nama}</div>
+                      <div className="text-[11px] text-ink-2 tabular-nums">
+                        {v.harga != null ? rupiah(v.harga) : "—"} · stok {v.stok ?? 0}
+                      </div>
+                    </div>
+                    {masterSelect(v)}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }
 
