@@ -116,11 +116,36 @@ export class ProductsService {
       .groupBy(productPostings.masterProductId);
 
     const byId = new Map(aggs.map((a) => [a.masterId, a]));
+
+    // Postingan & stok dari API: dihitung dari VARIAN yang dipetakan ke master
+    // (marketplace_sku_map -> marketplace_skus). Jumlah postingan = banyaknya
+    // listing marketplace berbeda yang punya varian menempel ke master ini;
+    // stok = jumlah stok varian-varian itu. Kolom lama (product_postings)
+    // ditambahkan, bukan diganti -- postingan manual tetap terhitung.
+    const apiAgg = await this.db
+      .select({
+        masterId: marketplaceSkuMap.masterProductId,
+        postingCount: sql<number>`count(distinct ${marketplaceSkus.productId})::int`,
+        totalStock: sql<number>`coalesce(sum(${marketplaceSkus.stock}), 0)::int`,
+      })
+      .from(marketplaceSkuMap)
+      .innerJoin(
+        marketplaceSkus,
+        and(
+          eq(marketplaceSkus.userId, marketplaceSkuMap.userId),
+          eq(marketplaceSkus.marketplace, marketplaceSkuMap.marketplace),
+          eq(marketplaceSkus.skuId, marketplaceSkuMap.sku),
+        ),
+      )
+      .where(and(eq(marketplaceSkuMap.userId, userId), inArray(marketplaceSkuMap.masterProductId, ids)))
+      .groupBy(marketplaceSkuMap.masterProductId);
+    const apiById = new Map(apiAgg.map((a) => [a.masterId, a]));
+
     const kategori = await this.categoriesFor(userId, ids);
     return masters.map((m) => ({
       ...m,
-      postingCount: byId.get(m.id)?.postingCount ?? 0,
-      totalStock: byId.get(m.id)?.totalStock ?? 0,
+      postingCount: (byId.get(m.id)?.postingCount ?? 0) + (apiById.get(m.id)?.postingCount ?? 0),
+      totalStock: (byId.get(m.id)?.totalStock ?? 0) + (apiById.get(m.id)?.totalStock ?? 0),
       gmv7d: byId.get(m.id)?.gmv7d ?? "0",
       // Kolom shopCategoryId tetap dikirim apa adanya sebagai kategori utama;
       // ini daftar lengkapnya.
