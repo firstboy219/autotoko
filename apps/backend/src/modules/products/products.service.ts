@@ -181,10 +181,69 @@ export class ProductsService {
       byShop.get(key)!.postings.push(r.posting);
     }
 
+    // Postingan marketplace (API) yang punya VARIAN dipetakan ke master ini.
+    // Dibaca dari sumber yang sama dengan kolom "Postingan/Stok" di tabel dan
+    // pohon Katalog, supaya detail tidak pernah bertentangan dengan angka di
+    // daftar. Hanya varian yang menempel ke master ini yang ditampilkan.
+    const apiRows = await this.db
+      .select({
+        productId: marketplaceSkus.productId,
+        skuId: marketplaceSkus.skuId,
+        nama: marketplaceSkus.skuName,
+        productName: marketplaceSkus.productName,
+        harga: marketplaceSkus.price,
+        stok: marketplaceSkus.stock,
+        title: marketplaceProducts.title,
+        shopName: sql<string>`coalesce(${shops.displayName}, ${shops.shopName})`,
+        marketplace: marketplaceProducts.marketplace,
+        catalogName: marketplaceCatalogs.name,
+      })
+      .from(marketplaceSkuMap)
+      .innerJoin(
+        marketplaceSkus,
+        and(
+          eq(marketplaceSkus.userId, marketplaceSkuMap.userId),
+          eq(marketplaceSkus.marketplace, marketplaceSkuMap.marketplace),
+          eq(marketplaceSkus.skuId, marketplaceSkuMap.sku),
+        ),
+      )
+      .leftJoin(
+        marketplaceProducts,
+        and(
+          eq(marketplaceProducts.userId, marketplaceSkus.userId),
+          eq(marketplaceProducts.productId, marketplaceSkus.productId),
+        ),
+      )
+      .leftJoin(shops, eq(shops.id, marketplaceProducts.shopId))
+      .leftJoin(marketplaceCatalogs, eq(marketplaceCatalogs.id, marketplaceProducts.catalogId))
+      .where(and(eq(marketplaceSkuMap.userId, userId), eq(marketplaceSkuMap.masterProductId, id)));
+
+    const perPosting = new Map<string, {
+      productId: string | null; title: string | null; shopName: string | null;
+      marketplace: string | null; catalogName: string | null;
+      varian: { skuId: string; nama: string; harga: number | null; stok: number | null }[];
+    }>();
+    for (const r of apiRows) {
+      const key = r.productId ?? r.skuId;
+      if (!perPosting.has(key)) {
+        perPosting.set(key, {
+          productId: r.productId, title: r.title, shopName: r.shopName,
+          marketplace: r.marketplace, catalogName: r.catalogName, varian: [],
+        });
+      }
+      perPosting.get(key)!.varian.push({
+        skuId: r.skuId,
+        nama: r.nama ?? r.productName ?? "(varian)",
+        harga: r.harga != null ? Number(r.harga) : null,
+        stok: r.stok,
+      });
+    }
+
     const kategori = await this.categoriesFor(userId, [id]);
     return {
       ...master,
       shops: [...byShop.values()],
+      marketplacePostings: [...perPosting.values()],
       shopCategoryIds: kategori.get(id) ?? [],
     };
   }

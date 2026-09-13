@@ -73,7 +73,19 @@ const STATUS_TONE: Record<string, Tone> = {
 };
 
 interface ShopGroup { shopId: string; shopName: string | null; marketplace: string; postings: Posting[]; }
-interface MasterDetail extends Master { shops: ShopGroup[]; }
+interface MpVarian { skuId: string; nama: string; harga: number | null; stok: number | null; }
+interface MpPosting {
+  productId: string | null;
+  title: string | null;
+  shopName: string | null;
+  marketplace: string;
+  catalogName: string | null;
+  varian: MpVarian[];
+}
+interface MasterDetail extends Master {
+  shops: ShopGroup[];
+  marketplacePostings?: MpPosting[];
+}
 interface Shop { id: string; shopName: string | null; marketplace: string; }
 
 interface Varian {
@@ -123,6 +135,20 @@ function hargaPostingan(vs: Varian[]): string {
   return min === max ? rupiah(min) : `${rupiah(min)} – ${rupiah(max)}`;
 }
 
+function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
+        active ? "border-brand text-ink" : "border-transparent text-ink-3 hover:text-ink-2"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function Produk() {
   const [sort, setSort] = useState("nama");
   const [days, setDays] = useState("30");
@@ -157,6 +183,7 @@ export function Produk() {
   const [saving, setSaving] = useState(false);
   const [q, setQ] = useState("");
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [tab, setTab] = useState<"produk" | "katalog">("produk");
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -196,6 +223,12 @@ export function Produk() {
         }
       />
 
+      <div className="flex gap-1 border-b border-line mb-4">
+        <TabBtn active={tab === "produk"} onClick={() => setTab("produk")}>Produk</TabBtn>
+        <TabBtn active={tab === "katalog"} onClick={() => setTab("katalog")}>Katalog Marketplace</TabBtn>
+      </div>
+
+      {tab === "produk" && (
       <Card padded={false} className="overflow-hidden">
         <CardHeader
           title="Daftar produk"
@@ -252,20 +285,19 @@ export function Produk() {
             <THead>
               <tr>
                 <TH>Produk / SKU</TH>
-                <TH align="right">Postingan</TH>
-                <TH align="right">Stok</TH>
-                <TH align="right">Harga</TH>
-                <TH align="right">GMV 7h</TH>
+                <TH align="right">Postingan<div className="text-[10px] font-normal text-ink-3">marketplace</div></TH>
+                <TH align="right">Stok<div className="text-[10px] font-normal text-ink-3">marketplace</div></TH>
+                <TH align="right">Harga Master</TH>
                 <TH align="right">Terjual</TH>
                 <TH>Status</TH>
               </tr>
             </THead>
             <tbody>
               {loading ? (
-                <SkeletonRows n={6} cols={7} />
+                <SkeletonRows n={6} cols={6} />
               ) : !filtered.length ? (
                 <tr>
-                  <td colSpan={7}>
+                  <td colSpan={6}>
                     <EmptyState
                       icon="package"
                       title={q.trim() ? "Produk tidak ditemukan" : "Belum ada produk"}
@@ -302,7 +334,6 @@ export function Produk() {
                     <TD align="right" className="tabular-nums">{m.postingCount ?? 0}</TD>
                     <TD align="right" className="tabular-nums">{m.totalStock ?? 0}</TD>
                     <TD align="right" className="tabular-nums whitespace-nowrap">{rupiah(m.basePrice)}</TD>
-                    <TD align="right" className="tabular-nums whitespace-nowrap">{rupiah(m.gmv7d)}</TD>
                     {/* From packing scans over the chosen window — the same
                         number the HPP page sorts by, from the same service. */}
                     <TD align="right" className="tabular-nums text-ink-2">
@@ -320,8 +351,9 @@ export function Produk() {
           </Table>
         </TableWrap>
       </Card>
+      )}
 
-      <MarketplaceCatalog />
+      {tab === "katalog" && <MarketplaceCatalog />}
 
       <Modal open={open} onClose={closeCreate} title="Produk Baru">
         <form onSubmit={create} className="space-y-3.5">
@@ -372,6 +404,7 @@ function MarketplaceCatalog() {
   const [openCat, setOpenCat] = useState<Set<string>>(new Set());
   const [openPost, setOpenPost] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [onlyUnmapped, setOnlyUnmapped] = useState(false);
 
   function toggle(set: Set<string>, id: string, setter: (s: Set<string>) => void) {
     const n = new Set(set);
@@ -425,6 +458,7 @@ function MarketplaceCatalog() {
 
   const posting = (p: Postingan, dalamKatalog: boolean) => {
     const terpetakan = p.varian.filter((v) => v.masterId).length;
+    const vs = onlyUnmapped ? p.varian.filter((v) => !v.masterId) : p.varian;
     return (
       <div key={p.productId} className="border-t border-line">
         <button
@@ -479,7 +513,7 @@ function MarketplaceCatalog() {
                   </tr>
                 </THead>
                 <tbody>
-                  {p.varian.map((v) => (
+                  {vs.map((v) => (
                     <TR key={v.skuId}>
                       <TD>
                         <div className="text-ink">{v.nama}</div>
@@ -541,15 +575,35 @@ function MarketplaceCatalog() {
         }
       />
 
-      <div className="px-4 py-2 border-b border-line">
+      <div className="px-4 pt-3">
+        <div className="flex items-center justify-between text-xs text-ink-2 mb-1">
+          <span>Pemetaan varian ke master</span>
+          <span className="tabular-nums">{r.varianTerpetakan} / {r.varian}</span>
+        </div>
+        <div className="h-1.5 rounded-full bg-line overflow-hidden">
+          <div
+            className="h-full bg-brand"
+            style={{ width: `${r.varian ? Math.round((r.varianTerpetakan / r.varian) * 100) : 0}%` }}
+          />
+        </div>
+      </div>
+      <div className="px-4 py-2 border-b border-line flex flex-wrap items-center gap-3">
         <div className="relative sm:w-72">
           <Icon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none" />
           <Input className="pl-9" placeholder="Cari katalog / postingan…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
+        <label className="flex items-center gap-1.5 text-xs text-ink-2 cursor-pointer">
+          <input type="checkbox" checked={onlyUnmapped} onChange={(e) => setOnlyUnmapped(e.target.checked)} />
+          Hanya yang belum dipetakan
+        </label>
       </div>
 
       {cats.map((c) => {
-        const nVar = c.postingan.reduce((a, p) => a + p.varian.length, 0);
+        const posts = onlyUnmapped
+          ? c.postingan.filter((p) => p.varian.some((v) => !v.masterId))
+          : c.postingan;
+        if (onlyUnmapped && posts.length === 0) return null;
+        const nVar = posts.reduce((a, p) => a + p.varian.length, 0);
         return (
           <div key={c.id} className="border-b border-line">
             <div className="flex items-center gap-2 px-3 py-2.5 bg-canvas">
@@ -561,7 +615,7 @@ function MarketplaceCatalog() {
                 <Icon name={openCat.has(c.id) ? "chevronDown" : "chevronRight"} size={16} />
                 <span className="text-sm font-medium text-ink truncate">{c.name}</span>
                 <span className="text-xs text-ink-3 whitespace-nowrap">
-                  {c.postingan.length} postingan · {nVar} varian
+                  {posts.length} postingan · {nVar} varian
                 </span>
               </button>
               <button
@@ -590,7 +644,7 @@ function MarketplaceCatalog() {
                 <Icon name="trash" size={14} />
               </button>
             </div>
-            {openCat.has(c.id) && c.postingan.map((p) => posting(p, true))}
+            {openCat.has(c.id) && posts.map((p) => posting(p, true))}
           </div>
         );
       })}
@@ -600,7 +654,7 @@ function MarketplaceCatalog() {
           <div className="px-3 py-2.5 bg-amber-50 text-sm font-medium text-amber-800">
             Belum berkatalog ({data.tanpaKatalog.length}) — klik "Kelompokkan otomatis" di atas
           </div>
-          {data.tanpaKatalog.map((p) => posting(p, false))}
+          {(onlyUnmapped ? data.tanpaKatalog.filter((p) => p.varian.some((v) => !v.masterId)) : data.tanpaKatalog).map((p) => posting(p, false))}
         </div>
       )}
 
@@ -615,13 +669,11 @@ function MarketplaceCatalog() {
 
 function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
   const { data, loading, reload } = useFetch<MasterDetail>(`/products/${id}`);
-  const shops = useFetch<Shop[]>("/shops");
   const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [delPosting, setDelPosting] = useState<Posting | null>(null);
 
   // edit form state
   const [name, setName] = useState("");
@@ -630,14 +682,6 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
   const [aliases, setAliases] = useState("");
   const [catIds, setCatIds] = useState<string[]>([]);
   const kategori = useFetch<ShopCategory[]>("/shops/categories");
-
-  // add-posting form state
-  const [showAdd, setShowAdd] = useState(false);
-  const [pShop, setPShop] = useState("");
-  const [pTitle, setPTitle] = useState("");
-  const [pItemId, setPItemId] = useState("");
-  const [pPrice, setPPrice] = useState("");
-  const [pStock, setPStock] = useState("");
 
   function startEdit() {
     if (!data) return;
@@ -681,34 +725,6 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
       toast("Master produk dihapus", "success");
       onChanged(); onClose();
     } catch (e) { setErr((e as Error).message); setBusy(false); setConfirmDelete(false); }
-  }
-
-  async function addPosting(e: React.FormEvent) {
-    e.preventDefault(); setBusy(true); setErr(null);
-    try {
-      await api.post(`/products/${id}/postings`, {
-        shopId: pShop,
-        marketplaceItemId: pItemId,
-        marketplaceSku: data?.sku,
-        title: pTitle || undefined,
-        price: pPrice || undefined,
-        stock: pStock ? Number(pStock) : undefined,
-        status: "active",
-      });
-      setShowAdd(false); setPShop(""); setPTitle(""); setPItemId(""); setPPrice(""); setPStock("");
-      reload(); onChanged();
-      toast("Postingan ditambahkan", "success");
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
-  }
-
-  async function removePosting(postingId: string) {
-    setBusy(true); setErr(null);
-    try {
-      await api.del(`/products/postings/${postingId}`);
-      toast("Postingan dihapus", "success");
-      reload(); onChanged();
-    }
-    catch (e) { setErr((e as Error).message); } finally { setBusy(false); setDelPosting(null); }
   }
 
   return (
@@ -836,95 +852,32 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
                 </form>
               )}
 
-              <div className="flex items-center justify-between gap-2 mb-2.5">
-                <div className="text-sm font-medium text-ink">Postingan per Toko</div>
-                <Button
-                  size="sm"
-                  variant="text"
-                  icon={showAdd ? "close" : "plus"}
-                  onClick={() => setShowAdd(!showAdd)}
-                >
-                  {showAdd ? "Tutup" : "Tambah postingan"}
-                </Button>
-              </div>
-
-              {showAdd && (
-                <form onSubmit={addPosting} className="mb-4 rounded-lg border border-line p-4 space-y-3.5">
-                  <Field label="Toko" required>
-                    <Select value={pShop} onChange={(e) => setPShop(e.target.value)} required>
-                      <option value="">Pilih toko…</option>
-                      {(shops.data ?? []).map((s) => (
-                        <option key={s.id} value={s.id}>{s.shopName ?? s.id} ({s.marketplace})</option>
-                      ))}
-                    </Select>
-                  </Field>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                    <Field label="Marketplace item ID" required>
-                      <Input value={pItemId} onChange={(e) => setPItemId(e.target.value)} required />
-                    </Field>
-                    <Field label="Judul postingan">
-                      <Input value={pTitle} onChange={(e) => setPTitle(e.target.value)} />
-                    </Field>
-                    <Field label="Harga">
-                      <Input inputMode="numeric" value={pPrice} onChange={(e) => setPPrice(e.target.value)} />
-                    </Field>
-                    <Field label="Stok">
-                      <Input
-                        inputMode="numeric"
-                        value={pStock}
-                        onChange={(e) => setPStock(e.target.value.replace(/\D/g, ""))}
-                      />
-                    </Field>
-                  </div>
-                  <div className="text-xs text-ink-3">
-                    SKU postingan otomatis = <span className="font-mono text-ink-2">{data.sku}</span> (untuk linking).
-                  </div>
-                  <Button type="submit" variant="filled" size="sm" icon="plus" loading={busy}>
-                    Tambah
-                  </Button>
-                </form>
-              )}
-
-              {!data.shops.length ? (
+              <div className="text-sm font-medium text-ink mb-2.5">Terjual di Marketplace</div>
+              {!data.marketplacePostings?.length ? (
                 <EmptyState
                   icon="store"
-                  title="Belum ada postingan terhubung"
-                  description="Tambahkan postingan agar stok dan harga tersinkron per marketplace."
+                  title="Belum ada varian marketplace yang dipetakan"
+                  description="Petakan varian ke produk ini lewat tab Katalog Marketplace."
                   className="py-8"
                 />
               ) : (
-                data.shops.map((sg) => {
-                  const badge = MP_BADGE[sg.marketplace] ?? { label: sg.marketplace, tone: "neutral" as Tone };
+                data.marketplacePostings.map((p, i) => {
+                  const badge = MP_BADGE[p.marketplace] ?? { label: p.marketplace, tone: "neutral" as Tone };
                   return (
-                    <div key={sg.shopId} className="mb-4">
+                    <div key={p.productId ?? String(i)} className="mb-4">
                       <div className="flex items-center gap-2 mb-1.5">
-                        <span className="text-xs font-medium text-ink-2">{sg.shopName ?? sg.shopId}</span>
+                        <span className="text-xs font-medium text-ink-2">{p.shopName ?? "-"}</span>
                         <Badge tone={badge.tone}>{badge.label}</Badge>
+                        {p.catalogName && <span className="text-[10px] text-ink-3">· {p.catalogName}</span>}
                       </div>
+                      {p.title && <div className="text-xs text-ink-2 truncate mb-1">{p.title}</div>}
                       <div className="border border-line rounded-lg divide-y divide-line">
-                        {sg.postings.map((p) => (
-                          <div key={p.id} className="flex items-start justify-between gap-3 px-3.5 py-2.5">
-                            <div className="min-w-0">
-                              <div className="text-sm text-ink truncate">
-                                {p.title ?? p.marketplaceSku ?? p.id}
-                              </div>
-                              {p.marketplaceItemId && (
-                                <div className="text-xs font-mono text-ink-3 mt-0.5">
-                                  Product ID: {p.marketplaceItemId}
-                                </div>
-                              )}
-                              <div className="text-xs text-ink-2 mt-0.5 tabular-nums">
-                                {rupiah(p.price)} · stok {p.stock ?? 0} · {p.status}
-                              </div>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="text"
-                              icon="trash"
-                              className="text-red-600 hover:bg-red-50 shrink-0"
-                              aria-label="Hapus postingan"
-                              onClick={() => setDelPosting(p)}
-                            />
+                        {p.varian.map((v) => (
+                          <div key={v.skuId} className="flex items-center justify-between gap-3 px-3.5 py-2 text-sm">
+                            <span className="text-ink truncate">{v.nama}</span>
+                            <span className="text-ink-2 tabular-nums whitespace-nowrap">
+                              {v.harga != null ? rupiah(v.harga) : "—"} · stok {v.stok ?? 0}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -948,19 +901,6 @@ function ProductDetail({ id, onClose, onChanged }: { id: string; onClose: () => 
         loading={busy}
       />
 
-      <ConfirmModal
-        open={delPosting != null}
-        onClose={() => setDelPosting(null)}
-        onConfirm={() => delPosting && removePosting(delPosting.id)}
-        title="Hapus postingan"
-        description={
-          <>
-            Hapus postingan{" "}
-            <b>{delPosting?.title ?? delPosting?.marketplaceSku ?? delPosting?.id}</b>?
-          </>
-        }
-        loading={busy}
-      />
     </>
   );
 }
