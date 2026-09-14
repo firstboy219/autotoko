@@ -73,6 +73,7 @@ public class OrdersActivity extends AppCompatActivity {
     private JSONArray all = new JSONArray();
     private String filter = "";      // "" = semua
     private String q = "";
+    private boolean autoBatch = false;
 
     private float d;
     private int dp(int v) { return (int) (v * d); }
@@ -81,6 +82,7 @@ public class OrdersActivity extends AppCompatActivity {
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         api = new Api(new Session(this));
+        autoBatch = getIntent().getBooleanExtra("openBatch", false);
         setTitle("Daftar Pesanan");
         if (getSupportActionBar() != null) getSupportActionBar().setDisplayHomeAsUpEnabled(true);
         d = getResources().getDisplayMetrics().density;
@@ -160,6 +162,7 @@ public class OrdersActivity extends AppCompatActivity {
             all = r.dataArray();
             buildTabs();
             render();
+            if (autoBatch) { autoBatch = false; showBatch(); }
         });
     }
 

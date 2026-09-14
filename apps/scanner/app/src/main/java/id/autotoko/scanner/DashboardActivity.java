@@ -2,6 +2,7 @@ package id.autotoko.scanner;
 
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
@@ -116,6 +117,8 @@ public class DashboardActivity extends AppCompatActivity {
         root.removeAllViews();
         root.addView(status);
         status.setText("Periode " + hari + " hari terakhir");
+        root.addView(kartuKpi());
+        root.addView(gridNavigasi());
         root.addView(pilihPeriode());
 
         uangDanLaba();
@@ -690,6 +693,135 @@ public class DashboardActivity extends AppCompatActivity {
         l.setText(label);
         box.addView(l);
         return box;
+    }
+
+    // ---- Gaya BigSeller: kartu KPI + grid tile navigasi ----
+    private View kartuKpi() {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        int p = (int) (16 * dp());
+        card.setPadding(p, p, p, p);
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{ Color.parseColor("#0E6E55"), Color.parseColor("#0A5642") });
+        g.setCornerRadius(16 * dp());
+        card.setBackground(g);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = (int) (10 * dp());
+        card.setLayoutParams(lp);
+
+        TextView h = new TextView(this);
+        h.setText("Penjualan Hari Ini");
+        h.setTextColor(Color.WHITE); h.setTextSize(15);
+        h.setTypeface(null, android.graphics.Typeface.BOLD);
+        card.addView(h);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rl.topMargin = (int) (10 * dp());
+        row.setLayoutParams(rl);
+        int orders = ringkasHariIni == null ? 0 : ringkasHariIni.optInt("today_orders", 0);
+        double rev = ringkasHariIni == null ? 0 : ringkasHariIni.optDouble("today_revenue", 0);
+        row.addView(kpiCol(String.valueOf(orders), "Jumlah pesanan"),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(kpiCol(rp(rev), "Omzet (IDR)"),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        card.addView(row);
+        return card;
+    }
+
+    private View kpiCol(String big, String label) {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        TextView b = new TextView(this);
+        b.setText(big); b.setTextColor(Color.WHITE); b.setTextSize(22);
+        b.setTypeface(null, android.graphics.Typeface.BOLD);
+        c.addView(b);
+        TextView l = new TextView(this);
+        l.setText(label); l.setTextColor(Color.parseColor("#CFE6DE")); l.setTextSize(12);
+        c.addView(l);
+        return c;
+    }
+
+    private View gridNavigasi() {
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams wl = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        wl.topMargin = (int) (14 * dp());
+        wrap.setLayoutParams(wl);
+        TextView t = new TextView(this);
+        t.setText("Menu"); t.setTextSize(14);
+        t.setTypeface(null, android.graphics.Typeface.BOLD);
+        t.setTextColor(Color.parseColor("#20242B"));
+        t.setPadding(0, 0, 0, (int) (6 * dp()));
+        wrap.addView(t);
+        String[][] tiles = {
+                {"📦", "Pesanan", "#3B82F6", "O"},
+                {"🧾", "Batch Packing", "#0E6E55", "B"},
+                {"📷", "Scan Resi", "#6366F1", "S"},
+                {"📥", "Bahan Baku", "#14B8A6", "D"},
+                {"💰", "HPP", "#F59E0B", "H"},
+                {"🏦", "Pencairan", "#8B5CF6", "P"},
+                {"📊", "Stok", "#EF4444", "K"},
+                {"🕒", "Riwayat", "#64748B", "R"},
+        };
+        LinearLayout row = null;
+        for (int i = 0; i < tiles.length; i++) {
+            if (i % 4 == 0) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                rl.topMargin = (int) (4 * dp());
+                row.setLayoutParams(rl);
+                wrap.addView(row);
+            }
+            row.addView(tile(tiles[i][0], tiles[i][1], tiles[i][2], tiles[i][3]));
+        }
+        return wrap;
+    }
+
+    private View tile(String emoji, String label, String color, String code) {
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setGravity(Gravity.CENTER_HORIZONTAL);
+        col.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        col.setPadding(0, (int) (8 * dp()), 0, (int) (8 * dp()));
+        col.setClickable(true); col.setFocusable(true);
+        TextView box = new TextView(this);
+        box.setText(emoji); box.setTextSize(22); box.setGravity(Gravity.CENTER);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(Color.parseColor(color)); g.setCornerRadius(14 * dp());
+        box.setBackground(g);
+        int s = (int) (48 * dp());
+        box.setLayoutParams(new LinearLayout.LayoutParams(s, s));
+        col.addView(box);
+        TextView l = new TextView(this);
+        l.setText(label); l.setTextSize(11); l.setGravity(Gravity.CENTER);
+        l.setTextColor(Color.parseColor("#20242B"));
+        l.setPadding(0, (int) (4 * dp()), 0, 0);
+        col.addView(l);
+        col.setOnClickListener(v -> bukaMenu(code));
+        return col;
+    }
+
+    private void bukaMenu(String code) {
+        Intent i;
+        switch (code) {
+            case "O": i = new Intent(this, OrdersActivity.class); break;
+            case "B": i = new Intent(this, OrdersActivity.class); i.putExtra("openBatch", true); break;
+            case "S": i = new Intent(this, ScanActivity.class); break;
+            case "D": i = new Intent(this, DeliveryActivity.class); break;
+            case "H": i = new Intent(this, HppActivity.class); break;
+            case "P": i = new Intent(this, PayoutActivity.class); break;
+            case "K": i = new Intent(this, StockActivity.class); break;
+            case "R": i = new Intent(this, HistoryActivity.class); break;
+            default: return;
+        }
+        startActivity(i);
     }
 
     private LinearLayout kotak(String judul, String isi) {
