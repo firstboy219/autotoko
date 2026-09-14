@@ -39,7 +39,10 @@ export function statusInternal(mp: string | null | undefined): StatusInternal {
     case "AWAITING_SHIPMENT":
       return "approved";
     case "AWAITING_COLLECTION":
-      return "siap_kirim";
+      // Resi/label sudah dicetak & menunggu kurir -> di alur seller ini
+      // artinya paket MULAI dikemas. forward-only menjaga yang sudah lebih
+      // maju (siap_kirim/dikirim) tidak ditarik mundur.
+      return "packing";
     case "PARTIALLY_SHIPPING":
     case "IN_TRANSIT":
       return "dikirim";

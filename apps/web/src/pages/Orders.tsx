@@ -57,6 +57,8 @@ interface Order {
   trackingNumber?: string | null;
   /** Nama toko (label seller bila ada, jika tidak nama marketplace). */
   shopName?: string | null;
+  /** Order API ini sudah dicocokkan dengan scan resi gudang. */
+  terscan?: boolean;
 }
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
@@ -100,25 +102,33 @@ const VIEWS: { mode: ViewMode; label: string; icon: IconName }[] = [
 ];
 
 export function Orders() {
-  const { data, loading, reload } = useFetch<Order[]>("/orders");
+  // Default fokus ke order aktif: ~99% arsip (selesai/batal) disembunyikan.
+  const [aktifSaja, setAktifSaja] = useState(true);
+  const { data, loading, reload } = useFetch<Order[]>(aktifSaja ? "/orders?active=1" : "/orders");
+  const { data: ringkas, reload: reloadRingkas } =
+    useFetch<{ perStatus: Record<string, number>; manual: number }>("/orders/board-summary");
   const toast = useToast();
-  useRealtime(useCallback(() => reload(), [reload]));
+  useRealtime(useCallback(() => { reload(); reloadRingkas(); }, [reload, reloadRingkas]));
   const [view, setView] = useState<ViewMode>("tabel");
   const [q, setQ] = useState("");
   const [mp, setMp] = useState("");
   const [fs, setFs] = useState("");
+  const [src, setSrc] = useState<"" | "api" | "manual">("");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Order | null>(null);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const all = data ?? [];
   const marketplaces = useMemo(() => [...new Set(all.map((o) => o.marketplace))], [all]);
 
-  // Shared search + marketplace filter for both views. The fulfillment-status
-  // dropdown only applies to the table view (each Kanban column is a status).
+  // Shared search + marketplace + source filter for both views. The
+  // fulfillment-status dropdown only applies to the table view.
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return all.filter((o) => {
       if (mp && o.marketplace !== mp) return false;
+      if (src && (o.sumber ?? "api") !== src) return false;
       if (view === "tabel" && fs && o.fulfillmentStatus !== fs) return false;
       if (needle) {
         const hay = `${o.marketplaceOrderId} ${o.buyerName ?? ""}`.toLowerCase();
@@ -126,23 +136,52 @@ export function Orders() {
       }
       return true;
     });
-  }, [all, q, mp, fs, view]);
+  }, [all, q, mp, fs, src, view]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
   const rows = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
-  const hasFilters = Boolean(q.trim() || mp || fs);
+  const hasFilters = Boolean(q.trim() || mp || fs || src);
 
   // Keep the live modal order in sync with reloaded data so the board reflects moves.
   const liveSelected = selected && (all.find((o) => o.id === selected.id) ?? selected);
+
+  // Hanya order API (bukan scan manual) yang statusnya bisa diubah massal.
+  const pageApiIds = rows.filter((o) => (o.sumber ?? "api") === "api").map((o) => o.id);
+  const semuaTerpilih = pageApiIds.length > 0 && pageApiIds.every((id) => sel.has(id));
+  const toggleSel = (id: string) =>
+    setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleSemua = () =>
+    setSel((s) => {
+      const n = new Set(s);
+      if (semuaTerpilih) pageApiIds.forEach((id) => n.delete(id));
+      else pageApiIds.forEach((id) => n.add(id));
+      return n;
+    });
 
   async function moveStatus(order: Order, status: string) {
     try {
       await api.patch<Order>(`/orders/${order.id}/status`, { status });
       toast(`Order dipindah ke ${FS_LABEL[status] ?? status}`, "success");
-      reload();
+      reload(); reloadRingkas();
     } catch (e) {
       toast((e as Error).message, "danger");
+    }
+  }
+
+  async function bulkStatus(status: string) {
+    const ids = [...sel];
+    if (!ids.length) return;
+    setBulkBusy(true);
+    try {
+      const r = await api.patch<{ updated: number }>("/orders/status/bulk", { ids, status });
+      toast(`${r.updated} order → ${FS_LABEL[status] ?? status}`, "success");
+      setSel(new Set());
+      reload(); reloadRingkas();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setBulkBusy(false);
     }
   }
 
@@ -177,6 +216,37 @@ export function Orders() {
         }
       />
 
+      {ringkas && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          {([
+            ["masuk", "Perlu disetujui"],
+            ["produksi", "Produksi"],
+            ["packing", "Packing"],
+            ["siap_kirim", "Siap kirim"],
+            ["dikirim", "Dikirim"],
+          ] as const).map(([s, label]) => {
+            const n = ringkas.perStatus[s] ?? 0;
+            const on = fs === s;
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => { setFs(on ? "" : s); setAktifSaja(true); setView("tabel"); setPage(0); }}
+                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition ${
+                  on ? "border-brand bg-brand/10 text-brand-ink" : "border-line bg-white text-ink-2 hover:text-ink"
+                }`}
+              >
+                {label}
+                <span className="font-semibold tabular-nums text-ink">{n}</span>
+              </button>
+            );
+          })}
+          <span className="ml-auto self-center text-xs text-ink-3 tabular-nums">
+            Selesai {ringkas.perStatus["selesai"] ?? 0} · Batal {ringkas.perStatus["dibatalkan"] ?? 0} · Scan manual {ringkas.manual}
+          </span>
+        </div>
+      )}
+
       <Card className="mb-4">
         <div className="flex flex-wrap items-center gap-2.5">
           <div className="relative flex-1 min-w-[200px]">
@@ -202,6 +272,15 @@ export function Orders() {
               <option key={m} value={m}>{MP_LABEL[m] ?? m}</option>
             ))}
           </Select>
+          <Select
+            className="w-auto min-w-[150px]"
+            value={src}
+            onChange={(e) => { setSrc(e.target.value as "" | "api" | "manual"); setPage(0); }}
+          >
+            <option value="">Semua sumber</option>
+            <option value="api">API marketplace</option>
+            <option value="manual">Scan manual</option>
+          </Select>
           {view === "tabel" && (
             <Select
               className="w-auto min-w-[150px]"
@@ -212,6 +291,18 @@ export function Orders() {
               {ALL_FS.map((s) => <option key={s} value={s}>{FS_LABEL[s]}</option>)}
             </Select>
           )}
+          <button
+            type="button"
+            aria-pressed={aktifSaja}
+            onClick={() => { setAktifSaja((v) => !v); setPage(0); }}
+            title="Sembunyikan order selesai/dibatalkan & scan manual"
+            className={`text-sm font-medium px-3 py-1.5 rounded-lg border inline-flex items-center gap-1.5 transition ${
+              aktifSaja ? "bg-brand/10 text-brand-ink border-brand" : "bg-white text-ink-2 border-line hover:text-ink"
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full border border-current ${aktifSaja ? "bg-current" : ""}`} />
+            Aktif saja
+          </button>
           {hasFilters && (
             <Button
               variant="text"
@@ -232,16 +323,51 @@ export function Orders() {
           onMove={moveStatus}
         />
       ) : (
+        <>
+        {sel.size > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-brand bg-brand/5 px-3 py-2">
+            <span className="text-sm font-medium text-ink">{sel.size} order dipilih</span>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="filled" icon="check" loading={bulkBusy} onClick={() => bulkStatus("approved")}>
+                Setujui
+              </Button>
+              <Button size="sm" variant="tonal" loading={bulkBusy} onClick={() => bulkStatus("packing")}>
+                Mulai Packing
+              </Button>
+              <Select
+                className="w-auto min-w-[150px]"
+                value=""
+                disabled={bulkBusy}
+                onChange={(e) => { if (e.target.value) void bulkStatus(e.target.value); }}
+              >
+                <option value="">Ubah ke status…</option>
+                {ALL_FS.map((s) => <option key={s} value={s}>{FS_LABEL[s]}</option>)}
+              </Select>
+              <Button size="sm" variant="text" onClick={() => setSel(new Set())}>Batal</Button>
+            </div>
+          </div>
+        )}
         <Card padded={false} className="overflow-hidden">
           <TableWrap>
-            <Table className="min-w-[860px]">
+            <Table className="min-w-[980px]">
               <THead>
                 <tr>
+                  <TH>
+                    <input
+                      type="checkbox"
+                      aria-label="Pilih semua order di halaman"
+                      checked={semuaTerpilih}
+                      onChange={toggleSemua}
+                      disabled={pageApiIds.length === 0}
+                      className="w-4 h-4 accent-brand align-middle"
+                    />
+                  </TH>
                   <TH>Order</TH>
                   <TH>Sumber</TH>
                   <TH>Marketplace</TH>
                   <TH>Toko</TH>
                   <TH>Status Proses</TH>
+                  <TH>Scan</TH>
                   <TH>Pembeli</TH>
                   <TH align="right">Total</TH>
                   <TH align="right">Fee</TH>
@@ -250,10 +376,10 @@ export function Orders() {
               </THead>
               <tbody>
                 {loading ? (
-                  <SkeletonRows n={8} cols={8} />
+                  <SkeletonRows n={8} cols={11} />
                 ) : !rows.length ? (
                   <tr>
-                    <td colSpan={8}>
+                    <td colSpan={11}>
                       <EmptyState
                         icon="cart"
                         title={hasFilters ? "Tidak ada order yang cocok" : "Belum ada order"}
@@ -283,6 +409,17 @@ export function Orders() {
                       className="cursor-pointer hover:bg-canvas"
                       onClick={() => setSelected(o)}
                     >
+                      <TD onClick={(e) => e.stopPropagation()}>
+                        {(o.sumber ?? "api") === "api" ? (
+                          <input
+                            type="checkbox"
+                            aria-label={`Pilih order ${o.marketplaceOrderId}`}
+                            checked={sel.has(o.id)}
+                            onChange={() => toggleSel(o.id)}
+                            className="w-4 h-4 accent-brand align-middle"
+                          />
+                        ) : null}
+                      </TD>
                       <TD className="font-mono text-xs">
                         {o.marketplaceOrderId || o.trackingNumber || "-"}
                       </TD>
@@ -301,6 +438,15 @@ export function Orders() {
                         <Badge tone={FS_TONE[o.fulfillmentStatus] ?? "neutral"}>
                           {FS_LABEL[o.fulfillmentStatus] ?? o.fulfillmentStatus}
                         </Badge>
+                      </TD>
+                      <TD>
+                        {(o.sumber ?? "api") === "manual" ? (
+                          <span className="text-ink-3 text-xs">—</span>
+                        ) : o.terscan ? (
+                          <Badge tone="success">Discan</Badge>
+                        ) : (
+                          <span className="text-xs text-ink-3">Belum</span>
+                        )}
                       </TD>
                       <TD>{o.buyerName ?? "-"}</TD>
                       <TD align="right" className="tabular-nums whitespace-nowrap">
@@ -333,6 +479,7 @@ export function Orders() {
             </Table>
           </TableWrap>
         </Card>
+        </>
       )}
 
       {view === "tabel" && filtered.length > PAGE_SIZE && (
@@ -640,6 +787,18 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
                   loading={busy}
                 >
                   Lanjut ke {FS_LABEL[next]}
+                </Button>
+              )}
+              {["masuk", "approved", "produksi"].includes(order.fulfillmentStatus) && (
+                <Button
+                  size="sm"
+                  variant="tonal"
+                  icon="package"
+                  onClick={() => setStatus("packing")}
+                  loading={busy}
+                  title="Tandai resi sudah dicetak & mulai kemas"
+                >
+                  Mulai Packing
                 </Button>
               )}
             </div>

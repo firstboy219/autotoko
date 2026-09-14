@@ -8,7 +8,7 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { IsIn, IsInt, IsOptional, IsISO8601, IsUUID, Min } from "class-validator";
+import { IsArray, IsIn, IsInt, IsOptional, IsISO8601, IsUUID, Min } from "class-validator";
 import { Type } from "class-transformer";
 import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
@@ -28,9 +28,20 @@ class UpdateStatusDto {
   status!: FulfillmentStatus;
 }
 
+class BulkStatusDto {
+  @IsArray() @IsUUID("4", { each: true })
+  ids!: string[];
+
+  @IsIn(FULFILLMENT_STATUSES as unknown as string[])
+  status!: FulfillmentStatus;
+}
+
 class ListOrdersQuery {
   @IsOptional() @IsIn(FULFILLMENT_STATUSES as unknown as string[])
   status?: FulfillmentStatus;
+
+  @IsOptional() @IsIn(["0", "1", "true", "false"])
+  active?: string;
 
   @IsOptional() @IsUUID()
   shopId?: string;
@@ -62,6 +73,7 @@ export class OrdersController {
       success: true,
       data: await this.orders.list(uid(req), {
         status: q.status,
+        active: q.active === "1" || q.active === "true",
         shopId: q.shopId,
         dateFrom: q.dateFrom ? new Date(q.dateFrom) : undefined,
         dateTo: q.dateTo ? new Date(q.dateTo) : undefined,
@@ -74,6 +86,19 @@ export class OrdersController {
   @Get("summary")
   async summary(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.orders.summary(uid(req)) };
+  }
+
+  @Get("board-summary")
+  async boardSummary(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.boardSummary(uid(req)) };
+  }
+
+  @Patch("status/bulk")
+  async updateStatusBulk(
+    @Req() req: FastifyRequest,
+    @Body() dto: BulkStatusDto,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.updateStatusBulk(uid(req), dto.ids, dto.status) };
   }
 
   @Get(":id")

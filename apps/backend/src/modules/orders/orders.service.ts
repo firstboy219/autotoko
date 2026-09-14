@@ -1,10 +1,12 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, notInArray, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders, resiScans, shops } from "../../database/schema/index.js";
 
 export interface ListOrdersOpts {
   status?: FulfillmentStatus;
+  /** Hanya order aktif (bukan selesai/dibatalkan); scan manual disembunyikan. */
+  active?: boolean;
   shopId?: string;
   dateFrom?: Date;
   dateTo?: Date;
@@ -32,6 +34,7 @@ export class OrdersService {
   async list(userId: string, opts: ListOrdersOpts = {}) {
     const conds: SQL[] = [eq(orders.userId, userId)];
     if (opts.status) conds.push(eq(orders.fulfillmentStatus, opts.status));
+    if (opts.active) conds.push(notInArray(orders.fulfillmentStatus, ["selesai", "dibatalkan"]));
     if (opts.shopId) conds.push(eq(orders.shopId, opts.shopId));
     if (opts.dateFrom) conds.push(gte(orders.createdAt, opts.dateFrom));
     if (opts.dateTo) conds.push(lte(orders.createdAt, opts.dateTo));
@@ -124,7 +127,8 @@ export class OrdersService {
 
     // Penyaring status hanya berlaku pada yang dari API: status paket manual
     // selalu "dikirim", jadi menyaring status lain berarti membuangnya semua.
-    const manualTerpilih = opts.status && opts.status !== "dikirim" ? [] : barisManual;
+    const manualTerpilih =
+      opts.active || (opts.status && opts.status !== "dikirim") ? [] : barisManual;
 
     return [
       ...dariApi.map((o) => ({
@@ -168,5 +172,33 @@ export class OrdersService {
       .returning();
     if (!row) throw new NotFoundException("Order not found");
     return row;
+  }
+
+  /** Jumlah per status proses (semua order API) + jumlah scan manual. */
+  async boardSummary(userId: string) {
+    const rows = await this.db
+      .select({ fs: orders.fulfillmentStatus, n: sql<number>`count(*)::int` })
+      .from(orders)
+      .where(eq(orders.userId, userId))
+      .groupBy(orders.fulfillmentStatus);
+    const perStatus: Record<string, number> = {};
+    for (const r of rows) perStatus[r.fs] = Number(r.n);
+    const [m] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(resiScans)
+      .where(eq(resiScans.userId, userId));
+    return { perStatus, manual: Number(m?.n ?? 0) };
+  }
+
+  /** Ubah status proses banyak order sekaligus (multi-tenant guarded). */
+  async updateStatusBulk(userId: string, ids: string[], status: FulfillmentStatus) {
+    const clean = [...new Set((ids ?? []).filter(Boolean))];
+    if (!clean.length) return { updated: 0, ids: [] as string[] };
+    const rows = await this.db
+      .update(orders)
+      .set({ fulfillmentStatus: status, updatedAt: new Date() })
+      .where(and(eq(orders.userId, userId), inArray(orders.id, clean)))
+      .returning({ id: orders.id });
+    return { updated: rows.length, ids: rows.map((r) => r.id) };
   }
 }
