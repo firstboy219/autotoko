@@ -98,6 +98,25 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.perbaikiNamaVarian(uid(req)) };
   }
 
+  /** Ambil URL label AWB order dari marketplace (read-only). */
+  @Get("orders/:id/label")
+  async labelOrder(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.labelOrder(uid(req), id) };
+  }
+
+  /** RTS / arrange shipment ke marketplace (menulis; outward). */
+  @Post("orders/:id/ship")
+  async shipOrder(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() body: { handoverMethod?: string },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.shipOrder(uid(req), id, { handoverMethod: body?.handoverMethod }) };
+  }
+
   @Get("shops/:id/runs")
   async runs(
     @Req() req: FastifyRequest,

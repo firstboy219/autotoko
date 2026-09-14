@@ -595,8 +595,9 @@ function OtomasiOrderModal({ onClose }: { onClose: () => void }) {
           </div>
 
           <InlineAlert tone="warning">
-            Mengubah status di AutoToko belum otomatis meng-update marketplace — perlu API ship/AWB yang belum
-            tersambung. Frontend sudah disiapkan; begitu API disambung, status di seller center ikut berubah.
+            TikTok Shop sudah tersambung. Auto siap-kirim ini hanya mengubah status <b>internal</b> AutoToko. Untuk
+            benar-benar meng-update marketplace (RTS &amp; AWB), pakai tombol “Kirim ke marketplace” di detail order —
+            sengaja manual + konfirmasi karena memicu pengiriman nyata.
           </InlineAlert>
 
           <div className="flex justify-end gap-2">
@@ -772,8 +773,46 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
   async function cetakAwb() {
     setBusy(true); setErr(null);
     try {
-      const r = await api.post<{ connected: boolean; message: string }>(`/orders/${order.id}/awb`, {});
-      toast(r.message, r.connected ? "success" : "warning");
+      const r = await api.get<{ hasil: { docUrl: string | null; trackingNumber: string | null; error?: string }[] }>(
+        `/marketplace-sync/orders/${order.id}/label`,
+      );
+      const ada = r.hasil.filter((h) => h.docUrl);
+      if (!ada.length) {
+        const e = r.hasil.find((h) => h.error)?.error;
+        toast(e ? `Label belum tersedia: ${e}` : "Label belum tersedia — order mungkin belum di-RTS.", "warning");
+        return;
+      }
+      ada.forEach((h) => window.open(h.docUrl!, "_blank", "noopener"));
+      const resi = ada[0]?.trackingNumber;
+      toast(`Label AWB dibuka (${ada.length} paket)${resi ? ` · resi ${resi}` : ""}`, "success");
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function kirimMarketplace() {
+    if (
+      !window.confirm(
+        `Kirim order ${order.marketplaceOrderId} ke marketplace (RTS)?\n\n` +
+          `Ini mengatur pengiriman di seller center: status jadi "menunggu kurir", AWB dibuat, dan bisa memicu ` +
+          `penjemputan kurir. Tindakan nyata dan sulit dibatalkan. Lanjutkan?`,
+      )
+    )
+      return;
+    setBusy(true); setErr(null);
+    try {
+      const r = await api.post<{ ok: boolean; hasil: { ok: boolean; error?: string }[] }>(
+        `/marketplace-sync/orders/${order.id}/ship`, {},
+      );
+      if (r.ok) {
+        toast("Order dikirim ke marketplace (RTS). Status → Siap Kirim.", "success");
+        onChanged({ ...order, fulfillmentStatus: "siap_kirim" });
+      } else {
+        const e = r.hasil.find((h) => !h.ok)?.error;
+        toast(`Gagal RTS: ${e ?? "tidak diketahui"}`, "danger");
+      }
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -915,13 +954,19 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
         </div>
 
         <div className="mt-3 rounded-lg border border-line p-3.5">
-          <div className="text-xs font-medium text-ink-2 mb-2">Kirim ke marketplace</div>
-          <Button size="sm" variant="outline" icon="package" loading={busy} onClick={cetakAwb}>
-            Cetak AWB / Resi
-          </Button>
+          <div className="text-xs font-medium text-ink-2 mb-2">Kirim ke marketplace <span className="text-emerald-600">· TikTok Shop tersambung</span></div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" icon="package" loading={busy} onClick={cetakAwb}>
+              Cetak AWB / Resi
+            </Button>
+            <Button size="sm" variant="filled" icon="check" loading={busy} onClick={kirimMarketplace}>
+              Kirim ke marketplace (RTS)
+            </Button>
+          </div>
           <p className="text-[11px] text-ink-3 mt-2">
-            Perubahan status di sini bersifat internal AutoToko. Sinkron ke marketplace (buat AWB &amp; ubah status di
-            seller center) memerlukan API ship yang belum tersambung — tombol ini menyiapkan alurnya.
+            <b>Cetak AWB</b> membuka label PDF dari marketplace (read-only, tak mengubah apa pun).
+            <b> Kirim ke marketplace</b> melakukan RTS — status di seller center jadi “menunggu kurir” &amp; AWB dibuat;
+            tindakan nyata, ada konfirmasi dulu.
           </p>
         </div>
       </Modal>

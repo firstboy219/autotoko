@@ -661,6 +661,117 @@ export class MarketplaceSyncService {
     return { toko: toko.length, terisi, perToko };
   }
 
+  /** Muat order + tokonya (Toko) untuk operasi fulfillment. */
+  private async ambilOrderToko(userId: string, orderId: string) {
+    const [order] = await this.bypass(() => this.db
+      .select({
+        id: orders.id,
+        shopId: orders.shopId,
+        marketplace: orders.marketplace,
+        marketplaceOrderId: orders.marketplaceOrderId,
+        fulfillmentStatus: orders.fulfillmentStatus,
+        raw: orders.raw,
+      })
+      .from(orders)
+      .where(and(eq(orders.id, orderId), eq(orders.userId, userId)))
+      .limit(1));
+    if (!order) throw new NotFoundException("Order tidak ditemukan");
+    if (order.marketplace !== "tiktok") throw new BadRequestException(`${order.marketplace} belum didukung untuk AWB`);
+    const [toko] = await this.bypass(() => this.db.select().from(shops).where(eq(shops.id, order.shopId)).limit(1));
+    if (!toko || !toko.accessToken || !toko.shopCipher) throw new BadRequestException("Toko tidak tersambung API");
+    return { order, toko };
+  }
+
+  private packageIds(raw: unknown): string[] {
+    const pkgs = (raw as { packages?: { id?: string }[] } | null)?.packages ?? [];
+    return pkgs.map((p) => p?.id).filter((x): x is string => !!x);
+  }
+
+  /**
+   * Ambil dokumen label (AWB) untuk order dari marketplace. READ-ONLY: hanya
+   * membaca URL PDF label yang sudah dibuat marketplace, tidak mengubah apa pun.
+   * Label baru tersedia setelah paket di-RTS (arrange shipment).
+   */
+  async labelOrder(userId: string, orderId: string) {
+    const { order, toko } = await this.ambilOrderToko(userId, orderId);
+    const ids = this.packageIds(order.raw);
+    if (!ids.length) throw new BadRequestException("Order belum punya paket di marketplace");
+    let klien = await this.klien(toko);
+    let sudahSegar = false;
+    const hasil: { packageId: string; docUrl: string | null; trackingNumber: string | null; error?: string }[] = [];
+    for (const pid of ids) {
+      try {
+        let doc: { doc_url?: string; tracking_number?: string } | undefined;
+        for (;;) {
+          try {
+            doc = await klien.get(`/fulfillment/202309/packages/${pid}/shipping_documents`, {
+              document_type: "SHIPPING_LABEL",
+              document_size: "A6",
+            });
+            break;
+          } catch (e) {
+            if (e instanceof TikTokApiError && e.tokenBermasalah && !sudahSegar) {
+              sudahSegar = true; klien = await this.segarkan(toko); continue;
+            }
+            throw e;
+          }
+        }
+        hasil.push({ packageId: pid, docUrl: doc?.doc_url ?? null, trackingNumber: doc?.tracking_number ?? null });
+      } catch (e) {
+        hasil.push({ packageId: pid, docUrl: null, trackingNumber: null, error: (e as Error).message });
+      }
+    }
+    return { orderId, hasil };
+  }
+
+  /**
+   * RTS / arrange shipment ke marketplace. TULIS & OUTWARD: memindahkan paket
+   * ke "menunggu kurir" (AWAITING_COLLECTION) di seller center, memicu AWB &
+   * bisa memicu penjemputan. Hanya dipanggil manual dari UI dengan konfirmasi.
+   * Setelah semua paket sukses, status lokal dimajukan ke "siap_kirim".
+   */
+  async shipOrder(userId: string, orderId: string, opts: { handoverMethod?: string }) {
+    const { order, toko } = await this.ambilOrderToko(userId, orderId);
+    const ids = this.packageIds(order.raw);
+    if (!ids.length) throw new BadRequestException("Order belum punya paket di marketplace");
+    let klien = await this.klien(toko);
+    let sudahSegar = false;
+    const hasil: { packageId: string; ok: boolean; error?: string }[] = [];
+    for (const pid of ids) {
+      const body: Record<string, unknown> = {};
+      if (opts.handoverMethod) body.handover_method = opts.handoverMethod;
+      try {
+        for (;;) {
+          try {
+            await klien.post(`/fulfillment/202309/packages/${pid}/ship`, body);
+            break;
+          } catch (e) {
+            if (e instanceof TikTokApiError && e.tokenBermasalah && !sudahSegar) {
+              sudahSegar = true; klien = await this.segarkan(toko); continue;
+            }
+            throw e;
+          }
+        }
+        hasil.push({ packageId: pid, ok: true });
+      } catch (e) {
+        this.logger.warn(`Ship ${orderId} pkg ${pid}: ${(e as Error).message}`);
+        hasil.push({ packageId: pid, ok: false, error: (e as Error).message });
+      }
+    }
+    const semuaOk = hasil.length > 0 && hasil.every((h) => h.ok);
+    if (semuaOk) {
+      await this.bypass(() => this.db
+        .update(orders)
+        .set({
+          awbGenerated: true,
+          fulfillmentStatus: majukanStatus(order.fulfillmentStatus as StatusInternal, "siap_kirim"),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(orders.userId, userId), eq(orders.id, orderId))));
+    }
+    return { orderId, ok: semuaOk, hasil };
+  }
+
   private async klien(toko: Toko): Promise<TikTokClient> {
     const { appKey, appSecret } = await this.tiktok.credentials();
     return new TikTokClient(appKey, appSecret, this.crypto.decrypt(toko.accessToken!), toko.shopCipher);
