@@ -44,6 +44,9 @@ export const orders = pgTable(
     awbGenerated: boolean("awb_generated").notNull().default(false),
     labelPrinted: boolean("label_printed").notNull().default(false),
     items: jsonb("items"),
+    /** Alasan order ditahan (takeout) dari batch packing; null = tidak ditahan. */
+    holdReason: text("hold_reason"),
+    heldAt: timestamp("held_at", { withTimezone: true }),
     createdAtMarketplace: timestamp("created_at_marketplace", { withTimezone: true }),
     /**
      * Tiga kolom dari sinkronisasi API (migrasi 0057). Nullable: 16 baris

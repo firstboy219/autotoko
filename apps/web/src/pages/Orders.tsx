@@ -199,41 +199,7 @@ export function Orders() {
     }
   }
 
-  async function batchPacking() {
-    const ids = [...sel];
-    if (!ids.length) return;
-    if (
-      !window.confirm(
-        `Mulai Batch Packing untuk ${ids.length} order.\n\n` +
-          `Order yang BELUM dikirim akan di-RTS (arrange shipment) ke marketplace — tindakan NYATA: ` +
-          `AWB dibuat & bisa memicu penjemputan kurir. Lalu diunduh PDF packing list + PDF resi, ` +
-          `dan status jadi Packing.\n\nLanjutkan?`,
-      )
-    )
-      return;
-    setBulkBusy(true);
-    try {
-      const r = await api.post<{ total: number; ok: number; hasil: BatchRow[] }>(
-        "/marketplace-sync/orders/batch-packing",
-        { orderIds: ids, handoverMethod: "DROP_OFF" },
-      );
-      const okRows = r.hasil.filter((h) => h.ok);
-      if (okRows.some((h) => h.labels.length)) await unduhResiGabung(okRows);
-      if (okRows.length) await unduhPackingList(okRows);
-      const gagal = r.hasil.filter((h) => !h.ok);
-      toast(
-        `Batch: ${r.ok}/${r.total} order → Packing, PDF diunduh.` +
-          (gagal.length ? ` ${gagal.length} gagal: ${gagal[0]?.error ?? ""}` : ""),
-        gagal.length ? "warning" : "success",
-      );
-      setSel(new Set());
-      reload(); reloadRingkas();
-    } catch (e) {
-      toast((e as Error).message, "danger");
-    } finally {
-      setBulkBusy(false);
-    }
-  }
+  const [batchOpen, setBatchOpen] = useState(false);
 
   return (
     <Layout title="Orders">
@@ -259,6 +225,9 @@ export function Orders() {
                 </button>
               ))}
             </div>
+            <Button variant="filled" icon="package" onClick={() => setBatchOpen(true)}>
+              Mulai Batch Packing
+            </Button>
             <Button variant="outline" onClick={() => setOtomasiOpen(true)}>
               Otomasi Order
             </Button>
@@ -381,9 +350,6 @@ export function Orders() {
           <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-brand bg-brand/5 px-3 py-2">
             <span className="text-sm font-medium text-ink">{sel.size} order dipilih</span>
             <div className="ml-auto flex flex-wrap items-center gap-2">
-              <Button size="sm" variant="filled" icon="package" loading={bulkBusy} onClick={batchPacking}>
-                Batch Packing (RTS + resi)
-              </Button>
               <Button size="sm" variant="outline" icon="check" loading={bulkBusy} onClick={() => bulkStatus("approved")}>
                 Setujui
               </Button>
@@ -575,7 +541,120 @@ export function Orders() {
       )}
 
       {otomasiOpen && <OtomasiOrderModal onClose={() => setOtomasiOpen(false)} />}
+      {batchOpen && (
+        <BatchPackingModal
+          onClose={() => setBatchOpen(false)}
+          onDone={() => { reload(); reloadRingkas(); }}
+        />
+      )}
     </Layout>
+  );
+}
+
+function BatchPackingModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const { data, loading } = useFetch<Order[]>("/orders?active=1");
+  const kandidat = (data ?? []).filter((o) => (o.sumber ?? "api") === "api" && o.fulfillmentStatus !== "dikirim");
+  const [taken, setTaken] = useState<Map<string, string>>(new Map());
+  const [busy, setBusy] = useState(false);
+  const [hasil, setHasil] = useState<{ total: number; ok: number; ditahan: number; gagal: number } | null>(null);
+
+  const toggleTakeout = (id: string) =>
+    setTaken((m) => { const n = new Map(m); if (n.has(id)) n.delete(id); else n.set(id, ""); return n; });
+  const setReason = (id: string, r: string) =>
+    setTaken((m) => { const n = new Map(m); if (n.has(id)) n.set(id, r); return n; });
+
+  const includedIds = kandidat.filter((o) => !taken.has(o.id)).map((o) => o.id);
+
+  async function proses() {
+    if (!includedIds.length) { toast("Tidak ada order untuk diproses", "warning"); return; }
+    if (
+      !window.confirm(
+        `Proses ${includedIds.length} order: RTS (kirim) ke marketplace, buat AWB, unduh PDF packing list + resi. ` +
+          `${taken.size} order di-takeout (ditahan). Tindakan nyata — lanjutkan?`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const takeouts = [...taken.entries()].map(([orderId, reason]) => ({ orderId, reason }));
+      const r = await api.post<{ total: number; ok: number; ditahan: number; hasil: BatchRow[] }>(
+        "/marketplace-sync/orders/batch-packing",
+        { orderIds: includedIds, takeouts, handoverMethod: "DROP_OFF" },
+      );
+      const okRows = r.hasil.filter((h) => h.ok);
+      if (okRows.some((h) => h.labels.length)) await unduhResiGabung(okRows);
+      if (okRows.length) await unduhPackingList(okRows);
+      const gagal = r.hasil.filter((h) => !h.ok).length;
+      setHasil({ total: r.total, ok: r.ok, ditahan: r.ditahan, gagal });
+      toast(`Batch: ${r.ok} diproses, ${r.ditahan} ditahan${gagal ? `, ${gagal} gagal` : ""}. PDF diunduh.`, gagal ? "warning" : "success");
+      onDone();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Mulai Batch Packing" width="max-w-2xl">
+      {hasil ? (
+        <div className="space-y-3">
+          <InlineAlert tone={hasil.gagal ? "warning" : "success"}>
+            Selesai: {hasil.ok} order diproses → Packing, {hasil.ditahan} ditahan
+            {hasil.gagal ? `, ${hasil.gagal} gagal` : ""}. PDF packing list &amp; resi sudah terunduh.
+          </InlineAlert>
+          <div className="flex justify-end"><Button variant="filled" onClick={onClose}>Tutup</Button></div>
+        </div>
+      ) : loading ? (
+        <Skeleton className="h-40 w-full" />
+      ) : kandidat.length === 0 ? (
+        <EmptyState icon="cart" title="Tidak ada order untuk dikirim" description="Semua order aktif sudah diproses atau belum ada yang perlu dikirim." />
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-ink-2">{kandidat.length} order perlu dikirim</span>
+            <span className="font-medium text-ink tabular-nums">{includedIds.length} akan diproses · {taken.size} di-takeout</span>
+          </div>
+          <div className="max-h-[52vh] overflow-y-auto border border-line rounded-lg divide-y divide-line">
+            {kandidat.map((o) => {
+              const out = taken.has(o.id);
+              return (
+                <div key={o.id} className={`px-3 py-2.5 ${out ? "bg-canvas" : ""}`}>
+                  <div className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className={`text-sm truncate ${out ? "text-ink-3 line-through" : "text-ink"}`}>
+                        <span className="font-mono text-xs">{o.marketplaceOrderId}</span> · {o.buyerName ?? "-"}
+                      </div>
+                      <div className="text-[11px] text-ink-3 truncate">
+                        {o.shopName ?? "-"} · {o.items?.length ?? 0} item · {FS_LABEL[o.fulfillmentStatus] ?? o.fulfillmentStatus}
+                      </div>
+                    </div>
+                    <Button size="sm" variant={out ? "tonal" : "outline"} onClick={() => toggleTakeout(o.id)}>
+                      {out ? "Batalkan" : "Take out"}
+                    </Button>
+                  </div>
+                  {out && (
+                    <Input
+                      className="mt-2"
+                      placeholder="Alasan takeout (mis. stok habis, alamat bermasalah)…"
+                      value={taken.get(o.id) ?? ""}
+                      onChange={(e) => setReason(o.id, e.target.value)}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="text" onClick={onClose} disabled={busy}>Batal</Button>
+            <Button variant="filled" icon="package" loading={busy} disabled={!includedIds.length} onClick={proses}>
+              Proses {includedIds.length} order →
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 

@@ -102,9 +102,9 @@ export class MarketplaceSyncController {
   @Post("orders/batch-packing")
   async batchPacking(
     @Req() req: FastifyRequest,
-    @Body() body: { orderIds: string[]; handoverMethod?: string },
+    @Body() body: { orderIds: string[]; handoverMethod?: string; takeouts?: { orderId: string; reason?: string }[] },
   ): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.sync.batchPacking(uid(req), body?.orderIds ?? [], { handoverMethod: body?.handoverMethod }) };
+    return { success: true, data: await this.sync.batchPacking(uid(req), body?.orderIds ?? [], { handoverMethod: body?.handoverMethod, takeouts: body?.takeouts }) };
   }
 
   /** Ambil URL label AWB order dari marketplace (read-only). */

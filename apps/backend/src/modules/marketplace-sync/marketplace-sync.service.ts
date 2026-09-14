@@ -668,9 +668,21 @@ export class MarketplaceSyncService {
    * lokal ke "packing". Frontend menggabung label jadi 1 PDF & membuat PDF
    * packing list. RTS = tulis outward -> hanya dipicu manual dari batch UI.
    */
-  async batchPacking(userId: string, orderIds: string[], opts: { handoverMethod?: string }) {
+  async batchPacking(
+    userId: string,
+    orderIds: string[],
+    opts: { handoverMethod?: string; takeouts?: { orderId: string; reason?: string }[] },
+  ) {
     const ids = [...new Set((orderIds ?? []).filter(Boolean))];
-    if (!ids.length) throw new BadRequestException("Tidak ada order dipilih");
+    const takeouts = (opts.takeouts ?? []).filter((t) => t?.orderId);
+    if (!ids.length && !takeouts.length) throw new BadRequestException("Tidak ada order dipilih");
+    // Takeout: order ditahan dari batch (tidak dikirim), alasan dicatat.
+    for (const t of takeouts) {
+      await this.bypass(() => this.db
+        .update(orders)
+        .set({ holdReason: (t.reason ?? "").trim() || "(tanpa alasan)", heldAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(orders.userId, userId), eq(orders.id, t.orderId))));
+    }
     type Baris = {
       orderId: string; ok: boolean; orderNo: string | null; buyer: string | null;
       courier: string | null; tracking: string | null;
@@ -733,7 +745,7 @@ export class MarketplaceSyncService {
         }
         await this.bypass(() => this.db
           .update(orders)
-          .set({ awbGenerated: true, fulfillmentStatus: majukanStatus(order.fulfillmentStatus as StatusInternal, "packing"), updatedAt: new Date() })
+          .set({ awbGenerated: true, holdReason: null, heldAt: null, fulfillmentStatus: majukanStatus(order.fulfillmentStatus as StatusInternal, "packing"), updatedAt: new Date() })
           .where(and(eq(orders.userId, userId), eq(orders.id, oid))));
         const rawItems = Array.isArray(order.items)
           ? (order.items as { name?: string; skuName?: string; sellerSku?: string; qty?: number }[])
@@ -750,7 +762,7 @@ export class MarketplaceSyncService {
         hasil.push(kosong(oid, (e as Error).message));
       }
     }
-    return { total: ids.length, ok: hasil.filter((h) => h.ok).length, hasil };
+    return { total: ids.length, ok: hasil.filter((h) => h.ok).length, ditahan: takeouts.length, hasil };
   }
 
   private async ambilOrderToko(userId: string, orderId: string) {
