@@ -99,11 +99,28 @@ export class ProductsController {
   @Post("catalogs")
   async createCatalog(
     @Req() req: FastifyRequest,
-    @Body() body: { name: string },
+    @Body() body: { name: string; note?: string; postingIds?: string[] },
   ): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.products.createCatalog(uid(req), body.name) };
+    return {
+      success: true,
+      data: await this.products.createCatalog(uid(req), body.name, body.note, body.postingIds),
+    };
   }
 
+  @Post("catalogs/bulk-delete")
+  async bulkDeleteCatalogs(
+    @Req() req: FastifyRequest,
+    @Body() body: { ids: string[] },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.products.bulkDeleteCatalogs(uid(req), body.ids ?? []) };
+  }
+  @Post("catalogs/merge")
+  async mergeCatalogs(
+    @Req() req: FastifyRequest,
+    @Body() body: { targetId: string; sourceIds: string[] },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.products.mergeCatalogs(uid(req), body.targetId, body.sourceIds ?? []) };
+  }
   @Patch("catalogs/:id")
   async renameCatalog(
     @Req() req: FastifyRequest,

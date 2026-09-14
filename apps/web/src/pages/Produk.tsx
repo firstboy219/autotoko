@@ -442,6 +442,17 @@ function MarketplaceCatalog() {
     return () => { cancelAnimationFrame(raf); window.removeEventListener("keydown", onKey); };
   }, [openId]);
 
+  // Pilihan katalog untuk aksi massal + modal buat/gabung.
+  const [pilih, setPilih] = useState<Set<string>>(new Set());
+  const [bukaBaru, setBukaBaru] = useState(false);
+  const [gabung, setGabung] = useState(false);
+  const togglePilih = (id: string) =>
+    setPilih((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+
   async function aksi(fn: () => Promise<unknown>, sukses: string) {
     setBusy(true);
     try {
@@ -487,6 +498,14 @@ function MarketplaceCatalog() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function hapusTerpilih() {
+    const ids = [...pilih];
+    if (!ids.length) return;
+    if (!window.confirm(`Hapus ${ids.length} katalog terpilih? Postingan di dalamnya tidak terhapus, hanya lepas dari katalog.`)) return;
+    await aksi(() => api.post("/products/catalogs/bulk-delete", { ids }), `${ids.length} katalog dihapus`);
+    setPilih(new Set());
   }
 
   if (loading) return <Card className="mt-4"><Skeleton className="h-40 w-full" /></Card>;
@@ -535,22 +554,45 @@ function MarketplaceCatalog() {
     .filter((p) => !needle || (p.title ?? "").toLowerCase().includes(needle))
     .filter((p) => !onlyUnmapped || punyaUnmapped([p]));
 
+  const semuaPostingan = [
+    ...data.katalog.flatMap((c) => c.postingan.map((p) => ({ productId: p.productId, title: p.title, shopName: p.shopName, catalogName: c.name as string | null }))),
+    ...(data.tanpaKatalog ?? []).map((p) => ({ productId: p.productId, title: p.title, shopName: p.shopName, catalogName: null as string | null })),
+  ];
+  const terpilihKatalog = data.katalog.filter((c) => pilih.has(c.id)).map((c) => ({ id: c.id, name: c.name }));
+
   // Satu kartu untuk katalog maupun postingan lepas (kunci "orphan:<id>").
-  const kartu = (key: string, name: string, posts: Postingan[]) => {
+  // catId diisi HANYA untuk katalog -> memunculkan checkbox pilih (aksi massal).
+  const kartu = (key: string, name: string, posts: Postingan[], catId?: string) => {
     const g = ringkas(posts);
     const pct = g.total ? Math.round((g.mapped / g.total) * 100) : 0;
+    const dipilih = !!catId && pilih.has(catId);
     const status =
       g.mapped >= g.total && g.total > 0 ? <Badge tone="success">✓ lengkap</Badge>
       : g.mapped > 0 ? <Badge tone="warning">{g.mapped}/{g.total} dipetakan</Badge>
       : <Badge tone="neutral">belum dipetakan</Badge>;
     return (
-      <button
+      <div
         key={key}
-        type="button"
+        role="button"
+        tabIndex={0}
         onClick={() => setOpenId(key)}
-        className="text-left bg-white border border-line rounded-xl p-4 flex flex-col gap-3 hover:border-brand transition"
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenId(key); } }}
+        className={`relative cursor-pointer text-left bg-white border rounded-xl p-4 flex flex-col gap-3 transition ${
+          dipilih ? "border-brand ring-1 ring-brand" : "border-line hover:border-brand"
+        }`}
       >
-        <div className="font-medium text-ink leading-snug line-clamp-2" title={name}>{name}</div>
+        {catId && (
+          <label className="absolute top-2.5 right-2.5 flex items-center" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={dipilih}
+              onChange={() => togglePilih(catId)}
+              className="w-4 h-4 accent-brand cursor-pointer"
+              aria-label={`Pilih katalog ${name}`}
+            />
+          </label>
+        )}
+        <div className={`font-medium text-ink leading-snug line-clamp-2 ${catId ? "pr-6" : ""}`} title={name}>{name}</div>
         <div className="flex flex-wrap gap-1.5">
           {g.shops.map((sh) => (
             <span key={sh} className="text-[11px] text-ink-2 bg-canvas border border-line rounded-full px-2 py-0.5">{sh}</span>
@@ -571,7 +613,7 @@ function MarketplaceCatalog() {
           {status}
           <span className="text-sm text-brand-ink">Kelola →</span>
         </div>
-      </button>
+      </div>
     );
   };
 
@@ -594,11 +636,8 @@ function MarketplaceCatalog() {
                 onClick={() => aksi(() => api.post("/products/catalogs/regroup", {}), "Postingan dikelompokkan ulang")}>
                 Kelompokkan otomatis
               </Button>
-              <Button size="sm" variant="outline" icon="plus" disabled={busy}
-                onClick={() => {
-                  const name = window.prompt("Nama katalog baru:");
-                  if (name && name.trim()) aksi(() => api.post("/products/catalogs", { name: name.trim() }), "Katalog dibuat");
-                }}>
+              <Button size="sm" variant="filled" icon="plus" disabled={busy}
+                onClick={() => setBukaBaru(true)}>
                 Katalog baru
               </Button>
             </div>
@@ -649,8 +688,22 @@ function MarketplaceCatalog() {
           </button>
         </div>
 
+        {pilih.size > 0 && (
+          <div className="mx-4 mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-brand bg-canvas px-3 py-2">
+            <span className="text-sm font-medium text-ink">{pilih.size} katalog dipilih</span>
+            <div className="ml-auto flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" disabled={busy || pilih.size < 2} onClick={() => setGabung(true)}>
+                Gabungkan
+              </Button>
+              <Button size="sm" variant="danger" icon="trash" loading={busy} onClick={hapusTerpilih}>
+                Hapus ({pilih.size})
+              </Button>
+              <Button size="sm" variant="text" onClick={() => setPilih(new Set())}>Batal</Button>
+            </div>
+          </div>
+        )}
         <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {cats.map((c) => kartu(c.id, c.name, c.postingan))}
+          {cats.map((c) => kartu(c.id, c.name, c.postingan, c.id))}
         </div>
         {cats.length === 0 && <p className="px-4 pb-4 text-sm text-ink-3">Tidak ada katalog yang cocok.</p>}
 
@@ -777,7 +830,151 @@ function MarketplaceCatalog() {
           </aside>
         </>
       )}
+
+      {bukaBaru && (
+        <KatalogBaruModal
+          postingan={semuaPostingan}
+          onClose={() => setBukaBaru(false)}
+          onCreated={reload}
+        />
+      )}
+      {gabung && (
+        <GabungModal
+          katalog={terpilihKatalog}
+          onClose={() => setGabung(false)}
+          onDone={() => { setPilih(new Set()); reload(); }}
+        />
+      )}
     </>
+  );
+}
+
+function KatalogBaruModal({
+  postingan, onClose, onCreated,
+}: {
+  postingan: { productId: string; title: string | null; shopName: string | null; catalogName: string | null }[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState("");
+  const [note, setNote] = useState("");
+  const [cari, setCari] = useState("");
+  const [pilih, setPilih] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const needle = cari.trim().toLowerCase();
+  const list = postingan.filter((p) =>
+    !needle || (p.title ?? "").toLowerCase().includes(needle) || (p.shopName ?? "").toLowerCase().includes(needle),
+  );
+  const toggle = (id: string) =>
+    setPilih((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  async function simpan(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) { setErr("Nama katalog wajib diisi"); return; }
+    setSaving(true); setErr(null);
+    try {
+      await api.post("/products/catalogs", { name: name.trim(), note: note.trim() || undefined, postingIds: [...pilih] });
+      toast(`Katalog "${name.trim()}" dibuat${pilih.size ? ` dengan ${pilih.size} postingan` : ""}`, "success");
+      onCreated(); onClose();
+    } catch (e) { setErr((e as Error).message); } finally { setSaving(false); }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Katalog baru" width="max-w-2xl">
+      <form onSubmit={simpan} className="space-y-3.5">
+        {err && <InlineAlert tone="danger">{err}</InlineAlert>}
+        <Field label="Nama katalog" required>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="mis. Renature Duo Inhaler Cool Mint" required />
+        </Field>
+        <Field label="Catatan" hint="Opsional — deskripsi singkat katalog.">
+          <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="mis. Bundel inhaler cool mint lintas toko" />
+        </Field>
+        <div>
+          <div className="text-sm font-medium text-ink mb-1.5">
+            Masukkan postingan <span className="text-ink-3 font-normal">(opsional{pilih.size ? `, ${pilih.size} dipilih` : ""})</span>
+          </div>
+          <div className="relative mb-2">
+            <Icon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none" />
+            <Input className="pl-9" placeholder="Cari postingan / toko…" value={cari} onChange={(e) => setCari(e.target.value)} />
+          </div>
+          <div className="max-h-64 overflow-y-auto border border-line rounded-lg divide-y divide-line">
+            {list.length === 0 && <div className="px-3 py-4 text-sm text-ink-3">Tidak ada postingan cocok.</div>}
+            {list.map((p) => (
+              <label key={p.productId} className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-canvas">
+                <input type="checkbox" checked={pilih.has(p.productId)} onChange={() => toggle(p.productId)} className="w-4 h-4 accent-brand shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-ink truncate">{p.title ?? "(tanpa judul)"}</div>
+                  <div className="text-[11px] text-ink-3 truncate">
+                    {p.shopName ?? "-"}{p.catalogName ? ` · di katalog: ${p.catalogName}` : " · belum berkatalog"}
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+          {pilih.size > 0 && (
+            <p className="mt-1.5 text-[11px] text-ink-3">Postingan yang sudah ada di katalog lain akan dipindah ke katalog baru ini.</p>
+          )}
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="text" onClick={onClose} disabled={saving}>Batal</Button>
+          <Button type="submit" variant="filled" loading={saving}>Buat katalog</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function GabungModal({
+  katalog, onClose, onDone,
+}: {
+  katalog: { id: string; name: string }[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const [targetId, setTargetId] = useState(katalog[0]?.id ?? "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function gabung() {
+    if (!targetId) return;
+    setSaving(true); setErr(null);
+    try {
+      const sourceIds = katalog.map((k) => k.id).filter((id) => id !== targetId);
+      const r = await api.post<{ dipindah: number; dihapus: number }>("/products/catalogs/merge", { targetId, sourceIds });
+      toast(`Digabung: ${r.dipindah} postingan dipindah, ${r.dihapus} katalog dihapus`, "success");
+      onDone(); onClose();
+    } catch (e) { setErr((e as Error).message); } finally { setSaving(false); }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Gabungkan katalog">
+      <div className="space-y-3.5">
+        {err && <InlineAlert tone="danger">{err}</InlineAlert>}
+        <p className="text-sm text-ink-2">
+          Semua postingan dari katalog terpilih dipindah ke katalog tujuan, lalu katalog lainnya dihapus.
+          Varian &amp; pemetaan master tidak berubah.
+        </p>
+        <div>
+          <div className="text-sm font-medium text-ink mb-1.5">Katalog tujuan</div>
+          <div className="border border-line rounded-lg divide-y divide-line max-h-56 overflow-y-auto">
+            {katalog.map((k) => (
+              <label key={k.id} className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-canvas">
+                <input type="radio" name="target" checked={targetId === k.id} onChange={() => setTargetId(k.id)} className="w-4 h-4 accent-brand shrink-0" />
+                <span className="text-sm text-ink truncate">{k.name}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="text" onClick={onClose} disabled={saving}>Batal</Button>
+          <Button type="button" variant="filled" loading={saving} onClick={gabung}>Gabungkan {katalog.length} katalog</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

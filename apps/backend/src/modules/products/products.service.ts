@@ -521,13 +521,26 @@ export class ProductsService {
     return { dibuat, ditugaskan, sisaTanpaKatalog: belum.length - ditugaskan };
   }
 
-  async createCatalog(userId: string, name: string) {
+  async createCatalog(
+    userId: string,
+    name: string,
+    note?: string | null,
+    postingIds?: string[],
+  ) {
     const nm = (name ?? "").trim();
     if (!nm) throw new BadRequestException("Nama katalog wajib diisi");
     const [c] = await this.db
       .insert(marketplaceCatalogs)
-      .values({ userId, name: nm })
+      .values({ userId, name: nm, note: (note ?? "").trim() || null })
       .returning();
+    if (!c) throw new BadRequestException("Gagal membuat katalog");
+    const ids = [...new Set((postingIds ?? []).filter(Boolean))];
+    if (ids.length) {
+      await this.db
+        .update(marketplaceProducts)
+        .set({ catalogId: c.id })
+        .where(and(eq(marketplaceProducts.userId, userId), inArray(marketplaceProducts.productId, ids)));
+    }
     return c;
   }
 
@@ -551,6 +564,43 @@ export class ProductsService {
       .returning({ id: marketplaceCatalogs.id });
     if (!c) throw new NotFoundException("Katalog tidak ditemukan");
     return { deleted: id };
+  }
+
+  /** Hapus banyak katalog sekaligus. Postingan dilepas (ON DELETE SET NULL). */
+  async bulkDeleteCatalogs(userId: string, ids: string[]) {
+    const clean = [...new Set((ids ?? []).filter(Boolean))];
+    if (!clean.length) throw new BadRequestException("Tidak ada katalog dipilih");
+    const rows = await this.db
+      .delete(marketplaceCatalogs)
+      .where(and(eq(marketplaceCatalogs.userId, userId), inArray(marketplaceCatalogs.id, clean)))
+      .returning({ id: marketplaceCatalogs.id });
+    return { deleted: rows.length, ids: rows.map((r) => r.id) };
+  }
+
+  /**
+   * Gabungkan beberapa katalog: semua postingan katalog sumber dipindah ke
+   * katalog tujuan, lalu katalog sumber dihapus. Tidak menyentuh varian/master.
+   */
+  async mergeCatalogs(userId: string, targetId: string, sourceIds: string[]) {
+    if (!targetId) throw new BadRequestException("Katalog tujuan wajib dipilih");
+    const sumber = [...new Set((sourceIds ?? []).filter((x) => x && x !== targetId))];
+    if (!sumber.length) throw new BadRequestException("Pilih minimal satu katalog lain untuk digabung");
+    const [t] = await this.db
+      .select({ id: marketplaceCatalogs.id })
+      .from(marketplaceCatalogs)
+      .where(and(eq(marketplaceCatalogs.id, targetId), eq(marketplaceCatalogs.userId, userId)))
+      .limit(1);
+    if (!t) throw new NotFoundException("Katalog tujuan tidak ditemukan");
+    const dipindah = await this.db
+      .update(marketplaceProducts)
+      .set({ catalogId: targetId })
+      .where(and(eq(marketplaceProducts.userId, userId), inArray(marketplaceProducts.catalogId, sumber)))
+      .returning({ productId: marketplaceProducts.productId });
+    const dihapus = await this.db
+      .delete(marketplaceCatalogs)
+      .where(and(eq(marketplaceCatalogs.userId, userId), inArray(marketplaceCatalogs.id, sumber)))
+      .returning({ id: marketplaceCatalogs.id });
+    return { targetId, dipindah: dipindah.length, dihapus: dihapus.length };
   }
 
   /** Memindah satu postingan ke sebuah katalog (atau lepas: catalogId null). */
