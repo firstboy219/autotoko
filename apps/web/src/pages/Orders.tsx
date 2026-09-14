@@ -774,27 +774,45 @@ async function unduhResiGabung(rows: BatchRow[]) {
   unduhBlob(await out.save(), "resi-batch.pdf");
 }
 
-// Packing list dari data order kita sendiri (kontrol penuh atas item).
+// Pick/packing list GABUNGAN: total qty per produk lintas semua resi terpilih
+// (mis. "Cool Mint 50ml — 5 pcs dari 3 resi"). Dibuat dari data order kita.
 async function unduhPackingList(rows: BatchRow[]) {
+  const agg = new Map<string, { qty: number; resi: number }>();
+  for (const h of rows) {
+    const seen = new Set<string>();
+    for (const it of h.items) {
+      const cur = agg.get(it.name) ?? { qty: 0, resi: 0 };
+      cur.qty += it.qty;
+      if (!seen.has(it.name)) { cur.resi += 1; seen.add(it.name); }
+      agg.set(it.name, cur);
+    }
+  }
+  const lines = [...agg.entries()].sort((a, b) => b[1].qty - a[1].qty);
+  const totalPcs = lines.reduce((s, [, v]) => s + v.qty, 0);
+
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const W = 595, H = 842, M = 40;
   let page = doc.addPage([W, H]);
   let y = H - M;
-  const text = (s: string, x: number, size: number, f = font) =>
-    page.drawText(s.replace(/[^\x20-\x7E]/g, "?"), { x, y, size, font: f });
-  const nl = (d = 14) => { y -= d; if (y < 70) { page = doc.addPage([W, H]); y = H - M; } };
-  text("Packing List", M, 18, bold); nl(16);
-  text(`${rows.length} order · ${new Date().toLocaleString("id-ID")}`, M, 9); nl(20);
-  for (const h of rows) {
-    if (y < 130) { page = doc.addPage([W, H]); y = H - M; }
-    text(`#${h.orderNo ?? "-"}   ${(h.buyer ?? "").slice(0, 40)}`, M, 11, bold); nl(13);
-    text(`${h.courier ?? "-"}   resi ${h.tracking ?? "-"}`, M, 9); nl(14);
-    for (const it of h.items) { text(`   ${it.qty} x ${it.name}`.slice(0, 95), M + 6, 9); nl(12); }
-    nl(6);
-    page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.5, color: rgb(0.82, 0.82, 0.82) });
-    nl(12);
+  const clean = (s: string) =>
+    s.replace(/·/g, "-").replace(/[–—]/g, "-").replace(/…/g, "...").replace(/[^\x20-\x7E]/g, "?");
+  const text = (s: string, x: number, size: number, f = font) => page.drawText(clean(s), { x, y, size, font: f });
+  const nl = (d = 15) => { y -= d; if (y < 55) { page = doc.addPage([W, H]); y = H - M; } };
+  const rule = (t = 0.5, c = 0.85) => page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: t, color: rgb(c, c, c) });
+
+  text("Pick / Packing List", M, 18, bold); nl(16);
+  text(`Gabungan ${rows.length} resi - ${lines.length} jenis produk - ${totalPcs} pcs total - ${new Date().toLocaleString("id-ID")}`, M, 9); nl(10);
+  rule(1, 0.7); nl(16);
+  text("QTY", M, 9, bold); text("PRODUK", M + 60, 9, bold); text("RESI", W - M - 55, 9, bold); nl(6);
+  rule(); nl(15);
+  for (const [name, v] of lines) {
+    if (y < 55) { page = doc.addPage([W, H]); y = H - M; }
+    text(`${v.qty} pcs`, M, 10, bold);
+    text(name.length > 60 ? name.slice(0, 59) + "..." : name, M + 60, 9);
+    text(`${v.resi} resi`, W - M - 55, 9);
+    nl(15);
   }
   unduhBlob(await doc.save(), "packing-list.pdf");
 }
