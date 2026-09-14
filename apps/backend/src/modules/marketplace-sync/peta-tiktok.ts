@@ -50,7 +50,10 @@ export function statusInternal(mp: string | null | undefined): StatusInternal {
     case "ON_HOLD":
       return "masuk";
     case "AWAITING_SHIPMENT":
-      return "approved";
+      // Pesanan baru berbayar yang BELUM ditangani seller -> tahap awal
+      // internal "menunggu disetujui" (masuk). Seller yang menyetujuinya di
+      // AutoToko (masuk -> approved); forward-only menjaga yang sudah maju.
+      return "masuk";
     case "AWAITING_COLLECTION":
       // Resi/label sudah dicetak & menunggu kurir -> di alur seller ini
       // artinya paket MULAI dikemas. forward-only menjaga yang sudah lebih
