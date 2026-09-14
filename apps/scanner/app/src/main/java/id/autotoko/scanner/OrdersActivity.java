@@ -1,10 +1,16 @@
 package id.autotoko.scanner;
 
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.LruCache;
+import android.widget.ImageView;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
@@ -31,7 +37,12 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -74,6 +85,91 @@ public class OrdersActivity extends AppCompatActivity {
 
     private float d;
     private int dp(int v) { return (int) (v * d); }
+
+    // --- Pemuat gambar ringan (tanpa Coil/Glide, keduanya belum ada di deps) ---
+    // Cache di memori + kolam thread kecil; hasil diset ke ImageView di UI
+    // thread. URL sama tidak diunduh dua kali; ImageView diberi tag agar bitmap
+    // lama tidak "nyasar" ke sel yang sudah dipakai ulang saat scroll.
+    private static final ExecutorService IMG_POOL = Executors.newFixedThreadPool(3);
+    private static final LruCache<String, Bitmap> IMG_CACHE =
+            new LruCache<String, Bitmap>(6 * 1024 * 1024) {
+                @Override protected int sizeOf(String k, Bitmap b) { return b.getByteCount(); }
+            };
+    private final Handler ui = new Handler(Looper.getMainLooper());
+
+    private void loadThumb(final String url, final ImageView iv) {
+        if (url == null || url.isEmpty()) return;
+        Bitmap cached = IMG_CACHE.get(url);
+        if (cached != null) { pasangThumb(iv, cached); return; }
+        final Object tag = new Object();
+        iv.setTag(tag);
+        IMG_POOL.execute(() -> {
+            Bitmap bmp = null;
+            try {
+                HttpURLConnection cx = (HttpURLConnection) new URL(url).openConnection();
+                cx.setConnectTimeout(8000);
+                cx.setReadTimeout(8000);
+                cx.setInstanceFollowRedirects(true);
+                InputStream is = cx.getInputStream();
+                BitmapFactory.Options op = new BitmapFactory.Options();
+                op.inSampleSize = 2; // thumbnail: hemat memori, tak perlu resolusi penuh
+                bmp = BitmapFactory.decodeStream(is, null, op);
+                is.close();
+                cx.disconnect();
+            } catch (Exception ignore) { /* biarkan placeholder */ }
+            final Bitmap out = bmp;
+            if (out != null) IMG_CACHE.put(url, out);
+            ui.post(() -> { if (out != null && iv.getTag() == tag) pasangThumb(iv, out); });
+        });
+    }
+
+    private void pasangThumb(ImageView iv, Bitmap bmp) {
+        iv.setPadding(0, 0, 0, 0);
+        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        iv.clearColorFilter();
+        iv.setImageBitmap(bmp);
+    }
+
+    /** ImageView thumbnail bulat-sudut + placeholder keranjang saat gambar belum ada. */
+    private ImageView thumb(int sizeDp) {
+        ImageView iv = new ImageView(this);
+        int s = dp(sizeDp);
+        iv.setLayoutParams(new LinearLayout.LayoutParams(s, s));
+        iv.setBackground(pill(getColor(R.color.canvas), getColor(R.color.line)));
+        iv.setClipToOutline(true);
+        int pad = dp(sizeDp / 4);
+        iv.setPadding(pad, pad, pad, pad);
+        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        iv.setImageResource(android.R.drawable.ic_menu_gallery);
+        iv.setColorFilter(getColor(R.color.ink3));
+        return iv;
+    }
+
+    private static String firstItemName(JSONObject o) {
+        JSONArray items = o.optJSONArray("items");
+        if (items == null || items.length() == 0) return null;
+        JSONObject it = items.optJSONObject(0);
+        if (it == null) return null;
+        String n = it.optString("name", it.optString("skuName", it.optString("sellerSku", "")));
+        return n == null || n.isEmpty() ? null : n;
+    }
+
+    private static int itemCount(JSONObject o) {
+        JSONArray items = o.optJSONArray("items");
+        return items == null ? 0 : items.length();
+    }
+
+    private static String firstThumbUrl(JSONObject o) {
+        JSONArray items = o.optJSONArray("items");
+        if (items == null) return null;
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject it = items.optJSONObject(i);
+            if (it == null) continue;
+            String u = it.optString("skuImage", "");
+            if (!u.isEmpty()) return u;
+        }
+        return null;
+    }
 
     @Override
     protected void onCreate(Bundle b) {
@@ -219,21 +315,56 @@ public class OrdersActivity extends AppCompatActivity {
         lp.topMargin = dp(8);
         c.setLayoutParams(lp);
 
+        // Kepala: thumbnail produk + kolom teks. Gambar produk membuat pesanan
+        // langsung dikenali, seperti BigSeller tapi lebih rapi.
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        ImageView tv = thumb(48);
+        LinearLayout.LayoutParams tvlp = (LinearLayout.LayoutParams) tv.getLayoutParams();
+        tvlp.rightMargin = dp(12);
+        tvlp.topMargin = dp(2);
+        tv.setLayoutParams(tvlp);
+        loadThumb(firstThumbUrl(o), tv);
+        head.addView(tv);
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        head.addView(body, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        // Nama produk sebagai judul (varian pertama + "+N lainnya" bila banyak).
+        String pn = firstItemName(o);
+        if (pn != null) {
+            int extra = itemCount(o) - 1;
+            TextView pname = new TextView(this);
+            pname.setText(extra > 0 ? pn + "  +" + extra + " lainnya" : pn);
+            pname.setTextSize(13);
+            pname.setTypeface(null, android.graphics.Typeface.BOLD);
+            pname.setTextColor(getColor(R.color.ink));
+            pname.setMaxLines(2);
+            pname.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            body.addView(pname);
+        }
+
         // Baris 1: nomor pesanan + toko
         LinearLayout r1 = new LinearLayout(this);
         r1.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams r1lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        if (pn != null) r1lp.topMargin = dp(2);
+        r1.setLayoutParams(r1lp);
         TextView no = new TextView(this);
         no.setText(o.optString("marketplaceOrderId", "-"));
-        no.setTextSize(14);
-        no.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD);
-        no.setTextColor(getColor(R.color.ink));
+        no.setTextSize(pn != null ? 12 : 14);
+        no.setTypeface(android.graphics.Typeface.MONOSPACE,
+                pn != null ? android.graphics.Typeface.NORMAL : android.graphics.Typeface.BOLD);
+        no.setTextColor(getColor(pn != null ? R.color.ink2 : R.color.ink));
         r1.addView(no, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         TextView toko = new TextView(this);
         toko.setText(o.optString("shopName", ""));
         toko.setTextSize(12);
         toko.setTextColor(getColor(R.color.ink2));
         r1.addView(toko);
-        c.addView(r1);
+        body.addView(r1);
 
         // Baris 2: harga + badge status
         LinearLayout r2 = new LinearLayout(this);
@@ -251,7 +382,7 @@ public class OrdersActivity extends AppCompatActivity {
         harga.setTextColor(getColor(R.color.ink));
         r2.addView(harga, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         r2.addView(badge(o.optString("fulfillmentStatus")));
-        c.addView(r2);
+        body.addView(r2);
 
         // Baris 3: kurir + pembeli
         TextView r3 = new TextView(this);
@@ -267,8 +398,9 @@ public class OrdersActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         r3lp.topMargin = dp(6);
         r3.setLayoutParams(r3lp);
-        c.addView(r3);
+        body.addView(r3);
 
+        c.addView(head);
         c.setOnClickListener(v -> showDetail(o));
         return c;
     }
@@ -317,10 +449,20 @@ public class OrdersActivity extends AppCompatActivity {
             ih.setPadding(0, dp(10), 0, dp(2)); col.addView(ih);
             for (int i = 0; i < items.length(); i++) {
                 JSONObject it = items.optJSONObject(i); if (it == null) continue;
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(0, dp(4), 0, dp(4));
+                ImageView iv = thumb(40);
+                ((LinearLayout.LayoutParams) iv.getLayoutParams()).rightMargin = dp(10);
+                loadThumb(it.optString("skuImage", ""), iv);
+                row.addView(iv);
                 TextView t = new TextView(this);
-                t.setText(it.optInt("qty", 1) + " x " + it.optString("name", it.optString("skuName", "-")));
+                String nm = it.optString("name", it.optString("skuName", "-"));
+                t.setText(it.optInt("qty", 1) + " x " + nm);
                 t.setTextSize(13); t.setTextColor(getColor(R.color.ink));
-                col.addView(t);
+                row.addView(t, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                col.addView(row);
             }
         }
 

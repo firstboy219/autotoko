@@ -28,6 +28,17 @@ import {
 } from "../components/ui";
 
 interface OrderItem {
+  /** Bentuk sebenarnya yang tersimpan di orders.items (peta-tiktok.ts). */
+  name?: string;
+  skuName?: string;
+  skuId?: string;
+  sellerSku?: string;
+  qty?: number;
+  salePrice?: number;
+  subtotal?: number;
+  /** Thumbnail varian dari marketplace, bila tersedia. */
+  skuImage?: string | null;
+  /** Nama field lama (kompatibilitas mundur / baris manual). */
   item_id?: string;
   product_name?: string;
   seller_sku?: string;
@@ -103,6 +114,76 @@ const VIEWS: { mode: ViewMode; label: string; icon: IconName }[] = [
   { mode: "tabel", label: "Tabel", icon: "fileText" },
   { mode: "kanban", label: "Kanban", icon: "dashboard" },
 ];
+
+/** Nama produk pertama pada satu pesanan (bentuk baru atau lama). */
+function firstItemName(o: Order): string | null {
+  const it = o.items?.[0];
+  return it ? (it.name ?? it.product_name ?? it.skuName ?? it.sellerSku ?? it.seller_sku ?? null) : null;
+}
+
+/** URL thumbnail unik dari item pesanan (varian marketplace). */
+function itemThumbs(o: Order): { src: string; name: string }[] {
+  const out: { src: string; name: string }[] = [];
+  const seen = new Set<string>();
+  for (const it of o.items ?? []) {
+    const src = it.skuImage;
+    if (!src || seen.has(src)) continue;
+    seen.add(src);
+    out.push({ src, name: it.name ?? it.product_name ?? it.skuName ?? "" });
+  }
+  return out;
+}
+
+/**
+ * Tumpukan thumbnail produk untuk satu pesanan.
+ *
+ * Kartu order lebih mudah dikenali lewat rupa produknya daripada deretan
+ * nomor. Bila satu pesanan berisi beberapa produk, thumbnail ditumpuk
+ * bertindih dengan penanda "+N" -- rapat tapi tetap terbaca. Gambar yang
+ * gagal dimuat menyembunyikan dirinya agar tidak meninggalkan kotak kosong,
+ * dan pesanan tanpa gambar (mis. scan manual) memakai placeholder keranjang.
+ */
+function ProductThumbs({ order, size = 40, max = 3 }: { order: Order; size?: number; max?: number }) {
+  const thumbs = itemThumbs(order);
+  const overlap = -Math.round(size * 0.34);
+  if (!thumbs.length) {
+    return (
+      <div
+        className="shrink-0 grid place-items-center rounded-xl bg-canvas text-ink-3 ring-1 ring-line"
+        style={{ width: size, height: size }}
+        aria-hidden
+      >
+        <Icon name="cart" size={Math.round(size * 0.5)} />
+      </div>
+    );
+  }
+  const shown = thumbs.slice(0, max);
+  const extra = thumbs.length - shown.length;
+  return (
+    <div className="shrink-0 flex items-center" style={{ height: size }}>
+      {shown.map((t, i) => (
+        <img
+          key={t.src}
+          src={t.src}
+          alt={t.name}
+          title={t.name}
+          loading="lazy"
+          onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }}
+          className="rounded-xl object-cover bg-canvas ring-1 ring-line shadow-e1"
+          style={{ width: size, height: size, marginLeft: i === 0 ? 0 : overlap, zIndex: shown.length - i }}
+        />
+      ))}
+      {extra > 0 && (
+        <span
+          className="grid place-items-center rounded-xl bg-ink/85 text-white text-xs font-semibold ring-1 ring-white/40"
+          style={{ width: size, height: size, marginLeft: overlap }}
+        >
+          +{extra}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function Orders() {
   // Default fokus ke order aktif: ~99% arsip (selesai/batal) disembunyikan.
@@ -432,8 +513,21 @@ export function Orders() {
                           />
                         ) : null}
                       </TD>
-                      <TD className="font-mono text-xs">
-                        {o.marketplaceOrderId || o.trackingNumber || "-"}
+                      <TD>
+                        <div className="flex items-center gap-2.5">
+                          <ProductThumbs order={o} size={40} />
+                          <div className="min-w-0">
+                            <div className="font-mono text-xs text-ink truncate">
+                              {o.marketplaceOrderId || o.trackingNumber || "-"}
+                            </div>
+                            {firstItemName(o) && (
+                              <div className="text-xs text-ink-3 truncate max-w-[220px]">
+                                {firstItemName(o)}
+                                {(o.items?.length ?? 0) > 1 ? ` +${(o.items?.length ?? 0) - 1} lainnya` : ""}
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </TD>
                       <TD>
                         <Badge tone={o.sumber === "manual" ? "warning" : "info"}>
@@ -611,12 +705,15 @@ function BatchPackingModal({ onClose, onDone }: { onClose: () => void; onDone: (
               return (
                 <div key={o.id} className={`px-3 py-2.5 ${out ? "bg-canvas" : ""}`}>
                   <div className="flex items-center gap-3">
+                    <div className={out ? "opacity-50" : ""}>
+                      <ProductThumbs order={o} size={38} max={2} />
+                    </div>
                     <div className="min-w-0 flex-1">
                       <div className={`text-sm truncate ${out ? "text-ink-3 line-through" : "text-ink"}`}>
                         <span className="font-mono text-xs">{o.marketplaceOrderId}</span> · {o.buyerName ?? "-"}
                       </div>
                       <div className="text-[11px] text-ink-3 truncate">
-                        {o.shopName ?? "-"} · {o.items?.length ?? 0} item · {FS_LABEL[o.fulfillmentStatus] ?? o.fulfillmentStatus}
+                        {firstItemName(o) ? `${firstItemName(o)} · ` : ""}{o.items?.length ?? 0} item · {FS_LABEL[o.fulfillmentStatus] ?? o.fulfillmentStatus}
                       </div>
                     </div>
                     <Button size="sm" variant={out ? "tonal" : "outline"} onClick={() => toggleTakeout(o.id)}>
@@ -857,6 +954,15 @@ function KanbanCard({
         </Badge>
         <span className="font-mono text-xs text-ink-3 truncate">{order.marketplaceOrderId}</span>
       </div>
+      <div className="flex items-center gap-2.5 mb-1.5">
+        <ProductThumbs order={order} size={44} />
+        <div className="min-w-0 flex-1">
+          <div className="text-xs text-ink-2 truncate">{firstItemName(order) ?? "-"}</div>
+          {(order.items?.length ?? 0) > 1 && (
+            <div className="text-xs text-ink-3">+{(order.items?.length ?? 0) - 1} produk lain</div>
+          )}
+        </div>
+      </div>
       <div className="text-sm text-ink truncate">{order.buyerName ?? "-"}</div>
       <div className="flex items-center justify-between gap-2 mt-1.5">
         <span className="text-sm font-medium text-ink tabular-nums">{rupiah(order.totalAmount)}</span>
@@ -1016,19 +1122,40 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
               Produk ({MP_LABEL[order.marketplace] ?? order.marketplace})
             </div>
             <div className="divide-y divide-line">
-              {order.items.map((it, i) => (
-                <div key={it.item_id ?? i} className="px-3.5 py-2.5">
-                  <div className="flex justify-between gap-2">
-                    <span className="text-sm text-ink">{it.product_name ?? it.seller_sku ?? "-"}</span>
-                    <span className="text-sm text-ink-2 whitespace-nowrap tabular-nums">
-                      ×{it.quantity ?? 1}
-                    </span>
+              {order.items.map((it, i) => {
+                const nm = it.name ?? it.product_name ?? it.skuName ?? it.sellerSku ?? it.seller_sku ?? "-";
+                const qty = it.qty ?? it.quantity ?? 1;
+                const sku = it.skuId ?? it.item_id;
+                return (
+                  <div key={sku ?? i} className="px-3.5 py-2.5 flex items-center gap-3">
+                    {it.skuImage ? (
+                      <img
+                        src={it.skuImage}
+                        alt={nm}
+                        loading="lazy"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }}
+                        className="w-12 h-12 shrink-0 rounded-lg object-cover bg-canvas ring-1 ring-line"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 shrink-0 grid place-items-center rounded-lg bg-canvas text-ink-3 ring-1 ring-line">
+                        <Icon name="cart" size={20} />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex justify-between gap-2">
+                        <span className="text-sm text-ink">{nm}</span>
+                        <span className="text-sm text-ink-2 whitespace-nowrap tabular-nums">×{qty}</span>
+                      </div>
+                      {it.skuName && it.skuName !== nm && (
+                        <div className="text-xs text-ink-3 mt-0.5 truncate">{it.skuName}</div>
+                      )}
+                      {sku && (
+                        <div className="text-xs font-mono text-ink-3 mt-0.5">SKU: {sku}</div>
+                      )}
+                    </div>
                   </div>
-                  {it.item_id && (
-                    <div className="text-xs font-mono text-ink-3 mt-0.5">Product ID: {it.item_id}</div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

@@ -103,6 +103,8 @@ export interface LineItemTikTok {
   original_price?: string | number;
   tracking_number?: string;
   display_status?: string;
+  /** URL gambar varian dari marketplace; dipakai sebagai thumbnail pesanan. */
+  sku_image?: string;
 }
 
 export interface ItemPesanan {
@@ -111,6 +113,8 @@ export interface ItemPesanan {
   name: string;
   skuName: string | null;
   sellerSku: string | null;
+  /** Thumbnail varian (URL) dari marketplace, bila tersedia. */
+  skuImage: string | null;
   qty: number;
   /** Harga satuan yang dibayar pembeli, rupiah. */
   salePrice: number;
@@ -142,6 +146,7 @@ export function kelompokkanItem(items: readonly LineItemTikTok[] | null | undefi
       name: it.product_name || it.sku_name || "(tanpa nama)",
       skuName: it.sku_name || null,
       sellerSku: it.seller_sku || null,
+      skuImage: it.sku_image || null,
       qty: 1,
       salePrice: harga,
       subtotal: harga,

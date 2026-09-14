@@ -4,6 +4,8 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   marketplaceCatalogs,
+  marketplaceSkuMap,
+  masterProducts,
   orderSettings,
   marketplaceProducts,
   marketplaceSkus,
@@ -690,6 +692,18 @@ export class MarketplaceSyncService {
     const labelBufs: Buffer[] = [];
     // Agregasi item lintas resi untuk packing list: nama -> { qty, resi }.
     const agg = new Map<string, { qty: number; resi: number }>();
+    // Peta varian (sku_id) -> nama master produk AutoToko. Packing list memakai
+    // nama katalog master; jika sku belum dipetakan, fallback ke gabungan nama
+    // postingan + nama varian di bawah.
+    const skuToMaster = new Map<string, string>();
+    {
+      const petaRows = await this.bypass(() => this.db
+        .select({ sku: marketplaceSkuMap.sku, nama: masterProducts.name })
+        .from(marketplaceSkuMap)
+        .innerJoin(masterProducts, eq(marketplaceSkuMap.masterProductId, masterProducts.id))
+        .where(and(eq(marketplaceSkuMap.userId, userId), eq(marketplaceSkuMap.marketplace, "tiktok"))));
+      for (const r of petaRows) if (r.sku && r.nama) skuToMaster.set(String(r.sku), r.nama);
+    }
     for (const oid of ids) {
       try {
         const [order] = await this.bypass(() => this.db
@@ -742,11 +756,13 @@ export class MarketplaceSyncService {
           .set({ awbGenerated: true, holdReason: null, heldAt: null, fulfillmentStatus: majukanStatus(order.fulfillmentStatus as StatusInternal, "packing"), updatedAt: new Date() })
           .where(and(eq(orders.userId, userId), eq(orders.id, oid))));
         const rawItems = Array.isArray(order.items)
-          ? (order.items as { name?: string; skuName?: string; sellerSku?: string; qty?: number }[])
+          ? (order.items as { name?: string; skuName?: string; sellerSku?: string; skuId?: string; qty?: number }[])
           : [];
         const seen = new Set<string>();
         for (const it of rawItems) {
-          const nm = [it.name, it.skuName].filter(Boolean).join(" \u00b7 ") || it.sellerSku || "-";
+          const master = it.skuId ? skuToMaster.get(String(it.skuId)) : undefined;
+          const nm = master
+            || ([it.name, it.skuName].filter(Boolean).join(" \u00b7 ") || it.sellerSku || "-");
           const cur = agg.get(nm) ?? { qty: 0, resi: 0 };
           cur.qty += Number(it.qty ?? 1);
           if (!seen.has(nm)) { cur.resi += 1; seen.add(nm); }
