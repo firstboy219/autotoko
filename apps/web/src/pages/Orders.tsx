@@ -81,13 +81,13 @@ const MP_TONE: Record<string, Tone> = {
 };
 
 // Internal fulfillment workflow (ordered) + side states.
-const FLOW = ["masuk", "approved", "produksi", "packing", "siap_kirim", "dikirim", "selesai"] as const;
-const SIDE = ["retur", "dibatalkan"] as const;
+const FLOW = ["masuk", "approved", "packing", "siap_kirim", "dikirim"] as const;
+const SIDE = ["selesai", "retur", "dibatalkan"] as const;
 const ALL_FS = [...FLOW, ...SIDE];
 const FS_LABEL: Record<string, string> = {
-  masuk: "Masuk", approved: "Disetujui", produksi: "Produksi", packing: "Packing",
-  siap_kirim: "Siap Kirim", dikirim: "Dikirim", selesai: "Selesai",
-  retur: "Retur", dibatalkan: "Dibatalkan",
+  masuk: "Menunggu Disetujui", approved: "Menunggu Dicetak", produksi: "Produksi",
+  packing: "Menunggu Dipacking", siap_kirim: "Menunggu Dipickup", dikirim: "Dalam Pengiriman",
+  selesai: "Selesai", retur: "Retur", dibatalkan: "Dibatalkan",
 };
 const FS_TONE: Record<string, Tone> = {
   masuk: "neutral", approved: "info", produksi: "brand", packing: "brand",
@@ -231,11 +231,11 @@ export function Orders() {
       {ringkas && (
         <div className="flex flex-wrap items-center gap-2 mb-4">
           {([
-            ["masuk", "Perlu disetujui"],
-            ["produksi", "Produksi"],
-            ["packing", "Packing"],
-            ["siap_kirim", "Siap kirim"],
-            ["dikirim", "Dikirim"],
+            ["masuk", "Menunggu Disetujui"],
+            ["approved", "Menunggu Dicetak"],
+            ["packing", "Menunggu Dipacking"],
+            ["siap_kirim", "Menunggu Dipickup"],
+            ["dikirim", "Dalam Pengiriman"],
           ] as const).map(([s, label]) => {
             const n = ringkas.perStatus[s] ?? 0;
             const on = fs === s;

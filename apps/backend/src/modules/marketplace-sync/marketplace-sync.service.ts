@@ -861,6 +861,13 @@ export class MarketplaceSyncService {
         hasil.push({ packageId: pid, docUrl: null, trackingNumber: null, error: (e as Error).message });
       }
     }
+    if (hasil.some((h) => h.docUrl)) {
+      // Resi berhasil diunduh -> pindah ke "menunggu dipacking".
+      await this.bypass(() => this.db
+        .update(orders)
+        .set({ labelPrinted: true, fulfillmentStatus: majukanStatus(order.fulfillmentStatus as StatusInternal, "packing"), updatedAt: new Date() })
+        .where(and(eq(orders.userId, userId), eq(orders.id, orderId))));
+    }
     return { orderId, hasil };
   }
 
@@ -868,7 +875,7 @@ export class MarketplaceSyncService {
    * RTS / arrange shipment ke marketplace. TULIS & OUTWARD: memindahkan paket
    * ke "menunggu kurir" (AWAITING_COLLECTION) di seller center, memicu AWB &
    * bisa memicu penjemputan. Hanya dipanggil manual dari UI dengan konfirmasi.
-   * Setelah semua paket sukses, status lokal dimajukan ke "siap_kirim".
+   * Setelah semua paket sukses, status lokal dimajukan ke "packing" (menunggu dipacking).
    */
   async shipOrder(userId: string, orderId: string, opts: { handoverMethod?: string }) {
     const { order, toko } = await this.ambilOrderToko(userId, orderId);
@@ -904,7 +911,7 @@ export class MarketplaceSyncService {
         .update(orders)
         .set({
           awbGenerated: true,
-          fulfillmentStatus: majukanStatus(order.fulfillmentStatus as StatusInternal, "siap_kirim"),
+          fulfillmentStatus: majukanStatus(order.fulfillmentStatus as StatusInternal, "packing"),
           updatedAt: new Date(),
         })
         .where(and(eq(orders.userId, userId), eq(orders.id, orderId))));

@@ -47,15 +47,15 @@ import java.util.Map;
 public class OrdersActivity extends AppCompatActivity {
 
     // Alur status internal + labelnya (sama dengan web).
-    private static final String[] FLOW = { "masuk", "approved", "produksi", "packing", "siap_kirim", "dikirim" };
+    private static final String[] FLOW = { "masuk", "approved", "packing", "siap_kirim", "dikirim" };
     private static String label(String s) {
         switch (s == null ? "" : s) {
-            case "masuk": return "Perlu disetujui";
-            case "approved": return "Disetujui";
+            case "masuk": return "Menunggu Disetujui";
+            case "approved": return "Menunggu Dicetak";
             case "produksi": return "Produksi";
-            case "packing": return "Packing";
-            case "siap_kirim": return "Siap Kirim";
-            case "dikirim": return "Dikirim";
+            case "packing": return "Menunggu Dipacking";
+            case "siap_kirim": return "Menunggu Dipickup";
+            case "dikirim": return "Dalam Pengiriman";
             case "selesai": return "Selesai";
             case "retur": return "Retur";
             case "dibatalkan": return "Dibatalkan";

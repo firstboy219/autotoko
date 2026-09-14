@@ -17,6 +17,7 @@ import {
 } from "../../database/schema/index.js";
 import { UploadsService } from "../uploads/uploads.service.js";
 import { mergeLabelColumns, parseShippingLabel } from "./label-parser.js";
+import { majukanStatus, type StatusInternal } from "../marketplace-sync/peta-tiktok.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -222,7 +223,7 @@ export class ResiOcrTask {
 
       await this.db
         .update(orders)
-        .set({ trackingNumber: scan.resi, fulfillmentStatus: "dikirim", updatedAt: new Date() })
+        .set({ trackingNumber: scan.resi, fulfillmentStatus: majukanStatus(order.fulfillmentStatus as StatusInternal, "siap_kirim"), updatedAt: new Date() })
         .where(eq(orders.id, order.id));
 
       await this.db
@@ -231,7 +232,7 @@ export class ResiOcrTask {
         .where(and(eq(resiScans.id, scan.id), isNull(resiScans.orderId)));
 
       this.logger.log(
-        `Auto-linked ${scan.resi} to order ${orderNo} (${order.fulfillmentStatus} -> dikirim) from the label`,
+        `Auto-linked ${scan.resi} to order ${orderNo} (${order.fulfillmentStatus} -> siap_kirim/menunggu dipickup) from the label`,
       );
     });
   }
