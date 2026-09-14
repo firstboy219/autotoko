@@ -4,11 +4,12 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { IsArray, IsIn, IsInt, IsOptional, IsISO8601, IsUUID, Min } from "class-validator";
+import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsISO8601, IsString, IsUUID, Min } from "class-validator";
 import { Type } from "class-transformer";
 import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
@@ -34,6 +35,14 @@ class BulkStatusDto {
 
   @IsIn(FULFILLMENT_STATUSES as unknown as string[])
   status!: FulfillmentStatus;
+}
+
+class OrderSettingsDto {
+  @IsOptional() @IsBoolean()
+  autoSiapKirim?: boolean;
+
+  @IsOptional() @IsArray() @IsString({ each: true })
+  instantCouriers?: string[];
 }
 
 class ListOrdersQuery {
@@ -93,6 +102,19 @@ export class OrdersController {
     return { success: true, data: await this.orders.boardSummary(uid(req)) };
   }
 
+  @Get("settings")
+  async getSettings(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.getOrderSettings(uid(req)) };
+  }
+
+  @Patch("settings")
+  async updateSettings(
+    @Req() req: FastifyRequest,
+    @Body() dto: OrderSettingsDto,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.updateOrderSettings(uid(req), dto) };
+  }
+
   @Patch("status/bulk")
   async updateStatusBulk(
     @Req() req: FastifyRequest,
@@ -119,5 +141,13 @@ export class OrdersController {
       success: true,
       data: await this.orders.updateStatus(uid(req), id, dto.status),
     };
+  }
+
+  @Post(":id/awb")
+  async generateAwb(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.generateAwb(uid(req), id) };
   }
 }

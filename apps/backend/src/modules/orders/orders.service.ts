@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, lte, notInArray, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { orders, resiScans, shops } from "../../database/schema/index.js";
+import { orders, orderSettings, resiScans, shops } from "../../database/schema/index.js";
 
 export interface ListOrdersOpts {
   status?: FulfillmentStatus;
@@ -200,5 +200,64 @@ export class OrdersService {
       .where(and(eq(orders.userId, userId), inArray(orders.id, clean)))
       .returning({ id: orders.id });
     return { updated: rows.length, ids: rows.map((r) => r.id) };
+  }
+
+  private readonly INSTANT_DEFAULT = ["instant", "sameday", "same day", "same-day"];
+
+  async getOrderSettings(userId: string) {
+    const [row] = await this.db
+      .select()
+      .from(orderSettings)
+      .where(eq(orderSettings.userId, userId))
+      .limit(1);
+    return {
+      autoSiapKirim: row?.autoSiapKirim ?? false,
+      instantCouriers: row?.instantCouriers ?? this.INSTANT_DEFAULT,
+    };
+  }
+
+  async updateOrderSettings(
+    userId: string,
+    dto: { autoSiapKirim?: boolean; instantCouriers?: string[] },
+  ) {
+    const kini = await this.getOrderSettings(userId);
+    const nilai = {
+      autoSiapKirim: dto.autoSiapKirim ?? kini.autoSiapKirim,
+      instantCouriers: (dto.instantCouriers ?? kini.instantCouriers)
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
+    await this.db
+      .insert(orderSettings)
+      .values({ userId, autoSiapKirim: nilai.autoSiapKirim, instantCouriers: nilai.instantCouriers, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: orderSettings.userId,
+        set: { autoSiapKirim: nilai.autoSiapKirim, instantCouriers: nilai.instantCouriers, updatedAt: new Date() },
+      });
+    return nilai;
+  }
+
+  /**
+   * Cetak AWB / arrange shipment ke marketplace. SEAM: API ship marketplace
+   * BELUM tersambung, jadi ini TIDAK menulis data palsu & TIDAK meng-update
+   * marketplace. Dipakai frontend sebagai alur siap-sambung; begitu panggilan
+   * API ship TikTok diisi di sini, barulah label dibuat dan status di seller
+   * center benar-benar berubah.
+   */
+  async generateAwb(userId: string, id: string) {
+    const [order] = await this.db
+      .select({ id: orders.id, awbGenerated: orders.awbGenerated, trackingNumber: orders.trackingNumber })
+      .from(orders)
+      .where(and(eq(orders.id, id), eq(orders.userId, userId)))
+      .limit(1);
+    if (!order) throw new NotFoundException("Order not found");
+    return {
+      connected: false,
+      simulated: true,
+      awbGenerated: order.awbGenerated,
+      trackingNumber: order.trackingNumber,
+      message:
+        "API AWB/ship marketplace belum tersambung. Frontend siap; nomor resi & status di marketplace akan terisi otomatis begitu API disambung.",
+    };
   }
 }

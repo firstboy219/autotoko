@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   marketplaceCatalogs,
+  orderSettings,
   marketplaceProducts,
   marketplaceSkus,
   marketplaceSyncRuns,
@@ -18,6 +19,7 @@ import { TikTokApiError, TikTokClient } from "./tiktok-client.js";
 import {
   hitungSince,
   majukanStatus,
+  autoSiapKirim,
   petakanPesanan,
   petakanProduk,
   type PesananTikTok,
@@ -330,6 +332,13 @@ export class MarketplaceSyncService {
     const baris = data.map(petakanPesanan);
     const ids = baris.map((b) => b.marketplaceOrderId);
 
+    // Config auto siap-kirim per seller (default mati -> perilaku tak berubah).
+    const [cfg] = await this.bypass(() => this.db
+      .select({ autoSiapKirim: orderSettings.autoSiapKirim, instantCouriers: orderSettings.instantCouriers })
+      .from(orderSettings)
+      .where(eq(orderSettings.userId, toko.userId))
+      .limit(1));
+
     const ada = ids.length
       ? await this.bypass(() => this.db
           .select({ id: orders.marketplaceOrderId, st: orders.fulfillmentStatus })
@@ -353,7 +362,11 @@ export class MarketplaceSyncService {
         marketplaceOrderId: b.marketplaceOrderId,
         marketplace: toko.marketplace,
         status: b.status,
-        fulfillmentStatus: majukanStatus(statusLama.get(b.marketplaceOrderId), b.fulfillmentStatus),
+        fulfillmentStatus: autoSiapKirim(
+          majukanStatus(statusLama.get(b.marketplaceOrderId), b.fulfillmentStatus),
+          b.shippingCourier,
+          cfg ?? null,
+        ),
         buyerName: b.buyerName,
         buyerPhone: b.buyerPhone,
         shippingAddress: b.shippingAddress,

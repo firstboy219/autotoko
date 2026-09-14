@@ -83,3 +83,16 @@ export const webhookEvents = pgTable(
     eventUnique: unique("webhook_events_mp_event_unique").on(t.marketplace, t.eventId),
   }),
 );
+
+// Pengaturan otomasi order per-seller (menu Order). Semua kolom AutoToko,
+// tidak pernah ditulis oleh sinkronisasi marketplace.
+export const orderSettings = pgTable("order_settings", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** true: order API yang masuk otomatis dinaikkan ke "siap_kirim". */
+  autoSiapKirim: boolean("auto_siap_kirim").notNull().default(false),
+  /** Kata kunci kurir instant/sameday yang DIKECUALIKAN dari auto siap kirim. */
+  instantCouriers: jsonb("instant_couriers").$type<string[]>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

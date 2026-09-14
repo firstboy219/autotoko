@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { useRealtime } from "../lib/realtime";
@@ -118,6 +118,7 @@ export function Orders() {
   const [selected, setSelected] = useState<Order | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [otomasiOpen, setOtomasiOpen] = useState(false);
 
   const all = data ?? [];
   const marketplaces = useMemo(() => [...new Set(all.map((o) => o.marketplace))], [all]);
@@ -209,6 +210,9 @@ export function Orders() {
                 </button>
               ))}
             </div>
+            <Button variant="outline" onClick={() => setOtomasiOpen(true)}>
+              Otomasi Order
+            </Button>
             <Button variant="outline" icon="refresh" loading={loading} onClick={() => reload()}>
               Segarkan
             </Button>
@@ -514,10 +518,94 @@ export function Orders() {
         <OrderDetail
           order={liveSelected}
           onClose={() => setSelected(null)}
-          onChanged={(updated) => { setSelected(updated); reload(); }}
+          onChanged={(updated) => { setSelected(updated); reload(); reloadRingkas(); }}
         />
       )}
+
+      {otomasiOpen && <OtomasiOrderModal onClose={() => setOtomasiOpen(false)} />}
     </Layout>
+  );
+}
+
+function OtomasiOrderModal({ onClose }: { onClose: () => void }) {
+  const toast = useToast();
+  const { data, loading } = useFetch<{ autoSiapKirim: boolean; instantCouriers: string[] }>("/orders/settings");
+  const [auto, setAuto] = useState(false);
+  const [instant, setInstant] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [siap, setSiap] = useState(false);
+  useEffect(() => {
+    if (data && !siap) {
+      setAuto(data.autoSiapKirim);
+      setInstant((data.instantCouriers ?? []).join(", "));
+      setSiap(true);
+    }
+  }, [data, siap]);
+
+  async function simpan() {
+    setSaving(true);
+    try {
+      await api.patch("/orders/settings", {
+        autoSiapKirim: auto,
+        instantCouriers: instant.split(",").map((s) => s.trim()).filter(Boolean),
+      });
+      toast("Pengaturan otomasi order disimpan", "success");
+      onClose();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Otomasi Order" width="max-w-lg">
+      {loading ? (
+        <Skeleton className="h-40 w-full" />
+      ) : (
+        <div className="space-y-4">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={auto}
+              onChange={(e) => setAuto(e.target.checked)}
+              className="w-4 h-4 accent-brand mt-0.5 shrink-0"
+            />
+            <span>
+              <span className="text-sm font-medium text-ink">Otomatis set “Siap Kirim” untuk order API masuk</span>
+              <span className="block text-xs text-ink-2 mt-0.5">
+                Saat sinkronisasi, order dari marketplace langsung dinaikkan ke <b>Siap Kirim</b> — kecuali kurir
+                instant/sameday di bawah. Hanya-maju: order yang sudah lebih jauh atau selesai tidak ditarik mundur.
+                Jika dimatikan, status tidak diubah otomatis.
+              </span>
+            </span>
+          </label>
+
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1.5">Kecualikan kurir (instant / sameday)</label>
+            <Input
+              value={instant}
+              onChange={(e) => setInstant(e.target.value)}
+              placeholder="instant, sameday, same day"
+            />
+            <p className="text-xs text-ink-3 mt-1">
+              Pisahkan dengan koma. Order yang nama kurirnya mengandung salah satu kata ini TIDAK diauto-siapkirim
+              (butuh penanganan manual cepat).
+            </p>
+          </div>
+
+          <InlineAlert tone="warning">
+            Mengubah status di AutoToko belum otomatis meng-update marketplace — perlu API ship/AWB yang belum
+            tersambung. Frontend sudah disiapkan; begitu API disambung, status di seller center ikut berubah.
+          </InlineAlert>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="text" onClick={onClose} disabled={saving}>Batal</Button>
+            <Button variant="filled" loading={saving} onClick={simpan}>Simpan</Button>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -681,6 +769,18 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
     }
   }
 
+  async function cetakAwb() {
+    setBusy(true); setErr(null);
+    try {
+      const r = await api.post<{ connected: boolean; message: string }>(`/orders/${order.id}/awb`, {});
+      toast(r.message, r.connected ? "success" : "warning");
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function setStatus(status: string) {
     // Irreversible-feeling transitions get an explicit confirmation.
     if (status === "dibatalkan" || status === "retur") {
@@ -812,6 +912,17 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
           >
             {ALL_FS.map((s) => <option key={s} value={s}>{FS_LABEL[s]}</option>)}
           </Select>
+        </div>
+
+        <div className="mt-3 rounded-lg border border-line p-3.5">
+          <div className="text-xs font-medium text-ink-2 mb-2">Kirim ke marketplace</div>
+          <Button size="sm" variant="outline" icon="package" loading={busy} onClick={cetakAwb}>
+            Cetak AWB / Resi
+          </Button>
+          <p className="text-[11px] text-ink-3 mt-2">
+            Perubahan status di sini bersifat internal AutoToko. Sinkron ke marketplace (buat AWB &amp; ubah status di
+            seller center) memerlukan API ship yang belum tersambung — tombol ini menyiapkan alurnya.
+          </p>
         </div>
       </Modal>
 

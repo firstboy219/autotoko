@@ -31,6 +31,19 @@ const TERMINAL = new Set<StatusInternal>(["selesai", "retur", "dibatalkan"]);
  * Yang tidak dikenal jatuh ke "masuk", bukan dilempar: satu status baru dari
  * TikTok tidak boleh menghentikan sinkronisasi seluruh toko.
  */
+export function autoSiapKirim(
+  status: StatusInternal,
+  courier: string | null | undefined,
+  cfg: { autoSiapKirim?: boolean; instantCouriers?: string[] } | null | undefined,
+): StatusInternal {
+  if (!cfg?.autoSiapKirim) return status;
+  const c = (courier ?? "").toLowerCase();
+  const instant = (cfg.instantCouriers ?? []).some((k) => k && c.includes(k.toLowerCase()));
+  // Kurir instant/sameday dikecualikan: butuh penanganan manual cepat.
+  if (instant) return status;
+  return majukanStatus(status, "siap_kirim");
+}
+
 export function statusInternal(mp: string | null | undefined): StatusInternal {
   switch (String(mp ?? "").toUpperCase()) {
     case "UNPAID":
