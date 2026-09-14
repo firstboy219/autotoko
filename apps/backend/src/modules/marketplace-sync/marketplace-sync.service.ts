@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   marketplaceCatalogs,
@@ -471,6 +471,11 @@ export class MarketplaceSyncService {
       }
 
       await this.selesaikanRun(run.id, "ok", { pages, fetched, upserted, watermark: null });
+      // Nama varian tidak ada di daftar produk; ambil dari detail untuk produk
+      // multi-varian yang namanya masih kosong (aman: hanya mengisi NULL).
+      await this.lengkapiNamaVarian(toko).catch((e) =>
+        this.logger.warn(`Lengkapi nama varian ${toko.shopName}: ${(e as Error).message}`),
+      );
       return { runId: run.id, status: "ok", pages, fetched, upserted, watermark: null, since: null };
     } catch (e) {
       const pesan = (e as Error).message;
@@ -551,6 +556,97 @@ export class MarketplaceSyncService {
   }
 
   /* --------------------------------------------------------- pembantu */
+
+  /** Nama varian dari sales_attributes detail: "A9 Pro", atau "Merah / L". */
+  private static namaDariAtribut(
+    sku: { sales_attributes?: { name?: string; value_name?: string }[] },
+  ): string | null {
+    const bagian = (sku.sales_attributes ?? [])
+      .map((a) => a.value_name ?? a.name)
+      .filter((x): x is string => !!x && x.trim() !== "");
+    return bagian.length ? bagian.join(" / ").slice(0, 255) : null;
+  }
+
+  /**
+   * Melengkapi sku_name yang masih NULL dari endpoint DETAIL produk. Daftar
+   * produk TikTok tidak memuat nama varian, sehingga varian yang belum pernah
+   * muncul di pesanan tampil memakai judul produk. Di sini sales_attributes
+   * ("Warna: Cool Mint" dst) untuk produk MULTI-varian diambil dan mengisi nama
+   * yang kosong -- TIDAK PERNAH menimpa nama yang sudah ada (dari pesanan atau
+   * input manual). Produk satu-varian tidak diambil detailnya: di marketplace
+   * ia memang tak punya nama varian tersendiri. Mengembalikan jumlah sku terisi.
+   */
+  private async lengkapiNamaVarian(toko: Toko): Promise<number> {
+    const grup = await this.bypass(() => this.db
+      .select({
+        productId: marketplaceSkus.productId,
+        n: sql<number>`count(*)::int`,
+        kosong: sql<number>`count(*) filter (where ${marketplaceSkus.skuName} is null)::int`,
+      })
+      .from(marketplaceSkus)
+      .where(and(eq(marketplaceSkus.shopId, toko.id), isNotNull(marketplaceSkus.productId)))
+      .groupBy(marketplaceSkus.productId));
+    const productIds = grup
+      .filter((g) => Number(g.n) > 1 && Number(g.kosong) > 0)
+      .map((g) => g.productId)
+      .filter((x): x is string => !!x);
+    if (!productIds.length) return 0;
+
+    let klien = await this.klien(toko);
+    let sudahSegar = false;
+    let terisi = 0;
+    for (const pid of productIds) {
+      let detail: { skus?: { id?: string; sales_attributes?: { name?: string; value_name?: string }[] }[] } | null = null;
+      try {
+        detail = await klien.get(`/product/202309/products/${pid}`);
+      } catch (e) {
+        if (e instanceof TikTokApiError && e.tokenBermasalah && !sudahSegar) {
+          sudahSegar = true;
+          klien = await this.segarkan(toko);
+          try {
+            detail = await klien.get(`/product/202309/products/${pid}`);
+          } catch (e2) {
+            this.logger.warn(`Detail varian ${pid}: ${(e2 as Error).message}`);
+          }
+        } else {
+          this.logger.warn(`Detail varian ${pid}: ${(e as Error).message}`);
+        }
+      }
+      for (const sk of detail?.skus ?? []) {
+        const nama = MarketplaceSyncService.namaDariAtribut(sk);
+        if (!nama || !sk.id) continue;
+        const diisi = await this.bypass(() => this.db
+          .update(marketplaceSkus)
+          .set({ skuName: nama })
+          .where(and(
+            eq(marketplaceSkus.userId, toko.userId),
+            eq(marketplaceSkus.skuId, sk.id!),
+            isNull(marketplaceSkus.skuName),
+          ))
+          .returning({ id: marketplaceSkus.id }));
+        terisi += diisi.length;
+      }
+      await tidur(JEDA_MS);
+    }
+    if (terisi) this.logger.log(`Lengkapi nama varian ${toko.shopName}: ${terisi} terisi`);
+    return terisi;
+  }
+
+  /** Backfill nama varian untuk semua toko TikTok pengguna (dipicu manual). */
+  async perbaikiNamaVarian(userId: string) {
+    const toko = await this.tokoSiap(userId);
+    const perToko: { toko: string | null; terisi: number }[] = [];
+    let terisi = 0;
+    for (const t of toko) {
+      const n = await this.lengkapiNamaVarian(t).catch((e) => {
+        this.logger.warn(`Lengkapi nama varian ${t.shopName}: ${(e as Error).message}`);
+        return 0;
+      });
+      perToko.push({ toko: t.shopName, terisi: n });
+      terisi += n;
+    }
+    return { toko: toko.length, terisi, perToko };
+  }
 
   private async klien(toko: Toko): Promise<TikTokClient> {
     const { appKey, appSecret } = await this.tiktok.credentials();

@@ -233,7 +233,7 @@ export class ProductsService {
       }
       perPosting.get(key)!.varian.push({
         skuId: r.skuId,
-        nama: r.nama ?? r.productName ?? "(varian)",
+        nama: r.nama ?? "(tanpa nama varian)",
         harga: r.harga != null ? Number(r.harga) : null,
         stok: r.stok,
       });
@@ -420,7 +420,7 @@ export class ProductsService {
       const arr = varByProduct.get(s2.productId) ?? [];
       arr.push({
         skuId: s2.skuId,
-        nama: s2.skuName ?? s2.productName ?? "(varian)",
+        nama: s2.skuName ?? "(tanpa nama varian)",
         sellerSku: s2.sellerSku,
         harga: s2.price != null ? Number(s2.price) : null,
         currency: s2.currency ?? "IDR",
