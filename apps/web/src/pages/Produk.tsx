@@ -228,6 +228,34 @@ export function Produk() {
         <TabBtn active={tab === "katalog"} onClick={() => setTab("katalog")}>Katalog Marketplace</TabBtn>
       </div>
 
+      {/* Panduan istilah: menjelaskan hierarki & padanan AutoToko <-> marketplace. */}
+      <details open className="mb-4 rounded-xl border border-line bg-canvas overflow-hidden">
+        <summary className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden px-4 py-2.5 flex items-center gap-2 text-sm font-medium text-ink hover:bg-line/40">
+          <span className="shrink-0 w-4 h-4 rounded-full bg-brand text-white text-[10px] font-bold flex items-center justify-center">i</span>
+          Panduan istilah: Katalog › Postingan › Varian — dan padanannya di marketplace
+          <span className="ml-auto text-xs font-normal text-ink-3">buka/tutup</span>
+        </summary>
+        <div className="px-4 pb-4 pt-1 border-t border-line">
+          <div className="flex flex-wrap items-center gap-2 py-3 text-sm">
+            <span className="px-2.5 py-1 rounded-lg bg-white border border-line font-medium text-ink">Katalog</span>
+            <span className="text-ink-3">›</span>
+            <span className="px-2.5 py-1 rounded-lg bg-white border border-line font-medium text-ink">Postingan</span>
+            <span className="text-ink-3">›</span>
+            <span className="px-2.5 py-1 rounded-lg bg-white border border-line font-medium text-ink">Varian</span>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 text-xs text-ink-2">
+            <div className="flex gap-2"><b className="text-ink w-24 shrink-0">Katalog</b><span>Kumpulan postingan produk yang sama di beberapa toko.</span></div>
+            <div className="flex gap-2"><b className="text-ink w-24 shrink-0">Postingan</b><span>Satu listing di satu toko. <span className="text-brand-ink">= “Produk” di marketplace.</span></span></div>
+            <div className="flex gap-2"><b className="text-ink w-24 shrink-0">Varian</b><span>Pilihan/SKU di dalam satu postingan (warna, ukuran, dll). <span className="text-brand-ink">= “Varian/SKU” di marketplace.</span></span></div>
+            <div className="flex gap-2"><b className="text-ink w-24 shrink-0">Master&nbsp;Produk</b><span>Identitas produk baku di AutoToko; tiap varian dipetakan ke satu master. <span className="text-brand-ink">= satu “Varian” nyata lintas toko.</span></span></div>
+          </div>
+          <div className="mt-3 pt-3 border-t border-line flex flex-wrap gap-x-6 gap-y-1 text-xs">
+            <span className="text-ink-2"><b className="text-ink">Postingan</b> (AutoToko) <span className="text-ink-3">=</span> <b className="text-ink">Produk</b> (marketplace)</span>
+            <span className="text-ink-2"><b className="text-ink">Master Produk</b> (AutoToko) <span className="text-ink-3">=</span> <b className="text-ink">Varian</b> (marketplace)</span>
+          </div>
+        </div>
+      </details>
+
       {tab === "produk" && (
       <Card padded={false} className="overflow-hidden">
         <CardHeader
