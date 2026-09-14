@@ -20,6 +20,18 @@
         android:text="Menu Lainnya" />
 
     <LinearLayout
+        android:id="@+id/menuPesanan"
+        style="@style/SheetRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView style="@style/Text.Body" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Pesanan" />
+        <TextView style="@style/Text.Caption" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Daftar &amp; proses pesanan marketplace" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/menuDashboard"
         style="@style/SheetRow"
         android:layout_width="match_parent"

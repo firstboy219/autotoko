@@ -2595,6 +2595,10 @@ public class ScanActivity extends AppCompatActivity {
         String who = session.email();
         account.setText(who == null || who.isEmpty() ? "Keluar dari aplikasi" : who);
 
+        sheet.findViewById(R.id.menuPesanan).setOnClickListener(v -> {
+            dialog.dismiss();
+            startActivity(new Intent(this, OrdersActivity.class));
+        });
         sheet.findViewById(R.id.menuDelivery).setOnClickListener(v -> {
             dialog.dismiss();
             startActivity(new Intent(this, DeliveryActivity.class));

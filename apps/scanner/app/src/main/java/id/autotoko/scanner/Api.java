@@ -117,6 +117,44 @@ public final class Api {
         call("GET", session.baseUrl() + "/api/products", session.token(), null, cb);
     }
 
+    // ---- Order & fulfillment (menu Pesanan). Endpoint sama dengan web. ----
+    public void orders(boolean active, Cb cb) {
+        call("GET", session.baseUrl() + "/api/orders" + (active ? "?active=1" : ""), session.token(), null, cb);
+    }
+    public void orderBoardSummary(Cb cb) {
+        call("GET", session.baseUrl() + "/api/orders/board-summary", session.token(), null, cb);
+    }
+    public void orderUpdateStatus(String id, String status, Cb cb) {
+        JSONObject p = new JSONObject();
+        try { p.put("status", status); } catch (Exception ignored) {}
+        call("PATCH", session.baseUrl() + "/api/orders/" + id + "/status", session.token(), p, cb);
+    }
+    public void orderLabel(String id, Cb cb) {
+        call("GET", session.baseUrl() + "/api/marketplace-sync/orders/" + id + "/label", session.token(), null, cb);
+    }
+    public void orderShip(String id, String handover, Cb cb) {
+        JSONObject p = new JSONObject();
+        try { if (handover != null) p.put("handoverMethod", handover); } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/marketplace-sync/orders/" + id + "/ship", session.token(), p, cb);
+    }
+    public void orderBatchPacking(JSONArray orderIds, JSONArray takeouts, String handover, Cb cb) {
+        JSONObject p = new JSONObject();
+        try {
+            p.put("orderIds", orderIds);
+            if (takeouts != null) p.put("takeouts", takeouts);
+            if (handover != null) p.put("handoverMethod", handover);
+        } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/marketplace-sync/orders/batch-packing", session.token(), p, cb);
+    }
+    public void orderSettings(Cb cb) {
+        call("GET", session.baseUrl() + "/api/orders/settings", session.token(), null, cb);
+    }
+    public void orderSettingsSave(boolean autoSiapKirim, JSONArray instantCouriers, Cb cb) {
+        JSONObject p = new JSONObject();
+        try { p.put("autoSiapKirim", autoSiapKirim); if (instantCouriers != null) p.put("instantCouriers", instantCouriers); } catch (Exception ignored) {}
+        call("PATCH", session.baseUrl() + "/api/orders/settings", session.token(), p, cb);
+    }
+
     public void scan(String resi, String raw, String source, String barcodeFormat,
                      String photoBase64, JSONObject reading, Cb cb) {
         JSONObject payload = new JSONObject();

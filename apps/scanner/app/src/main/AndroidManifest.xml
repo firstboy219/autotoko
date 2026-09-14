@@ -170,5 +170,9 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <activity
+            android:name=".OrdersActivity"
+            android:exported="false"
+            android:label="Daftar Pesanan" />
     </application>
 </manifest>
