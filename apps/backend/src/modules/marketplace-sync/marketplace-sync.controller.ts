@@ -98,6 +98,15 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.perbaikiNamaVarian(uid(req)) };
   }
 
+  /** Batch packing: RTS bila perlu + kembalikan label(base64)+item, set packing. */
+  @Post("orders/batch-packing")
+  async batchPacking(
+    @Req() req: FastifyRequest,
+    @Body() body: { orderIds: string[]; handoverMethod?: string },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.batchPacking(uid(req), body?.orderIds ?? [], { handoverMethod: body?.handoverMethod }) };
+  }
+
   /** Ambil URL label AWB order dari marketplace (read-only). */
   @Get("orders/:id/label")
   async labelOrder(

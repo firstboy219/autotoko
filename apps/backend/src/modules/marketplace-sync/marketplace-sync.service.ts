@@ -662,6 +662,97 @@ export class MarketplaceSyncService {
   }
 
   /** Muat order + tokonya (Toko) untuk operasi fulfillment. */
+  /**
+   * Batch packing: untuk tiap order terpilih, pastikan sudah RTS (jika belum,
+   * arrange shipment), ambil PDF label (base64) + data item, lalu set status
+   * lokal ke "packing". Frontend menggabung label jadi 1 PDF & membuat PDF
+   * packing list. RTS = tulis outward -> hanya dipicu manual dari batch UI.
+   */
+  async batchPacking(userId: string, orderIds: string[], opts: { handoverMethod?: string }) {
+    const ids = [...new Set((orderIds ?? []).filter(Boolean))];
+    if (!ids.length) throw new BadRequestException("Tidak ada order dipilih");
+    type Baris = {
+      orderId: string; ok: boolean; orderNo: string | null; buyer: string | null;
+      courier: string | null; tracking: string | null;
+      items: { name: string; qty: number }[]; labels: string[]; error?: string;
+    };
+    const kosong = (oid: string, error: string): Baris => ({
+      orderId: oid, ok: false, orderNo: null, buyer: null, courier: null,
+      tracking: null, items: [], labels: [], error,
+    });
+    const hasil: Baris[] = [];
+    for (const oid of ids) {
+      try {
+        const [order] = await this.bypass(() => this.db
+          .select({
+            id: orders.id, shopId: orders.shopId, marketplace: orders.marketplace,
+            marketplaceOrderId: orders.marketplaceOrderId, fulfillmentStatus: orders.fulfillmentStatus,
+            buyerName: orders.buyerName, shippingCourier: orders.shippingCourier,
+            items: orders.items, raw: orders.raw,
+          })
+          .from(orders)
+          .where(and(eq(orders.id, oid), eq(orders.userId, userId)))
+          .limit(1));
+        if (!order) { hasil.push(kosong(oid, "Order tidak ditemukan")); continue; }
+        if (order.marketplace !== "tiktok") { hasil.push(kosong(oid, `${order.marketplace} belum didukung`)); continue; }
+        const [toko] = await this.bypass(() => this.db.select().from(shops).where(eq(shops.id, order.shopId)).limit(1));
+        if (!toko || !toko.accessToken || !toko.shopCipher) { hasil.push(kosong(oid, "Toko tidak tersambung API")); continue; }
+        const pkgIds = this.packageIds(order.raw);
+        if (!pkgIds.length) { hasil.push(kosong(oid, "Order belum punya paket")); continue; }
+
+        let klien = await this.klien(toko);
+        let segar = false;
+        const call = async <T>(fn: (c: TikTokClient) => Promise<T>): Promise<T> => {
+          for (;;) {
+            try { return await fn(klien); }
+            catch (e) {
+              if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(toko); continue; }
+              throw e;
+            }
+          }
+        };
+        const labels: string[] = [];
+        let tracking: string | null = null;
+        for (const pid of pkgIds) {
+          const ambilLabel = () => call((c) => c.get<{ doc_url?: string; tracking_number?: string }>(
+            `/fulfillment/202309/packages/${pid}/shipping_documents`,
+            { document_type: "SHIPPING_LABEL", document_size: "A6" }));
+          let doc: { doc_url?: string; tracking_number?: string } | null = null;
+          try { doc = await ambilLabel(); } catch { doc = null; }
+          if (!doc?.doc_url) {
+            const body: Record<string, unknown> = {};
+            if (opts.handoverMethod) body.handover_method = opts.handoverMethod;
+            await call((c) => c.post(`/fulfillment/202309/packages/${pid}/ship`, body));
+            doc = await ambilLabel();
+          }
+          tracking = doc?.tracking_number ?? tracking;
+          if (doc?.doc_url) {
+            const res = await fetch(doc.doc_url);
+            labels.push(Buffer.from(await res.arrayBuffer()).toString("base64"));
+          }
+        }
+        await this.bypass(() => this.db
+          .update(orders)
+          .set({ awbGenerated: true, fulfillmentStatus: majukanStatus(order.fulfillmentStatus as StatusInternal, "packing"), updatedAt: new Date() })
+          .where(and(eq(orders.userId, userId), eq(orders.id, oid))));
+        const rawItems = Array.isArray(order.items)
+          ? (order.items as { name?: string; skuName?: string; sellerSku?: string; qty?: number }[])
+          : [];
+        const items = rawItems.map((it) => ({
+          name: [it.name, it.skuName].filter(Boolean).join(" \u00b7 ") || it.sellerSku || "-",
+          qty: Number(it.qty ?? 1),
+        }));
+        hasil.push({
+          orderId: oid, ok: true, orderNo: order.marketplaceOrderId, buyer: order.buyerName,
+          courier: order.shippingCourier, tracking, items, labels,
+        });
+      } catch (e) {
+        hasil.push(kosong(oid, (e as Error).message));
+      }
+    }
+    return { total: ids.length, ok: hasil.filter((h) => h.ok).length, hasil };
+  }
+
   private async ambilOrderToko(userId: string, orderId: string) {
     const [order] = await this.bypass(() => this.db
       .select({

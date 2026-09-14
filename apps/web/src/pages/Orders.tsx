@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { useRealtime } from "../lib/realtime";
@@ -60,6 +61,18 @@ interface Order {
   /** Order API ini sudah dicocokkan dengan scan resi gudang. */
   terscan?: boolean;
 }
+
+type BatchRow = {
+  orderId: string;
+  ok: boolean;
+  orderNo: string | null;
+  buyer: string | null;
+  courier: string | null;
+  tracking: string | null;
+  items: { name: string; qty: number }[];
+  labels: string[];
+  error?: string;
+};
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
 
@@ -177,6 +190,42 @@ export function Orders() {
     try {
       const r = await api.patch<{ updated: number }>("/orders/status/bulk", { ids, status });
       toast(`${r.updated} order → ${FS_LABEL[status] ?? status}`, "success");
+      setSel(new Set());
+      reload(); reloadRingkas();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function batchPacking() {
+    const ids = [...sel];
+    if (!ids.length) return;
+    if (
+      !window.confirm(
+        `Mulai Batch Packing untuk ${ids.length} order.\n\n` +
+          `Order yang BELUM dikirim akan di-RTS (arrange shipment) ke marketplace — tindakan NYATA: ` +
+          `AWB dibuat & bisa memicu penjemputan kurir. Lalu diunduh PDF packing list + PDF resi, ` +
+          `dan status jadi Packing.\n\nLanjutkan?`,
+      )
+    )
+      return;
+    setBulkBusy(true);
+    try {
+      const r = await api.post<{ total: number; ok: number; hasil: BatchRow[] }>(
+        "/marketplace-sync/orders/batch-packing",
+        { orderIds: ids, handoverMethod: "DROP_OFF" },
+      );
+      const okRows = r.hasil.filter((h) => h.ok);
+      if (okRows.some((h) => h.labels.length)) await unduhResiGabung(okRows);
+      if (okRows.length) await unduhPackingList(okRows);
+      const gagal = r.hasil.filter((h) => !h.ok);
+      toast(
+        `Batch: ${r.ok}/${r.total} order → Packing, PDF diunduh.` +
+          (gagal.length ? ` ${gagal.length} gagal: ${gagal[0]?.error ?? ""}` : ""),
+        gagal.length ? "warning" : "success",
+      );
       setSel(new Set());
       reload(); reloadRingkas();
     } catch (e) {
@@ -332,11 +381,14 @@ export function Orders() {
           <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-brand bg-brand/5 px-3 py-2">
             <span className="text-sm font-medium text-ink">{sel.size} order dipilih</span>
             <div className="ml-auto flex flex-wrap items-center gap-2">
-              <Button size="sm" variant="filled" icon="check" loading={bulkBusy} onClick={() => bulkStatus("approved")}>
+              <Button size="sm" variant="filled" icon="package" loading={bulkBusy} onClick={batchPacking}>
+                Batch Packing (RTS + resi)
+              </Button>
+              <Button size="sm" variant="outline" icon="check" loading={bulkBusy} onClick={() => bulkStatus("approved")}>
                 Setujui
               </Button>
               <Button size="sm" variant="tonal" loading={bulkBusy} onClick={() => bulkStatus("packing")}>
-                Mulai Packing
+                Set Packing
               </Button>
               <Select
                 className="w-auto min-w-[150px]"
@@ -608,6 +660,64 @@ function OtomasiOrderModal({ onClose }: { onClose: () => void }) {
       )}
     </Modal>
   );
+}
+
+// --- Batch Packing PDF helpers (pdf-lib, di browser) ---
+function unduhBlob(bytes: Uint8Array, name: string) {
+  const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 8000);
+}
+
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// Gabung semua PDF label jadi satu file "resi-batch.pdf".
+async function unduhResiGabung(rows: BatchRow[]) {
+  const out = await PDFDocument.create();
+  for (const h of rows) {
+    for (const b64 of h.labels) {
+      try {
+        const src = await PDFDocument.load(b64ToBytes(b64));
+        const pages = await out.copyPages(src, src.getPageIndices());
+        pages.forEach((p) => out.addPage(p));
+      } catch { /* label rusak, lewati */ }
+    }
+  }
+  if (out.getPageCount() === 0) return;
+  unduhBlob(await out.save(), "resi-batch.pdf");
+}
+
+// Packing list dari data order kita sendiri (kontrol penuh atas item).
+async function unduhPackingList(rows: BatchRow[]) {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const W = 595, H = 842, M = 40;
+  let page = doc.addPage([W, H]);
+  let y = H - M;
+  const text = (s: string, x: number, size: number, f = font) =>
+    page.drawText(s.replace(/[^\x20-\x7E]/g, "?"), { x, y, size, font: f });
+  const nl = (d = 14) => { y -= d; if (y < 70) { page = doc.addPage([W, H]); y = H - M; } };
+  text("Packing List", M, 18, bold); nl(16);
+  text(`${rows.length} order · ${new Date().toLocaleString("id-ID")}`, M, 9); nl(20);
+  for (const h of rows) {
+    if (y < 130) { page = doc.addPage([W, H]); y = H - M; }
+    text(`#${h.orderNo ?? "-"}   ${(h.buyer ?? "").slice(0, 40)}`, M, 11, bold); nl(13);
+    text(`${h.courier ?? "-"}   resi ${h.tracking ?? "-"}`, M, 9); nl(14);
+    for (const it of h.items) { text(`   ${it.qty} x ${it.name}`.slice(0, 95), M + 6, 9); nl(12); }
+    nl(6);
+    page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.5, color: rgb(0.82, 0.82, 0.82) });
+    nl(12);
+  }
+  unduhBlob(await doc.save(), "packing-list.pdf");
 }
 
 // Kanban: one column per FLOW status, with the two SIDE states appended at the end.
