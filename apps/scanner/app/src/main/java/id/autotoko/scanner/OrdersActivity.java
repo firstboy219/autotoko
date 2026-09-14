@@ -1,22 +1,30 @@
 package id.autotoko.scanner;
 
 import android.content.Intent;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.pdf.PdfDocument;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.FileProvider;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -24,8 +32,13 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.text.SimpleDateFormat;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Daftar Pesanan di APK — meniru pola BigSeller: tab status yang bisa digeser
@@ -125,6 +138,17 @@ public class OrdersActivity extends AppCompatActivity {
 
     @Override public boolean onSupportNavigateUp() { finish(); return true; }
     @Override protected void onResume() { super.onResume(); if (all.length() > 0) muat(); }
+
+    @Override public boolean onCreateOptionsMenu(Menu m) {
+        m.add(0, 1, 0, "Batch Packing").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        m.add(0, 2, 1, "Otomasi Order").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        return true;
+    }
+    @Override public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == 1) { showBatch(); return true; }
+        if (item.getItemId() == 2) { showOtomasi(); return true; }
+        return super.onOptionsItemSelected(item);
+    }
 
     private void muat() {
         status.setText("Memuat pesanan…");
@@ -384,6 +408,166 @@ public class OrdersActivity extends AppCompatActivity {
                     });
                 })
                 .show();
+    }
+
+    // ---- Otomasi Order ----
+    private void showOtomasi() {
+        api.orderSettings(r -> {
+            boolean auto = r != null && r.ok() && r.data() != null && r.data().optBoolean("autoSiapKirim", false);
+            StringBuilder kur = new StringBuilder();
+            if (r != null && r.ok() && r.data() != null) {
+                JSONArray ic = r.data().optJSONArray("instantCouriers");
+                if (ic != null) for (int i = 0; i < ic.length(); i++) { if (i > 0) kur.append(", "); kur.append(ic.optString(i)); }
+            }
+            LinearLayout col = new LinearLayout(this); col.setOrientation(LinearLayout.VERTICAL);
+            col.setPadding(dp(20), dp(8), dp(20), dp(8));
+            Switch sw = new Switch(this);
+            sw.setText("Otomatis set Siap Kirim untuk order API masuk");
+            sw.setChecked(auto);
+            col.addView(sw);
+            TextView note = new TextView(this);
+            note.setText("Kecuali kurir instant/sameday di bawah. Hanya-maju: order yang sudah lebih jauh tak ditarik mundur.");
+            note.setTextSize(12); note.setTextColor(getColor(R.color.ink3)); note.setPadding(0, dp(4), 0, dp(10));
+            col.addView(note);
+            TextView lbl = new TextView(this); lbl.setText("Kecualikan kurir (pisahkan koma)");
+            lbl.setTextSize(12); lbl.setTextColor(getColor(R.color.ink2)); col.addView(lbl);
+            EditText et = new EditText(this); et.setText(kur.toString()); et.setSingleLine(true); et.setTextSize(14);
+            col.addView(et);
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle("Otomasi Order").setView(col)
+                    .setNegativeButton("Batal", null)
+                    .setPositiveButton("Simpan", (di, w) -> {
+                        JSONArray arr = new JSONArray();
+                        for (String s : et.getText().toString().split(",")) { String t = s.trim(); if (!t.isEmpty()) arr.put(t); }
+                        api.orderSettingsSave(sw.isChecked(), arr, rr -> toast(rr != null && rr.ok() ? "Pengaturan disimpan" : "Gagal menyimpan"));
+                    }).show();
+        });
+    }
+
+    // ---- Batch Packing ----
+    private void showBatch() {
+        final List<JSONObject> kandidat = new ArrayList<>();
+        for (int i = 0; i < all.length(); i++) {
+            JSONObject o = all.optJSONObject(i);
+            if (o != null && !"dikirim".equals(o.optString("fulfillmentStatus"))) kandidat.add(o);
+        }
+        if (kandidat.isEmpty()) { toast("Tidak ada order untuk dikirim."); return; }
+        final Map<String, String> takeout = new LinkedHashMap<>();
+
+        LinearLayout col = new LinearLayout(this); col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(dp(16), dp(8), dp(16), dp(8));
+        final TextView head = new TextView(this); head.setTextSize(13); head.setTextColor(getColor(R.color.ink2));
+        col.addView(head);
+        final Runnable upd = () -> head.setText((kandidat.size() - takeout.size()) + " akan diproses · " + takeout.size() + " di-takeout");
+
+        for (JSONObject o : kandidat) {
+            final String id = o.optString("id");
+            LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.VERTICAL);
+            row.setPadding(0, dp(8), 0, dp(8));
+            LinearLayout top = new LinearLayout(this); top.setOrientation(LinearLayout.HORIZONTAL); top.setGravity(Gravity.CENTER_VERTICAL);
+            CheckBox cb = new CheckBox(this); cb.setChecked(true); top.addView(cb);
+            TextView t = new TextView(this);
+            t.setText(o.optString("marketplaceOrderId", "-") + "  ·  " + o.optString("buyerName", ""));
+            t.setTextSize(13); t.setTextColor(getColor(R.color.ink));
+            top.addView(t, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            row.addView(top);
+            final EditText rsn = new EditText(this); rsn.setHint("Alasan takeout…"); rsn.setSingleLine(true); rsn.setTextSize(13);
+            rsn.setVisibility(View.GONE); rsn.setPadding(dp(36), 0, 0, 0); row.addView(rsn);
+            cb.setOnCheckedChangeListener((bv, checked) -> {
+                if (checked) { takeout.remove(id); rsn.setVisibility(View.GONE); }
+                else { takeout.put(id, ""); rsn.setVisibility(View.VISIBLE); }
+                upd.run();
+            });
+            rsn.addTextChangedListener(new TextWatcher() {
+                public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+                public void onTextChanged(CharSequence s, int a, int b, int c) {}
+                public void afterTextChanged(Editable e) { if (takeout.containsKey(id)) takeout.put(id, e.toString().trim()); }
+            });
+            col.addView(row);
+        }
+        upd.run();
+        ScrollView sv = new ScrollView(this); sv.addView(col);
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Batch Packing").setView(sv)
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Proses", (di, w) -> {
+                    JSONArray ids = new JSONArray(), tk = new JSONArray();
+                    for (JSONObject o : kandidat) {
+                        String id = o.optString("id");
+                        if (takeout.containsKey(id)) {
+                            try { JSONObject t = new JSONObject(); t.put("orderId", id); t.put("reason", takeout.get(id)); tk.put(t); } catch (Exception ig) {}
+                        } else ids.put(id);
+                    }
+                    if (ids.length() == 0) { toast("Semua order di-takeout."); return; }
+                    konfirmBatch(ids, tk);
+                }).show();
+    }
+
+    private void konfirmBatch(JSONArray ids, JSONArray takeouts) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Proses " + ids.length() + " order?")
+                .setMessage("Order akan di-RTS (kirim) ke marketplace + AWB dibuat, lalu status jadi Packing. Tindakan nyata. Lanjutkan?")
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Proses", (di, w) -> {
+                    toast("Memproses batch…");
+                    api.orderBatchPacking(ids, takeouts, "DROP_OFF", r -> {
+                        if (r == null || !r.ok() || r.data() == null) { toast(r == null ? "Gagal" : r.message("Gagal batch")); muat(); return; }
+                        JSONObject d = r.data();
+                        buatPickListPdf(d.optJSONArray("hasil"));
+                        toast("Batch: " + d.optInt("ok", 0) + " diproses, " + d.optInt("ditahan", 0) + " ditahan → Packing.");
+                        muat();
+                    });
+                }).show();
+    }
+
+    /** Pick list gabungan (qty per produk lintas resi) -> PDF -> dibuka. */
+    private void buatPickListPdf(JSONArray hasil) {
+        if (hasil == null) return;
+        Map<String, int[]> agg = new LinkedHashMap<>();
+        int resiCount = 0;
+        for (int i = 0; i < hasil.length(); i++) {
+            JSONObject h = hasil.optJSONObject(i);
+            if (h == null || !h.optBoolean("ok", false)) continue;
+            resiCount++;
+            JSONArray items = h.optJSONArray("items"); if (items == null) continue;
+            java.util.HashSet<String> seen = new java.util.HashSet<>();
+            for (int j = 0; j < items.length(); j++) {
+                JSONObject it = items.optJSONObject(j); if (it == null) continue;
+                String name = it.optString("name", "-"); int qty = it.optInt("qty", 1);
+                int[] cur = agg.get(name); if (cur == null) { cur = new int[]{0, 0}; agg.put(name, cur); }
+                cur[0] += qty;
+                if (!seen.contains(name)) { cur[1] += 1; seen.add(name); }
+            }
+        }
+        try {
+            PdfDocument doc = new PdfDocument();
+            int W = 595, H = 842, M = 40, y = M + 20;
+            PdfDocument.Page page = doc.startPage(new PdfDocument.PageInfo.Builder(W, H, 1).create());
+            Canvas cv = page.getCanvas();
+            Paint p = new Paint(); p.setColor(Color.BLACK); p.setAntiAlias(true);
+            Paint bold = new Paint(p); bold.setFakeBoldText(true);
+            bold.setTextSize(18); cv.drawText("Pick / Packing List", M, y, bold); y += 22;
+            p.setTextSize(10); p.setColor(Color.DKGRAY);
+            cv.drawText("Gabungan " + resiCount + " resi - " + agg.size() + " jenis produk", M, y, p); y += 22;
+            p.setColor(Color.BLACK); p.setTextSize(11); bold.setTextSize(11);
+            for (Map.Entry<String, int[]> e : agg.entrySet()) {
+                if (y > H - M) { doc.finishPage(page); page = doc.startPage(new PdfDocument.PageInfo.Builder(W, H, doc.getPages().size() + 1).create()); cv = page.getCanvas(); y = M + 20; }
+                String name = e.getKey(); if (name.length() > 66) name = name.substring(0, 65) + "...";
+                cv.drawText(e.getValue()[0] + " pcs", M, y, bold);
+                cv.drawText(name, M + 60, y, p);
+                cv.drawText(e.getValue()[1] + " resi", W - M - 55, y, p);
+                y += 18;
+            }
+            doc.finishPage(page);
+            File f = new File(getExternalFilesDir(null), "packing-list.pdf");
+            FileOutputStream fos = new FileOutputStream(f);
+            doc.writeTo(fos); fos.close(); doc.close();
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".berkas", f);
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setDataAndType(uri, "application/pdf");
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            try { startActivity(i); } catch (Exception ex) { toast("Pick list tersimpan: " + f.getName()); }
+        } catch (Exception ex) { toast("Gagal buat PDF: " + ex.getMessage()); }
     }
 
     private TextView badge(String stat) {
