@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
@@ -404,6 +404,15 @@ function MarketplaceCatalog() {
   const [onlyUnmapped, setOnlyUnmapped] = useState(false);
   const [busy, setBusy] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  // Animasi geser + tutup pakai Escape untuk drawer detail.
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!openId) { setShown(false); return; }
+    const raf = requestAnimationFrame(() => setShown(true));
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpenId(null); };
+    window.addEventListener("keydown", onKey);
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("keydown", onKey); };
+  }, [openId]);
 
   async function aksi(fn: () => Promise<unknown>, sukses: string) {
     setBusy(true);
@@ -481,7 +490,7 @@ function MarketplaceCatalog() {
           e.target.value ? "Varian ditautkan ke master" : "Tautan dilepas",
         )
       }
-      className="min-w-[170px]"
+      className={`min-w-[150px] max-w-[190px] ${v.masterId ? "" : "!border-amber-500 !border-dashed"}`}
     >
       <option value="">— belum dipetakan —</option>
       {(data.masters ?? []).map((m) => (
@@ -568,13 +577,29 @@ function MarketplaceCatalog() {
           }
         />
 
-        <div className="px-4 pt-3">
-          <div className="flex items-center justify-between text-xs text-ink-2 mb-1">
-            <span>Pemetaan varian ke master</span>
-            <span className="tabular-nums">{r.varianTerpetakan} / {r.varian}</span>
+        <div className="px-4 pt-3 flex flex-wrap items-center gap-x-8 gap-y-3">
+          <div className="flex-1 min-w-[220px]">
+            <div className="flex items-center justify-between text-xs text-ink-2 mb-1">
+              <span>Pemetaan varian ke master</span>
+              <span className="tabular-nums">{r.varianTerpetakan} / {r.varian}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-line overflow-hidden">
+              <div className="h-full bg-brand" style={{ width: `${r.varian ? Math.round((r.varianTerpetakan / r.varian) * 100) : 0}%` }} />
+            </div>
           </div>
-          <div className="h-1.5 rounded-full bg-line overflow-hidden">
-            <div className="h-full bg-brand" style={{ width: `${r.varian ? Math.round((r.varianTerpetakan / r.varian) * 100) : 0}%` }} />
+          <div className="flex gap-6">
+            <div>
+              <div className="text-xl font-bold tabular-nums leading-none text-ink">{r.katalog}</div>
+              <div className="text-[10px] uppercase tracking-wide text-ink-3 mt-1">Katalog</div>
+            </div>
+            <div>
+              <div className="text-xl font-bold tabular-nums leading-none text-ink">{r.postingan}</div>
+              <div className="text-[10px] uppercase tracking-wide text-ink-3 mt-1">Postingan</div>
+            </div>
+            <div>
+              <div className="text-xl font-bold tabular-nums leading-none text-amber-600">{Math.max(0, r.varian - r.varianTerpetakan)}</div>
+              <div className="text-[10px] uppercase tracking-wide text-ink-3 mt-1">Belum dipetakan</div>
+            </div>
           </div>
         </div>
 
@@ -583,10 +608,17 @@ function MarketplaceCatalog() {
             <Icon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none" />
             <Input className="pl-9" placeholder="Cari katalog / postingan…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-          <label className="flex items-center gap-1.5 text-xs text-ink-2 cursor-pointer">
-            <input type="checkbox" checked={onlyUnmapped} onChange={(e) => setOnlyUnmapped(e.target.checked)} />
-            Hanya yang belum dipetakan
-          </label>
+          <button
+            type="button"
+            aria-pressed={onlyUnmapped}
+            onClick={() => setOnlyUnmapped((v) => !v)}
+            className={`text-xs font-semibold px-3 py-1.5 rounded-lg border inline-flex items-center gap-1.5 transition ${
+              onlyUnmapped ? "bg-canvas text-brand-ink border-brand" : "bg-white text-ink-2 border-line hover:text-ink"
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full border border-current ${onlyUnmapped ? "bg-current" : ""}`} />
+            Hanya belum dipetakan
+          </button>
         </div>
 
         <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -613,18 +645,40 @@ function MarketplaceCatalog() {
       </Card>
 
       {(openCat || openOrphan) && (
-        <Modal open onClose={() => setOpenId(null)} title="Kelola Katalog" width="max-w-2xl">
-          <div className="max-h-[72vh] overflow-y-auto -mx-1 px-1">
-            <div className="flex items-start justify-between gap-3 mb-3">
+        <>
+          <div
+            className={`fixed inset-0 bg-black/40 z-40 transition-opacity duration-200 ${shown ? "opacity-100" : "opacity-0"}`}
+            onClick={() => setOpenId(null)}
+          />
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="Kelola katalog"
+            className={`fixed top-0 right-0 h-full w-[560px] max-w-[94vw] bg-white z-50 shadow-2xl flex flex-col transition-transform duration-200 ease-out ${
+              shown ? "translate-x-0" : "translate-x-full"
+            }`}
+          >
+            <header className="px-5 py-4 border-b border-line flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-lg font-medium text-ink truncate">{openCat ? openCat.name : openOrphan?.title ?? "(tanpa judul)"}</div>
-                <div className="text-xs text-ink-3 mt-0.5">
-                  {detailPosts.length} postingan · {detailG.mapped}/{detailG.total} varian dipetakan
+                <div className="text-lg font-semibold text-ink truncate">{openCat ? openCat.name : openOrphan?.title ?? "(tanpa judul)"}</div>
+                <div className="text-xs text-ink-2 mt-0.5">
+                  {detailPosts.length} postingan · {detailG.total} varian · {detailG.mapped} dipetakan
                   {!openCat && " · belum berkatalog"}
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setOpenId(null)}
+                aria-label="Tutup"
+                className="shrink-0 w-8 h-8 rounded-lg border border-line text-ink-2 hover:bg-canvas"
+              >
+                ✕
+              </button>
+            </header>
+
+            <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 py-4">
               {openCat && (
-                <div className="flex gap-1.5 shrink-0">
+                <div className="flex flex-wrap gap-1.5 mb-4">
                   <Button size="sm" variant="tonal" icon="refresh" loading={busy}
                     onClick={() => samakanNamaKatalog(openCat)}>
                     Samakan nama ke marketplace
@@ -648,43 +702,52 @@ function MarketplaceCatalog() {
                   </Button>
                 </div>
               )}
-            </div>
 
-            {detailPosts.map((p) => (
-              <div key={p.productId} className="border border-line rounded-lg mb-3 overflow-hidden">
-                <div className="flex items-center gap-2 px-3.5 py-2 bg-canvas border-b border-line">
-                  <span className="text-xs font-medium text-ink">{p.shopName ?? "-"}</span>
-                  <span className="text-xs text-ink-2 flex-1 truncate">{p.title ?? "-"}</span>
-                </div>
-                <div className="flex items-center gap-2 px-3.5 py-2 text-xs border-b border-line">
-                  <span className="text-ink-3 whitespace-nowrap">Masuk katalog:</span>
-                  <Select
-                    value={openCat?.id ?? ""}
-                    disabled={busy}
-                    onChange={(e) =>
-                      aksi(() => api.patch(`/products/postings/${p.productId}/catalog`, { catalogId: e.target.value || null }), "Postingan dipindah")
-                    }
-                    className="min-w-[180px]"
-                  >
-                    <option value="">— tanpa katalog —</option>
-                    {data.katalog.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </Select>
-                </div>
-                {p.varian.map((v) => (
-                  <div key={v.skuId} className="flex items-center gap-3 px-3.5 py-2 border-t border-line">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-ink truncate">{v.nama}</div>
-                      <div className="text-[11px] text-ink-2 tabular-nums">
-                        {v.harga != null ? rupiah(v.harga) : "—"} · stok {v.stok ?? 0}
-                      </div>
-                    </div>
-                    {masterSelect(v)}
+              {detailPosts.map((p) => (
+                <div key={p.productId} className="border border-line rounded-lg mb-3 overflow-hidden">
+                  <div className="flex items-center gap-2 px-3.5 py-2 bg-canvas border-b border-line">
+                    <span className="text-xs font-medium text-ink">{p.shopName ?? "-"}</span>
+                    <span className="text-xs text-ink-2 flex-1 truncate">{p.title ?? "-"}</span>
                   </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </Modal>
+                  <div className="flex items-center gap-2 px-3.5 py-2 text-xs border-b border-line">
+                    <span className="text-ink-3 whitespace-nowrap">Masuk katalog:</span>
+                    <Select
+                      value={openCat?.id ?? ""}
+                      disabled={busy}
+                      onChange={(e) =>
+                        aksi(() => api.patch(`/products/postings/${p.productId}/catalog`, { catalogId: e.target.value || null }), "Postingan dipindah")
+                      }
+                      className="min-w-[160px] max-w-[240px]"
+                    >
+                      <option value="">— tanpa katalog —</option>
+                      {data.katalog.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </Select>
+                    {/* select native menyusut ke lebar tetap; teks opsi panjang dipotong */}
+                  </div>
+                  {p.varian.map((v) => (
+                    <div key={v.skuId} className="flex items-center gap-3 px-3.5 py-2 border-t border-line">
+                      <span
+                        className={`shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] leading-none ${
+                          v.masterId ? "bg-emerald-100 text-emerald-700" : "border border-ink-3 text-transparent"
+                        }`}
+                        title={v.masterId ? "Sudah dipetakan" : "Belum dipetakan"}
+                      >
+                        ✓
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-ink truncate">{v.nama}</div>
+                        <div className="text-[11px] text-ink-2 tabular-nums">
+                          {v.harga != null ? rupiah(v.harga) : "—"} · stok {v.stok ?? 0}
+                        </div>
+                      </div>
+                      {masterSelect(v)}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </aside>
+        </>
       )}
     </>
   );
