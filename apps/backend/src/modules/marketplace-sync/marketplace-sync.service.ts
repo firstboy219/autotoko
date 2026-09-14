@@ -382,6 +382,10 @@ export class MarketplaceSyncService {
         items: b.items,
         createdAtMarketplace: b.createdAtMarketplace,
         updatedAtMarketplace: b.updatedAtMarketplace,
+        // Tanggal order mengikuti create date bawaan marketplace, bukan waktu
+        // sync -- itulah "kapan pesanan terjadi" yang seller kenali. Fallback ke
+        // sekarang hanya bila marketplace tak mengirim create_time.
+        createdAt: b.createdAtMarketplace ?? new Date(),
         commercePlatform: b.commercePlatform,
         raw: b.raw,
         updatedAt: new Date(),
@@ -414,6 +418,9 @@ export class MarketplaceSyncService {
             items: sql`excluded.items`,
             createdAtMarketplace: sql`excluded.created_at_marketplace`,
             updatedAtMarketplace: sql`excluded.updated_at_marketplace`,
+            // Selaraskan tanggal order ke create date marketplace (idempoten;
+            // sekaligus memperbaiki baris lama yang sempat memakai waktu sync).
+            createdAt: sql`COALESCE(excluded.created_at_marketplace, orders.created_at)`,
             commercePlatform: sql`excluded.commerce_platform`,
             raw: sql`excluded.raw`,
             updatedAt: sql`excluded.updated_at`,
