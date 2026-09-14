@@ -1,7 +1,8 @@
-import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
+  marketplaceCatalogs,
   marketplaceProducts,
   marketplaceSkus,
   marketplaceSyncRuns,
@@ -146,6 +147,108 @@ export class MarketplaceSyncService {
       .where(and(eq(marketplaceSyncRuns.userId, userId), eq(marketplaceSyncRuns.shopId, shopId)))
       .orderBy(desc(marketplaceSyncRuns.startedAt))
       .limit(Math.min(50, Math.max(1, limit))));
+  }
+
+  /**
+   * Menyamakan judul SEMUA postingan aktif dalam satu katalog dengan nama
+   * katalog -- langsung menulis judul listing di marketplace lewat API
+   * partial_edit. HANYA field title yang dikirim; partial_edit tidak menyentuh
+   * field lain, jadi kegagalan bersifat non-destruktif (ditolak, tak berubah).
+   *
+   * Hanya postingan aktif yang disentuh; sisanya dilewati dengan alasan. Tiap
+   * postingan ditangani sendiri (satu gagal tidak menghentikan yang lain),
+   * dan token yang ditolak disegarkan sekali lalu diulang. Ini MENULIS ke toko
+   * publik pengguna, jadi hanya dipicu manual dari UI dengan konfirmasi.
+   */
+  async pushCatalogNames(userId: string, catalogId: string) {
+    const [cat] = await this.bypass(() => this.db
+      .select({ id: marketplaceCatalogs.id, name: marketplaceCatalogs.name })
+      .from(marketplaceCatalogs)
+      .where(and(eq(marketplaceCatalogs.id, catalogId), eq(marketplaceCatalogs.userId, userId)))
+      .limit(1));
+    if (!cat) throw new NotFoundException("Katalog tidak ditemukan");
+    const title = (cat.name ?? "").trim().slice(0, 255);
+    if (!title) throw new BadRequestException("Nama katalog kosong");
+
+    const postings = await this.bypass(() => this.db
+      .select({
+        productId: marketplaceProducts.productId,
+        title: marketplaceProducts.title,
+        status: marketplaceProducts.status,
+        shopId: marketplaceProducts.shopId,
+        marketplace: marketplaceProducts.marketplace,
+      })
+      .from(marketplaceProducts)
+      .where(and(eq(marketplaceProducts.userId, userId), eq(marketplaceProducts.catalogId, catalogId))));
+
+    const shopIds = [...new Set(postings.map((p) => p.shopId))];
+    const shopRows = shopIds.length
+      ? await this.bypass(() => this.db.select().from(shops).where(inArray(shops.id, shopIds)))
+      : [];
+    const shopById = new Map(shopRows.map((s) => [s.id, s] as const));
+    const { appKey, appSecret } = await this.tiktok.credentials();
+    const clientOf = (shop: typeof shops.$inferSelect) =>
+      new TikTokClient(appKey, appSecret, this.crypto.decrypt(shop.accessToken!), shop.shopCipher);
+
+    type Baris = {
+      productId: string; shop: string | null; oldTitle: string | null;
+      status: "ok" | "skipped" | "failed"; reason?: string; error?: string;
+    };
+    const hasil: Baris[] = [];
+    for (const p of postings) {
+      let shop = shopById.get(p.shopId);
+      const nama = shop?.shopName ?? null;
+      if (!shop || !shop.accessToken || !shop.shopCipher) {
+        hasil.push({ productId: p.productId, shop: nama, oldTitle: p.title, status: "skipped", reason: "toko tidak tersambung API" });
+        continue;
+      }
+      if (p.marketplace !== "tiktok") {
+        hasil.push({ productId: p.productId, shop: nama, oldTitle: p.title, status: "skipped", reason: `${p.marketplace} belum didukung` });
+        continue;
+      }
+      if (String(p.status ?? "").toUpperCase() !== "ACTIVATE") {
+        hasil.push({ productId: p.productId, shop: nama, oldTitle: p.title, status: "skipped", reason: `status ${p.status ?? "?"} (hanya produk aktif)` });
+        continue;
+      }
+      if ((p.title ?? "") === title) {
+        hasil.push({ productId: p.productId, shop: nama, oldTitle: p.title, status: "skipped", reason: "nama sudah sama" });
+        continue;
+      }
+      const path = `/product/202309/products/${p.productId}/partial_edit`;
+      try {
+        let sudahSegar = false;
+        for (;;) {
+          try {
+            await clientOf(shop).post(path, { title });
+            break;
+          } catch (e) {
+            if (e instanceof TikTokApiError && e.tokenBermasalah && !sudahSegar) {
+              sudahSegar = true;
+              await this.shops.refreshOne(userId, shop.id);
+              const [fresh] = await this.bypass(() => this.db.select().from(shops).where(eq(shops.id, shop!.id)).limit(1));
+              if (fresh) { shop = fresh; shopById.set(shop.id, fresh); }
+              continue;
+            }
+            throw e;
+          }
+        }
+        await this.bypass(() => this.db
+          .update(marketplaceProducts)
+          .set({ title })
+          .where(and(eq(marketplaceProducts.userId, userId), eq(marketplaceProducts.productId, p.productId))));
+        hasil.push({ productId: p.productId, shop: nama, oldTitle: p.title, status: "ok" });
+      } catch (e) {
+        this.logger.warn(`Push nama ${p.productId} (${nama}): ${(e as Error).message}`);
+        hasil.push({ productId: p.productId, shop: nama, oldTitle: p.title, status: "failed", error: (e as Error).message });
+      }
+    }
+    return {
+      catalogId, name: title, total: postings.length,
+      ok: hasil.filter((h) => h.status === "ok").length,
+      gagal: hasil.filter((h) => h.status === "failed").length,
+      dilewati: hasil.filter((h) => h.status === "skipped").length,
+      hasil,
+    };
   }
 
   /* --------------------------------------------------------- pesanan */

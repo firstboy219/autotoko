@@ -418,6 +418,40 @@ function MarketplaceCatalog() {
     }
   }
 
+  // Samakan judul semua postingan aktif satu katalog dengan nama katalog,
+  // langsung menulis ke marketplace lewat API (partial_edit, hanya field title).
+  // Menyentuh listing publik pengguna -> wajib konfirmasi tegas dulu.
+  async function samakanNamaKatalog(cat: { id: string; name: string }) {
+    if (
+      !window.confirm(
+        `Samakan nama SEMUA postingan aktif di katalog "${cat.name}" menjadi ` +
+          `"${cat.name}" langsung di marketplace?\n\n` +
+          `Sistem akan mengedit judul listing publik di tiap toko lewat API ` +
+          `(hanya judul yang diubah, data lain tidak disentuh). Lanjutkan?`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await api.post<{
+        total: number;
+        ok: number;
+        gagal: number;
+        dilewati: number;
+      }>(`/marketplace-sync/catalogs/${cat.id}/push-names`, {});
+      toast(
+        `Selesai: ${r.ok} judul diubah, ${r.dilewati} dilewati, ${r.gagal} gagal ` +
+          `(dari ${r.total} postingan).`,
+        r.gagal > 0 ? "danger" : "success",
+      );
+      reload();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (loading) return <Card className="mt-4"><Skeleton className="h-40 w-full" /></Card>;
   if (!data || data.ringkas.postingan === 0) return null;
   const r = data.ringkas;
@@ -591,6 +625,10 @@ function MarketplaceCatalog() {
               </div>
               {openCat && (
                 <div className="flex gap-1.5 shrink-0">
+                  <Button size="sm" variant="tonal" icon="refresh" loading={busy}
+                    onClick={() => samakanNamaKatalog(openCat)}>
+                    Samakan nama ke marketplace
+                  </Button>
                   <Button size="sm" variant="outline" icon="pencil"
                     onClick={() => {
                       const name = window.prompt("Ubah nama katalog:", openCat.name);

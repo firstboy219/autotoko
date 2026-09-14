@@ -80,6 +80,18 @@ export class MarketplaceSyncController {
     return { success: true, data: { started: true, shopId, kind } };
   }
 
+  /**
+   * Samakan judul semua postingan aktif satu katalog dengan nama katalog,
+   * langsung di marketplace (partial_edit). Menulis ke toko publik pengguna.
+   */
+  @Post("catalogs/:id/push-names")
+  async pushNames(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.pushCatalogNames(uid(req), id) };
+  }
+
   @Get("shops/:id/runs")
   async runs(
     @Req() req: FastifyRequest,
