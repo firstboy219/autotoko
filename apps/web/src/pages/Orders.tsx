@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { useRealtime } from "../lib/realtime";
@@ -62,17 +61,8 @@ interface Order {
   terscan?: boolean;
 }
 
-type BatchRow = {
-  orderId: string;
-  ok: boolean;
-  orderNo: string | null;
-  buyer: string | null;
-  courier: string | null;
-  tracking: string | null;
-  items: { name: string; qty: number }[];
-  labels: string[];
-  error?: string;
-};
+type BatchRow = { orderId: string; ok: boolean; orderNo: string | null; error?: string };
+type BatchResp = { total: number; ok: number; ditahan: number; labelsPdf?: string | null; packingListPdf?: string | null; hasil: BatchRow[] };
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
 
@@ -578,13 +568,12 @@ function BatchPackingModal({ onClose, onDone }: { onClose: () => void; onDone: (
     setBusy(true);
     try {
       const takeouts = [...taken.entries()].map(([orderId, reason]) => ({ orderId, reason }));
-      const r = await api.post<{ total: number; ok: number; ditahan: number; hasil: BatchRow[] }>(
+      const r = await api.post<BatchResp>(
         "/marketplace-sync/orders/batch-packing",
         { orderIds: includedIds, takeouts, handoverMethod: "DROP_OFF" },
       );
-      const okRows = r.hasil.filter((h) => h.ok);
-      if (okRows.some((h) => h.labels.length)) await unduhResiGabung(okRows);
-      if (okRows.length) await unduhPackingList(okRows);
+      if (r.labelsPdf) unduhBase64Pdf(r.labelsPdf, "resi-batch.pdf");
+      if (r.packingListPdf) unduhBase64Pdf(r.packingListPdf, "packing-list.pdf");
       const gagal = r.hasil.filter((h) => !h.ok).length;
       setHasil({ total: r.total, ok: r.ok, ditahan: r.ditahan, gagal });
       toast(`Batch: ${r.ok} diproses, ${r.ditahan} ditahan${gagal ? `, ${gagal} gagal` : ""}. PDF diunduh.`, gagal ? "warning" : "success");
@@ -758,63 +747,10 @@ function b64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
-// Gabung semua PDF label jadi satu file "resi-batch.pdf".
-async function unduhResiGabung(rows: BatchRow[]) {
-  const out = await PDFDocument.create();
-  for (const h of rows) {
-    for (const b64 of h.labels) {
-      try {
-        const src = await PDFDocument.load(b64ToBytes(b64));
-        const pages = await out.copyPages(src, src.getPageIndices());
-        pages.forEach((p) => out.addPage(p));
-      } catch { /* label rusak, lewati */ }
-    }
-  }
-  if (out.getPageCount() === 0) return;
-  unduhBlob(await out.save(), "resi-batch.pdf");
-}
-
-// Pick/packing list GABUNGAN: total qty per produk lintas semua resi terpilih
-// (mis. "Cool Mint 50ml — 5 pcs dari 3 resi"). Dibuat dari data order kita.
-async function unduhPackingList(rows: BatchRow[]) {
-  const agg = new Map<string, { qty: number; resi: number }>();
-  for (const h of rows) {
-    const seen = new Set<string>();
-    for (const it of h.items) {
-      const cur = agg.get(it.name) ?? { qty: 0, resi: 0 };
-      cur.qty += it.qty;
-      if (!seen.has(it.name)) { cur.resi += 1; seen.add(it.name); }
-      agg.set(it.name, cur);
-    }
-  }
-  const lines = [...agg.entries()].sort((a, b) => b[1].qty - a[1].qty);
-  const totalPcs = lines.reduce((s, [, v]) => s + v.qty, 0);
-
-  const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const W = 595, H = 842, M = 40;
-  let page = doc.addPage([W, H]);
-  let y = H - M;
-  const clean = (s: string) =>
-    s.replace(/·/g, "-").replace(/[–—]/g, "-").replace(/…/g, "...").replace(/[^\x20-\x7E]/g, "?");
-  const text = (s: string, x: number, size: number, f = font) => page.drawText(clean(s), { x, y, size, font: f });
-  const nl = (d = 15) => { y -= d; if (y < 55) { page = doc.addPage([W, H]); y = H - M; } };
-  const rule = (t = 0.5, c = 0.85) => page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: t, color: rgb(c, c, c) });
-
-  text("Pick / Packing List", M, 18, bold); nl(16);
-  text(`Gabungan ${rows.length} resi - ${lines.length} jenis produk - ${totalPcs} pcs total - ${new Date().toLocaleString("id-ID")}`, M, 9); nl(10);
-  rule(1, 0.7); nl(16);
-  text("QTY", M, 9, bold); text("PRODUK", M + 60, 9, bold); text("RESI", W - M - 55, 9, bold); nl(6);
-  rule(); nl(15);
-  for (const [name, v] of lines) {
-    if (y < 55) { page = doc.addPage([W, H]); y = H - M; }
-    text(`${v.qty} pcs`, M, 10, bold);
-    text(name.length > 60 ? name.slice(0, 59) + "..." : name, M + 60, 9);
-    text(`${v.resi} resi`, W - M - 55, 9);
-    nl(15);
-  }
-  unduhBlob(await doc.save(), "packing-list.pdf");
+// Unduh PDF dari base64 (label & packing list kini dibuat backend agar
+// kualitas/ketajaman label terjaga).
+function unduhBase64Pdf(b64: string, name: string) {
+  unduhBlob(b64ToBytes(b64), name);
 }
 
 // Kanban: one column per FLOW status, with the two SIDE states appended at the end.

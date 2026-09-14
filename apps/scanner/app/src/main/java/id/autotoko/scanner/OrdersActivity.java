@@ -1,11 +1,8 @@
 package id.autotoko.scanner;
 
 import android.content.Intent;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.pdf.PdfDocument;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.Editable;
@@ -516,61 +513,29 @@ public class OrdersActivity extends AppCompatActivity {
                     api.orderBatchPacking(ids, takeouts, "DROP_OFF", r -> {
                         if (r == null || !r.ok() || r.data() == null) { toast(r == null ? "Gagal" : r.message("Gagal batch")); muat(); return; }
                         JSONObject d = r.data();
-                        buatPickListPdf(d.optJSONArray("hasil"));
+                        bukaBase64Pdf(d.optString("packingListPdf", ""), "packing-list.pdf");
+                        bukaBase64Pdf(d.optString("labelsPdf", ""), "resi-batch.pdf");
                         toast("Batch: " + d.optInt("ok", 0) + " diproses, " + d.optInt("ditahan", 0) + " ditahan → Packing.");
                         muat();
                     });
                 }).show();
     }
 
-    /** Pick list gabungan (qty per produk lintas resi) -> PDF -> dibuka. */
-    private void buatPickListPdf(JSONArray hasil) {
-        if (hasil == null) return;
-        Map<String, int[]> agg = new LinkedHashMap<>();
-        int resiCount = 0;
-        for (int i = 0; i < hasil.length(); i++) {
-            JSONObject h = hasil.optJSONObject(i);
-            if (h == null || !h.optBoolean("ok", false)) continue;
-            resiCount++;
-            JSONArray items = h.optJSONArray("items"); if (items == null) continue;
-            java.util.HashSet<String> seen = new java.util.HashSet<>();
-            for (int j = 0; j < items.length(); j++) {
-                JSONObject it = items.optJSONObject(j); if (it == null) continue;
-                String name = it.optString("name", "-"); int qty = it.optInt("qty", 1);
-                int[] cur = agg.get(name); if (cur == null) { cur = new int[]{0, 0}; agg.put(name, cur); }
-                cur[0] += qty;
-                if (!seen.contains(name)) { cur[1] += 1; seen.add(name); }
-            }
-        }
+    /** Tulis PDF base64 (dari backend) ke file lalu buka. Label & packing list
+     *  dibuat di backend agar ketajaman barcode terjaga. */
+    private void bukaBase64Pdf(String b64, String name) {
+        if (b64 == null || b64.isEmpty()) return;
         try {
-            PdfDocument doc = new PdfDocument();
-            int W = 595, H = 842, M = 40, y = M + 20;
-            PdfDocument.Page page = doc.startPage(new PdfDocument.PageInfo.Builder(W, H, 1).create());
-            Canvas cv = page.getCanvas();
-            Paint p = new Paint(); p.setColor(Color.BLACK); p.setAntiAlias(true);
-            Paint bold = new Paint(p); bold.setFakeBoldText(true);
-            bold.setTextSize(18); cv.drawText("Pick / Packing List", M, y, bold); y += 22;
-            p.setTextSize(10); p.setColor(Color.DKGRAY);
-            cv.drawText("Gabungan " + resiCount + " resi - " + agg.size() + " jenis produk", M, y, p); y += 22;
-            p.setColor(Color.BLACK); p.setTextSize(11); bold.setTextSize(11);
-            for (Map.Entry<String, int[]> e : agg.entrySet()) {
-                if (y > H - M) { doc.finishPage(page); page = doc.startPage(new PdfDocument.PageInfo.Builder(W, H, doc.getPages().size() + 1).create()); cv = page.getCanvas(); y = M + 20; }
-                String name = e.getKey(); if (name.length() > 66) name = name.substring(0, 65) + "...";
-                cv.drawText(e.getValue()[0] + " pcs", M, y, bold);
-                cv.drawText(name, M + 60, y, p);
-                cv.drawText(e.getValue()[1] + " resi", W - M - 55, y, p);
-                y += 18;
-            }
-            doc.finishPage(page);
-            File f = new File(getExternalFilesDir(null), "packing-list.pdf");
+            byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+            File f = new File(getExternalFilesDir(null), name);
             FileOutputStream fos = new FileOutputStream(f);
-            doc.writeTo(fos); fos.close(); doc.close();
+            fos.write(bytes); fos.close();
             Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".berkas", f);
             Intent i = new Intent(Intent.ACTION_VIEW);
             i.setDataAndType(uri, "application/pdf");
             i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            try { startActivity(i); } catch (Exception ex) { toast("Pick list tersimpan: " + f.getName()); }
-        } catch (Exception ex) { toast("Gagal buat PDF: " + ex.getMessage()); }
+            startActivity(i);
+        } catch (Exception e) { toast("Gagal buka " + name); }
     }
 
     private TextView badge(String stat) {

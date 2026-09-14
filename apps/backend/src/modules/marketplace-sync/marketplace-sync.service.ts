@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   marketplaceCatalogs,
@@ -683,16 +684,12 @@ export class MarketplaceSyncService {
         .set({ holdReason: (t.reason ?? "").trim() || "(tanpa alasan)", heldAt: new Date(), updatedAt: new Date() })
         .where(and(eq(orders.userId, userId), eq(orders.id, t.orderId))));
     }
-    type Baris = {
-      orderId: string; ok: boolean; orderNo: string | null; buyer: string | null;
-      courier: string | null; tracking: string | null;
-      items: { name: string; qty: number }[]; labels: string[]; error?: string;
-    };
-    const kosong = (oid: string, error: string): Baris => ({
-      orderId: oid, ok: false, orderNo: null, buyer: null, courier: null,
-      tracking: null, items: [], labels: [], error,
-    });
+    type Baris = { orderId: string; ok: boolean; orderNo: string | null; error?: string };
+    const kosong = (oid: string, error: string): Baris => ({ orderId: oid, ok: false, orderNo: null, error });
     const hasil: Baris[] = [];
+    const labelBufs: Buffer[] = [];
+    // Agregasi item lintas resi untuk packing list: nama -> { qty, resi }.
+    const agg = new Map<string, { qty: number; resi: number }>();
     for (const oid of ids) {
       try {
         const [order] = await this.bypass(() => this.db
@@ -723,8 +720,6 @@ export class MarketplaceSyncService {
             }
           }
         };
-        const labels: string[] = [];
-        let tracking: string | null = null;
         for (const pid of pkgIds) {
           const ambilLabel = () => call((c) => c.get<{ doc_url?: string; tracking_number?: string }>(
             `/fulfillment/202309/packages/${pid}/shipping_documents`,
@@ -737,10 +732,9 @@ export class MarketplaceSyncService {
             await call((c) => c.post(`/fulfillment/202309/packages/${pid}/ship`, body));
             doc = await ambilLabel();
           }
-          tracking = doc?.tracking_number ?? tracking;
           if (doc?.doc_url) {
             const res = await fetch(doc.doc_url);
-            labels.push(Buffer.from(await res.arrayBuffer()).toString("base64"));
+            labelBufs.push(Buffer.from(await res.arrayBuffer()));
           }
         }
         await this.bypass(() => this.db
@@ -750,19 +744,62 @@ export class MarketplaceSyncService {
         const rawItems = Array.isArray(order.items)
           ? (order.items as { name?: string; skuName?: string; sellerSku?: string; qty?: number }[])
           : [];
-        const items = rawItems.map((it) => ({
-          name: [it.name, it.skuName].filter(Boolean).join(" \u00b7 ") || it.sellerSku || "-",
-          qty: Number(it.qty ?? 1),
-        }));
-        hasil.push({
-          orderId: oid, ok: true, orderNo: order.marketplaceOrderId, buyer: order.buyerName,
-          courier: order.shippingCourier, tracking, items, labels,
-        });
+        const seen = new Set<string>();
+        for (const it of rawItems) {
+          const nm = [it.name, it.skuName].filter(Boolean).join(" \u00b7 ") || it.sellerSku || "-";
+          const cur = agg.get(nm) ?? { qty: 0, resi: 0 };
+          cur.qty += Number(it.qty ?? 1);
+          if (!seen.has(nm)) { cur.resi += 1; seen.add(nm); }
+          agg.set(nm, cur);
+        }
+        hasil.push({ orderId: oid, ok: true, orderNo: order.marketplaceOrderId });
       } catch (e) {
         hasil.push(kosong(oid, (e as Error).message));
       }
     }
-    return { total: ids.length, ok: hasil.filter((h) => h.ok).length, ditahan: takeouts.length, hasil };
+    const labelsPdf = await this.gabungLabelPdf(labelBufs);
+    const packingListPdf = await this.buatPackingListPdf(agg, hasil.filter((h) => h.ok).length);
+    return { total: ids.length, ok: hasil.filter((h) => h.ok).length, ditahan: takeouts.length, labelsPdf, packingListPdf, hasil };
+  }
+
+  /** Gabung banyak PDF label jadi satu (pdf-lib) -> base64. Null bila kosong. */
+  private async gabungLabelPdf(bufs: Buffer[]): Promise<string | null> {
+    if (!bufs.length) return null;
+    const out = await PDFDocument.create();
+    for (const b of bufs) {
+      try {
+        const src = await PDFDocument.load(b);
+        const pages = await out.copyPages(src, src.getPageIndices());
+        pages.forEach((p) => out.addPage(p));
+      } catch { /* label rusak, lewati */ }
+    }
+    if (out.getPageCount() === 0) return null;
+    return Buffer.from(await out.save()).toString("base64");
+  }
+
+  /** Packing list gabungan (qty per produk lintas resi) -> PDF base64. */
+  private async buatPackingListPdf(agg: Map<string, { qty: number; resi: number }>, resiCount: number): Promise<string | null> {
+    if (agg.size === 0) return null;
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    const W = 595, H = 842, M = 40;
+    let page = doc.addPage([W, H]);
+    let y = H - M;
+    const clean = (s: string) => s.replace(/\u00b7/g, "-").replace(/[\u2013\u2014]/g, "-").replace(/\u2026/g, "...").replace(/[^\x20-\x7E]/g, "?");
+    const text = (s: string, x: number, size: number, f = font) => page.drawText(clean(s), { x, y, size, font: f });
+    const nl = (dd = 15) => { y -= dd; if (y < 55) { page = doc.addPage([W, H]); y = H - M; } };
+    text("Pick / Packing List", M, 18, bold); nl(16);
+    text(`Gabungan ${resiCount} resi - ${agg.size} jenis produk`, M, 9); nl(18);
+    const lines = [...agg.entries()].sort((a, b) => b[1].qty - a[1].qty);
+    for (const [name, v] of lines) {
+      if (y < 55) { page = doc.addPage([W, H]); y = H - M; }
+      text(`${v.qty} pcs`, M, 11, bold);
+      text(name.length > 62 ? name.slice(0, 61) + "..." : name, M + 60, 10);
+      text(`${v.resi} resi`, W - M - 55, 10);
+      nl(16);
+    }
+    return Buffer.from(await doc.save()).toString("base64");
   }
 
   private async ambilOrderToko(userId: string, orderId: string) {

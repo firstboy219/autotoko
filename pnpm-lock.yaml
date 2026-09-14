@@ -105,6 +105,9 @@ importers:
       nodemailer:
         specifier: ^9.0.1
         version: 9.0.1
+      pdf-lib:
+        specifier: ^1.17.1
+        version: 1.17.1
       postgres:
         specifier: ^3.4.5
         version: 3.4.9
