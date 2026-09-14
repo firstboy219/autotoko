@@ -13,6 +13,7 @@ import {
   TD,
 } from "../components/ui";
 import { Icon } from "../components/Icon";
+import { FS_LABEL, STATUS_GLOSSARY } from "../lib/orderStatus";
 
 /**
  * Kesehatan Pesanan — halaman MONITORING (web-only, sesuai doktrin: APK untuk
@@ -38,11 +39,6 @@ interface Health {
   tanpaNominal: Metric;
 }
 
-const FS_LABEL: Record<string, string> = {
-  masuk: "Menunggu Disetujui", approved: "Menunggu Dicetak", packing: "Menunggu Dipacking",
-  siap_kirim: "Menunggu Dipickup", dikirim: "Dalam Pengiriman", selesai: "Selesai",
-  retur: "Retur", dibatalkan: "Dibatalkan",
-};
 const tgl = (s?: string) => (s ? new Date(s).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" }) : "-");
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info";
@@ -156,7 +152,14 @@ export function KesehatanPesanan() {
                   </button>
                   {aktif && m.total > 0 && (
                     <div className="border-t border-line">
-                      <div className="px-4 py-2 text-xs text-ink-3 bg-canvas">{c.aksi}</div>
+                      <div className="px-4 py-2 text-xs text-ink-3 bg-canvas flex flex-wrap items-center gap-2 justify-between">
+                        <span>{c.aksi}</span>
+                        {c.key === "skuBelumDipetakan" && (
+                          <a href="/produk" className="text-brand-ink font-medium whitespace-nowrap inline-flex items-center gap-1">
+                            Petakan di Master Produk <Icon name="chevronRight" size={12} />
+                          </a>
+                        )}
+                      </div>
                       <TableWrap>
                         <Table>
                           <THead><tr>{c.kolom.map((k) => <TH key={String(k.k)}>{k.label}</TH>)}</tr></THead>
@@ -182,6 +185,31 @@ export function KesehatanPesanan() {
               );
             })}
           </div>
+
+          <Card className="p-0 overflow-hidden">
+            <div className="px-4 py-3 border-b border-line">
+              <div className="text-sm font-medium text-ink">Panduan status pesanan</div>
+              <div className="text-xs text-ink-2 mt-0.5">
+                Tahap <b>Menunggu Dicetak/Dipacking/Dipickup</b> adalah rincian internal AutoToko —
+                di marketplace ketiganya masih “Siap Kirim”. Yang sama persis dengan marketplace hanya
+                Menunggu Disetujui, Dalam Pengiriman, Dibatalkan, dan Selesai.
+              </div>
+            </div>
+            <TableWrap>
+              <Table>
+                <THead><tr><TH>Status di AutoToko</TH><TH>Artinya</TH><TH>Di marketplace</TH></tr></THead>
+                <tbody>
+                  {STATUS_GLOSSARY.map((g) => (
+                    <TR key={g.key}>
+                      <TD><Badge tone={g.marketplace.startsWith("=") ? "info" : "neutral"}>{g.internal}</Badge></TD>
+                      <TD className="text-ink-2">{g.arti}</TD>
+                      <TD className="text-ink-3">{g.marketplace}</TD>
+                    </TR>
+                  ))}
+                </tbody>
+              </Table>
+            </TableWrap>
+          </Card>
         </>
       )}
     </Layout>

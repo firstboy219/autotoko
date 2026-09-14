@@ -175,6 +175,24 @@ export class OrdersService {
   }
 
   /** Jumlah per status proses (semua order API) + jumlah scan manual. */
+  /** Sumber TUNGGAL meta status untuk klien (web & APK) supaya label tak disalin-tangan. */
+  statusMeta() {
+    return {
+      flow: ["masuk", "approved", "packing", "siap_kirim", "dikirim"],
+      side: ["selesai", "retur", "dibatalkan"],
+      label: {
+        masuk: "Menunggu Disetujui", approved: "Menunggu Dicetak", produksi: "Produksi",
+        packing: "Menunggu Dipacking", siap_kirim: "Menunggu Dipickup", dikirim: "Dalam Pengiriman",
+        selesai: "Selesai", retur: "Retur", dibatalkan: "Dibatalkan",
+      } as Record<string, string>,
+      // null = tahap rincian internal; di marketplace order masih "siap kirim".
+      marketplaceEquivalent: {
+        masuk: "Menunggu Disetujui / Perlu Diproses", approved: null, packing: null, siap_kirim: null,
+        dikirim: "Dalam Pengiriman", selesai: "Selesai", retur: "Retur", dibatalkan: "Dibatalkan",
+      } as Record<string, string | null>,
+    };
+  }
+
   /**
    * Kesehatan Pesanan: menyatukan sinyal dua-sumber (API x scan manual) dalam
    * satu tempat -- read-only, tidak mengubah data apa pun. Empat temuan:

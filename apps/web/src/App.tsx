@@ -66,9 +66,10 @@ export function App() {
         <Route path="/rekonsiliasi" element={<Protected><Rekonsiliasi /></Protected>} />
         <Route path="/audit-pesanan" element={<Protected><AuditPesanan /></Protected>} />
         <Route path="/dashboard-v2" element={<Protected><DashboardV2 /></Protected>} />
+        <Route path="/dashboard-ringkas" element={<Protected><Dashboard /></Protected>} />
         <Route path="/paket" element={<Protected><Paket /></Protected>} />
         <Route path="/notifikasi" element={<Protected><Notifikasi /></Protected>} />
-        <Route path="/" element={<Protected><Dashboard /></Protected>} />
+        <Route path="/" element={<Protected><DashboardV2 /></Protected>} />
         <Route path="/toko" element={<Protected><Toko /></Protected>} />
         <Route path="/produk" element={<Protected><Produk /></Protected>} />
         <Route path="/orders" element={<Protected><Orders /></Protected>} />

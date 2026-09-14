@@ -4,6 +4,7 @@ import { useFetch } from "../lib/useFetch";
 import { useRealtime } from "../lib/realtime";
 import { api } from "../lib/api";
 import { rupiah, dateShort } from "../lib/fmt";
+import { FLOW, SIDE, ALL_FS, FS_LABEL } from "../lib/orderStatus";
 import { Icon, type IconName } from "../components/Icon";
 import {
   PageHeader,
@@ -91,15 +92,7 @@ const MP_TONE: Record<string, Tone> = {
   lazada: "info",
 };
 
-// Internal fulfillment workflow (ordered) + side states.
-const FLOW = ["masuk", "approved", "packing", "siap_kirim", "dikirim"] as const;
-const SIDE = ["selesai", "retur", "dibatalkan"] as const;
-const ALL_FS = [...FLOW, ...SIDE];
-const FS_LABEL: Record<string, string> = {
-  masuk: "Menunggu Disetujui", approved: "Menunggu Dicetak", produksi: "Produksi",
-  packing: "Menunggu Dipacking", siap_kirim: "Menunggu Dipickup", dikirim: "Dalam Pengiriman",
-  selesai: "Selesai", retur: "Retur", dibatalkan: "Dibatalkan",
-};
+// Alur & label status: satu sumber di ../lib/orderStatus (dulu disalin di sini).
 const FS_TONE: Record<string, Tone> = {
   masuk: "neutral", approved: "info", produksi: "brand", packing: "brand",
   siap_kirim: "warning", dikirim: "info", selesai: "success",

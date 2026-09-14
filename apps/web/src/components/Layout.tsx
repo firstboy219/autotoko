@@ -12,7 +12,7 @@ import { NavSettingsModal, type NavItem, type NavPrefs } from "./NavSettings";
 
 export const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: "dashboard", end: true },
-  { to: "/dashboard-v2", label: "Dashboard v2", icon: "activity" },
+  { to: "/dashboard-ringkas", label: "Dashboard Ringkas", icon: "activity" },
   { to: "/toko", label: "Toko Saya", icon: "store" },
   { to: "/produk", label: "Master Produk", icon: "package" },
   { to: "/katalog", label: "Kesehatan Katalog", icon: "activity" },
@@ -48,6 +48,7 @@ export const NAV: NavItem[] = [
 const NAV_PERM: Record<string, string> = {
   "/": "dashboard",
   "/dashboard-v2": "dashboard",
+  "/dashboard-ringkas": "dashboard",
   "/toko": "toko",
   "/produk": "produk",
   "/katalog": "produk",
@@ -80,7 +81,7 @@ const EMPTY_PREFS: NavPrefs = { groups: [], counts: {}, collapsed: [] };
  * jatuh ke "Lainnya", jadi menu baru tak pernah hilang.
  */
 const DEFAULT_SECTIONS: { id: string; label: string; paths: string[] }[] = [
-  { id: "kendali", label: "Pusat Kendali", paths: ["/", "/dashboard-v2", "/notifikasi", "/autopilot"] },
+  { id: "kendali", label: "Pusat Kendali", paths: ["/", "/dashboard-ringkas", "/notifikasi", "/autopilot"] },
   { id: "pesanan", label: "Penjualan & Pesanan", paths: ["/orders", "/kesehatan-pesanan", "/produksi-packing", "/rekonsiliasi", "/audit-pesanan"] },
   { id: "produk", label: "Produk & Katalog", paths: ["/produk", "/katalog", "/hpp", "/toko"] },
   { id: "gudang", label: "Gudang & Stok", paths: ["/bom", "/pembelian", "/request-stok"] },

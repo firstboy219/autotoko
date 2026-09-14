@@ -107,6 +107,11 @@ export class OrdersController {
     return { success: true, data: await this.orders.health(uid(req)) };
   }
 
+  @Get("status-meta")
+  statusMeta(): ApiResponse<unknown> {
+    return { success: true, data: this.orders.statusMeta() };
+  }
+
   @Get("settings")
   async getSettings(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.orders.getOrderSettings(uid(req)) };
