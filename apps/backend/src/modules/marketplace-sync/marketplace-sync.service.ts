@@ -361,20 +361,23 @@ export class MarketplaceSyncService {
       if (t && (watermark === null || t.getTime() > watermark.getTime())) watermark = t;
     }
     const nilai = baris.map((b) => {
+      const fsBase = majukanStatus(statusLama.get(b.marketplaceOrderId), b.fulfillmentStatus);
+      // Auto-proses hanya untuk order yang BENAR-BENAR siap diproses
+      // (AWAITING_SHIPMENT = sudah dibayar), bukan UNPAID/ON_HOLD yang juga
+      // jatuh ke "masuk". Order belum dibayar tidak boleh auto-disetujui.
+      const fs =
+        (b.status ?? "").toUpperCase() === "AWAITING_SHIPMENT"
+          ? autoProses(fsBase, b.shippingCourier, cfg ?? null)
+          : fsBase;
       return {
         userId: toko.userId,
         shopId: toko.id,
         marketplaceOrderId: b.marketplaceOrderId,
         marketplace: toko.marketplace,
         status: b.status,
-        // siap_kirim (menunggu dipickup) HANYA dari scan packing (resi-ocr
-        // autoLink), tak pernah dari tebakan kurir. autoProses hanya menaikkan
-        // order BARU (masuk) -> approved bila seller mengaktifkan auto-setujui.
-        fulfillmentStatus: autoProses(
-          majukanStatus(statusLama.get(b.marketplaceOrderId), b.fulfillmentStatus),
-          b.shippingCourier,
-          cfg ?? null,
-        ),
+        // siap_kirim HANYA dari scan packing (resi-ocr autoLink); autoProses
+        // (di atas) hanya menaikkan order BARU yang sudah dibayar -> approved.
+        fulfillmentStatus: fs,
         buyerName: b.buyerName,
         buyerPhone: b.buyerPhone,
         shippingAddress: b.shippingAddress,
