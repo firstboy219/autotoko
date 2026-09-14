@@ -57,10 +57,18 @@ import java.util.Map;
  */
 public class OrdersActivity extends AppCompatActivity {
 
-    // Alur status internal + labelnya (sama dengan web).
+    // Alur status internal + labelnya. Label ditarik dari backend
+    // (GET /api/orders/status-meta) sebagai SUMBER TUNGGAL supaya tak lagi
+    // disalin-tangan; switch di bawah hanya fallback bila meta belum termuat
+    // (mis. offline / permintaan pertama). Jadi ubah label = cukup deploy
+    // backend, tanpa rilis APK baru.
     private static final String[] FLOW = { "masuk", "approved", "packing", "siap_kirim", "dikirim" };
+    private static final java.util.Map<String, String> LABEL_META = new java.util.HashMap<>();
     private static String label(String s) {
-        switch (s == null ? "" : s) {
+        String k = s == null ? "" : s;
+        String m = LABEL_META.get(k);
+        if (m != null && !m.isEmpty()) return m;
+        switch (k) {
             case "masuk": return "Menunggu Disetujui";
             case "approved": return "Menunggu Dicetak";
             case "produksi": return "Produksi";
@@ -70,7 +78,7 @@ public class OrdersActivity extends AppCompatActivity {
             case "selesai": return "Selesai";
             case "retur": return "Retur";
             case "dibatalkan": return "Dibatalkan";
-            default: return s == null || s.isEmpty() ? "-" : s;
+            default: return k.isEmpty() ? "-" : k;
         }
     }
 
@@ -247,6 +255,15 @@ public class OrdersActivity extends AppCompatActivity {
 
     private void muat() {
         status.setText("Memuat pesanan…");
+        // Tarik label status dari sumber tunggal backend (fallback ke switch lokal).
+        api.orderStatusMeta(mr -> {
+            if (mr == null || !mr.ok() || mr.data() == null) return;
+            org.json.JSONObject lbl = mr.data().optJSONObject("label");
+            if (lbl == null) return;
+            java.util.Iterator<String> it = lbl.keys();
+            while (it.hasNext()) { String k = it.next(); LABEL_META.put(k, lbl.optString(k, "")); }
+            if (all.length() > 0) { buildTabs(); render(); }
+        });
         api.orders(true, r -> {
             if (r == null || !r.ok() || r.dataArray() == null) {
                 status.setText(r == null ? "Gagal memuat." : r.message("Gagal memuat pesanan."));

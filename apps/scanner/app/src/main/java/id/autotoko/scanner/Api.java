@@ -124,6 +124,10 @@ public final class Api {
     public void orderBoardSummary(Cb cb) {
         call("GET", session.baseUrl() + "/api/orders/board-summary", session.token(), null, cb);
     }
+    /** Sumber tunggal meta status (label dsb) dari backend, agar tak disalin-tangan. */
+    public void orderStatusMeta(Cb cb) {
+        call("GET", session.baseUrl() + "/api/orders/status-meta", session.token(), null, cb);
+    }
     public void orderUpdateStatus(String id, String status, Cb cb) {
         JSONObject p = new JSONObject();
         try { p.put("status", status); } catch (Exception ignored) {}
