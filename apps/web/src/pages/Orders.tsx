@@ -789,11 +789,12 @@ function OtomasiOrderModal({ onClose }: { onClose: () => void }) {
               className="w-4 h-4 accent-brand mt-0.5 shrink-0"
             />
             <span>
-              <span className="text-sm font-medium text-ink">Otomatis set “Siap Kirim” untuk order API masuk</span>
+              <span className="text-sm font-medium text-ink">Otomatis setujui / proses order baru</span>
               <span className="block text-xs text-ink-2 mt-0.5">
-                Saat sinkronisasi, order dari marketplace langsung dinaikkan ke <b>Siap Kirim</b> — kecuali kurir
-                instant/sameday di bawah. Hanya-maju: order yang sudah lebih jauh atau selesai tidak ditarik mundur.
-                Jika dimatikan, status tidak diubah otomatis.
+                Saat sinkronisasi, order baru (<b>Menunggu Disetujui</b>) langsung dinaikkan ke <b>Menunggu Dicetak</b>
+                — jadi tim tinggal cetak resi tanpa menyetujui satu per satu. Kecuali kurir instant/sameday di bawah.
+                Hanya-maju: tahap yang sudah lebih jauh atau selesai tidak ditarik mundur. Jika dimatikan, order baru
+                menunggu disetujui manual.
               </span>
             </span>
           </label>
@@ -806,15 +807,16 @@ function OtomasiOrderModal({ onClose }: { onClose: () => void }) {
               placeholder="instant, sameday, same day"
             />
             <p className="text-xs text-ink-3 mt-1">
-              Pisahkan dengan koma. Order yang nama kurirnya mengandung salah satu kata ini TIDAK diauto-siapkirim
-              (butuh penanganan manual cepat).
+              Pisahkan dengan koma. Order yang nama kurirnya mengandung salah satu kata ini TIDAK diauto-setujui
+              (butuh keputusan manual cepat).
             </p>
           </div>
 
           <InlineAlert tone="warning">
-            TikTok Shop sudah tersambung. Auto siap-kirim ini hanya mengubah status <b>internal</b> AutoToko. Untuk
-            benar-benar meng-update marketplace (RTS &amp; AWB), pakai tombol “Kirim ke marketplace” di detail order —
-            sengaja manual + konfirmasi karena memicu pengiriman nyata.
+            Auto proses ini hanya menyetujui order di sisi <b>internal</b> AutoToko (Menunggu Disetujui → Menunggu
+            Dicetak); status di marketplace tidak berubah. Untuk benar-benar meng-update marketplace (RTS &amp; AWB),
+            pakai tombol “Kirim ke marketplace” di detail order — sengaja manual + konfirmasi karena memicu pengiriman
+            nyata.
           </InlineAlert>
 
           <div className="flex justify-end gap-2">

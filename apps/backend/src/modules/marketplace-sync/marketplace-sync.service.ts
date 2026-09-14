@@ -22,6 +22,7 @@ import { TikTokApiError, TikTokClient } from "./tiktok-client.js";
 import {
   hitungSince,
   majukanStatus,
+  autoProses,
   petakanPesanan,
   petakanProduk,
   type PesananTikTok,
@@ -334,6 +335,15 @@ export class MarketplaceSyncService {
     const baris = data.map(petakanPesanan);
     const ids = baris.map((b) => b.marketplaceOrderId);
 
+    // Auto-proses (auto-setujui) per seller: order baru langsung disetujui saat
+    // sync. Saklarnya memakai kolom lama order_settings.auto_siap_kirim yang
+    // di-repurpose (label UI sudah "Auto Setujui/Proses").
+    const [cfg] = await this.bypass(() => this.db
+      .select({ autoProses: orderSettings.autoSiapKirim, instantCouriers: orderSettings.instantCouriers })
+      .from(orderSettings)
+      .where(eq(orderSettings.userId, toko.userId))
+      .limit(1));
+
     const ada = ids.length
       ? await this.bypass(() => this.db
           .select({ id: orders.marketplaceOrderId, st: orders.fulfillmentStatus })
@@ -357,10 +367,14 @@ export class MarketplaceSyncService {
         marketplaceOrderId: b.marketplaceOrderId,
         marketplace: toko.marketplace,
         status: b.status,
-        // siap_kirim (menunggu dipickup) HANYA dicapai lewat scan packing
-        // (resi-ocr autoLink), bukan tebakan dari kurir saat sync. Pemetaan
-        // murni dari status marketplace + forward-only.
-        fulfillmentStatus: majukanStatus(statusLama.get(b.marketplaceOrderId), b.fulfillmentStatus),
+        // siap_kirim (menunggu dipickup) HANYA dari scan packing (resi-ocr
+        // autoLink), tak pernah dari tebakan kurir. autoProses hanya menaikkan
+        // order BARU (masuk) -> approved bila seller mengaktifkan auto-setujui.
+        fulfillmentStatus: autoProses(
+          majukanStatus(statusLama.get(b.marketplaceOrderId), b.fulfillmentStatus),
+          b.shippingCourier,
+          cfg ?? null,
+        ),
         buyerName: b.buyerName,
         buyerPhone: b.buyerPhone,
         shippingAddress: b.shippingAddress,

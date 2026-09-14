@@ -564,11 +564,11 @@ public class OrdersActivity extends AppCompatActivity {
             LinearLayout col = new LinearLayout(this); col.setOrientation(LinearLayout.VERTICAL);
             col.setPadding(dp(20), dp(8), dp(20), dp(8));
             Switch sw = new Switch(this);
-            sw.setText("Otomatis set Siap Kirim untuk order API masuk");
+            sw.setText("Otomatis setujui / proses order baru");
             sw.setChecked(auto);
             col.addView(sw);
             TextView note = new TextView(this);
-            note.setText("Kecuali kurir instant/sameday di bawah. Hanya-maju: order yang sudah lebih jauh tak ditarik mundur.");
+            note.setText("Order baru (Menunggu Disetujui) langsung dinaikkan ke Menunggu Dicetak, jadi tim tinggal cetak resi. Kecuali kurir instant/sameday di bawah. Hanya-maju: tahap yang sudah lebih jauh tak ditarik mundur.");
             note.setTextSize(12); note.setTextColor(getColor(R.color.ink3)); note.setPadding(0, dp(4), 0, dp(10));
             col.addView(note);
             TextView lbl = new TextView(this); lbl.setText("Kecualikan kurir (pisahkan koma)");

@@ -31,17 +31,24 @@ const TERMINAL = new Set<StatusInternal>(["selesai", "retur", "dibatalkan"]);
  * Yang tidak dikenal jatuh ke "masuk", bukan dilempar: satu status baru dari
  * TikTok tidak boleh menghentikan sinkronisasi seluruh toko.
  */
-export function autoSiapKirim(
+/**
+ * Auto-setujui / auto-proses: order BARU (masuk = menunggu disetujui) langsung
+ * dinaikkan ke approved (menunggu dicetak) saat sync, agar tim tak perlu
+ * menyetujui satu per satu. Ini gate INTERNAL AutoToko; di marketplace order
+ * tetap "siap kirim". Kurir instant/sameday dikecualikan (butuh keputusan
+ * manual cepat). Hanya menyentuh tahap "masuk"; forward-only tetap berlaku.
+ */
+export function autoProses(
   status: StatusInternal,
   courier: string | null | undefined,
-  cfg: { autoSiapKirim?: boolean; instantCouriers?: string[] } | null | undefined,
+  cfg: { autoProses?: boolean; instantCouriers?: string[] } | null | undefined,
 ): StatusInternal {
-  if (!cfg?.autoSiapKirim) return status;
+  if (!cfg?.autoProses) return status;
+  if (status !== "masuk") return status;
   const c = (courier ?? "").toLowerCase();
   const instant = (cfg.instantCouriers ?? []).some((k) => k && c.includes(k.toLowerCase()));
-  // Kurir instant/sameday dikecualikan: butuh penanganan manual cepat.
   if (instant) return status;
-  return majukanStatus(status, "siap_kirim");
+  return majukanStatus(status, "approved");
 }
 
 export function statusInternal(mp: string | null | undefined): StatusInternal {
