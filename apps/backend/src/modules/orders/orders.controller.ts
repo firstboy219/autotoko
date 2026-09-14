@@ -102,6 +102,11 @@ export class OrdersController {
     return { success: true, data: await this.orders.boardSummary(uid(req)) };
   }
 
+  @Get("health")
+  async health(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.health(uid(req)) };
+  }
+
   @Get("settings")
   async getSettings(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.orders.getOrderSettings(uid(req)) };

@@ -17,6 +17,7 @@ export const NAV: NavItem[] = [
   { to: "/produk", label: "Master Produk", icon: "package" },
   { to: "/katalog", label: "Kesehatan Katalog", icon: "activity" },
   { to: "/orders", label: "Orders", icon: "cart" },
+  { to: "/kesehatan-pesanan", label: "Kesehatan Pesanan", icon: "activity" },
   { to: "/produksi-packing", label: "Produksi & Packing", icon: "package" },
   { to: "/autopilot", label: "Autopilot", icon: "bot" },
   { to: "/affiliate", label: "Affiliate", icon: "users" },
@@ -51,6 +52,7 @@ const NAV_PERM: Record<string, string> = {
   "/produk": "produk",
   "/katalog": "produk",
   "/orders": "order",
+  "/kesehatan-pesanan": "order",
   "/produksi-packing": "scan",
   "/request-stok": "bom",
   "/autopilot": "produk",
@@ -70,6 +72,22 @@ const NAV_PERM: Record<string, string> = {
 };
 
 const EMPTY_PREFS: NavPrefs = { groups: [], counts: {}, collapsed: [] };
+
+/**
+ * Pengelompokan bawaan 6+1 domain (cetak biru ekosistem). Dipakai HANYA saat
+ * pemiliknya belum pernah menyusun menunya sendiri (prefs.groups kosong) —
+ * begitu ia mengatur sendiri, susunannya yang menang. Path yang tak masuk sini
+ * jatuh ke "Lainnya", jadi menu baru tak pernah hilang.
+ */
+const DEFAULT_SECTIONS: { id: string; label: string; paths: string[] }[] = [
+  { id: "kendali", label: "Pusat Kendali", paths: ["/", "/dashboard-v2", "/notifikasi", "/autopilot"] },
+  { id: "pesanan", label: "Penjualan & Pesanan", paths: ["/orders", "/kesehatan-pesanan", "/produksi-packing", "/rekonsiliasi", "/audit-pesanan"] },
+  { id: "produk", label: "Produk & Katalog", paths: ["/produk", "/katalog", "/hpp", "/toko"] },
+  { id: "gudang", label: "Gudang & Stok", paths: ["/bom", "/pembelian", "/request-stok"] },
+  { id: "keuangan", label: "Keuangan", paths: ["/pencairan", "/laporan-bagian", "/wallet", "/laporan"] },
+  { id: "pertumbuhan", label: "Pertumbuhan", paths: ["/affiliate"] },
+  { id: "pengaturan", label: "Pengaturan & Akses", paths: ["/karyawan", "/aplikasi", "/pending"] },
+];
 
 /**
  * Id kelompok otomatis yang dulu ada.
@@ -211,6 +229,20 @@ export function Layout({
    * dihafal.
    */
   const sections = useMemo(() => {
+    // Belum pernah dikustom → pakai pengelompokan bawaan 6+1 domain.
+    if (prefs.groups.length === 0) {
+      const out = DEFAULT_SECTIONS
+        .map((g) => ({
+          id: g.id,
+          label: g.label as string | null,
+          items: g.paths.map((p) => byPath.get(p)).filter((n): n is NavItem => Boolean(n)),
+        }))
+        .filter((g) => g.items.length > 0);
+      const filed = new Set(out.flatMap((g) => g.items.map((i) => i.to)));
+      const rest = NAV_TAMPIL.filter((n) => !filed.has(n.to));
+      if (rest.length) out.push({ id: "__lainnya__", label: "Lainnya", items: rest });
+      return out;
+    }
     const grouped = prefs.groups
       .filter((g) => g.id !== ID_KELOMPOK_LAMA)
       .map((g) => ({

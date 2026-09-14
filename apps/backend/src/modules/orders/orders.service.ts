@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, lte, notInArray, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { orders, orderSettings, resiScans, shops } from "../../database/schema/index.js";
+import { orders, orderSettings, resiScans, shops, marketplaceSkuMap } from "../../database/schema/index.js";
 
 export interface ListOrdersOpts {
   status?: FulfillmentStatus;
@@ -175,6 +175,46 @@ export class OrdersService {
   }
 
   /** Jumlah per status proses (semua order API) + jumlah scan manual. */
+  /**
+   * Kesehatan Pesanan: menyatukan sinyal dua-sumber (API x scan manual) dalam
+   * satu tempat -- read-only, tidak mengubah data apa pun. Empat temuan:
+   * 1) API bilang terkirim/selesai tapi gudang tak pernah scan,
+   * 2) discan gudang tapi tak ada order API-nya,
+   * 3) SKU varian di item order yang belum dipetakan ke master produk,
+   * 4) order API tanpa nominal (bukan dibatalkan).
+   */
+  async health(userId: string) {
+    const one = async (q: SQL) => (await this.db.execute(q)) as unknown as Record<string, unknown>[];
+    const cnt = async (q: SQL) => Number((await one(q))[0]?.n ?? 0);
+
+    const wBelum = sql`o.user_id = ${userId} AND o.fulfillment_status IN ('dikirim','selesai') AND o.created_at >= now() - interval '60 days' AND NOT EXISTS (SELECT 1 FROM resi_scans r WHERE r.user_id = o.user_id AND r.label_order_no = o.marketplace_order_id)`;
+    const belumDiscan = {
+      total: await cnt(sql`SELECT count(*)::int AS n FROM orders o WHERE ${wBelum}`),
+      contoh: await one(sql`SELECT o.marketplace_order_id AS no, o.fulfillment_status AS fs, o.shipping_courier AS kurir, o.created_at AS at FROM orders o WHERE ${wBelum} ORDER BY o.created_at DESC LIMIT 50`),
+    };
+
+    const wManual = sql`r.user_id = ${userId} AND r.label_order_no IS NOT NULL AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.user_id = r.user_id AND o.marketplace_order_id = r.label_order_no)`;
+    const manualTanpaApi = {
+      total: await cnt(sql`SELECT count(*)::int AS n FROM resi_scans r WHERE ${wManual}`),
+      contoh: await one(sql`SELECT r.label_order_no AS no, r.resi AS resi, r.scanned_at AS at FROM resi_scans r WHERE ${wManual} ORDER BY r.scanned_at DESC LIMIT 50`),
+    };
+
+    const skuCte = sql`SELECT DISTINCT (it->>'skuId') AS sku, coalesce(it->>'name','') AS nama FROM orders o CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(o.items) = 'array' THEN o.items ELSE '[]'::jsonb END) it WHERE o.user_id = ${userId} AND o.marketplace = 'tiktok' AND it->>'skuId' IS NOT NULL AND it->>'skuId' <> ''`;
+    const skuNot = sql`NOT EXISTS (SELECT 1 FROM marketplace_sku_map m WHERE m.user_id = ${userId} AND m.marketplace = 'tiktok' AND m.sku = s.sku)`;
+    const skuBelumDipetakan = {
+      total: await cnt(sql`SELECT count(*)::int AS n FROM (${skuCte}) s WHERE ${skuNot}`),
+      contoh: await one(sql`SELECT s.sku AS sku, s.nama AS nama FROM (${skuCte}) s WHERE ${skuNot} ORDER BY s.nama LIMIT 100`),
+    };
+
+    const wNom = sql`user_id = ${userId} AND total_amount IS NULL AND fulfillment_status <> 'dibatalkan'`;
+    const tanpaNominal = {
+      total: await cnt(sql`SELECT count(*)::int AS n FROM orders WHERE ${wNom}`),
+      contoh: await one(sql`SELECT marketplace_order_id AS no, fulfillment_status AS fs, created_at AS at FROM orders WHERE ${wNom} ORDER BY created_at DESC LIMIT 50`),
+    };
+
+    return { belumDiscan, manualTanpaApi, skuBelumDipetakan, tanpaNominal };
+  }
+
   async boardSummary(userId: string) {
     const rows = await this.db
       .select({ fs: orders.fulfillmentStatus, n: sql<number>`count(*)::int` })
