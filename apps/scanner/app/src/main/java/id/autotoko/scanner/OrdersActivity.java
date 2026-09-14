@@ -1,7 +1,9 @@
 package id.autotoko.scanner;
 
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -15,6 +17,9 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.material.bottomsheet.BottomSheetDialog;
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -240,10 +245,145 @@ public class OrdersActivity extends AppCompatActivity {
         r3.setLayoutParams(r3lp);
         c.addView(r3);
 
-        // Fase berikutnya: buka detail (status, cetak AWB, RTS).
-        c.setOnClickListener(v ->
-                android.widget.Toast.makeText(this, "Detail pesanan menyusul (fase berikutnya)", android.widget.Toast.LENGTH_SHORT).show());
+        c.setOnClickListener(v -> showDetail(o));
         return c;
+    }
+
+    private static String nextStatus(String s) {
+        for (int i = 0; i < FLOW.length - 1; i++) if (FLOW[i].equals(s)) return FLOW[i + 1];
+        return null;
+    }
+
+    private void toast(String m) { android.widget.Toast.makeText(this, m, android.widget.Toast.LENGTH_SHORT).show(); }
+
+    /** Detail pesanan: info + item + aksi (ubah status, Cetak AWB, Kirim RTS). */
+    private void showDetail(JSONObject o) {
+        final String id = o.optString("id");
+        final String stat = o.optString("fulfillmentStatus");
+        BottomSheetDialog dlg = new BottomSheetDialog(this);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(dp(18), dp(16), dp(18), dp(20));
+
+        TextView no = new TextView(this);
+        no.setText(o.optString("marketplaceOrderId", "-"));
+        no.setTextSize(16);
+        no.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD);
+        no.setTextColor(getColor(R.color.ink));
+        col.addView(no);
+
+        col.addView(kv("Toko", o.optString("shopName", "-")));
+        col.addView(kv("Pembeli", o.optString("buyerName", "-")));
+        col.addView(kv("Kurir", o.optString("shippingCourier", "-")));
+        String amt = o.isNull("totalAmount") ? null : o.optString("totalAmount", null);
+        col.addView(kv("Total", amt == null ? "—" : rupiah(amt)));
+        LinearLayout srow = new LinearLayout(this);
+        srow.setOrientation(LinearLayout.HORIZONTAL);
+        srow.setGravity(Gravity.CENTER_VERTICAL);
+        srow.setPadding(0, dp(6), 0, dp(2));
+        TextView sk = new TextView(this); sk.setText("Status"); sk.setTextSize(12); sk.setTextColor(getColor(R.color.ink2));
+        srow.addView(sk, new LinearLayout.LayoutParams(dp(90), ViewGroup.LayoutParams.WRAP_CONTENT));
+        srow.addView(badge(stat));
+        col.addView(srow);
+
+        // Item
+        JSONArray items = o.optJSONArray("items");
+        if (items != null && items.length() > 0) {
+            TextView ih = new TextView(this); ih.setText("Item"); ih.setTextSize(12); ih.setTextColor(getColor(R.color.ink2));
+            ih.setPadding(0, dp(10), 0, dp(2)); col.addView(ih);
+            for (int i = 0; i < items.length(); i++) {
+                JSONObject it = items.optJSONObject(i); if (it == null) continue;
+                TextView t = new TextView(this);
+                t.setText(it.optInt("qty", 1) + " x " + it.optString("name", it.optString("skuName", "-")));
+                t.setTextSize(13); t.setTextColor(getColor(R.color.ink));
+                col.addView(t);
+            }
+        }
+
+        // Aksi
+        LinearLayout act = new LinearLayout(this);
+        act.setOrientation(LinearLayout.VERTICAL);
+        act.setPadding(0, dp(14), 0, 0);
+        if ("masuk".equals(stat)) {
+            act.addView(btn("Setujui", true, v -> { dlg.dismiss(); ubahStatus(id, "approved"); }));
+            act.addView(btn("Tolak", false, v -> { dlg.dismiss(); ubahStatus(id, "dibatalkan"); }));
+        } else {
+            String nx = nextStatus(stat);
+            if (nx != null) act.addView(btn("Lanjut ke " + label(nx), true, v -> { dlg.dismiss(); ubahStatus(id, nx); }));
+        }
+        act.addView(btn("Cetak AWB / Resi", false, v -> cetakAwb(id)));
+        act.addView(btn("Kirim ke marketplace (RTS)", true, v -> konfirmRts(id, o.optString("marketplaceOrderId"), dlg)));
+        col.addView(act);
+
+        ScrollView sv = new ScrollView(this);
+        sv.addView(col);
+        dlg.setContentView(sv);
+        dlg.show();
+    }
+
+    private LinearLayout kv(String k, String v) {
+        LinearLayout r = new LinearLayout(this);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        r.setPadding(0, dp(4), 0, dp(4));
+        TextView a = new TextView(this); a.setText(k); a.setTextSize(12); a.setTextColor(getColor(R.color.ink2));
+        r.addView(a, new LinearLayout.LayoutParams(dp(90), ViewGroup.LayoutParams.WRAP_CONTENT));
+        TextView b = new TextView(this); b.setText(v); b.setTextSize(13); b.setTextColor(getColor(R.color.ink));
+        r.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        return r;
+    }
+
+    private MaterialButton btn(String text, boolean filled, View.OnClickListener cl) {
+        MaterialButton b = new MaterialButton(this, null, filled
+                ? com.google.android.material.R.attr.materialButtonStyle
+                : com.google.android.material.R.attr.materialButtonOutlinedStyle);
+        b.setText(text);
+        b.setAllCaps(false);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(6);
+        b.setLayoutParams(lp);
+        b.setOnClickListener(cl);
+        return b;
+    }
+
+    private void ubahStatus(String id, String status) {
+        api.orderUpdateStatus(id, status, r -> {
+            toast(r != null && r.ok() ? "Status → " + label(status) : (r == null ? "Gagal" : r.message("Gagal ubah status")));
+            muat();
+        });
+    }
+
+    private void cetakAwb(String id) {
+        toast("Mengambil label…");
+        api.orderLabel(id, r -> {
+            if (r == null || !r.ok() || r.data() == null) { toast(r == null ? "Gagal" : r.message("Gagal ambil label")); return; }
+            JSONArray hasil = r.data().optJSONArray("hasil");
+            String url = null;
+            if (hasil != null) for (int i = 0; i < hasil.length(); i++) {
+                JSONObject h = hasil.optJSONObject(i);
+                if (h != null && !h.isNull("docUrl") && !h.optString("docUrl").isEmpty()) { url = h.optString("docUrl"); break; }
+            }
+            if (url == null) { toast("Label belum tersedia (order mungkin belum di-RTS)."); return; }
+            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); }
+            catch (Exception e) { toast("Tak bisa membuka label."); }
+        });
+    }
+
+    private void konfirmRts(String id, String no, BottomSheetDialog parent) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Kirim ke marketplace (RTS)?")
+                .setMessage("Order " + no + " akan di-RTS: status di seller center jadi menunggu kurir & AWB dibuat. Tindakan nyata dan sulit dibatalkan.")
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Kirim", (di, w) -> {
+                    if (parent != null) parent.dismiss();
+                    toast("Mengirim…");
+                    api.orderShip(id, "DROP_OFF", r -> {
+                        boolean ok = r != null && r.ok() && r.data() != null && r.data().optBoolean("ok", false);
+                        toast(ok ? "Dikirim (RTS) → Siap Kirim" : (r == null ? "Gagal" : r.message("Gagal RTS")));
+                        muat();
+                    });
+                })
+                .show();
     }
 
     private TextView badge(String stat) {
