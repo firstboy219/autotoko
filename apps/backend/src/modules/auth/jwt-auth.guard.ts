@@ -209,6 +209,16 @@ export class JwtAuthGuard implements CanActivate {
       throw new ForbiddenException("Portal access only");
     }
 
+    // DEFAULT-DENY untuk login portal (sub-seller/sub-sub-seller): token portal
+    // ber-principalType dan `sub`-nya = id tenant ASLI (sengaja, agar RLS jalan),
+    // sehingga bila dibiarkan menembus route tenant biasa ia akan melihat DATA
+    // PENUH seller. Portal HANYA boleh route @PortalOnly. Ini menutup eskalasi
+    // hak horizontal; sebelumnya perlindungan opt-in (@TenantOwnerOnly) hanya
+    // dipasang di 6 dari 31 controller sehingga sisanya terbuka.
+    if (payload.principalType && !portalOnly) {
+      throw new ForbiddenException("Login portal hanya boleh mengakses menu portal.");
+    }
+
     return true;
   }
 
