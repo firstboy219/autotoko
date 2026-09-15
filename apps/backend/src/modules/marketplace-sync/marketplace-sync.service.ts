@@ -12,6 +12,7 @@ import {
   marketplaceSyncRuns,
   orders,
   shops,
+  marketplaceConversations,
 } from "../../database/schema/index.js";
 import { CryptoService } from "../../common/crypto/crypto.service.js";
 import { TenantService } from "../../database/tenant.service.js";
@@ -948,6 +949,61 @@ export class MarketplaceSyncService {
         .where(and(eq(orders.userId, userId), eq(orders.id, orderId))));
     }
     return { orderId, ok: semuaOk, hasil };
+  }
+
+  /**
+   * Sinkron percakapan Customer Service (TikTok IM) -> tabel chat kita.
+   * READ-ONLY, manual-trigger, DORMAN sampai scope Customer Service aktif;
+   * kalau scope belum aktif, TikTok menolak dan kita kembalikan error per toko
+   * (tidak crash). Path/param CS API 202309 = best-effort dari kontrak standar
+   * (dok SPA tak terbaca via fetch) -> VERIFIKASI saat scope aktif, isolasi di
+   * satu tempat ini. Pesan per-percakapan menyusul setelah ini terverifikasi.
+   */
+  async syncChat(userId: string) {
+    const toko = await this.tokoSiap(userId);
+    let conversations = 0;
+    const hasil: { shop: string; conv: number; error?: string }[] = [];
+    for (const t of toko) {
+      if (t.marketplace !== "tiktok") continue;
+      try {
+        let klien = await this.klien(t);
+        let segar = false;
+        const call = async <T>(fn: (c: TikTokClient) => Promise<T>): Promise<T> => {
+          for (;;) {
+            try { return await fn(klien); }
+            catch (e) {
+              if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(t); continue; }
+              throw e;
+            }
+          }
+        };
+        const resp = await call((c) => c.get<{ conversations?: Record<string, any>[] }>(
+          "/customer_service/202309/conversations", { page_size: 50 }));
+        const list = resp?.conversations ?? [];
+        for (const cv of list) {
+          const cid = String(cv.id ?? cv.conversation_id ?? "");
+          if (!cid) continue;
+          const lm: any = cv.latest_message ?? {};
+          const lastText = typeof lm.content === "string" ? lm.content : (lm.content?.text ?? cv.last_message ?? null);
+          const lastAt = lm.create_time ? new Date(Number(lm.create_time) * 1000) : null;
+          const buyer = cv.buyer_name ?? cv.latest_user_nickname
+            ?? (Array.isArray(cv.participants) ? (cv.participants.find((p: any) => p?.role === "BUYER")?.nickname ?? null) : null);
+          const unread = Number(cv.unread_count ?? cv.unread ?? 0) || 0;
+          await this.bypass(() => this.db
+            .insert(marketplaceConversations)
+            .values({ userId, shopId: t.id, marketplace: "tiktok", conversationId: cid, buyerName: buyer, lastMessage: lastText, lastMessageAt: lastAt, unread, raw: cv })
+            .onConflictDoUpdate({
+              target: [marketplaceConversations.userId, marketplaceConversations.marketplace, marketplaceConversations.conversationId],
+              set: { shopId: t.id, buyerName: buyer, lastMessage: lastText, lastMessageAt: lastAt, unread, raw: cv, updatedAt: new Date() },
+            }));
+          conversations++;
+        }
+        hasil.push({ shop: t.shopName ?? t.id, conv: list.length });
+      } catch (e) {
+        hasil.push({ shop: t.shopName ?? t.id, conv: 0, error: (e as Error).message });
+      }
+    }
+    return { shops: toko.length, conversations, hasil };
   }
 
   private async klien(toko: Toko): Promise<TikTokClient> {

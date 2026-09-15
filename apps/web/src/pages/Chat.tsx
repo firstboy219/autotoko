@@ -38,10 +38,28 @@ export function Chat() {
   const [msgs, setMsgs] = useState<Msg[] | null>(null);
   const [teks, setTeks] = useState("");
   const [kirim, setKirim] = useState(false);
+  const [sinkron, setSinkron] = useState(false);
 
-  useEffect(() => {
+  function muatConvs() {
     api.get<Conv[]>("/chat/conversations").then(setConvs).catch(() => setConvs([]));
-  }, []);
+  }
+  useEffect(() => { muatConvs(); }, []);
+
+  async function tarikDariMarketplace() {
+    setSinkron(true);
+    try {
+      const r = await api.post<{ conversations: number; hasil: { shop: string; error?: string }[] }>(
+        "/marketplace-sync/chat/sync", {});
+      const err = r.hasil?.find((h) => h.error);
+      if (err) toast(`Belum tersambung: ${err.error}. Pastikan scope Customer Service aktif.`, "warning");
+      else toast(`${r.conversations} percakapan tersinkron.`, "success");
+      muatConvs();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setSinkron(false);
+    }
+  }
 
   useEffect(() => {
     if (!sel) { setMsgs(null); return; }
@@ -75,7 +93,10 @@ export function Chat() {
       <div className="grid gap-3 md:grid-cols-[320px_1fr] mt-4">
         {/* Daftar percakapan */}
         <Card className="p-0 overflow-hidden md:max-h-[70vh] md:overflow-y-auto">
-          <div className="px-4 py-3 border-b border-line text-sm font-medium text-ink">Percakapan</div>
+          <div className="px-4 py-3 border-b border-line flex items-center justify-between gap-2">
+            <span className="text-sm font-medium text-ink">Percakapan</span>
+            <Button size="sm" variant="tonal" loading={sinkron} onClick={tarikDariMarketplace}>Sinkron</Button>
+          </div>
           {convs === null ? (
             <div className="p-4 space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
           ) : convs.length === 0 ? (

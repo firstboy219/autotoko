@@ -93,6 +93,11 @@ export class MarketplaceSyncController {
   }
 
   /** Backfill nama varian dari detail marketplace (mengisi sku_name kosong). */
+  @Post("chat/sync")
+  async chatSync(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.syncChat(uid(req)) };
+  }
+
   @Post("enrich-names")
   async enrichNames(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.sync.perbaikiNamaVarian(uid(req)) };
