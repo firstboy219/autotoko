@@ -47,3 +47,33 @@ CREATE POLICY tenant_isolation ON users FOR ALL
     id = nullif(current_setting('app.user_id', true), '')::uuid
     OR current_setting('app.bypass', true) = 'on'
   );
+
+
+-- S1: tabel ANAK (tenant lewat FK, tanpa user_id) -- policy subquery ke induk,
+-- aman-bypass. Ditunda (penulis background/webhook contextless): webhook_events,
+-- wallet_transactions, product_postings -> pindahkan penulisnya ke runBypass dulu.
+DO $anak$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT * FROM (VALUES
+    ('master_product_variants','master_product_id','master_products'),
+    ('bom_items','master_product_id','master_products'),
+    ('product_packing_quantities','master_product_id','master_products'),
+    ('chat_logs','shop_id','shops'),
+    ('review_logs','shop_id','shops'),
+    ('order_api_snapshots','shop_id','shops'),
+    ('fulfillment_api_snapshots','shop_id','shops'),
+    ('resi_scan_items','resi_scan_id','resi_scans')
+  ) AS x(tbl, fk, parent) LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', r.tbl);
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', r.tbl);
+    EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', r.tbl);
+    EXECUTE format($f$
+      CREATE POLICY tenant_isolation ON %I FOR ALL
+      USING (current_setting('app.bypass', true) = 'on'
+             OR %I IN (SELECT id FROM %I WHERE user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+      WITH CHECK (current_setting('app.bypass', true) = 'on'
+             OR %I IN (SELECT id FROM %I WHERE user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    $f$, r.tbl, r.fk, r.parent, r.fk, r.parent);
+  END LOOP;
+END $anak$;
