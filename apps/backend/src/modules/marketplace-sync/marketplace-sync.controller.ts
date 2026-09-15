@@ -93,6 +93,16 @@ export class MarketplaceSyncController {
   }
 
   /** Backfill nama varian dari detail marketplace (mengisi sku_name kosong). */
+  @Post("returns/sync")
+  async returnsSync(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.syncReturns(uid(req)) };
+  }
+
+  @Get("returns")
+  async returnsList(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.listReturns(uid(req)) };
+  }
+
   @Post("chat/sync")
   async chatSync(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.sync.syncChat(uid(req)) };

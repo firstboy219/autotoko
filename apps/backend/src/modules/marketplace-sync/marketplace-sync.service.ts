@@ -13,6 +13,7 @@ import {
   orders,
   shops,
   marketplaceConversations,
+  marketplaceReturns,
 } from "../../database/schema/index.js";
 import { CryptoService } from "../../common/crypto/crypto.service.js";
 import { TenantService } from "../../database/tenant.service.js";
@@ -1008,6 +1009,77 @@ export class MarketplaceSyncService {
       }
     }
     return { shops: toko.length, conversations, hasil };
+  }
+
+  /**
+   * Sinkron retur/refund (Reverse Order 202309) -> tabel kita. READ-ONLY,
+   * manual, dorman sampai scope aktif; graceful bila ditolak. Ambil 90 hari
+   * terakhir, page pertama (page_size 20).
+   */
+  async syncReturns(userId: string) {
+    const toko = await this.tokoSiap(userId);
+    let returns = 0;
+    const hasil: { shop: string; ret: number; error?: string }[] = [];
+    const since = Math.floor((Date.now() - 90 * 86400000) / 1000);
+    for (const t of toko) {
+      if (t.marketplace !== "tiktok") continue;
+      try {
+        let klien = await this.klien(t);
+        let segar = false;
+        const call = async <T>(fn: (c: TikTokClient) => Promise<T>): Promise<T> => {
+          for (;;) {
+            try { return await fn(klien); }
+            catch (e) {
+              if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(t); continue; }
+              throw e;
+            }
+          }
+        };
+        const resp = await call((c) => c.post<{ return_orders?: Record<string, any>[] }>(
+          "/return_refund/202309/returns/search",
+          { create_time_ge: since },
+          { page_size: 20, sort_field: "update_time", sort_order: "DESC" }));
+        const list = resp?.return_orders ?? [];
+        for (const r of list) {
+          const rid = String(r.return_id ?? "");
+          if (!rid) continue;
+          const ra: any = r.refund_amount ?? {};
+          const act: any = Array.isArray(r.seller_next_action_response) ? r.seller_next_action_response[0] : null;
+          const values = {
+            userId, shopId: t.id, marketplace: "tiktok", returnId: rid,
+            orderId: r.order_id ?? null, returnType: r.return_type ?? null,
+            returnStatus: r.return_status ?? null, arbitrationStatus: r.arbitration_status ?? null,
+            role: r.role ?? null, reasonText: r.return_reason_text ?? null,
+            refundTotal: ra.refund_total ?? null, currency: ra.currency ?? null,
+            buyerUserId: r.buyer_user_id ?? null, lineItems: (r.return_line_items ?? null) as never,
+            sellerNextAction: act?.action ?? null,
+            nextActionDeadline: act?.deadline ? new Date(Number(act.deadline) * 1000) : null,
+            returnCreateTime: r.create_time ? new Date(Number(r.create_time) * 1000) : null,
+            returnUpdateTime: r.update_time ? new Date(Number(r.update_time) * 1000) : null,
+            raw: r as never,
+          };
+          await this.bypass(() => this.db.insert(marketplaceReturns).values(values).onConflictDoUpdate({
+            target: [marketplaceReturns.userId, marketplaceReturns.marketplace, marketplaceReturns.returnId],
+            set: { ...values, updatedAt: new Date() },
+          }));
+          returns++;
+        }
+        hasil.push({ shop: t.shopName ?? t.id, ret: list.length });
+      } catch (e) {
+        hasil.push({ shop: t.shopName ?? t.id, ret: 0, error: (e as Error).message });
+      }
+    }
+    return { shops: toko.length, returns, hasil };
+  }
+
+  /** Daftar retur tersimpan (authed -> ter-skop RLS). */
+  async listReturns(userId: string) {
+    return this.db
+      .select()
+      .from(marketplaceReturns)
+      .where(eq(marketplaceReturns.userId, userId))
+      .orderBy(desc(marketplaceReturns.returnUpdateTime))
+      .limit(200);
   }
 
   private async klien(toko: Toko): Promise<TikTokClient> {

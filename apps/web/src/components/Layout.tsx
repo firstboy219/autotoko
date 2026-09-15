@@ -18,6 +18,7 @@ export const NAV: NavItem[] = [
   { to: "/katalog", label: "Kesehatan Katalog", icon: "activity" },
   { to: "/orders", label: "Orders", icon: "cart" },
   { to: "/kesehatan-pesanan", label: "Kesehatan Pesanan", icon: "activity" },
+  { to: "/retur", label: "Retur & Refund", icon: "cart" },
   { to: "/produksi-packing", label: "Produksi & Packing", icon: "package" },
   { to: "/autopilot", label: "Autopilot", icon: "bot" },
   { to: "/chat", label: "Chat Pelanggan", icon: "users" },
@@ -55,6 +56,7 @@ const NAV_PERM: Record<string, string> = {
   "/katalog": "produk",
   "/orders": "order",
   "/kesehatan-pesanan": "order",
+  "/retur": "order",
   "/chat": "order",
   "/produksi-packing": "scan",
   "/request-stok": "bom",
@@ -84,7 +86,7 @@ const EMPTY_PREFS: NavPrefs = { groups: [], counts: {}, collapsed: [] };
  */
 const DEFAULT_SECTIONS: { id: string; label: string; paths: string[] }[] = [
   { id: "kendali", label: "Pusat Kendali", paths: ["/", "/dashboard-ringkas", "/notifikasi", "/autopilot"] },
-  { id: "pesanan", label: "Penjualan & Pesanan", paths: ["/orders", "/kesehatan-pesanan", "/produksi-packing", "/rekonsiliasi", "/audit-pesanan"] },
+  { id: "pesanan", label: "Penjualan & Pesanan", paths: ["/orders", "/kesehatan-pesanan", "/retur", "/produksi-packing", "/rekonsiliasi", "/audit-pesanan"] },
   { id: "produk", label: "Produk & Katalog", paths: ["/produk", "/katalog", "/hpp", "/toko"] },
   { id: "gudang", label: "Gudang & Stok", paths: ["/bom", "/pembelian", "/request-stok"] },
   { id: "keuangan", label: "Keuangan", paths: ["/pencairan", "/laporan-bagian", "/wallet", "/laporan"] },

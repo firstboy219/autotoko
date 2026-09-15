@@ -45,6 +45,7 @@ import { PencairanProfit } from "./pages/PencairanProfit";
 import { RequestStok } from "./pages/RequestStok";
 import { KesehatanPesanan } from "./pages/KesehatanPesanan";
 import { Chat } from "./pages/Chat";
+import { Retur } from "./pages/Retur";
 function Protected({ children }: { children: React.ReactNode }) {
   const authed = useAuth((s) => s.authenticated);
   return authed ? <>{children}</> : <Navigate to="/login" replace />;
@@ -76,6 +77,7 @@ export function App() {
         <Route path="/orders" element={<Protected><Orders /></Protected>} />
         <Route path="/kesehatan-pesanan" element={<Protected><KesehatanPesanan /></Protected>} />
         <Route path="/chat" element={<Protected><Chat /></Protected>} />
+        <Route path="/retur" element={<Protected><Retur /></Protected>} />
         <Route path="/produksi-packing" element={<Protected><ProduksiPacking /></Protected>} />
         <Route path="/bom" element={<Protected><Bom /></Protected>} />
         <Route path="/aplikasi" element={<Protected><AplikasiVersi /></Protected>} />

@@ -16,7 +16,7 @@ BEGIN
     'platform_invoices','autopilot_activity','notifications',
     'sub_sellers','sub_sub_sellers','payout_settings',
     'payout_batches','payout_mutations','payout_adjustments',
-    'payout_disbursements','product_costing','materials','material_purchases','material_purchase_items','password_reset_tokens','resi_scans','packing_settings','shop_categories','packing_materials','user_ui_prefs','resi_scan_photos','payout_carryovers','marketplace_conversations','marketplace_messages','custom_couriers','marketplace_statement_lines','marketplace_statements','master_product_categories','material_movements','ocr_corrections','order_settings','resi_scan_codes','staff_accounts'
+    'payout_disbursements','product_costing','materials','material_purchases','material_purchase_items','password_reset_tokens','resi_scans','packing_settings','shop_categories','packing_materials','user_ui_prefs','resi_scan_photos','payout_carryovers','marketplace_conversations','marketplace_messages','marketplace_returns','custom_couriers','marketplace_statement_lines','marketplace_statements','master_product_categories','material_movements','ocr_corrections','order_settings','resi_scan_codes','staff_accounts'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
