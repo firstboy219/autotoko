@@ -17,6 +17,7 @@ import { BillingModule } from "./modules/billing/billing.module.js";
 import { WebhooksModule } from "./modules/webhooks/webhooks.module.js";
 import { OrdersModule } from "./modules/orders/orders.module.js";
 import { ChatModule } from "./modules/chat/chat.module.js";
+import { InventoryModule } from "./modules/inventory/inventory.module.js";
 import { BomModule } from "./modules/bom/bom.module.js";
 import { AiModule } from "./modules/ai/ai.module.js";
 import { ReportsModule } from "./modules/reports/reports.module.js";
@@ -60,6 +61,7 @@ import { StockRequestsModule } from "./modules/stock-requests/stock-requests.mod
     WebhooksModule,
     OrdersModule,
     ChatModule,
+    InventoryModule,
     BomModule,
     AiModule,
     ReportsModule,

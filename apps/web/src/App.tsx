@@ -46,6 +46,7 @@ import { RequestStok } from "./pages/RequestStok";
 import { KesehatanPesanan } from "./pages/KesehatanPesanan";
 import { Chat } from "./pages/Chat";
 import { Retur } from "./pages/Retur";
+import { StokOmnichannel } from "./pages/StokOmnichannel";
 function Protected({ children }: { children: React.ReactNode }) {
   const authed = useAuth((s) => s.authenticated);
   return authed ? <>{children}</> : <Navigate to="/login" replace />;
@@ -74,6 +75,7 @@ export function App() {
         <Route path="/" element={<Protected><DashboardV2 /></Protected>} />
         <Route path="/toko" element={<Protected><Toko /></Protected>} />
         <Route path="/produk" element={<Protected><Produk /></Protected>} />
+        <Route path="/stok-omnichannel" element={<Protected><StokOmnichannel /></Protected>} />
         <Route path="/orders" element={<Protected><Orders /></Protected>} />
         <Route path="/kesehatan-pesanan" element={<Protected><KesehatanPesanan /></Protected>} />
         <Route path="/chat" element={<Protected><Chat /></Protected>} />
