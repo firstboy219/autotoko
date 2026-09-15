@@ -978,13 +978,17 @@ export class MarketplaceSyncService {
           }
         };
         const resp = await call((c) => c.get<{ conversations?: Record<string, any>[] }>(
-          "/customer_service/202309/conversations", { page_size: 50 }));
+          "/customer_service/202309/conversations", { page_size: 20 }));
         const list = resp?.conversations ?? [];
         for (const cv of list) {
           const cid = String(cv.id ?? cv.conversation_id ?? "");
           if (!cid) continue;
           const lm: any = cv.latest_message ?? {};
-          const lastText = typeof lm.content === "string" ? lm.content : (lm.content?.text ?? cv.last_message ?? null);
+          const lastText: string | null = (() => {
+            const c = lm.content;
+            if (typeof c !== "string") return null;
+            try { const o = JSON.parse(c); return typeof o?.content === "string" ? o.content : c; } catch { return c; }
+          })();
           const lastAt = lm.create_time ? new Date(Number(lm.create_time) * 1000) : null;
           const buyer = cv.buyer_name ?? cv.latest_user_nickname
             ?? (Array.isArray(cv.participants) ? (cv.participants.find((p: any) => p?.role === "BUYER")?.nickname ?? null) : null);
