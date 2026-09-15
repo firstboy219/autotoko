@@ -1,0 +1,156 @@
+import { useEffect, useState } from "react";
+import { Layout } from "../components/Layout";
+import { api } from "../lib/api";
+import { Card, Badge, Skeleton, InlineAlert, Button, useToast } from "../components/ui";
+import { Icon } from "../components/Icon";
+
+/**
+ * Chat Pelanggan (Fase 1) — inbox terpadu. Web = take-action + monitoring, jadi
+ * di sinilah CS dilakukan tanpa buka Seller Center. Fondasi: percakapan &
+ * pesan dibaca dari backend; balasan di-ANTRE (status 'queued') dan benar-benar
+ * terkirim begitu koneksi TikTok IM (scope) diaktifkan.
+ */
+
+interface Conv {
+  id: string;
+  buyerName: string | null;
+  lastMessage: string | null;
+  lastMessageAt: string | null;
+  unread: number;
+  marketplace: string;
+}
+interface Msg {
+  id: string;
+  direction: "in" | "out";
+  sender: string | null;
+  text: string | null;
+  status: string;
+  createdAt: string;
+}
+
+const jam = (s?: string | null) =>
+  s ? new Date(s).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" }) : "";
+
+export function Chat() {
+  const toast = useToast();
+  const [convs, setConvs] = useState<Conv[] | null>(null);
+  const [sel, setSel] = useState<Conv | null>(null);
+  const [msgs, setMsgs] = useState<Msg[] | null>(null);
+  const [teks, setTeks] = useState("");
+  const [kirim, setKirim] = useState(false);
+
+  useEffect(() => {
+    api.get<Conv[]>("/chat/conversations").then(setConvs).catch(() => setConvs([]));
+  }, []);
+
+  useEffect(() => {
+    if (!sel) { setMsgs(null); return; }
+    setMsgs(null);
+    api.get<Msg[]>(`/chat/conversations/${sel.id}/messages`).then(setMsgs).catch(() => setMsgs([]));
+  }, [sel]);
+
+  async function balas() {
+    if (!sel || !teks.trim()) return;
+    setKirim(true);
+    try {
+      await api.post(`/chat/conversations/${sel.id}/reply`, { text: teks.trim() });
+      setTeks("");
+      const m = await api.get<Msg[]>(`/chat/conversations/${sel.id}/messages`);
+      setMsgs(m);
+      toast("Balasan diantre — terkirim saat koneksi TikTok IM aktif.", "success");
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setKirim(false);
+    }
+  }
+
+  return (
+    <Layout title="Chat Pelanggan">
+      <InlineAlert tone="info">
+        Inbox chat pembeli akan terisi begitu <b>koneksi TikTok IM (scope Customer Service)</b> diaktifkan.
+        Balasan yang Anda tulis sekarang aman disimpan &amp; diantre, lalu terkirim otomatis saat koneksi hidup.
+      </InlineAlert>
+
+      <div className="grid gap-3 md:grid-cols-[320px_1fr] mt-4">
+        {/* Daftar percakapan */}
+        <Card className="p-0 overflow-hidden md:max-h-[70vh] md:overflow-y-auto">
+          <div className="px-4 py-3 border-b border-line text-sm font-medium text-ink">Percakapan</div>
+          {convs === null ? (
+            <div className="p-4 space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+          ) : convs.length === 0 ? (
+            <div className="p-6 text-center text-sm text-ink-3">
+              <Icon name="cart" size={26} />
+              <div className="mt-2">Belum ada percakapan.</div>
+              <div className="text-xs mt-1">Menunggu koneksi TikTok IM.</div>
+            </div>
+          ) : (
+            <div className="divide-y divide-line">
+              {convs.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => setSel(c)}
+                  className={`w-full text-left px-4 py-3 hover:bg-canvas transition ${sel?.id === c.id ? "bg-canvas" : ""}`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-ink truncate">{c.buyerName ?? "Pembeli"}</span>
+                    {c.unread > 0 && <Badge tone="danger">{c.unread}</Badge>}
+                  </div>
+                  <div className="text-xs text-ink-3 truncate mt-0.5">{c.lastMessage ?? "—"}</div>
+                  <div className="text-[11px] text-ink-3 mt-0.5">{jam(c.lastMessageAt)}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        {/* Thread */}
+        <Card className="p-0 overflow-hidden flex flex-col md:max-h-[70vh]">
+          {!sel ? (
+            <div className="flex-1 grid place-items-center p-10 text-sm text-ink-3">
+              Pilih percakapan untuk melihat pesan.
+            </div>
+          ) : (
+            <>
+              <div className="px-4 py-3 border-b border-line">
+                <div className="text-sm font-medium text-ink">{sel.buyerName ?? "Pembeli"}</div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-canvas">
+                {msgs === null ? (
+                  <Skeleton className="h-24 w-full" />
+                ) : msgs.length === 0 ? (
+                  <div className="text-center text-sm text-ink-3 py-8">Belum ada pesan.</div>
+                ) : (
+                  msgs.map((m) => (
+                    <div key={m.id} className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}>
+                      <div
+                        className={`max-w-[75%] rounded-2xl px-3.5 py-2 text-sm ${
+                          m.direction === "out" ? "bg-brand text-white" : "bg-white text-ink ring-1 ring-line"
+                        }`}
+                      >
+                        <div>{m.text}</div>
+                        <div className={`text-[10px] mt-1 ${m.direction === "out" ? "text-white/70" : "text-ink-3"}`}>
+                          {jam(m.createdAt)}{m.direction === "out" && m.status === "queued" ? " · diantre" : ""}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="border-t border-line p-3 flex gap-2">
+                <input
+                  value={teks}
+                  onChange={(e) => setTeks(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); balas(); } }}
+                  placeholder="Tulis balasan…"
+                  className="flex-1 rounded-lg border border-line px-3 py-2 text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-brand/40"
+                />
+                <Button variant="filled" loading={kirim} onClick={balas} disabled={!teks.trim()}>Kirim</Button>
+              </div>
+            </>
+          )}
+        </Card>
+      </div>
+    </Layout>
+  );
+}
