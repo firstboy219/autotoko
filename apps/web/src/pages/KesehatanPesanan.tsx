@@ -30,6 +30,8 @@ interface Row {
   sku?: string;
   nama?: string;
   note?: string | null;
+  harap?: number;
+  terbaca?: number;
   at?: string;
 }
 interface Metric { total: number; contoh: Row[] }
@@ -38,7 +40,7 @@ interface Health {
   manualTanpaApi: Metric;
   skuBelumDipetakan: Metric;
   tanpaNominal: Metric;
-  verifikasiSelisih: Metric;
+  isiTakCocok: Metric;
 }
 
 const tgl = (s?: string) => (s ? new Date(s).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" }) : "-");
@@ -89,14 +91,15 @@ const CARDS: CardDef[] = [
     ],
   },
   {
-    key: "verifikasiSelisih", icon: "warning", tone: "danger",
-    title: "Paket selisih saat verifikasi packing",
-    desc: "Tim packing menandai isi paket tidak cocok dengan pesanan (kurang / salah item) saat verifikasi. Harus ditindak sebelum benar-benar dikirim.",
-    aksi: "Tindak: cek fisik paket vs pesanan; benahi sebelum kirim.",
+    key: "isiTakCocok", icon: "warning", tone: "warning",
+    title: "Jumlah item terbaca ≠ pesanan",
+    desc: "Saat resi discan, tim membaca daftar produk (tahap opsional). Bila jumlah item yang terbaca beda dari yang dipesan, mungkin ada yang kurang/lebih. Sifatnya advisory — bergantung daftar produk memang discan, bukan vonis.",
+    aksi: "Tindak: cek fisik paket vs pesanan sebelum dikirim.",
     kolom: [
       { k: "no", label: "No. Pesanan" },
-      { k: "note", label: "Catatan" },
-      { k: "at", label: "Diverifikasi", render: (r) => tgl(r.at) },
+      { k: "harap", label: "Dipesan" },
+      { k: "terbaca", label: "Terbaca" },
+      { k: "at", label: "Discan", render: (r) => tgl(r.at) },
     ],
   },
   {

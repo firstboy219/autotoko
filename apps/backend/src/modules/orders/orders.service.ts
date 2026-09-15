@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, lte, notInArray, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { orders, orderSettings, resiScans, shops, marketplaceSkuMap, packingVerifications } from "../../database/schema/index.js";
+import { orders, orderSettings, resiScans, shops, marketplaceSkuMap } from "../../database/schema/index.js";
 
 export interface ListOrdersOpts {
   status?: FulfillmentStatus;
@@ -230,50 +230,34 @@ export class OrdersService {
       contoh: await one(sql`SELECT marketplace_order_id AS no, fulfillment_status AS fs, created_at AS at FROM orders WHERE ${wNom} ORDER BY created_at DESC LIMIT 50`),
     };
 
-    const wSelisih = sql`v.user_id = ${userId} AND v.status = 'discrepancy'`;
-    const verifikasiSelisih = {
-      total: await cnt(sql`SELECT count(*)::int AS n FROM packing_verifications v WHERE ${wSelisih}`),
-      contoh: await one(sql`SELECT o.marketplace_order_id AS no, v.note AS note, v.verified_at AS at FROM packing_verifications v JOIN orders o ON o.id = v.order_id WHERE ${wSelisih} ORDER BY v.verified_at DESC LIMIT 50`),
+    // Auto-cocok isi paket: untuk order yang resinya sudah discan DAN itemnya
+    // terbaca (tahap "Daftar Produk"), bandingkan total qty terbaca vs qty
+    // pesanan. Beda = perlu dicek. ADVISORY: OCR daftar produk opsional, jadi
+    // ini penanda, bukan vonis; verifikasi "sudah dipacking" tetap si scan itu.
+    const isiCte = sql`
+      WITH harap AS (
+        SELECT o.id AS oid, o.marketplace_order_id AS no,
+               SUM(COALESCE((it->>'qty')::int, 0)) AS harap_qty
+          FROM orders o
+          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(o.items) = 'array' THEN o.items ELSE '[]'::jsonb END) it
+         WHERE o.user_id = ${userId}
+         GROUP BY o.id, o.marketplace_order_id
+      ),
+      scan AS (
+        SELECT r.order_id AS oid, SUM(i.qty) AS scan_qty, COUNT(i.id) AS n, MAX(r.scanned_at) AS at
+          FROM resi_scans r JOIN resi_scan_items i ON i.resi_scan_id = r.id
+         WHERE r.user_id = ${userId} AND r.order_id IS NOT NULL
+         GROUP BY r.order_id
+      )
+      SELECT h.no AS no, h.harap_qty AS harap, s.scan_qty AS terbaca, s.at AS at
+        FROM harap h JOIN scan s ON s.oid = h.oid
+       WHERE s.n > 0 AND s.scan_qty IS NOT NULL AND s.scan_qty <> h.harap_qty`;
+    const isiTakCocok = {
+      total: await cnt(sql`SELECT count(*)::int AS n FROM (${isiCte}) x`),
+      contoh: await one(sql`SELECT no, harap, terbaca, at FROM (${isiCte}) x ORDER BY at DESC LIMIT 50`),
     };
 
-    return { belumDiscan, manualTanpaApi, skuBelumDipetakan, tanpaNominal, verifikasiSelisih };
-  }
-
-  /**
-   * Rekam verifikasi packing (scan-verify): apakah isi paket dicek cocok
-   * sebelum dikirim. Satu baris TERAKHIR per order (upsert). status 'ok' atau
-   * 'discrepancy' (+ catatan & snapshot item). Tidak mengubah status order.
-   */
-  async packingVerify(
-    userId: string,
-    orderId: string,
-    dto: { status: string; items?: unknown; note?: string },
-  ) {
-    const [o] = await this.db
-      .select({ id: orders.id })
-      .from(orders)
-      .where(and(eq(orders.id, orderId), eq(orders.userId, userId)))
-      .limit(1);
-    if (!o) throw new NotFoundException("Order tidak ditemukan");
-    const status = dto.status === "discrepancy" ? "discrepancy" : "ok";
-    const items = (dto.items ?? null) as never;
-    await this.db
-      .insert(packingVerifications)
-      .values({ userId, orderId, status, items, note: dto.note ?? null, verifiedBy: userId, verifiedAt: new Date() })
-      .onConflictDoUpdate({
-        target: [packingVerifications.userId, packingVerifications.orderId],
-        set: { status, items, note: dto.note ?? null, verifiedBy: userId, verifiedAt: new Date() },
-      });
-    return { ok: true, status };
-  }
-
-  async getPackingVerify(userId: string, orderId: string) {
-    const [v] = await this.db
-      .select()
-      .from(packingVerifications)
-      .where(and(eq(packingVerifications.userId, userId), eq(packingVerifications.orderId, orderId)))
-      .limit(1);
-    return v ?? null;
+    return { belumDiscan, manualTanpaApi, skuBelumDipetakan, tanpaNominal, isiTakCocok };
   }
 
   async boardSummary(userId: string) {

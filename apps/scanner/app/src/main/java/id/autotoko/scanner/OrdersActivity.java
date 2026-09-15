@@ -494,7 +494,6 @@ public class OrdersActivity extends AppCompatActivity {
             String nx = nextStatus(stat);
             if (nx != null) act.addView(btn("Lanjut ke " + label(nx), true, v -> { dlg.dismiss(); ubahStatus(id, nx); }));
         }
-        act.addView(btn("Verifikasi Packing", false, v -> { dlg.dismiss(); verifikasiPacking(o, id); }));
         act.addView(btn("Cetak AWB / Resi", false, v -> cetakAwb(id)));
         act.addView(btn("Kirim ke marketplace (RTS)", true, v -> konfirmRts(id, o.optString("marketplaceOrderId"), dlg)));
         col.addView(act);
@@ -696,60 +695,6 @@ public class OrdersActivity extends AppCompatActivity {
             i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivity(i);
         } catch (Exception e) { toast("Gagal buka " + name); }
-    }
-
-    /** Scan-verify: centang item yang masuk ke paket; yang tak dicentang =
-     *  kurang/salah. TIDAK menyentuh alur scan OCR — murni konfirmasi isi. */
-    private void verifikasiPacking(JSONObject o, String id) {
-        JSONArray items = o.optJSONArray("items");
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(dp(20), dp(8), dp(20), dp(8));
-        TextView hint = new TextView(this);
-        hint.setText("Centang item yang benar-benar masuk ke paket. Yang tidak dicentang dianggap kurang/salah.");
-        hint.setTextSize(12); hint.setTextColor(getColor(R.color.ink2)); hint.setPadding(0, 0, 0, dp(8));
-        col.addView(hint);
-        final java.util.List<android.widget.CheckBox> boxes = new java.util.ArrayList<>();
-        final java.util.List<String> names = new java.util.ArrayList<>();
-        final java.util.List<Integer> qtys = new java.util.ArrayList<>();
-        if (items != null) {
-            for (int i = 0; i < items.length(); i++) {
-                JSONObject it = items.optJSONObject(i); if (it == null) continue;
-                String nm = it.optString("name", it.optString("skuName", "-"));
-                int qty = it.optInt("qty", 1);
-                android.widget.CheckBox cbx = new android.widget.CheckBox(this);
-                cbx.setText(qty + " x " + nm); cbx.setChecked(true); cbx.setTextColor(getColor(R.color.ink));
-                col.addView(cbx); boxes.add(cbx); names.add(nm); qtys.add(qty);
-            }
-        }
-        if (boxes.isEmpty()) {
-            TextView kosong = new TextView(this);
-            kosong.setText("Pesanan ini belum punya rincian item."); kosong.setTextColor(getColor(R.color.ink3));
-            col.addView(kosong);
-        }
-        ScrollView sv = new ScrollView(this); sv.addView(col);
-        new MaterialAlertDialogBuilder(this)
-                .setTitle("Verifikasi Packing")
-                .setView(sv)
-                .setNegativeButton("Batal", null)
-                .setPositiveButton("Simpan", (di, w) -> {
-                    JSONArray snap = new JSONArray();
-                    boolean semua = true; StringBuilder kurang = new StringBuilder();
-                    for (int i = 0; i < boxes.size(); i++) {
-                        boolean ck = boxes.get(i).isChecked();
-                        if (!ck) { semua = false; if (kurang.length() > 0) kurang.append(", "); kurang.append(names.get(i)); }
-                        try {
-                            JSONObject s = new JSONObject();
-                            s.put("name", names.get(i)); s.put("expected", qtys.get(i)); s.put("checked", ck);
-                            snap.put(s);
-                        } catch (Exception ignore) {}
-                    }
-                    final boolean ok = semua;
-                    String status = ok ? "ok" : "discrepancy";
-                    String note = ok ? null : ("Kurang/salah: " + kurang);
-                    api.packingVerify(id, status, snap, note, r ->
-                            toast(r != null && r.ok() ? (ok ? "Terverifikasi ✓" : "Dicatat: ada selisih") : "Gagal menyimpan"));
-                }).show();
     }
 
     private TextView badge(String stat) {

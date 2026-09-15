@@ -128,16 +128,6 @@ public final class Api {
     public void orderStatusMeta(Cb cb) {
         call("GET", session.baseUrl() + "/api/orders/status-meta", session.token(), null, cb);
     }
-    /** Verifikasi packing (scan-verify): rekam apakah isi paket cocok sebelum kirim. */
-    public void packingVerify(String orderId, String status, JSONArray items, String note, Cb cb) {
-        JSONObject p = new JSONObject();
-        try {
-            p.put("status", status);
-            if (items != null) p.put("items", items);
-            if (note != null) p.put("note", note);
-        } catch (Exception ignore) {}
-        call("POST", session.baseUrl() + "/api/orders/" + orderId + "/packing-verify", session.token(), p, cb);
-    }
     public void orderUpdateStatus(String id, String status, Cb cb) {
         JSONObject p = new JSONObject();
         try { p.put("status", status); } catch (Exception ignored) {}

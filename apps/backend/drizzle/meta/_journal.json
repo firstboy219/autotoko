@@ -442,13 +442,6 @@
       "when": 1789430468621,
       "tag": "0062_chat",
       "breakpoints": true
-    },
-    {
-      "idx": 63,
-      "version": "7",
-      "when": 1789434288501,
-      "tag": "0063_packing_verify",
-      "breakpoints": true
     }
   ]
 }
