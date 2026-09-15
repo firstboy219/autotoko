@@ -14,6 +14,7 @@ import {
   shops,
   marketplaceConversations,
   marketplaceReturns,
+  autopilotActivity,
 } from "../../database/schema/index.js";
 import { CryptoService } from "../../common/crypto/crypto.service.js";
 import { TenantService } from "../../database/tenant.service.js";
@@ -362,6 +363,7 @@ export class MarketplaceSyncService {
       const t = b.updatedAtMarketplace;
       if (t && (watermark === null || t.getTime() > watermark.getTime())) watermark = t;
     }
+    const autoApproved: string[] = [];
     const nilai = baris.map((b) => {
       const fsBase = majukanStatus(statusLama.get(b.marketplaceOrderId), b.fulfillmentStatus);
       // Auto-proses hanya untuk order yang BENAR-BENAR siap diproses
@@ -371,6 +373,7 @@ export class MarketplaceSyncService {
         (b.status ?? "").toUpperCase() === "AWAITING_SHIPMENT"
           ? autoProses(fsBase, b.shippingCourier, cfg ?? null)
           : fsBase;
+      if (fs === "approved" && fsBase !== "approved") autoApproved.push(b.marketplaceOrderId);
       return {
         userId: toko.userId,
         shopId: toko.id,
@@ -436,6 +439,23 @@ export class MarketplaceSyncService {
             updatedAt: sql`excluded.updated_at`,
           },
         }));
+    }
+
+    // Transparansi Autopilot: catat order baru yang OTOMATIS disetujui oleh
+    // auto-proses (masuk -> approved). id order internal tak tersedia di jalur
+    // bulk ini, jadi no. pesanan disimpan di summary/meta. Best-effort (bypass).
+    if (autoApproved.length) {
+      await this.bypass(() => this.db.insert(autopilotActivity).values(
+        autoApproved.map((no) => ({
+          userId: toko.userId,
+          feature: "auto_approve",
+          action: "approve",
+          status: "done" as const,
+          summary: `Order ${no} otomatis disetujui (Menunggu Dicetak)`,
+          refType: "order",
+          meta: { orderNo: no },
+        })),
+      )).catch(() => {});
     }
 
     // Nama SKU hanya ada di line item pesanan, bukan di daftar produk. Diisi
