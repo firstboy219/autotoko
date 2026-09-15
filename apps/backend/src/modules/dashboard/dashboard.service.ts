@@ -61,6 +61,63 @@ export class DashboardService {
     };
   }
 
+  /**
+   * Komposisi order HARI INI (waktu Jakarta): kontribusi tiap toko + produk
+   * apa saja yang terbeli beserta qty-nya. Read-only, tenant-scoped. Dipakai
+   * APK saat kartu ringkasan "Order & omzet" diklik.
+   */
+  async todayComposition(userId: string) {
+    const start = this.jakartaStartOfDay();
+    const rows = await this.db
+      .select({
+        shopId: orders.shopId,
+        shopName: sql<string>`coalesce(${shops.displayName}, ${shops.shopName}, '(tanpa toko)')`,
+        totalAmount: orders.totalAmount,
+        items: orders.items,
+      })
+      .from(orders)
+      .leftJoin(shops, eq(shops.id, orders.shopId))
+      .where(and(eq(orders.userId, userId), gte(orders.createdAt, start)));
+
+    const perShop = new Map<string, { shopId: string | null; shopName: string; orders: number; revenue: number }>();
+    const prod = new Map<string, { name: string; qty: number; orders: number }>();
+    let totalOrders = 0;
+    let totalRevenue = 0;
+
+    for (const r of rows) {
+      totalOrders += 1;
+      const rev = r.totalAmount != null ? Number(r.totalAmount) : 0;
+      totalRevenue += rev;
+      const key = r.shopId ?? "?";
+      if (!perShop.has(key)) perShop.set(key, { shopId: r.shopId, shopName: r.shopName, orders: 0, revenue: 0 });
+      const ps = perShop.get(key)!;
+      ps.orders += 1;
+      ps.revenue += rev;
+
+      const items = Array.isArray(r.items) ? (r.items as Array<Record<string, unknown>>) : [];
+      const seen = new Set<string>();
+      for (const it of items) {
+        const nama = String(
+          (it?.name ?? it?.skuName ?? it?.sellerSku ?? it?.skuId ?? "(tanpa nama)") as string,
+        );
+        const qty = Number(it?.quantity ?? it?.qty ?? it?.count ?? 1) || 0;
+        if (!prod.has(nama)) prod.set(nama, { name: nama, qty: 0, orders: 0 });
+        const pm = prod.get(nama)!;
+        pm.qty += qty;
+        if (!seen.has(nama)) { pm.orders += 1; seen.add(nama); }
+      }
+    }
+
+    return {
+      totalOrders,
+      totalRevenue: String(totalRevenue),
+      perShop: [...perShop.values()]
+        .sort((a, b) => b.orders - a.orders)
+        .map((s) => ({ shopId: s.shopId, shopName: s.shopName, orders: s.orders, revenue: String(s.revenue) })),
+      products: [...prod.values()].sort((a, b) => b.qty - a.qty),
+    };
+  }
+
   /** Actionable alert cards: low BOM stock, low wallet, soon-expiring tokens. */
   async alerts(userId: string) {
     // Low stock — bom_items whose master belongs to the user.

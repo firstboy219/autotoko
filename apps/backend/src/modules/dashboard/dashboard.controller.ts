@@ -141,4 +141,9 @@ export class DashboardController {
   async alerts(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.dashboard.alerts(uid(req)) };
   }
+
+  @Get("today-composition")
+  async todayComposition(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.dashboard.todayComposition(uid(req)) };
+  }
 }

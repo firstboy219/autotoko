@@ -358,6 +358,11 @@ public final class Api {
         call("GET", session.baseUrl() + "/api/dashboard/summary", session.token(), null, cb);
     }
 
+    /** Komposisi order hari ini: kontribusi tiap toko + produk & qty terbeli. */
+    public void todayComposition(Cb cb) {
+        call("GET", session.baseUrl() + "/api/dashboard/today-composition", session.token(), null, cb);
+    }
+
     /** Stok menipis, saldo wallet rendah, token toko yang mau kedaluwarsa. */
     public void dashboardAlerts(Cb cb) {
         call("GET", session.baseUrl() + "/api/dashboard/alerts", session.token(), null, cb);

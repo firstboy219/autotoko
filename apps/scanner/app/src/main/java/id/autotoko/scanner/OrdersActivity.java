@@ -87,7 +87,8 @@ public class OrdersActivity extends AppCompatActivity {
     private TextView status;
     private EditText search;
     private JSONArray all = new JSONArray();
-    private String filter = "";      // "" = semua
+    private String filter = FLOW[0]; // tab pertama (tanpa "Semua")
+    private androidx.swiperefreshlayout.widget.SwipeRefreshLayout srl;
     private String q = "";
     private boolean autoBatch = false;
 
@@ -230,10 +231,29 @@ public class OrdersActivity extends AppCompatActivity {
         list.setPadding(dp(12), 0, dp(12), dp(16));
         ScrollView sv = new ScrollView(this);
         sv.addView(list);
+
+        // Geser ke bawah = muat ulang; geser kiri/kanan = pindah tab. // tab Semua dihapus
+        srl = new androidx.swiperefreshlayout.widget.SwipeRefreshLayout(this);
+        srl.addView(sv, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        sv.setLayoutParams(lp);
-        rootCol.addView(sv);
+        srl.setLayoutParams(lp);
+        srl.setOnRefreshListener(this::muat);
+        final android.view.GestureDetector gd = new android.view.GestureDetector(this,
+                new android.view.GestureDetector.SimpleOnGestureListener() {
+                    @Override public boolean onFling(android.view.MotionEvent e1, android.view.MotionEvent e2, float vx, float vy) {
+                        if (e1 == null || e2 == null) return false;
+                        float ddx = e2.getX() - e1.getX(), ddy = e2.getY() - e1.getY();
+                        if (Math.abs(ddx) > Math.abs(ddy) * 1.5f && Math.abs(ddx) > dp(60) && Math.abs(vx) > 400) {
+                            pindahTab(ddx < 0 ? 1 : -1);
+                            return true;
+                        }
+                        return false;
+                    }
+                });
+        sv.setOnTouchListener((v, ev) -> { gd.onTouchEvent(ev); return false; });
+        rootCol.addView(srl);
 
         setContentView(rootCol);
         muat();
@@ -265,6 +285,7 @@ public class OrdersActivity extends AppCompatActivity {
             if (all.length() > 0) { buildTabs(); render(); }
         });
         api.orders(true, r -> {
+            if (srl != null) srl.setRefreshing(false);
             if (r == null || !r.ok() || r.dataArray() == null) {
                 status.setText(r == null ? "Gagal memuat." : r.message("Gagal memuat pesanan."));
                 return;
@@ -276,9 +297,18 @@ public class OrdersActivity extends AppCompatActivity {
         });
     }
 
+    private void pindahTab(int dir) {
+        int idx = 0;
+        for (int i = 0; i < FLOW.length; i++) if (FLOW[i].equals(filter)) { idx = i; break; }
+        int ni = idx + dir;
+        if (ni < 0 || ni >= FLOW.length) return;
+        filter = FLOW[ni];
+        buildTabs();
+        render();
+    }
+
     private void buildTabs() {
         tabs.removeAllViews();
-        addTab("Semua", "");
         for (String s : FLOW) addTab(label(s), s);
     }
 

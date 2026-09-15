@@ -176,10 +176,13 @@ public class DashboardActivity extends AppCompatActivity {
     private void hariIni() {
         if (ringkasHariIni == null) return;
         root.addView(judul("Hari ini"));
-        root.addView(kotak("Order & omzet",
+        LinearLayout kOrder = kotak("Order & omzet",
                 ringkasHariIni.optInt("today_orders", 0) + " order hari ini"
                         + "\n" + rp(ringkasHariIni.optDouble("today_revenue", 0)) + " omzet hari ini"
-                        + "\n" + ringkasHariIni.optInt("active_shops", 0) + " toko aktif"));
+                        + "\n" + ringkasHariIni.optInt("active_shops", 0) + " toko aktif"
+                        + "\n\u2192 ketuk untuk lihat komposisi (toko & produk)");
+        kOrder.setOnClickListener(v -> bukaKomposisiHariIni());
+        root.addView(kOrder);
         // Total sepanjang masa ikut, seperti di web: angka hari ini tanpa
         // pembandingnya tidak memberi tahu apakah hari ini ramai atau sepi.
         root.addView(kotak("Sepanjang masa",
@@ -649,6 +652,75 @@ public class DashboardActivity extends AppCompatActivity {
 
     private static String persen(JSONObject cov, String key) {
         return cov.isNull(key) ? "—" : cov.optDouble(key) + "%";
+    }
+
+    /** Rincian komposisi order hari ini: per toko + produk & qty. */
+    private void bukaKomposisiHariIni() {
+        android.widget.Toast.makeText(this, "Memuat komposisi\u2026", android.widget.Toast.LENGTH_SHORT).show();
+        api.todayComposition(r -> {
+            if (r == null || !r.ok() || r.data() == null) {
+                android.widget.Toast.makeText(this, "Gagal memuat komposisi.", android.widget.Toast.LENGTH_SHORT).show();
+                return;
+            }
+            JSONObject d = r.data();
+            int pad = (int) (16 * dp());
+            LinearLayout box = new LinearLayout(this);
+            box.setOrientation(LinearLayout.VERTICAL);
+            box.setPadding(pad, pad, pad, pad);
+
+            double rev = 0; try { rev = Double.parseDouble(d.optString("totalRevenue", "0")); } catch (Exception ignore) {}
+            TextView head = new TextView(this);
+            head.setTextSize(15);
+            head.setTextColor(Color.parseColor("#20242B"));
+            head.setText(d.optInt("totalOrders", 0) + " order \u00b7 " + rp(rev) + " hari ini");
+            box.addView(head);
+
+            JSONArray ps = d.optJSONArray("perShop");
+            box.addView(seksiKomposisi("Per toko"));
+            if (ps == null || ps.length() == 0) box.addView(barisKomposisi("Belum ada order hari ini.", true));
+            else for (int i = 0; i < ps.length(); i++) {
+                JSONObject sh = ps.optJSONObject(i); if (sh == null) continue;
+                double sr = 0; try { sr = Double.parseDouble(sh.optString("revenue", "0")); } catch (Exception ignore) {}
+                box.addView(barisKomposisi(sh.optString("shopName", "(tanpa toko)") + "  \u2014  "
+                        + sh.optInt("orders", 0) + " order \u00b7 " + rp(sr), false));
+            }
+
+            JSONArray pr = d.optJSONArray("products");
+            box.addView(seksiKomposisi("Produk dibeli"));
+            if (pr == null || pr.length() == 0) box.addView(barisKomposisi("Belum ada produk hari ini.", true));
+            else for (int i = 0; i < pr.length(); i++) {
+                JSONObject po = pr.optJSONObject(i); if (po == null) continue;
+                box.addView(barisKomposisi(po.optInt("qty", 0) + " pcs  \u00b7  "
+                        + po.optString("name", "(tanpa nama)") + "  (" + po.optInt("orders", 0) + " order)", false));
+            }
+
+            ScrollView sc = new ScrollView(this);
+            sc.addView(box);
+            new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Komposisi hari ini")
+                    .setView(sc)
+                    .setPositiveButton("Tutup", null)
+                    .show();
+        });
+    }
+
+    private TextView seksiKomposisi(String t) {
+        TextView tv = new TextView(this);
+        tv.setTextSize(13);
+        tv.setTypeface(null, android.graphics.Typeface.BOLD);
+        tv.setTextColor(Color.parseColor("#20242B"));
+        tv.setPadding(0, (int) (14 * dp()), 0, (int) (4 * dp()));
+        tv.setText(t);
+        return tv;
+    }
+
+    private TextView barisKomposisi(String t, boolean redup) {
+        TextView tv = new TextView(this);
+        tv.setTextSize(13);
+        tv.setTextColor(redup ? abu() : Color.parseColor("#3A4048"));
+        tv.setPadding(0, (int) (3 * dp()), 0, (int) (3 * dp()));
+        tv.setText(t);
+        return tv;
     }
 
     static String rp(double v) {

@@ -23,7 +23,7 @@ public class LoginActivity extends AppCompatActivity {
         api = new Api(session);
 
         if (session.loggedIn()) {
-            startActivity(new Intent(this, ScanActivity.class));
+            startActivity(new Intent(this, DashboardActivity.class));
             finish();
             return;
         }
@@ -73,7 +73,7 @@ public class LoginActivity extends AppCompatActivity {
             }
             session.save(base, token, email);
             if (!device.isEmpty()) session.setDevice(device);
-            startActivity(new Intent(this, ScanActivity.class));
+            startActivity(new Intent(this, DashboardActivity.class));
             finish();
         });
     }
