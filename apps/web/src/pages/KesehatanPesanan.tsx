@@ -29,6 +29,7 @@ interface Row {
   resi?: string | null;
   sku?: string;
   nama?: string;
+  note?: string | null;
   at?: string;
 }
 interface Metric { total: number; contoh: Row[] }
@@ -37,6 +38,7 @@ interface Health {
   manualTanpaApi: Metric;
   skuBelumDipetakan: Metric;
   tanpaNominal: Metric;
+  verifikasiSelisih: Metric;
 }
 
 const tgl = (s?: string) => (s ? new Date(s).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" }) : "-");
@@ -84,6 +86,17 @@ const CARDS: CardDef[] = [
     kolom: [
       { k: "nama", label: "Nama (dari postingan)" },
       { k: "sku", label: "SKU ID", render: (r) => <span className="font-mono text-xs">{r.sku}</span> },
+    ],
+  },
+  {
+    key: "verifikasiSelisih", icon: "warning", tone: "danger",
+    title: "Paket selisih saat verifikasi packing",
+    desc: "Tim packing menandai isi paket tidak cocok dengan pesanan (kurang / salah item) saat verifikasi. Harus ditindak sebelum benar-benar dikirim.",
+    aksi: "Tindak: cek fisik paket vs pesanan; benahi sebelum kirim.",
+    kolom: [
+      { k: "no", label: "No. Pesanan" },
+      { k: "note", label: "Catatan" },
+      { k: "at", label: "Diverifikasi", render: (r) => tgl(r.at) },
     ],
   },
   {

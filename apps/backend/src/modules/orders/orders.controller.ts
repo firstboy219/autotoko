@@ -45,6 +45,17 @@ class OrderSettingsDto {
   instantCouriers?: string[];
 }
 
+class PackingVerifyDto {
+  @IsIn(["ok", "discrepancy"])
+  status!: string;
+
+  @IsOptional() @IsArray()
+  items?: unknown[];
+
+  @IsOptional() @IsString()
+  note?: string;
+}
+
 class ListOrdersQuery {
   @IsOptional() @IsIn(FULFILLMENT_STATUSES as unknown as string[])
   status?: FulfillmentStatus;
@@ -110,6 +121,20 @@ export class OrdersController {
   @Get("status-meta")
   statusMeta(): ApiResponse<unknown> {
     return { success: true, data: this.orders.statusMeta() };
+  }
+
+  @Get(":id/packing-verify")
+  async getPackingVerify(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.getPackingVerify(uid(req), id) };
+  }
+
+  @Post(":id/packing-verify")
+  async packingVerify(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: PackingVerifyDto,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.packingVerify(uid(req), id, dto) };
   }
 
   @Get("settings")
