@@ -3,6 +3,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   notifications,
+  orders,
   pricingConfig,
   shops,
   type NavPrefs,
@@ -152,6 +153,39 @@ export class AccountService {
         set: { nav, updatedAt: new Date() },
       });
     return nav;
+  }
+
+  /**
+   * Pemakaian vs batas paket (meter, read-only). Tidak menegakkan/gating apa pun
+   * -- penegakan keras (blokir connect/order, mode baca-saja saat saldo habis)
+   * adalah keputusan kebijakan yang menyentuh operasi LIVE, dibuat terpisah.
+   * fees bulan ini dihitung dari orders.platform_fee (aman-RLS), bukan dari
+   * wallet_transactions (yang belum ber-RLS).
+   */
+  async usage(userId: string) {
+    const [u] = await this.db.select({ planType: users.planType }).from(users).where(eq(users.id, userId)).limit(1);
+    const plan = (u?.planType ?? "freemium") as PlanType;
+    const [pricing] = await this.db.select().from(pricingConfig).where(eq(pricingConfig.planType, plan)).limit(1);
+    const [w] = await this.db.select({ balance: wallets.balance }).from(wallets).where(eq(wallets.userId, userId)).limit(1);
+    const shopRows = await this.db.select({ id: shops.id }).from(shops).where(eq(shops.userId, userId));
+    const start = new Date(); start.setDate(1); start.setHours(0, 0, 0, 0);
+    const rows = (await this.db.execute(sql`
+      SELECT count(*)::int AS n,
+             COALESCE(sum(platform_fee) FILTER (WHERE fee_deducted), 0)::text AS fees
+        FROM orders
+       WHERE user_id = ${userId} AND created_at >= ${start.toISOString()}`)) as unknown as { n: number; fees: string }[];
+    const ord = rows[0] ?? { n: 0, fees: "0" };
+    return {
+      plan,
+      monthlyFee: pricing?.monthlyFee ?? "0",
+      perTransactionFee: pricing?.perTransactionFee ?? "0",
+      maxShops: pricing?.maxShops ?? null,
+      maxOrdersPerMonth: pricing?.maxOrdersPerMonth ?? null,
+      shopsUsed: shopRows.length,
+      ordersThisMonth: Number(ord.n ?? 0),
+      walletBalance: w?.balance ?? "0",
+      feesThisMonth: ord.fees ?? "0",
+    };
   }
 
   async listPlans() {

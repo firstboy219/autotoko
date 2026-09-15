@@ -15,6 +15,63 @@ interface Plan {
 const LABEL: Record<string, string> = { freemium: "Freemium", starter: "Starter", pro: "Pro" };
 const rp = (n: number) => "Rp " + n.toLocaleString("id-ID");
 
+interface Usage {
+  plan: string;
+  monthlyFee: string; perTransactionFee: string;
+  maxShops: number | null; maxOrdersPerMonth: number | null;
+  shopsUsed: number; ordersThisMonth: number;
+  walletBalance: string; feesThisMonth: string;
+}
+
+/** Kartu pemakaian vs batas paket (meter, read-only). Tidak memblokir apa pun. */
+function UsageCard() {
+  const [u, setU] = useState<Usage | null>(null);
+  useEffect(() => { api.get<Usage>("/account/usage").then(setU).catch(() => {}); }, []);
+  if (!u) return null;
+
+  const meter = (label: string, used: number, max: number | null, unit: string) => {
+    const unlimited = max == null;
+    const pct = unlimited ? 0 : Math.min(100, Math.round((used / Math.max(max, 1)) * 100));
+    const over = !unlimited && used > max;
+    const near = !unlimited && pct >= 80 && !over;
+    const color = over ? "#B3261E" : near ? "#B0740F" : "#0E6E55";
+    return (
+      <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <div className="text-[12px] text-slate-500">{label}</div>
+        <div className="text-lg font-bold text-slate-900 mt-0.5 tabular-nums">
+          {used.toLocaleString("id-ID")}<span className="text-slate-400 text-sm font-normal"> / {unlimited ? "∞" : max!.toLocaleString("id-ID")} {unit}</span>
+        </div>
+        <div className="h-1.5 rounded-full bg-slate-100 mt-2 overflow-hidden">
+          <div style={{ width: unlimited ? "8%" : `${pct}%`, background: color }} className="h-full rounded-full" />
+        </div>
+        {over && <div className="text-[11px] text-red-600 mt-1">Melebihi batas paket</div>}
+        {near && <div className="text-[11px] text-amber-700 mt-1">Mendekati batas</div>}
+        {unlimited && <div className="text-[11px] text-slate-400 mt-1">Tak terbatas</div>}
+      </div>
+    );
+  };
+
+  return (
+    <div className="mb-5">
+      <div className="text-sm font-semibold text-slate-700 mb-2">Pemakaian bulan ini · paket {LABEL[u.plan] ?? u.plan}</div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {meter("Toko tersambung", u.shopsUsed, u.maxShops, "toko")}
+        {meter("Order bulan ini", u.ordersThisMonth, u.maxOrdersPerMonth, "order")}
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="text-[12px] text-slate-500">Saldo Wallet</div>
+          <div className="text-lg font-bold text-slate-900 mt-0.5 tabular-nums">{rp(Number(u.walletBalance))}</div>
+          <div className="text-[11px] text-slate-400 mt-2">Fee/transaksi {rp(Number(u.perTransactionFee))}</div>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="text-[12px] text-slate-500">Fee transaksi bulan ini</div>
+          <div className="text-lg font-bold text-slate-900 mt-0.5 tabular-nums">{rp(Number(u.feesThisMonth))}</div>
+          <div className="text-[11px] text-slate-400 mt-2">Langganan {rp(Number(u.monthlyFee))}/bln</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Paket() {
   const { me, load, setMe } = useAccount();
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -34,6 +91,7 @@ export function Paket() {
 
   return (
     <Layout title="Paket Langganan">
+      <UsageCard />
       <p className="text-sm text-slate-500 mb-4">Pilih paket yang sesuai. Paket aktif kamu sekarang: <b>{me ? LABEL[me.planType] : "…"}</b></p>
       {err && <div className="text-red-500 text-sm mb-3">{err}</div>}
       <div className="grid gap-3 md:grid-cols-3">

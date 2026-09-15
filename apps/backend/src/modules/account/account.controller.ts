@@ -37,6 +37,11 @@ export class AccountController {
     return { success: true, data: await this.account.updateProfile(this.uid(req), dto.fullName) };
   }
 
+  @Get("usage")
+  async usage(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.account.usage(this.uid(req)) };
+  }
+
   @Get("plans")
   async plans(): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.account.listPlans() };
