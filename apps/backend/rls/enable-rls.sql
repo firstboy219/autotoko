@@ -63,7 +63,8 @@ BEGIN
     ('review_logs','shop_id','shops'),
     ('order_api_snapshots','shop_id','shops'),
     ('fulfillment_api_snapshots','shop_id','shops'),
-    ('resi_scan_items','resi_scan_id','resi_scans')
+    ('resi_scan_items','resi_scan_id','resi_scans'),
+    ('product_postings','shop_id','shops')
   ) AS x(tbl, fk, parent) LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', r.tbl);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', r.tbl);
