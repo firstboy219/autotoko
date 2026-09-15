@@ -119,3 +119,51 @@ verifikasi sha256 unduhan). Update DITAWARKAN (bukan paksa). Terakhir **5.15/56*
 Prinsip data yang mengikat semua: data manual jangan rusak/hilang; migrasi
 aditif; di SaaS "jangan rusak data" berkembang jadi "jangan bocorkan data
 lintas-tenant" — audit RLS setiap tabel/endpoint baru sebelum menambah tenant.
+
+
+## 8. Ledger fase (per 15 September 2026)
+
+- **Fase 0** rapikan ekosistem — SELESAI (nav 6+1 domain, label status
+  single-source, dsb).
+- **Fase 1** fitur (fondasi) — SELESAI: Kesehatan Pesanan; Retur (baca;
+  approve/reject = aksi live, dorman sampai scope); Chat (baca + antre balasan,
+  kirim dorman sampai scope CS/approval).
+- **Fase 2** stok omnichannel — SELESAI & LIVE: `GET /inventory/omnichannel`
+  + halaman **Stok Omnichannel** (habis / menipis / tak-tahu + deteksi
+  TAK-SINKRON antar listing dari master yang sama), read-only, dari data
+  `marketplace_skus` yang sudah tersinkron. Data live: 821 SKU / 5 toko
+  (142 habis, 96 tak-tahu, 1 master tak-sinkron). Push stok/harga = homework.
+- **Fase 3** keuangan/settlement — FONDASI SUDAH ADA (non-scope selesai):
+  statement di-import (XLSX / OCR bukti pencairan) -> rekonsiliasi vs order
+  (`/statements/reconcile`, halaman Rekonsiliasi) -> surface di Audit &
+  DashboardV2 ("Uang masuk") -> feed HPP / biaya-marketplace. Modul payout
+  lengkap (sub-seller berjenjang, batch, mutasi, disbursement, profit). Sisa =
+  auto-sync Finance API (homework).
+- **Fase 4** listing/promo — Kesehatan Katalog ADA. Sisa (promo/voucher,
+  product create/edit, push listing) SELURUHNYA butuh Product-write /
+  Promotion scope = homework.
+- **SaaS S1** isolasi RLS — SELESAI kecuali 2 tabel (webhook_events,
+  wallet_transactions) yang butuh sesi interaktif. **S2** metering terpasang;
+  penegakan keras menunggu kebijakan pemilik.
+
+Catatan jujur: di luar Fase 2, tak ada kode NON-SCOPE & non-redundan yang
+tersisa untuk Fase 3/4 — membangun lagi hanya menduplikasi surface yang ada
+(Rekonsiliasi/Laporan/Pencairan; Katalog) atau butuh scope/kontrak yang belum
+aktif. Maka fase "diselesaikan" = bagian yang bisa dibangun sudah dibangun;
+sisanya di-ledger sebagai homework, bukan ditutup diam-diam.
+
+### Homework (menunggu scope/approval + verifikasi kontrak)
+Kontrak di bawah BELUM diverifikasi ke dok resmi (butuh sesi Chrome/interaktif);
+jangan dipakai sebelum diverifikasi:
+- **Product-write (push stok/harga)** — pola seperti push-nama; `POST
+  /product/202309/products/{id}/partial_edit` sudah LIVE untuk title. Untuk
+  stok/harga: endpoint update inventory / update price v202309 — VERIFIKASI
+  nama path & bentuk body saat scope aktif. Tulisan keluar ke listing live ->
+  WAJIB aksi manual + konfirmasi, tak pernah otomatis.
+- **Finance (withdrawal/settlement)** — auto-tarik settlement/transaction
+  menggantikan import XLSX manual. VERIFIKASI endpoint (statement/transaction
+  search) + scope Finance.
+- **Promotion/voucher** — kelola promo/voucher. VERIFIKASI endpoint + scope
+  Promotion.
+- **CS chat live** — butuh APPROVAL KHUSUS (bukan sekadar toggle scope).
+- **Reverse Order (retur live)** — scope standar, paling dekat diaktifkan.
