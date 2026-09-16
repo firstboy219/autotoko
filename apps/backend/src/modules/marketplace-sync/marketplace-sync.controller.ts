@@ -123,6 +123,12 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.batchPacking(uid(req), body?.orderIds ?? [], { handoverMethod: body?.handoverMethod, takeouts: body?.takeouts }) };
   }
 
+  /** E: dorong SKU varian mengikuti SKU master (push ke listing TikTok). */
+  @Post("skus/:skuId/push-seller-sku")
+  async pushSellerSku(@Req() req: FastifyRequest, @Param("skuId") skuId: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.pushSellerSku(uid(req), skuId) };
+  }
+
   /** Daftar batch yang sudah dibuat (poin 1: tampil di halaman order). */
   @Get("batches")
   async batches(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {

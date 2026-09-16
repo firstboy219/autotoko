@@ -531,12 +531,20 @@ function MarketplaceCatalog() {
     <Select
       value={v.masterId ?? ""}
       disabled={busy}
-      onChange={(e) =>
+      onChange={(e) => {
+        const masterId = e.target.value || null;
         aksi(
-          () => api.post("/products/variants/link", { skuId: v.skuId, masterId: e.target.value || null }),
-          e.target.value ? "Varian ditautkan ke master" : "Tautan dilepas",
-        )
-      }
+          async () => {
+            await api.post("/products/variants/link", { skuId: v.skuId, masterId });
+            // E: begitu dimapping ke master, dorong SKU varian di listing TikTok
+            // mengikuti SKU master (best-effort; kegagalan tak membatalkan mapping).
+            if (masterId) {
+              try { await api.post(`/marketplace-sync/skus/${v.skuId}/push-seller-sku`, {}); } catch { /* best-effort */ }
+            }
+          },
+          masterId ? "Varian ditautkan ke master (SKU didorong ke TikTok)" : "Tautan dilepas",
+        );
+      }}
       className={`min-w-[150px] max-w-[190px] ${v.masterId ? "" : "!border-amber-500 !border-dashed"}`}
     >
       <option value="">— belum dipetakan —</option>

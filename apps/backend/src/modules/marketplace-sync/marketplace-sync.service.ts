@@ -477,6 +477,25 @@ export class MarketplaceSyncService {
       )).catch(() => {});
     }
 
+    // Auto-Proses ke marketplace: jika seller mengaktifkan auto-proses, order
+    // yang baru auto-approved (AWAITING_SHIPMENT, berbayar, BUKAN instant/sameday)
+    // langsung di-RTS. Dibatasi 30/run + best-effort. Toggle default OFF.
+    if (cfg?.autoProses && autoApproved.length) {
+      const perluRts = await this.bypass(() => this.db
+        .select({ id: orders.id })
+        .from(orders)
+        .where(and(
+          eq(orders.userId, toko.userId),
+          eq(orders.shopId, toko.id),
+          inArray(orders.marketplaceOrderId, autoApproved),
+          eq(orders.status, "AWAITING_SHIPMENT"),
+        )));
+      for (const r of perluRts.slice(0, 30)) {
+        try { await this.shipOrder(toko.userId, r.id, { handoverMethod: "DROP_OFF" }); }
+        catch (e) { this.logger.warn(`Auto-RTS ${r.id}: ${(e as Error).message}`); }
+      }
+    }
+
     // Nama SKU hanya ada di line item pesanan, bukan di daftar produk. Diisi
     // dari sini, dan tidak ditimpa null oleh sinkronisasi produk sesudahnya.
     const skuNilai = new Map<string, {
@@ -742,6 +761,45 @@ export class MarketplaceSyncService {
       .set({ status: "cancelled", updatedAt: new Date() })
       .where(and(eq(orderBatches.id, id), eq(orderBatches.userId, userId))));
     return this.getBatch(userId, id);
+  }
+
+  /**
+   * E: dorong SKU (seller_sku) varian marketplace agar mengikuti SKU master
+   * AutoToko hasil mapping. TULISAN KELUAR ke listing TikTok (partial_edit,
+   * skus[{id, seller_sku}]). Best-effort; juga menyamakan cache lokal.
+   */
+  async pushSellerSku(userId: string, skuId: string): Promise<{ ok: boolean; sellerSku?: string; error?: string }> {
+    const [sku] = await this.bypass(() => this.db
+      .select({ productId: marketplaceSkus.productId, shopId: marketplaceSkus.shopId, marketplace: marketplaceSkus.marketplace })
+      .from(marketplaceSkus)
+      .where(and(eq(marketplaceSkus.userId, userId), eq(marketplaceSkus.skuId, skuId))).limit(1));
+    if (!sku) return { ok: false, error: "SKU tidak ditemukan" };
+    if (sku.marketplace !== "tiktok") return { ok: false, error: `${sku.marketplace} belum didukung` };
+    if (!sku.productId) return { ok: false, error: "Produk marketplace tak diketahui" };
+    const [peta] = await this.bypass(() => this.db
+      .select({ mid: marketplaceSkuMap.masterProductId })
+      .from(marketplaceSkuMap)
+      .where(and(eq(marketplaceSkuMap.userId, userId), eq(marketplaceSkuMap.marketplace, "tiktok"), eq(marketplaceSkuMap.sku, skuId))).limit(1));
+    if (!peta) return { ok: false, error: "Varian belum dipetakan ke master" };
+    const [master] = await this.bypass(() => this.db
+      .select({ sku: masterProducts.sku }).from(masterProducts).where(eq(masterProducts.id, peta.mid)).limit(1));
+    if (!master?.sku) return { ok: false, error: "Master tanpa SKU" };
+    const [toko] = await this.bypass(() => this.db.select().from(shops).where(eq(shops.id, sku.shopId)).limit(1));
+    if (!toko || !toko.accessToken || !toko.shopCipher) return { ok: false, error: "Toko tidak tersambung API" };
+    let klien = await this.klien(toko);
+    let segar = false;
+    const body = { skus: [{ id: skuId, seller_sku: master.sku }] };
+    for (;;) {
+      try { await klien.post(`/product/202309/products/${sku.productId}/partial_edit`, body); break; }
+      catch (e) {
+        if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(toko); continue; }
+        this.logger.warn(`Push seller_sku ${skuId}: ${(e as Error).message}`);
+        return { ok: false, error: (e as Error).message };
+      }
+    }
+    await this.bypass(() => this.db.update(marketplaceSkus).set({ sellerSku: master.sku })
+      .where(and(eq(marketplaceSkus.userId, userId), eq(marketplaceSkus.skuId, skuId))));
+    return { ok: true, sellerSku: master.sku };
   }
 
   /** Daftar batch packing (poin 1): tampil di halaman order. orderCount dihitung on-read. */
