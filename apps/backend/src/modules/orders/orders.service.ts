@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, lte, notInArray, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { orders, orderSettings, resiScans, shops, marketplaceSkuMap } from "../../database/schema/index.js";
+import { orders, orderSettings, resiScans, resiScanCodes, shops, marketplaceSkuMap } from "../../database/schema/index.js";
 
 export interface ListOrdersOpts {
   status?: FulfillmentStatus;
@@ -31,6 +31,75 @@ export type FulfillmentStatus = (typeof FULFILLMENT_STATUSES)[number];
 export class OrdersService {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
+  /** Normalisasi kunci resi: huruf besar, hanya alfanumerik (samakan dgn resi_scans.resi). */
+  private normResi(s: string | null | undefined): string {
+    return (s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+  private rawObj(o: { raw?: unknown }): Record<string, unknown> {
+    return o && typeof o.raw === "object" && o.raw ? (o.raw as Record<string, unknown>) : {};
+  }
+  private isCodOf(o: { raw?: unknown; paymentMethod?: string | null }): boolean {
+    if (this.rawObj(o).is_cod === true) return true;
+    const pm = (o.paymentMethod ?? "").toString().toLowerCase();
+    return pm.includes("cash on delivery") || pm === "cash";
+  }
+  /** Tenggat kirim (ms epoch) dari raw TikTok; angka detik dikonversi ke ms. Null bila tak ada. */
+  private deadlineOf(o: { raw?: unknown }): number | null {
+    const r = this.rawObj(o);
+    for (const c of [r.rts_sla_time, r.shipping_due_time, r.collection_due_time, r.tts_sla_time]) {
+      const n = Number(c);
+      if (Number.isFinite(n) && n > 0) return n < 1e12 ? n * 1000 : n;
+    }
+    return null;
+  }
+  private prioOf(o: { raw?: unknown }): number | null {
+    const n = Number(this.rawObj(o).fulfillment_priority_level);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  /**
+   * Himpunan id order yang SUDAH discan packer, dicocokkan secara OR:
+   * (a) no. pesanan = resi_scans.label_order_no, (b) tautan resi_scans.order_id,
+   * (c) no. resi (JX/JP/CM/JT dll) = resi_scans.resi ATAU resi_scan_codes.code
+   * (dinormalisasi). Ini memperbaiki order yang keliru "belum discan" hanya
+   * karena OCR menangkap resinya, bukan nomor pesanannya.
+   */
+  private async scannedOrderIds(
+    userId: string,
+    rows: Array<{ id: string; marketplaceOrderId: string | null; trackingNumber: string | null }>,
+  ): Promise<Set<string>> {
+    const hit = new Set<string>();
+    const ids = rows.map((o) => o.id);
+    const noPesanan = rows.map((o) => o.marketplaceOrderId).filter((x): x is string => !!x);
+    const byNo = new Map<string, string[]>();
+    for (const o of rows) if (o.marketplaceOrderId) {
+      const a = byNo.get(o.marketplaceOrderId) ?? []; a.push(o.id); byNo.set(o.marketplaceOrderId, a);
+    }
+    const byResi = new Map<string, string[]>();
+    for (const o of rows) { const t = this.normResi(o.trackingNumber); if (t) { const a = byResi.get(t) ?? []; a.push(o.id); byResi.set(t, a); } }
+    const allResi = [...byResi.keys()];
+
+    if (noPesanan.length) {
+      const r = await this.db.selectDistinct({ no: resiScans.labelOrderNo })
+        .from(resiScans).where(and(eq(resiScans.userId, userId), inArray(resiScans.labelOrderNo, noPesanan)));
+      for (const x of r) if (x.no) for (const id of byNo.get(x.no) ?? []) hit.add(id);
+    }
+    if (ids.length) {
+      const r = await this.db.selectDistinct({ oid: resiScans.orderId })
+        .from(resiScans).where(and(eq(resiScans.userId, userId), inArray(resiScans.orderId, ids)));
+      for (const x of r) if (x.oid) hit.add(x.oid);
+    }
+    if (allResi.length) {
+      const r1 = await this.db.selectDistinct({ resi: resiScans.resi })
+        .from(resiScans).where(and(eq(resiScans.userId, userId), inArray(resiScans.resi, allResi)));
+      for (const x of r1) if (x.resi) for (const id of byResi.get(x.resi) ?? []) hit.add(id);
+      const r2 = await this.db.selectDistinct({ code: resiScanCodes.code })
+        .from(resiScanCodes).where(and(eq(resiScanCodes.userId, userId), inArray(resiScanCodes.code, allResi)));
+      for (const x of r2) if (x.code) for (const id of byResi.get(x.code) ?? []) hit.add(id);
+    }
+    return hit;
+  }
+
   async list(userId: string, opts: ListOrdersOpts = {}) {
     const conds: SQL[] = [eq(orders.userId, userId)];
     if (opts.status) conds.push(eq(orders.fulfillmentStatus, opts.status));
@@ -58,15 +127,7 @@ export class OrdersService {
     // sinilah dua sumber itu bertemu: pesanan yang kata marketplace sudah
     // dikirim tapi tidak pernah discan, atau sebaliknya, adalah temuan --
     // dan tanpa penanda ini keduanya hanya dua baris yang kebetulan mirip.
-    const noPesanan = dariApi.map((o) => o.marketplaceOrderId).filter((x): x is string => !!x);
-    const terscan = new Set<string>();
-    if (noPesanan.length) {
-      const r = await this.db
-        .selectDistinct({ no: resiScans.labelOrderNo })
-        .from(resiScans)
-        .where(and(eq(resiScans.userId, userId), inArray(resiScans.labelOrderNo, noPesanan)));
-      for (const x of r) if (x.no) terscan.add(x.no);
-    }
+    const terscanIds = await this.scannedOrderIds(userId, dariApi);
 
     // Paket yang dipindai lewat aplikasi ikut terdaftar di sini.
     //
@@ -132,7 +193,12 @@ export class OrdersService {
 
     return [
       ...dariApi.map((o) => ({
-        ...o, sumber: "api" as const, terscan: terscan.has(o.marketplaceOrderId),
+        ...o, sumber: "api" as const,
+        terscan: terscanIds.has(o.id),
+        scanned: terscanIds.has(o.id),
+        isCod: this.isCodOf(o),
+        shipDeadlineMs: this.deadlineOf(o),
+        priorityLevel: this.prioOf(o),
         shopName: o.shopId ? namaToko.get(o.shopId) ?? null : null,
       })),
       ...manualTerpilih,
@@ -205,7 +271,17 @@ export class OrdersService {
     const one = async (q: SQL) => (await this.db.execute(q)) as unknown as Record<string, unknown>[];
     const cnt = async (q: SQL) => Number((await one(q))[0]?.n ?? 0);
 
-    const wBelum = sql`o.user_id = ${userId} AND o.fulfillment_status IN ('dikirim','selesai') AND o.created_at >= now() - interval '60 days' AND NOT EXISTS (SELECT 1 FROM resi_scans r WHERE r.user_id = o.user_id AND r.label_order_no = o.marketplace_order_id)`;
+    const wBelum = sql`o.user_id = ${userId} AND o.fulfillment_status IN ('dikirim','selesai') AND o.created_at >= now() - interval '60 days' AND NOT EXISTS (
+        SELECT 1 FROM resi_scans r WHERE r.user_id = o.user_id AND (
+          r.label_order_no = o.marketplace_order_id
+          OR r.order_id = o.id
+          OR (o.tracking_number IS NOT NULL AND o.tracking_number <> ''
+              AND upper(regexp_replace(r.resi,'[^A-Za-z0-9]','','g')) = upper(regexp_replace(o.tracking_number,'[^A-Za-z0-9]','','g')))
+        ))
+      AND NOT EXISTS (
+        SELECT 1 FROM resi_scan_codes c WHERE c.user_id = o.user_id
+          AND o.tracking_number IS NOT NULL AND o.tracking_number <> ''
+          AND upper(regexp_replace(c.code,'[^A-Za-z0-9]','','g')) = upper(regexp_replace(o.tracking_number,'[^A-Za-z0-9]','','g')))`;
     const belumDiscan = {
       total: await cnt(sql`SELECT count(*)::int AS n FROM orders o WHERE ${wBelum}`),
       contoh: await one(sql`SELECT o.marketplace_order_id AS no, o.fulfillment_status AS fs, o.shipping_courier AS kurir, o.created_at AS at FROM orders o WHERE ${wBelum} ORDER BY o.created_at DESC LIMIT 50`),

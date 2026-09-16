@@ -83,7 +83,8 @@ public class OrdersActivity extends AppCompatActivity {
     }
 
     private Api api;
-    private LinearLayout tabs, list;
+    private LinearLayout tabs, list, stats;
+    private String maxValueId = "";
     private TextView status;
     private EditText search;
     private JSONArray all = new JSONArray();
@@ -211,6 +212,15 @@ public class OrdersActivity extends AppCompatActivity {
         });
         rootCol.addView(search);
 
+        // Kartu ringkas (poin 2): kirim hari ini / urgent / aging terlama & terbaru.
+        HorizontalScrollView statsWrap = new HorizontalScrollView(this);
+        statsWrap.setHorizontalScrollBarEnabled(false);
+        stats = new LinearLayout(this);
+        stats.setOrientation(LinearLayout.HORIZONTAL);
+        stats.setPadding(dp(12), 0, dp(12), dp(4));
+        statsWrap.addView(stats);
+        rootCol.addView(statsWrap);
+
         // Tab status (geser mendatar)
         HorizontalScrollView hs = new HorizontalScrollView(this);
         hs.setHorizontalScrollBarEnabled(false);
@@ -291,8 +301,10 @@ public class OrdersActivity extends AppCompatActivity {
                 return;
             }
             all = r.dataArray();
+            maxValueId = hitungMaxValue();
             buildTabs();
             render();
+            renderStats();
             if (autoBatch) { autoBatch = false; showBatch(); }
         });
     }
@@ -350,6 +362,164 @@ public class OrdersActivity extends AppCompatActivity {
             shown++;
         }
         status.setText(shown == 0 ? "Tidak ada pesanan." : shown + " pesanan");
+    }
+
+    // ---- Turunan untuk kartu ringkas & chip (poin 2/3) ----
+    private static long timeMs(String iso) {
+        // Backend selalu ISO UTC (…Z). Ambil 19 char pertama & parse sbg UTC —
+        // hindari java.time (butuh API 26) demi minSdk 21.
+        if (iso == null || iso.length() < 19) return 0L;
+        try {
+            java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US);
+            f.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            return f.parse(iso.substring(0, 19)).getTime();
+        } catch (Exception e) { return 0L; }
+    }
+    private static String agingFromMs(long age) {
+        long h = age / 3600000L;
+        if (h < 1) return "baru";
+        if (h < 24) return h + " jam";
+        return (h / 24) + " hari";
+    }
+    private static String aging(long createdMs) {
+        if (createdMs <= 0) return "";
+        long age = System.currentTimeMillis() - createdMs;
+        if (age < 0) return "";
+        return agingFromMs(age);
+    }
+    private static long startTodayJak() {
+        long JAK = 7L * 3600000L;
+        long day = (System.currentTimeMillis() + JAK) / 86400000L;
+        return day * 86400000L - JAK;
+    }
+    private static boolean aktifOrder(JSONObject o) {
+        String st = o.optString("fulfillmentStatus");
+        return !st.equals("dikirim") && !st.equals("selesai") && !st.equals("dibatalkan");
+    }
+    private static long createdMsOf(JSONObject o) {
+        return timeMs(o.optString("createdAtMarketplace", o.optString("createdAt", "")));
+    }
+    private String hitungMaxValue() {
+        double maxv = -1; String id = "";
+        for (int i = 0; i < all.length(); i++) {
+            JSONObject o = all.optJSONObject(i); if (o == null) continue;
+            if (o.isNull("totalAmount") || !aktifOrder(o)) continue;
+            double v = o.optDouble("totalAmount", -1);
+            if (v > maxv) { maxv = v; id = o.optString("id"); }
+        }
+        return id;
+    }
+
+    private TextView chip(String text, int bg, int fg) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextSize(11);
+        t.setTextColor(fg);
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setColor(bg);
+        g.setCornerRadius(dp(10));
+        t.setBackground(g);
+        t.setPadding(dp(8), dp(3), dp(8), dp(3));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.rightMargin = dp(6);
+        t.setLayoutParams(lp);
+        return t;
+    }
+
+    private View statCard(String title, String val, String color, final Runnable onClick) {
+        LinearLayout b = new LinearLayout(this);
+        b.setOrientation(LinearLayout.VERTICAL);
+        b.setBackground(pill(getColor(R.color.surface), getColor(R.color.line)));
+        b.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(124), ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.rightMargin = dp(8);
+        b.setLayoutParams(lp);
+        TextView v = new TextView(this);
+        v.setText(val); v.setTextSize(20);
+        v.setTypeface(null, android.graphics.Typeface.BOLD);
+        v.setTextColor(android.graphics.Color.parseColor(color));
+        TextView t = new TextView(this);
+        t.setText(title); t.setTextSize(11); t.setTextColor(getColor(R.color.ink2));
+        b.addView(v); b.addView(t);
+        b.setOnClickListener(x -> onClick.run());
+        return b;
+    }
+
+    private void renderStats() {
+        if (stats == null) return;
+        stats.removeAllViews();
+        long now = System.currentTimeMillis();
+        long endToday = startTodayJak() + 86400000L;
+        int shipToday = 0, urgent = 0; long oldest = 0, newest = 0; boolean any = false;
+        for (int i = 0; i < all.length(); i++) {
+            JSONObject o = all.optJSONObject(i); if (o == null || !aktifOrder(o)) continue;
+            long dl = o.optLong("shipDeadlineMs", 0);
+            if (dl > 0 && dl < endToday) shipToday++;
+            if (dl > 0 && dl < now + 3L * 3600000L) urgent++;
+            long cm = createdMsOf(o);
+            if (cm > 0) { long age = now - cm; if (!any) { oldest = age; newest = age; any = true; } else { oldest = Math.max(oldest, age); newest = Math.min(newest, age); } }
+        }
+        stats.addView(statCard("Kirim hari ini", String.valueOf(shipToday), "#256FB0", () -> showStatList("kirim_hari_ini")));
+        stats.addView(statCard("Urgent (≤3 jam/lewat)", String.valueOf(urgent), "#B3261E", () -> showStatList("urgent")));
+        stats.addView(statCard("Order terlama", any ? agingFromMs(oldest) : "–", "#B36A00", () -> showStatList("terlama")));
+        stats.addView(statCard("Order terbaru", any ? agingFromMs(newest) : "–", "#1B7F4B", () -> showStatList("terbaru")));
+    }
+
+    private String judulStat(String kind) {
+        switch (kind) {
+            case "kirim_hari_ini": return "Harus dikirim hari ini";
+            case "urgent": return "Urgent — lewat/≤3 jam lagi";
+            case "terlama": return "Order terlama (aktif)";
+            default: return "Order terbaru (aktif)";
+        }
+    }
+
+    private void showStatList(final String kind) {
+        long now = System.currentTimeMillis();
+        long endToday = startTodayJak() + 86400000L;
+        final java.util.ArrayList<JSONObject> sel = new java.util.ArrayList<>();
+        for (int i = 0; i < all.length(); i++) {
+            JSONObject o = all.optJSONObject(i); if (o == null || !aktifOrder(o)) continue;
+            long dl = o.optLong("shipDeadlineMs", 0);
+            boolean ok;
+            if (kind.equals("kirim_hari_ini")) ok = dl > 0 && dl < endToday;
+            else if (kind.equals("urgent")) ok = dl > 0 && dl < now + 3L * 3600000L;
+            else ok = createdMsOf(o) > 0;
+            if (ok) sel.add(o);
+        }
+        if (kind.equals("terlama")) java.util.Collections.sort(sel, (a, b) -> Long.compare(createdMsOf(a), createdMsOf(b)));
+        else if (kind.equals("terbaru")) java.util.Collections.sort(sel, (a, b) -> Long.compare(createdMsOf(b), createdMsOf(a)));
+        else java.util.Collections.sort(sel, (a, b) -> Long.compare(a.optLong("shipDeadlineMs", Long.MAX_VALUE), b.optLong("shipDeadlineMs", Long.MAX_VALUE)));
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(16); box.setPadding(pad, pad, pad, pad);
+        if (sel.isEmpty()) {
+            TextView e = new TextView(this); e.setText("Tidak ada order pada kategori ini."); e.setTextColor(getColor(R.color.ink3));
+            box.addView(e);
+        }
+        for (final JSONObject o : sel) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.VERTICAL);
+            row.setPadding(0, dp(6), 0, dp(6));
+            TextView t1 = new TextView(this);
+            t1.setText(o.optString("marketplaceOrderId", "-"));
+            t1.setTextSize(13); t1.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD);
+            t1.setTextColor(getColor(R.color.ink));
+            TextView t2 = new TextView(this);
+            String amt = o.isNull("totalAmount") ? "—" : rupiah(o.optString("totalAmount", ""));
+            t2.setText(o.optString("shippingCourier", "") + "  ·  " + amt + "  ·  umur " + aging(createdMsOf(o))
+                    + (o.optBoolean("isCod", false) ? "  ·  COD" : ""));
+            t2.setTextSize(12); t2.setTextColor(getColor(R.color.ink2));
+            row.addView(t1); row.addView(t2);
+            row.setOnClickListener(v -> showDetail(o));
+            box.addView(row);
+        }
+        ScrollView sc = new ScrollView(this); sc.addView(box);
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(judulStat(kind) + " (" + sel.size() + ")")
+                .setView(sc).setPositiveButton("Tutup", null).show();
     }
 
     private View card(JSONObject o) {
@@ -446,6 +616,29 @@ public class OrdersActivity extends AppCompatActivity {
         r3lp.topMargin = dp(6);
         r3.setLayoutParams(r3lp);
         body.addView(r3);
+
+        // Chip info per order (poin 3.1 prioritas / 3.4 COD / 3.5 aging / 4 status scan).
+        LinearLayout chips = new LinearLayout(this);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        long dl = o.optLong("shipDeadlineMs", 0);
+        long now = System.currentTimeMillis();
+        long endToday = startTodayJak() + 86400000L;
+        if (dl > 0 && dl < now) chips.addView(chip("⚠ lewat tenggat", android.graphics.Color.parseColor("#FDE7E7"), android.graphics.Color.parseColor("#B3261E")));
+        else if (dl > 0 && dl < endToday) chips.addView(chip("kirim duluan", android.graphics.Color.parseColor("#FFF3E0"), android.graphics.Color.parseColor("#B36A00")));
+        if (o.optBoolean("isCod", false)) chips.addView(chip("COD", android.graphics.Color.parseColor("#FFF3E0"), android.graphics.Color.parseColor("#8A5A00")));
+        String ag = aging(createdMsOf(o));
+        if (!ag.isEmpty()) chips.addView(chip("⏱ " + ag, android.graphics.Color.parseColor("#EEF1F4"), getColor(R.color.ink2)));
+        if (o.optBoolean("scanned", false)) chips.addView(chip("✓ discan", android.graphics.Color.parseColor("#E6F4EA"), android.graphics.Color.parseColor("#1B7F4B")));
+        else chips.addView(chip("belum discan", android.graphics.Color.parseColor("#EEF1F4"), getColor(R.color.ink3)));
+        if (o.optString("id").equals(maxValueId)) chips.addView(chip("★ nilai tertinggi", android.graphics.Color.parseColor("#E8F0FE"), android.graphics.Color.parseColor("#256FB0")));
+        HorizontalScrollView chScroll = new HorizontalScrollView(this);
+        chScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout.LayoutParams chlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        chlp.topMargin = dp(8);
+        chScroll.setLayoutParams(chlp);
+        chScroll.addView(chips);
+        body.addView(chScroll);
 
         c.addView(head);
         c.setOnClickListener(v -> showDetail(o));
