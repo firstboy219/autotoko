@@ -82,6 +82,21 @@ public class OrdersActivity extends AppCompatActivity {
         }
     }
 
+    private static String mpLabel(String s) {
+        switch (s == null ? "" : s) {
+            case "UNPAID": return "Belum Bayar";
+            case "ON_HOLD": return "Ditahan";
+            case "AWAITING_SHIPMENT": return "Menunggu Diproses";
+            case "AWAITING_COLLECTION": return "Menunggu Pickup";
+            case "PARTIALLY_SHIPPING": return "Sebagian Dikirim";
+            case "IN_TRANSIT": return "Dalam Pengiriman";
+            case "DELIVERED": return "Terkirim";
+            case "COMPLETED": return "Selesai";
+            case "CANCELLED": case "CANCELED": return "Dibatalkan";
+            default: return s == null ? "" : s;
+        }
+    }
+
     private Api api;
     private LinearLayout tabs, list, stats;
     private String maxValueId = "";
@@ -160,7 +175,8 @@ public class OrdersActivity extends AppCompatActivity {
         if (items == null || items.length() == 0) return null;
         JSONObject it = items.optJSONObject(0);
         if (it == null) return null;
-        String n = it.optString("name", it.optString("skuName", it.optString("sellerSku", "")));
+        String mn = it.isNull("masterName") ? "" : it.optString("masterName", "");
+        String n = !mn.isEmpty() ? mn : it.optString("name", it.optString("skuName", it.optString("sellerSku", "")));
         return n == null || n.isEmpty() ? null : n;
     }
 
@@ -714,6 +730,8 @@ public class OrdersActivity extends AppCompatActivity {
         if (o.optBoolean("isCod", false)) chips.addView(chip("COD", android.graphics.Color.parseColor("#FFF3E0"), android.graphics.Color.parseColor("#8A5A00")));
         String ag = aging(createdMsOf(o));
         if (!ag.isEmpty()) chips.addView(chip("⏱ " + ag, android.graphics.Color.parseColor("#EEF1F4"), getColor(R.color.ink2)));
+        String mp = o.optString("status", "");
+        if (!mp.isEmpty()) chips.addView(chip("MP: " + mpLabel(mp), android.graphics.Color.parseColor("#EEF1F4"), getColor(R.color.ink2)));
         if (o.optBoolean("scanned", false)) chips.addView(chip("✓ discan", android.graphics.Color.parseColor("#E6F4EA"), android.graphics.Color.parseColor("#1B7F4B")));
         else chips.addView(chip("belum discan", android.graphics.Color.parseColor("#EEF1F4"), getColor(R.color.ink3)));
         if (o.optString("id").equals(maxValueId)) chips.addView(chip("★ nilai tertinggi", android.graphics.Color.parseColor("#E8F0FE"), android.graphics.Color.parseColor("#256FB0")));
