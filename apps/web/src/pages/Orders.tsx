@@ -79,6 +79,8 @@ interface Order {
   isCod?: boolean;
   shipDeadlineMs?: number | null;
   priorityLevel?: number | null;
+  /** Estimasi pencairan marketplace dari detail order (backend). */
+  estPencairan?: string | null;
 }
 
 type BatchRow = { orderId: string; ok: boolean; orderNo: string | null; error?: string };
@@ -569,16 +571,17 @@ export function Orders() {
                   <TH>Scan</TH>
                   <TH>Pembeli</TH>
                   <TH align="right">Total</TH>
+                  <TH align="right">Est. Pencairan</TH>
                   <TH align="right">Fee</TH>
                   <TH align="right">Waktu</TH>
                 </tr>
               </THead>
               <tbody>
                 {loading ? (
-                  <SkeletonRows n={8} cols={12} />
+                  <SkeletonRows n={8} cols={13} />
                 ) : !rows.length ? (
                   <tr>
-                    <td colSpan={12}>
+                    <td colSpan={13}>
                       <EmptyState
                         icon="cart"
                         title={hasFilters ? "Tidak ada order yang cocok" : "Belum ada order"}
@@ -606,6 +609,13 @@ export function Orders() {
                     <TR
                       key={o.id}
                       className="cursor-pointer hover:bg-canvas"
+                      style={(() => {
+                        const dl = o.shipDeadlineMs ?? 0; const now = Date.now(); const endToday = startTodayJakMs() + 86400000;
+                        const st = o.fulfillmentStatus; const aktif = st !== "dikirim" && st !== "selesai" && st !== "dibatalkan";
+                        if (aktif && dl > 0 && dl < now) return { boxShadow: "inset 3px 0 0 #B3261E" };
+                        if (aktif && dl > 0 && dl < endToday) return { boxShadow: "inset 3px 0 0 #B36A00" };
+                        return undefined;
+                      })()}
                       onClick={() => setSelected(o)}
                     >
                       <TD onClick={(e) => e.stopPropagation()}>
@@ -641,9 +651,9 @@ export function Orders() {
                                   return null;
                                 })()}
                                 {o.isCod && <Badge tone="warning">COD</Badge>}
-                                {o.id === maxValueId && <Badge tone="info">\u2605 nilai tertinggi</Badge>}
+                                {o.id === maxValueId && <Badge tone="info">nilai tertinggi</Badge>}
                                 {o.shippingCourier && <span className="text-[11px] text-ink-3">{o.shippingCourier}</span>}
-                                {agingText(orderCreatedMs(o)) && <span className="text-[11px] text-ink-3">\u23f1 {agingText(orderCreatedMs(o))}</span>}
+                                {orderCreatedMs(o) > 0 && (() => { const days = (Date.now() - orderCreatedMs(o)) / 86400000; return <Badge tone={days >= 3 ? "danger" : days >= 1 ? "warning" : "neutral"}>umur {agingText(orderCreatedMs(o))}</Badge>; })()}
                               </div>
                             )}
                           </div>
@@ -689,6 +699,13 @@ export function Orders() {
                           </span>
                         ) : (
                           rupiah(o.totalAmount)
+                        )}
+                      </TD>
+                      <TD align="right" className="tabular-nums whitespace-nowrap">
+                        {o.estPencairan == null ? (
+                          <span className="text-ink-3">—</span>
+                        ) : (
+                          <span className="text-emerald-700" title="Estimasi dari detail order (sub_total − diskon seller; belum potong komisi TikTok)">≈ {rupiah(o.estPencairan)}</span>
                         )}
                       </TD>
                       <TD align="right" className="tabular-nums whitespace-nowrap">

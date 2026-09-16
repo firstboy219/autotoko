@@ -57,6 +57,22 @@ export class OrdersService {
     }
     return null;
   }
+  /**
+   * Estimasi pencairan marketplace dari DETAIL ORDER (raw.payment): pendapatan
+   * produk seller = sub_total - seller_discount. Belum potong komisi TikTok
+   * (komisi tak tersedia di detail order); fallback ke kolom subtotal/total.
+   */
+  private estPencairan(o: { raw?: unknown; subtotal?: unknown; totalAmount?: unknown }): string | null {
+    const p = this.rawObj(o).payment as Record<string, unknown> | undefined;
+    if (p && typeof p === "object") {
+      const sub = Number(p.sub_total ?? 0);
+      const disc = Number(p.seller_discount ?? 0);
+      if (Number.isFinite(sub) && sub > 0) return String(Math.max(0, sub - (Number.isFinite(disc) ? disc : 0)));
+    }
+    if (o.subtotal != null) return String(o.subtotal);
+    return o.totalAmount != null ? String(o.totalAmount) : null;
+  }
+
   private prioOf(o: { raw?: unknown }): number | null {
     const n = Number(this.rawObj(o).fulfillment_priority_level);
     return Number.isFinite(n) ? n : null;
@@ -228,6 +244,7 @@ export class OrdersService {
         isCod: this.isCodOf(o),
         shipDeadlineMs: this.deadlineOf(o),
         priorityLevel: this.prioOf(o),
+        estPencairan: this.estPencairan(o),
         shopName: o.shopId ? namaToko.get(o.shopId) ?? null : null,
         items: enrichItems(o.items),
       })),

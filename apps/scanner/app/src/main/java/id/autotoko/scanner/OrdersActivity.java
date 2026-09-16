@@ -736,8 +736,19 @@ public class OrdersActivity extends AppCompatActivity {
         if (dl > 0 && dl < now) chips.addView(chip("⚠ lewat tenggat", android.graphics.Color.parseColor("#FDE7E7"), android.graphics.Color.parseColor("#B3261E")));
         else if (dl > 0 && dl < endToday) chips.addView(chip("kirim duluan", android.graphics.Color.parseColor("#FFF3E0"), android.graphics.Color.parseColor("#B36A00")));
         if (o.optBoolean("isCod", false)) chips.addView(chip("COD", android.graphics.Color.parseColor("#FFF3E0"), android.graphics.Color.parseColor("#8A5A00")));
-        String ag = aging(createdMsOf(o));
-        if (!ag.isEmpty()) chips.addView(chip("⏱ " + ag, android.graphics.Color.parseColor("#EEF1F4"), getColor(R.color.ink2)));
+        // umur order (dari create-date marketplace) di-HIGHLIGHT: warna makin
+        // pekat makin tua (>=3 hari merah, >=1 hari oranye).
+        long cmAge = createdMsOf(o);
+        String ag = cmAge > 0 ? aging(cmAge) : "";
+        if (!ag.isEmpty()) {
+            long hariUmur = (System.currentTimeMillis() - cmAge) / 86400000L;
+            int agBg = hariUmur >= 3 ? 0xFFFDE7E7 : hariUmur >= 1 ? 0xFFFFF3E0 : 0xFFEEF1F4;
+            int agFg = hariUmur >= 3 ? 0xFFB3261E : hariUmur >= 1 ? 0xFFB36A00 : getColor(R.color.ink2);
+            chips.addView(chip("⏱ umur " + ag, agBg, agFg));
+        }
+        // chip est-pencairan (estimasi dari detail order marketplace)
+        String est = o.isNull("estPencairan") ? "" : o.optString("estPencairan", "");
+        if (!est.isEmpty()) chips.addView(chip("≈ " + rupiah(est), android.graphics.Color.parseColor("#E6F4EA"), android.graphics.Color.parseColor("#1B7F4B")));
         String mp = o.optString("status", "");
         if (!mp.isEmpty()) chips.addView(chip("MP: " + mpLabel(mp), android.graphics.Color.parseColor("#EEF1F4"), getColor(R.color.ink2)));
         if (o.optBoolean("scanned", false)) chips.addView(chip("✓ discan", android.graphics.Color.parseColor("#E6F4EA"), android.graphics.Color.parseColor("#1B7F4B")));
