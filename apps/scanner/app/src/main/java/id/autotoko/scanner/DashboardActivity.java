@@ -36,6 +36,7 @@ import java.util.Locale;
 public class DashboardActivity extends AppCompatActivity {
 
     private Api api;
+    private androidx.appcompat.app.AlertDialog dialogVersi;
     private LinearLayout root;
     private TextView status;
     private int hari = 30;
@@ -817,6 +818,46 @@ public class DashboardActivity extends AppCompatActivity {
         return c;
     }
 
+    @Override protected void onResume() {
+        super.onResume();
+        paksaCekVersi();
+    }
+
+    /**
+     * Gate WAJIB UPDATE: setiap dashboard tampil, jika versi terpasang lebih lama
+     * dari versi terbaru di server, paksa update (dialog tak bisa ditutup; satu-
+     * satunya tombol membuka halaman update). Mengganti pola "ditawarkan" untuk
+     * titik masuk ini.
+     */
+    private void paksaCekVersi() {
+        if (dialogVersi != null && dialogVersi.isShowing()) return;
+        final int terpasang;
+        final String namaT;
+        try {
+            android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+            terpasang = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P
+                    ? (int) pi.getLongVersionCode() : pi.versionCode;
+            namaT = pi.versionName;
+        } catch (Exception e) { return; }
+        api.appReleases(r -> {
+            if (r == null || !r.ok() || r.data() == null) return;
+            org.json.JSONObject c = r.data().optJSONObject("current");
+            if (c == null || c.optInt("versionCode", 0) <= terpasang) return;
+            if (isFinishing() || isDestroyed()) return;
+            if (dialogVersi != null && dialogVersi.isShowing()) return;
+            String pesan = "Versi di HP ini: " + namaT + "\nWajib update ke " + c.optString("versionName", "")
+                    + " sebelum melanjutkan.";
+            String catatan = c.optString("notes", "");
+            if (!catatan.isEmpty() && !"null".equals(catatan)) pesan += "\n\n" + catatan;
+            dialogVersi = new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Update Wajib")
+                    .setMessage(pesan)
+                    .setCancelable(false)
+                    .setPositiveButton("Update Sekarang", (d, w) -> startActivity(new Intent(this, UpdateActivity.class)))
+                    .show();
+        });
+    }
+
     private View gridNavigasi() {
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
@@ -839,6 +880,10 @@ public class DashboardActivity extends AppCompatActivity {
                 {"🏦", "Pencairan", "#8B5CF6", "P"},
                 {"📊", "Stok", "#EF4444", "K"},
                 {"🕒", "Riwayat", "#64748B", "R"},
+                {"🔤", "Scan Teks", "#0EA5E9", "T"},
+                {"⚠️", "Belum Lengkap", "#B45309", "N"},
+                {"👥", "Akun Staff", "#7C3AED", "A"},
+                {"⬇️", "Versi Aplikasi", "#059669", "U"},
         };
         LinearLayout row = null;
         for (int i = 0; i < tiles.length; i++) {
@@ -891,6 +936,10 @@ public class DashboardActivity extends AppCompatActivity {
             case "P": i = new Intent(this, PayoutActivity.class); break;
             case "K": i = new Intent(this, StockActivity.class); break;
             case "R": i = new Intent(this, HistoryActivity.class); break;
+            case "T": i = new Intent(this, TextScanActivity.class); break;
+            case "N": i = new Intent(this, PendingActivity.class); break;
+            case "A": i = new Intent(this, StaffActivity.class); break;
+            case "U": i = new Intent(this, UpdateActivity.class); break;
             default: return;
         }
         startActivity(i);

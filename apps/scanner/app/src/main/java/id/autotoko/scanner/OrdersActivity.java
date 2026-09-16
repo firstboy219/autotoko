@@ -104,6 +104,7 @@ public class OrdersActivity extends AppCompatActivity {
     private EditText search;
     private JSONArray all = new JSONArray();
     private String filter = FLOW[0]; // tab pertama (tanpa "Semua")
+    private java.util.List<String> flowList = new java.util.ArrayList<>(java.util.Arrays.asList(FLOW));
     private androidx.swiperefreshlayout.widget.SwipeRefreshLayout srl;
     private String q = "";
     private boolean autoBatch = false;
@@ -310,6 +311,13 @@ public class OrdersActivity extends AppCompatActivity {
             if (lbl == null) return;
             java.util.Iterator<String> it = lbl.keys();
             while (it.hasNext()) { String k = it.next(); LABEL_META.put(k, lbl.optString(k, "")); }
+            // urutan tahap dari server (status-meta.flow) -> tab mengikuti config admin.
+            org.json.JSONArray fl = mr.data().optJSONArray("flow");
+            if (fl != null && fl.length() > 0) {
+                java.util.List<String> nf = new java.util.ArrayList<>();
+                for (int i = 0; i < fl.length(); i++) { String s = fl.optString(i, ""); if (!s.isEmpty()) nf.add(s); }
+                if (!nf.isEmpty()) { flowList = nf; if (!flowList.contains(filter)) filter = flowList.get(0); }
+            }
             if (all.length() > 0) { buildTabs(); render(); }
         });
         api.orders(true, r -> {
@@ -329,17 +337,17 @@ public class OrdersActivity extends AppCompatActivity {
 
     private void pindahTab(int dir) {
         int idx = 0;
-        for (int i = 0; i < FLOW.length; i++) if (FLOW[i].equals(filter)) { idx = i; break; }
+        for (int i = 0; i < flowList.size(); i++) if (flowList.get(i).equals(filter)) { idx = i; break; }
         int ni = idx + dir;
-        if (ni < 0 || ni >= FLOW.length) return;
-        filter = FLOW[ni];
+        if (ni < 0 || ni >= flowList.size()) return;
+        filter = flowList.get(ni);
         buildTabs();
         render();
     }
 
     private void buildTabs() {
         tabs.removeAllViews();
-        for (String s : FLOW) addTab(label(s), s);
+        for (String s : flowList) addTab(label(s), s);
     }
 
     private void addTab(String text, String value) {
