@@ -374,7 +374,7 @@ export class ProductsService {
         })
         .from(marketplaceProducts)
         .innerJoin(shops, eq(shops.id, marketplaceProducts.shopId))
-        .where(eq(marketplaceProducts.userId, userId)),
+        .where(and(eq(marketplaceProducts.userId, userId), sql`upper(coalesce(${marketplaceProducts.status}, '')) = 'ACTIVATE'`)),
       this.db
         .select({
           productId: marketplaceSkus.productId,

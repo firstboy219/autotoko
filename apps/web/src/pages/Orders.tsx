@@ -81,6 +81,8 @@ interface Order {
   priorityLevel?: number | null;
   /** Estimasi pencairan marketplace dari detail order (backend). */
   estPencairan?: string | null;
+  /** URL PDF AWB/resi yang sudah di-cache ke server (backend). */
+  awbUrl?: string | null;
 }
 
 type BatchRow = { orderId: string; ok: boolean; orderNo: string | null; error?: string };
@@ -1510,9 +1512,17 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
         <div className="mt-3 rounded-lg border border-line p-3.5">
           <div className="text-xs font-medium text-ink-2 mb-2">Kirim ke marketplace <span className="text-emerald-600">· TikTok Shop tersambung</span></div>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" icon="package" loading={busy} onClick={cetakAwb}>
-              Print / Unduh Resi
-            </Button>
+            {order.fulfillmentStatus !== "masuk" && (
+              order.awbUrl ? (
+                <Button size="sm" variant="outline" icon="package" onClick={() => window.open(order.awbUrl!, "_blank", "noopener")}>
+                  Cetak / Unduh Resi
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" icon="download" loading={busy} onClick={cetakAwb}>
+                  Ambil Resi dari TikTok
+                </Button>
+              )
+            )}
             <Button size="sm" variant="filled" icon="check" loading={busy} onClick={kirimMarketplace}>
               Proses (RTS ke marketplace)
             </Button>

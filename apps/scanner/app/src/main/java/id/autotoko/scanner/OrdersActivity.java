@@ -840,7 +840,20 @@ public class OrdersActivity extends AppCompatActivity {
             String nx = nextStatus(stat);
             if (nx != null) act.addView(btn("Lanjut ke " + label(nx), true, v -> { dlg.dismiss(); ubahStatus(id, nx); }));
         }
-        act.addView(btn("Cetak AWB / Resi", false, v -> cetakAwb(id)));
+        // Cetak Resi: tombol sembunyi saat "menunggu disetujui" (masuk). Bila AWB
+        // sudah di-cache di server -> buka file server; kalau belum -> ambil dari TikTok.
+        if (!"masuk".equals(stat)) {
+            final String awbUrl = o.isNull("awbUrl") ? "" : o.optString("awbUrl", "");
+            if (!awbUrl.isEmpty()) {
+                final String full = new Session(this).baseUrl() + awbUrl;
+                act.addView(btn("Cetak / Unduh Resi", false, v -> {
+                    try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(full))); }
+                    catch (Exception e) { toast("Tak bisa membuka resi."); }
+                }));
+            } else {
+                act.addView(btn("Ambil Resi dari TikTok", false, v -> cetakAwb(id)));
+            }
+        }
         act.addView(btn("Proses (kirim ke marketplace)", true, v -> konfirmRts(id, o.optString("marketplaceOrderId"), dlg)));
         col.addView(act);
 

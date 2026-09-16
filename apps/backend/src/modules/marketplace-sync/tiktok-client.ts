@@ -161,7 +161,7 @@ export class TikTokClient {
       products?: Record<string, unknown>[];
       next_page_token?: string;
       total_count?: number;
-    }>("/product/202309/products/search", {}, query);
+    }>("/product/202309/products/search", { status: "ACTIVATE" }, query);
     return {
       data: d?.products ?? [],
       nextPageToken: d?.next_page_token || null,

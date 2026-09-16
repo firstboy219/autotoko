@@ -926,7 +926,13 @@ export class MarketplaceSyncService {
           }
           if (doc?.doc_url) {
             const res = await fetch(doc.doc_url);
-            labelBufs.push(Buffer.from(await res.arrayBuffer()));
+            const bufLbl = Buffer.from(await res.arrayBuffer());
+            labelBufs.push(bufLbl);
+            // cache AWB batch: simpan label per order ke server (best-effort, byte sudah ada).
+            try {
+              const savedLbl = await this.uploads.saveFile(bufLbl, "pdf");
+              await this.bypass(() => this.db.update(orders).set({ awbUrl: savedLbl.url }).where(and(eq(orders.userId, userId), eq(orders.id, oid))));
+            } catch { /* best-effort */ }
           }
         }
         await this.bypass(() => this.db
@@ -1105,6 +1111,48 @@ export class MarketplaceSyncService {
    * bisa memicu penjemputan. Hanya dipanggil manual dari UI dengan konfirmasi.
    * Setelah semua paket sukses, status lokal dimajukan ke "packing" (menunggu dipacking).
    */
+  /**
+   * Unduh & SIMPAN label/AWB ke server (orders.awb_url) TANPA mengubah status.
+   * Dipakai setelah RTS supaya tombol Cetak Resi menunjuk file di server, bukan
+   * memanggil marketplace tiap kali. Best-effort; lewati jika sudah ter-cache.
+   */
+  private async cacheAwb(userId: string, orderId: string): Promise<string | null> {
+    const [o] = await this.bypass(() => this.db
+      .select({ awbUrl: orders.awbUrl, raw: orders.raw, shopId: orders.shopId })
+      .from(orders).where(and(eq(orders.userId, userId), eq(orders.id, orderId))).limit(1));
+    if (!o) return null;
+    if (o.awbUrl) return o.awbUrl;
+    const ids = this.packageIds(o.raw);
+    if (!ids.length) return null;
+    const [toko] = await this.bypass(() => this.db.select().from(shops).where(eq(shops.id, o.shopId)).limit(1));
+    if (!toko || !toko.accessToken || !toko.shopCipher) return null;
+    let klien = await this.klien(toko);
+    let segar = false;
+    for (const pid of ids) {
+      try {
+        let doc: { doc_url?: string } | undefined;
+        for (;;) {
+          try {
+            doc = await klien.get(`/fulfillment/202309/packages/${pid}/shipping_documents`, { document_type: "SHIPPING_LABEL", document_size: "A6" });
+            break;
+          } catch (e) {
+            if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(toko); continue; }
+            throw e;
+          }
+        }
+        if (doc?.doc_url) {
+          const res = await fetch(doc.doc_url);
+          const buf = Buffer.from(await res.arrayBuffer());
+          const saved = await this.uploads.saveFile(buf, "pdf");
+          await this.bypass(() => this.db.update(orders).set({ awbUrl: saved.url, updatedAt: new Date() })
+            .where(and(eq(orders.userId, userId), eq(orders.id, orderId))));
+          return saved.url;
+        }
+      } catch (e) { this.logger.warn(`cacheAwb ${orderId} pkg ${pid}: ${(e as Error).message}`); }
+    }
+    return null;
+  }
+
   async shipOrder(userId: string, orderId: string, opts: { handoverMethod?: string }) {
     const { order, toko } = await this.ambilOrderToko(userId, orderId);
     const ids = this.packageIds(order.raw);
@@ -1143,6 +1191,8 @@ export class MarketplaceSyncService {
           updatedAt: new Date(),
         })
         .where(and(eq(orders.userId, userId), eq(orders.id, orderId))));
+      // Status baru AWAITING_COLLECTION -> simpan AWB ke server (best-effort).
+      await this.cacheAwb(userId, orderId).catch(() => {});
     }
     return { orderId, ok: semuaOk, hasil };
   }
