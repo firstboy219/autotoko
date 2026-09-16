@@ -144,6 +144,12 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.editBatch(uid(req), id, { note: body?.note, addOrderIds: body?.addOrderIds, removeOrderIds: body?.removeOrderIds }) };
   }
 
+  /** Batalkan batch: bubarkan grup (lepas order + status cancelled). */
+  @Post("batches/:id/cancel")
+  async cancelBatch(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.cancelBatch(uid(req), id) };
+  }
+
   /** Ambil URL label AWB order dari marketplace (read-only). */
   @Get("orders/:id/label")
   async labelOrder(

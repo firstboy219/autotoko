@@ -71,6 +71,12 @@ interface Order {
   shopName?: string | null;
   /** Order API ini sudah dicocokkan dengan scan resi gudang. */
   terscan?: boolean;
+  scanned?: boolean;
+  shippingCourier?: string | null;
+  createdAtMarketplace?: string | null;
+  isCod?: boolean;
+  shipDeadlineMs?: number | null;
+  priorityLevel?: number | null;
 }
 
 type BatchRow = { orderId: string; ok: boolean; orderNo: string | null; error?: string };
@@ -112,6 +118,28 @@ const VIEWS: { mode: ViewMode; label: string; icon: IconName }[] = [
 function firstItemName(o: Order): string | null {
   const it = o.items?.[0];
   return it ? (it.name ?? it.product_name ?? it.skuName ?? it.sellerSku ?? it.seller_sku ?? null) : null;
+}
+
+// Aging & tenggat (poin 2 & 3). createdAtMarketplace lebih akurat dari createdAt.
+function orderCreatedMs(o: Order): number {
+  const t = Date.parse(o.createdAtMarketplace || o.createdAt || "");
+  return Number.isFinite(t) ? t : 0;
+}
+function fmtAge(age: number): string {
+  if (age <= 0) return "\u2013";
+  const h = Math.floor(age / 3600000);
+  if (h < 1) return "baru";
+  if (h < 24) return `${h} jam`;
+  return `${Math.floor(h / 24)} hari`;
+}
+function agingText(createdMs: number): string {
+  if (!createdMs) return "";
+  const age = Date.now() - createdMs;
+  return age < 0 ? "" : fmtAge(age);
+}
+function startTodayJakMs(): number {
+  const JAK = 7 * 3600000;
+  return Math.floor((Date.now() + JAK) / 86400000) * 86400000 - JAK;
 }
 
 /** URL thumbnail unik dari item pesanan (varian marketplace). */
@@ -191,6 +219,7 @@ export function Orders() {
   const [mp, setMp] = useState("");
   const [fs, setFs] = useState("");
   const [src, setSrc] = useState<"" | "api" | "manual">("");
+  const [statFilter, setStatFilter] = useState<"" | "kirim_hari_ini" | "urgent">("");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Order | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -198,6 +227,32 @@ export function Orders() {
   const [otomasiOpen, setOtomasiOpen] = useState(false);
 
   const all = data ?? [];
+
+  // Kartu ringkas (poin 2) + order nilai tertinggi (poin 3.2), dihitung dari list.
+  const stats = useMemo(() => {
+    const now = Date.now(); const endToday = startTodayJakMs() + 86400000;
+    let shipToday = 0, urgent = 0, oldest = 0, newest = 0; let any = false;
+    for (const o of all) {
+      const st = o.fulfillmentStatus;
+      if (st === "dikirim" || st === "selesai" || st === "dibatalkan") continue;
+      const dl = o.shipDeadlineMs ?? 0;
+      if (dl > 0 && dl < endToday) shipToday++;
+      if (dl > 0 && dl < now + 3 * 3600000) urgent++;
+      const cm = orderCreatedMs(o);
+      if (cm > 0) { const age = now - cm; if (!any) { oldest = age; newest = age; any = true; } else { oldest = Math.max(oldest, age); newest = Math.min(newest, age); } }
+    }
+    return { shipToday, urgent, oldest, newest, any };
+  }, [all]);
+  const maxValueId = useMemo(() => {
+    let mv = -1, id = "";
+    for (const o of all) {
+      const st = o.fulfillmentStatus;
+      if (st === "dikirim" || st === "selesai" || st === "dibatalkan") continue;
+      const v = o.totalAmount != null ? Number(o.totalAmount) : -1;
+      if (v > mv) { mv = v; id = o.id; }
+    }
+    return id;
+  }, [all]);
   const marketplaces = useMemo(() => [...new Set(all.map((o) => o.marketplace))], [all]);
 
   // Shared search + marketplace + source filter for both views. The
@@ -208,13 +263,21 @@ export function Orders() {
       if (mp && o.marketplace !== mp) return false;
       if (src && (o.sumber ?? "api") !== src) return false;
       if (view === "tabel" && fs && o.fulfillmentStatus !== fs) return false;
+      if (statFilter) {
+        const st = o.fulfillmentStatus;
+        const aktif = st !== "dikirim" && st !== "selesai" && st !== "dibatalkan";
+        const dl = o.shipDeadlineMs ?? 0;
+        const endToday = startTodayJakMs() + 86400000;
+        if (statFilter === "kirim_hari_ini" && !(aktif && dl > 0 && dl < endToday)) return false;
+        if (statFilter === "urgent" && !(aktif && dl > 0 && dl < Date.now() + 3 * 3600000)) return false;
+      }
       if (needle) {
         const hay = `${o.marketplaceOrderId} ${o.buyerName ?? ""}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
     });
-  }, [all, q, mp, fs, src, view]);
+  }, [all, q, mp, fs, src, view, statFilter]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
@@ -264,6 +327,7 @@ export function Orders() {
   }
 
   const [batchOpen, setBatchOpen] = useState(false);
+  const [batchesOpen, setBatchesOpen] = useState(false);
 
   return (
     <Layout title="Orders">
@@ -292,6 +356,9 @@ export function Orders() {
             <Button variant="filled" icon="package" onClick={() => setBatchOpen(true)}>
               Mulai Batch Packing
             </Button>
+            <Button variant="outline" icon="fileText" onClick={() => setBatchesOpen(true)}>
+              Daftar Batch
+            </Button>
             <Button variant="outline" onClick={() => setOtomasiOpen(true)}>
               Otomasi Order
             </Button>
@@ -301,6 +368,29 @@ export function Orders() {
           </>
         }
       />
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+        <button type="button"
+          onClick={() => { setStatFilter(statFilter === "kirim_hari_ini" ? "" : "kirim_hari_ini"); setAktifSaja(true); setView("tabel"); setPage(0); }}
+          className={`rounded-lg border px-3 py-2 text-left transition ${statFilter === "kirim_hari_ini" ? "border-brand bg-brand/10" : "border-line bg-white hover:bg-canvas"}`}>
+          <div className="text-xl font-bold tabular-nums text-ink">{stats.shipToday}</div>
+          <div className="text-xs text-ink-2">Kirim hari ini</div>
+        </button>
+        <button type="button"
+          onClick={() => { setStatFilter(statFilter === "urgent" ? "" : "urgent"); setAktifSaja(true); setView("tabel"); setPage(0); }}
+          className={`rounded-lg border px-3 py-2 text-left transition ${statFilter === "urgent" ? "border-brand bg-brand/10" : "border-line bg-white hover:bg-canvas"}`}>
+          <div className="text-xl font-bold tabular-nums" style={{ color: "#B3261E" }}>{stats.urgent}</div>
+          <div className="text-xs text-ink-2">Urgent (\u22643 jam / lewat)</div>
+        </button>
+        <div className="rounded-lg border border-line bg-white px-3 py-2">
+          <div className="text-xl font-bold tabular-nums text-ink">{stats.any ? fmtAge(stats.oldest) : "\u2013"}</div>
+          <div className="text-xs text-ink-2">Order terlama</div>
+        </div>
+        <div className="rounded-lg border border-line bg-white px-3 py-2">
+          <div className="text-xl font-bold tabular-nums text-ink">{stats.any ? fmtAge(stats.newest) : "\u2013"}</div>
+          <div className="text-xs text-ink-2">Order terbaru</div>
+        </div>
+      </div>
 
       {ringkas && (
         <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -519,6 +609,20 @@ export function Orders() {
                                 {(o.items?.length ?? 0) > 1 ? ` +${(o.items?.length ?? 0) - 1} lainnya` : ""}
                               </div>
                             )}
+                            {(o.sumber ?? "api") === "api" && (
+                              <div className="flex flex-wrap items-center gap-1 mt-1">
+                                {(() => {
+                                  const dl = o.shipDeadlineMs ?? 0; const now = Date.now(); const endToday = startTodayJakMs() + 86400000;
+                                  if (dl > 0 && dl < now) return <Badge tone="danger">lewat tenggat</Badge>;
+                                  if (dl > 0 && dl < endToday) return <Badge tone="warning">kirim duluan</Badge>;
+                                  return null;
+                                })()}
+                                {o.isCod && <Badge tone="warning">COD</Badge>}
+                                {o.id === maxValueId && <Badge tone="info">\u2605 nilai tertinggi</Badge>}
+                                {o.shippingCourier && <span className="text-[11px] text-ink-3">{o.shippingCourier}</span>}
+                                {agingText(orderCreatedMs(o)) && <span className="text-[11px] text-ink-3">\u23f1 {agingText(orderCreatedMs(o))}</span>}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </TD>
@@ -618,6 +722,7 @@ export function Orders() {
       )}
 
       {otomasiOpen && <OtomasiOrderModal onClose={() => setOtomasiOpen(false)} />}
+      {batchesOpen && <BatchesModal onClose={() => setBatchesOpen(false)} onChanged={() => { reload(); reloadRingkas(); }} />}
       {batchOpen && (
         <BatchPackingModal
           onClose={() => setBatchOpen(false)}
@@ -732,6 +837,113 @@ function BatchPackingModal({ onClose, onDone }: { onClose: () => void; onDone: (
             </Button>
           </div>
         </div>
+      )}
+    </Modal>
+  );
+}
+
+type BatchItem = { id: string; note: string | null; status: string; orderCount: number; createdAt: string; handoverMethod: string | null };
+type BatchOrder = { id: string; marketplaceOrderId: string | null; shippingCourier: string | null; fulfillmentStatus: string; buyerName: string | null; totalAmount: string | null };
+type BatchDetail = BatchItem & { orders: BatchOrder[] };
+
+/** Daftar & edit/cancel batch packing (poin 1). Selaras dgn menu "Daftar Batch" di APK. */
+function BatchesModal({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const toast = useToast();
+  const [list, setList] = useState<BatchItem[] | null>(null);
+  const [sel, setSel] = useState<BatchDetail | null>(null);
+  const [note, setNote] = useState("");
+  const [remove, setRemove] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+
+  const loadList = useCallback(() => {
+    api.get<BatchItem[]>("/marketplace-sync/batches").then(setList).catch((e) => toast((e as Error).message, "danger"));
+  }, [toast]);
+  useEffect(() => { loadList(); }, [loadList]);
+
+  const openDetail = async (id: string) => {
+    try { const d = await api.get<BatchDetail>(`/marketplace-sync/batches/${id}`); setSel(d); setNote(d.note ?? ""); setRemove(new Set()); }
+    catch (e) { toast((e as Error).message, "danger"); }
+  };
+  const save = async () => {
+    if (!sel) return; setBusy(true);
+    try {
+      await api.patch(`/marketplace-sync/batches/${sel.id}`, { note, removeOrderIds: [...remove] });
+      toast("Batch diperbarui", "success"); setSel(null); loadList(); onChanged();
+    } catch (e) { toast((e as Error).message, "danger"); } finally { setBusy(false); }
+  };
+  const doCancel = async () => {
+    if (!sel) return; setBusy(true);
+    try {
+      await api.post(`/marketplace-sync/batches/${sel.id}/cancel`, {});
+      toast("Batch dibatalkan", "success"); setConfirmCancel(false); setSel(null); loadList(); onChanged();
+    } catch (e) { toast((e as Error).message, "danger"); } finally { setBusy(false); }
+  };
+
+  return (
+    <Modal open onClose={onClose} title={sel ? "Edit Batch" : "Daftar Batch"} width="max-w-lg">
+      {!sel ? (
+        <div className="space-y-2">
+          {list === null ? (
+            <Skeleton className="h-24 w-full" />
+          ) : list.length === 0 ? (
+            <EmptyState icon="package" title="Belum ada batch" description="Batch muncul di sini setelah Anda menjalankan Batch Packing." />
+          ) : (
+            list.map((b) => (
+              <button key={b.id} type="button" onClick={() => openDetail(b.id)}
+                className="w-full text-left rounded-lg border border-line bg-white px-3 py-2.5 hover:bg-canvas transition">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-ink flex-1 truncate">{b.note ?? "(tanpa catatan)"}</span>
+                  <Badge tone={b.status === "cancelled" ? "danger" : "success"}>{b.status === "cancelled" ? "Dibatalkan" : "Aktif"}</Badge>
+                </div>
+                <div className="text-xs text-ink-2 mt-0.5">{b.orderCount} order · {dateShort(b.createdAt)}</div>
+              </button>
+            ))
+          )}
+          <div className="flex justify-end pt-2"><Button variant="text" onClick={onClose}>Tutup</Button></div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-ink-2">Catatan / nama batch</label>
+            <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={255} />
+          </div>
+          <div className="text-xs text-ink-2">Anggota ({sel.orders.length}) — centang untuk dilepas dari batch:</div>
+          <div className="max-h-64 overflow-y-auto space-y-1">
+            {sel.orders.length === 0 ? (
+              <div className="text-sm text-ink-3">Tidak ada order pada batch ini.</div>
+            ) : sel.orders.map((o) => {
+              const checked = remove.has(o.id);
+              return (
+                <label key={o.id} className="flex items-center gap-2 rounded-md border border-line px-2.5 py-1.5 cursor-pointer">
+                  <input type="checkbox" className="w-4 h-4 accent-brand" checked={checked}
+                    onChange={() => setRemove((r) => { const n = new Set(r); if (n.has(o.id)) n.delete(o.id); else n.add(o.id); return n; })} />
+                  <span className="flex-1 min-w-0">
+                    <span className="font-mono text-xs text-ink">{o.marketplaceOrderId ?? "-"}</span>
+                    <span className="text-xs text-ink-3"> · {o.shippingCourier ?? "-"} · {FS_LABEL[o.fulfillmentStatus] ?? o.fulfillmentStatus}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <Button variant="danger" onClick={() => setConfirmCancel(true)} disabled={busy}>Batalkan batch</Button>
+            <div className="ml-auto flex gap-2">
+              <Button variant="text" onClick={() => setSel(null)} disabled={busy}>Kembali</Button>
+              <Button variant="filled" onClick={save} loading={busy}>Simpan</Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmCancel && (
+        <ConfirmModal
+          open
+          title="Batalkan batch ini?"
+          description="Semua order dilepas dari batch & batch ditandai dibatalkan. Ini TIDAK menarik balik pengiriman (RTS) yang sudah terjadi di marketplace."
+          confirmLabel="Ya, batalkan"
+          onConfirm={doCancel}
+          onClose={() => setConfirmCancel(false)}
+        />
       )}
     </Modal>
   );

@@ -709,6 +709,23 @@ export class MarketplaceSyncService {
    * lokal ke "packing". Frontend menggabung label jadi 1 PDF & membuat PDF
    * packing list. RTS = tulis outward -> hanya dipicu manual dari batch UI.
    */
+  /**
+   * Batalkan batch (poin 1): bubarkan grup — lepas semua order dari batch &
+   * tandai status 'cancelled'. TIDAK menarik balik RTS ke marketplace (tak
+   * bisa dibatalkan); ini murni pembatalan pengelompokan di AutoToko.
+   */
+  async cancelBatch(userId: string, id: string) {
+    const [b] = await this.bypass(() => this.db.select().from(orderBatches)
+      .where(and(eq(orderBatches.id, id), eq(orderBatches.userId, userId))).limit(1));
+    if (!b) throw new NotFoundException("Batch tidak ditemukan");
+    await this.bypass(() => this.db.update(orders).set({ batchId: null, updatedAt: new Date() })
+      .where(and(eq(orders.userId, userId), eq(orders.batchId, id))));
+    await this.bypass(() => this.db.update(orderBatches)
+      .set({ status: "cancelled", updatedAt: new Date() })
+      .where(and(eq(orderBatches.id, id), eq(orderBatches.userId, userId))));
+    return this.getBatch(userId, id);
+  }
+
   /** Daftar batch packing (poin 1): tampil di halaman order. orderCount dihitung on-read. */
   async listBatches(userId: string) {
     const rows = await this.bypass(() => this.db.select().from(orderBatches)

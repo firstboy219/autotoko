@@ -160,6 +160,9 @@ public final class Api {
     public void batchEdit(String id, JSONObject body, Cb cb) {
         call("PATCH", session.baseUrl() + "/api/marketplace-sync/batches/" + id, session.token(), body, cb);
     }
+    public void batchCancel(String id, Cb cb) {
+        call("POST", session.baseUrl() + "/api/marketplace-sync/batches/" + id + "/cancel", session.token(), new JSONObject(), cb);
+    }
 
     public void orderSettings(Cb cb) {
         call("GET", session.baseUrl() + "/api/orders/settings", session.token(), null, cb);

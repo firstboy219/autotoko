@@ -590,9 +590,22 @@ public class OrdersActivity extends AppCompatActivity {
                         toast("Batch diperbarui."); muat();
                     });
                 })
+                .setNeutralButton("Batalkan batch", (d, w) -> konfirmCancelBatch(id))
                 .setNegativeButton("Tutup", null)
                 .show();
         });
+    }
+
+    private void konfirmCancelBatch(final String id) {
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Batalkan batch?")
+            .setMessage("Semua order dilepas dari batch & batch ditandai dibatalkan. TIDAK menarik balik RTS yang sudah terjadi di marketplace.")
+            .setPositiveButton("Ya, batalkan", (d, w) -> api.batchCancel(id, r -> {
+                if (r == null || !r.ok()) { toast(r == null ? "Gagal" : r.message("Gagal batalkan")); return; }
+                toast("Batch dibatalkan."); muat();
+            }))
+            .setNegativeButton("Batal", null)
+            .show();
     }
 
     private View card(JSONObject o) {
