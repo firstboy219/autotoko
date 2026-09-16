@@ -224,6 +224,14 @@ export function Orders() {
     useFetch<{ perStatus: Record<string, number>; manual: number }>("/orders/board-summary");
   const toast = useToast();
   useRealtime(useCallback(() => { reload(); reloadRingkas(); }, [reload, reloadRingkas]));
+  // Label status internal bisa di-rename dari Admin CMS -> hidrasi FS_LABEL saat
+  // muat supaya tabel/badge memakai nama terbaru (bukan default statis).
+  const [, setLabelVer] = useState(0);
+  useEffect(() => {
+    api.get<{ label?: Record<string, string> }>("/orders/status-meta")
+      .then((m) => { if (m?.label) { Object.assign(FS_LABEL, m.label); setLabelVer((v) => v + 1); } })
+      .catch(() => { /* pakai default */ });
+  }, []);
   const [view, setView] = useState<ViewMode>("tabel");
   const [q, setQ] = useState("");
   const [mp, setMp] = useState("");

@@ -2,7 +2,8 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, lte, notInArray, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders, orderSettings, resiScans, resiScanCodes, shops, marketplaceSkuMap, masterProducts } from "../../database/schema/index.js";
-import { DEFAULT_STATUS_MAP } from "../marketplace-sync/peta-tiktok.js";
+import { parseStatusConfig, deriveStatus, MP_STATUS_LABEL } from "../marketplace-sync/status-config.js";
+import { AdminSettingsService } from "../admin-settings/admin-settings.service.js";
 
 export interface ListOrdersOpts {
   status?: FulfillmentStatus;
@@ -30,7 +31,10 @@ export type FulfillmentStatus = (typeof FULFILLMENT_STATUSES)[number];
 
 @Injectable()
 export class OrdersService {
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly settings: AdminSettingsService,
+  ) {}
 
   /** Normalisasi kunci resi: huruf besar, hanya alfanumerik (samakan dgn resi_scans.resi). */
   private normResi(s: string | null | undefined): string {
@@ -268,29 +272,16 @@ export class OrdersService {
 
   /** Jumlah per status proses (semua order API) + jumlah scan manual. */
   /** Sumber TUNGGAL meta status untuk klien (web & APK) supaya label tak disalin-tangan. */
-  statusMeta() {
+  async statusMeta() {
+    const cfg = parseStatusConfig(await this.settings.get("order_status_config"));
+    const d = deriveStatus(cfg);
     return {
-      flow: ["masuk", "approved", "packing", "siap_kirim", "dikirim"],
-      side: ["selesai", "retur", "dibatalkan"],
-      label: {
-        masuk: "Menunggu Disetujui", approved: "Menunggu Dicetak", produksi: "Produksi",
-        packing: "Menunggu Dipacking", siap_kirim: "Menunggu Dipickup", dikirim: "Dalam Pengiriman",
-        selesai: "Selesai", retur: "Retur", dibatalkan: "Dibatalkan",
-      } as Record<string, string>,
-      // null = tahap rincian internal; di marketplace order masih "siap kirim".
-      marketplaceEquivalent: {
-        masuk: "Menunggu Disetujui / Perlu Diproses", approved: null, packing: null, siap_kirim: null,
-        dikirim: "Dalam Pengiriman", selesai: "Selesai", retur: "Retur", dibatalkan: "Dibatalkan",
-      } as Record<string, string | null>,
-      // Peta status MARKETPLACE -> internal (read-only utk halaman order; diatur
-      // di Admin CMS). Label ramah status marketplace mentah.
-      marketplaceMap: DEFAULT_STATUS_MAP as Record<string, string>,
-      mpLabel: {
-        UNPAID: "Belum Bayar", ON_HOLD: "Ditahan", AWAITING_SHIPMENT: "Menunggu Diproses",
-        AWAITING_COLLECTION: "Menunggu Pickup", PARTIALLY_SHIPPING: "Sebagian Dikirim",
-        IN_TRANSIT: "Dalam Pengiriman", DELIVERED: "Terkirim", COMPLETED: "Selesai",
-        CANCELLED: "Dibatalkan", CANCELED: "Dibatalkan",
-      } as Record<string, string>,
+      flow: d.flow,
+      side: d.side,
+      label: d.label,
+      marketplaceEquivalent: d.marketplaceEquivalent,
+      marketplaceMap: d.marketplaceMap,
+      mpLabel: MP_STATUS_LABEL,
     };
   }
 

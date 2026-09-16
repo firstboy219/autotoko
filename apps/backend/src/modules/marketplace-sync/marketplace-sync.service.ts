@@ -25,6 +25,7 @@ import { ShopsService } from "../shops/shops.service.js";
 import { AdminSettingsService } from "../admin-settings/admin-settings.service.js";
 import { UploadsService } from "../uploads/uploads.service.js";
 import { TikTokApiError, TikTokClient } from "./tiktok-client.js";
+import { parseStatusConfig, deriveStatus } from "./status-config.js";
 import {
   hitungSince,
   majukanStatus,
@@ -84,8 +85,8 @@ export class MarketplaceSyncService {
     if (this.statusMapCache && Date.now() - this.statusMapCache.at < 60000) return this.statusMapCache.map;
     let map: Record<string, StatusInternal> = {};
     try {
-      const raw = await this.adminSettings.get("order_status_mapping");
-      if (raw) { const p = JSON.parse(raw); if (p && typeof p === "object") map = p as Record<string, StatusInternal>; }
+      const raw = await this.adminSettings.get("order_status_config");
+      map = deriveStatus(parseStatusConfig(raw)).marketplaceMap as Record<string, StatusInternal>;
     } catch { map = {}; }
     this.statusMapCache = { at: Date.now(), map };
     return map;

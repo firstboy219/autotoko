@@ -108,8 +108,8 @@ export class OrdersController {
   }
 
   @Get("status-meta")
-  statusMeta(): ApiResponse<unknown> {
-    return { success: true, data: this.orders.statusMeta() };
+  async statusMeta(): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.statusMeta() };
   }
 
   @Get("settings")
