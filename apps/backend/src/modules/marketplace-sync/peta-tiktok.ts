@@ -62,10 +62,12 @@ export function statusInternal(mp: string | null | undefined): StatusInternal {
       // AutoToko (masuk -> approved); forward-only menjaga yang sudah maju.
       return "masuk";
     case "AWAITING_COLLECTION":
-      // Resi/label sudah dicetak & menunggu kurir -> di alur seller ini
-      // artinya paket MULAI dikemas. forward-only menjaga yang sudah lebih
-      // maju (siap_kirim/dikirim) tidak ditarik mundur.
-      return "packing";
+      // Label/AWB sudah dicetak (RTS selesai) & paket MENUNGGU DIJEMPUT kurir.
+      // Ini = "Menunggu Dipickup" (siap_kirim), BUKAN "Menunggu Dipacking":
+      // di sisi marketplace paket sudah siap kirim. (Dulu keliru -> "packing",
+      // membuat order yang sebetulnya sudah diproses tampak belum dipacking.)
+      // forward-only menjaga yang sudah "dikirim/selesai" tak ditarik mundur.
+      return "siap_kirim";
     case "PARTIALLY_SHIPPING":
     case "IN_TRANSIT":
       return "dikirim";
