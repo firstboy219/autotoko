@@ -22,6 +22,7 @@ import { TenantService } from "../../database/tenant.service.js";
 import { TikTokAdapter } from "../../marketplace/adapters/tiktok.adapter.js";
 import { EventsGateway } from "../events/events.gateway.js";
 import { ShopsService } from "../shops/shops.service.js";
+import { UploadsService } from "../uploads/uploads.service.js";
 import { TikTokApiError, TikTokClient } from "./tiktok-client.js";
 import {
   hitungSince,
@@ -72,6 +73,7 @@ export class MarketplaceSyncService {
     private readonly shops: ShopsService,
     private readonly tenant: TenantService,
     private readonly events: EventsGateway,
+    private readonly uploads: UploadsService,
   ) {}
 
   /**
@@ -1003,7 +1005,23 @@ export class MarketplaceSyncService {
         .set({ labelPrinted: true, fulfillmentStatus: majukanStatus(order.fulfillmentStatus as StatusInternal, "packing"), updatedAt: new Date() })
         .where(and(eq(orders.userId, userId), eq(orders.id, orderId))));
     }
-    return { orderId, hasil };
+    // Poin 5: unduh PDF label & SIMPAN ke server kita (audit/cetak-ulang/offline);
+    // catat awb_url di order supaya tak bergantung URL marketplace yang bisa
+    // kedaluwarsa. Best-effort — kegagalan cache tak menggagalkan pengambilan.
+    let awbUrl: string | null = null;
+    const pertama = hasil.find((h) => h.docUrl);
+    if (pertama?.docUrl) {
+      try {
+        const res = await fetch(pertama.docUrl);
+        const buf = Buffer.from(await res.arrayBuffer());
+        const saved = await this.uploads.saveFile(buf, "pdf");
+        awbUrl = saved.url;
+        await this.bypass(() => this.db.update(orders)
+          .set({ awbUrl, updatedAt: new Date() })
+          .where(and(eq(orders.userId, userId), eq(orders.id, orderId))));
+      } catch (e) { this.logger.warn(`Cache AWB ${orderId}: ${(e as Error).message}`); }
+    }
+    return { orderId, awbUrl, hasil };
   }
 
   /**

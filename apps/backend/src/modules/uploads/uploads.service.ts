@@ -10,9 +10,10 @@ const EXT_MIME: Record<string, string> = {
   jpeg: "image/jpeg",
   png: "image/png",
   webp: "image/webp",
+  pdf: "application/pdf",
 };
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB decoded
-const NAME_RE = /^[a-f0-9-]+\.(jpg|jpeg|png|webp)$/;
+const NAME_RE = /^[a-f0-9-]+\.(jpg|jpeg|png|webp|pdf)$/;
 
 /**
  * Image storage on our own server (replaces the earlier R2 plan). Files are
@@ -29,6 +30,18 @@ export class UploadsService {
 
   private async ensureDir() {
     if (!existsSync(this.dir)) await fs.mkdir(this.dir, { recursive: true });
+  }
+
+  /** Persist arbitrary bytes (server-side; mis. cache PDF label/AWB). */
+  async saveFile(buf: Buffer, extRaw: string): Promise<{ url: string; name: string }> {
+    const ext = extRaw.toLowerCase().replace(/^\./, "");
+    if (!EXT_MIME[ext]) throw new BadRequestException("Unsupported file type");
+    if (!buf.length) throw new BadRequestException("Empty file");
+    if (buf.length > MAX_BYTES) throw new BadRequestException("File exceeds 8 MB");
+    await this.ensureDir();
+    const name = `${randomUUID()}.${ext === "jpeg" ? "jpg" : ext}`;
+    await fs.writeFile(join(this.dir, name), buf);
+    return { url: `/api/uploads/${name}`, name };
   }
 
   /** Persist a base64-encoded image, returning the public URL path. */

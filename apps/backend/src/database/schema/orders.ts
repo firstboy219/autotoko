@@ -57,6 +57,8 @@ export const orders = pgTable(
     commercePlatform: varchar("commerce_platform", { length: 32 }),
     /** Batch packing tempat order ini dikelompokkan (poin 1); null = tak berbatch. */
     batchId: uuid("batch_id").references(() => orderBatches.id, { onDelete: "set null" }),
+    /** URL PDF label/AWB yang di-cache ke server kita (poin 5). Null = belum. */
+    awbUrl: varchar("awb_url", { length: 255 }),
     /** Pesanan apa adanya dari marketplace, untuk audit. */
     raw: jsonb("raw"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
