@@ -22,6 +22,7 @@ import { TenantService } from "../../database/tenant.service.js";
 import { TikTokAdapter } from "../../marketplace/adapters/tiktok.adapter.js";
 import { EventsGateway } from "../events/events.gateway.js";
 import { ShopsService } from "../shops/shops.service.js";
+import { AdminSettingsService } from "../admin-settings/admin-settings.service.js";
 import { UploadsService } from "../uploads/uploads.service.js";
 import { TikTokApiError, TikTokClient } from "./tiktok-client.js";
 import {
@@ -74,7 +75,21 @@ export class MarketplaceSyncService {
     private readonly tenant: TenantService,
     private readonly events: EventsGateway,
     private readonly uploads: UploadsService,
+    private readonly adminSettings: AdminSettingsService,
   ) {}
+
+  private statusMapCache: { at: number; map: Record<string, StatusInternal> } | null = null;
+  /** Override pemetaan status dari Admin CMS (order_status_mapping), cache 60s. */
+  private async statusOverride(): Promise<Record<string, StatusInternal>> {
+    if (this.statusMapCache && Date.now() - this.statusMapCache.at < 60000) return this.statusMapCache.map;
+    let map: Record<string, StatusInternal> = {};
+    try {
+      const raw = await this.adminSettings.get("order_status_mapping");
+      if (raw) { const p = JSON.parse(raw); if (p && typeof p === "object") map = p as Record<string, StatusInternal>; }
+    } catch { map = {}; }
+    this.statusMapCache = { at: Date.now(), map };
+    return map;
+  }
 
   /**
    * Tiap sentuhan basis data dibungkus SENDIRI-SENDIRI di sini, bukan satu
@@ -338,7 +353,8 @@ export class MarketplaceSyncService {
    * AWAITING_SHIPMENT.
    */
   private async simpanPesanan(toko: Toko, data: PesananTikTok[]) {
-    const baris = data.map(petakanPesanan);
+    const override = await this.statusOverride();
+    const baris = data.map((o) => petakanPesanan(o, override));
     const ids = baris.map((b) => b.marketplaceOrderId);
 
     // Auto-proses (auto-setujui) per seller: order baru langsung disetujui saat

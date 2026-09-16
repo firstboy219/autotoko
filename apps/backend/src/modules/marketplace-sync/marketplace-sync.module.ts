@@ -3,6 +3,7 @@ import { AuthModule } from "../auth/auth.module.js";
 import { ShopsModule } from "../shops/shops.module.js";
 import { MarketplaceModule } from "../../marketplace/marketplace.module.js";
 import { UploadsModule } from "../uploads/uploads.module.js";
+import { AdminSettingsModule } from "../admin-settings/admin-settings.module.js";
 import { MarketplaceSyncService } from "./marketplace-sync.service.js";
 import { MarketplaceSyncTask } from "./marketplace-sync.task.js";
 import { MarketplaceSyncController } from "./marketplace-sync.controller.js";
@@ -13,7 +14,7 @@ import { MarketplaceSyncController } from "./marketplace-sync.controller.js";
  * keduanya. Menaruhnya di salah satu membuat impor melingkar.
  */
 @Module({
-  imports: [AuthModule, ShopsModule, MarketplaceModule, UploadsModule],
+  imports: [AuthModule, ShopsModule, MarketplaceModule, UploadsModule, AdminSettingsModule],
   controllers: [MarketplaceSyncController],
   providers: [MarketplaceSyncService, MarketplaceSyncTask],
   exports: [MarketplaceSyncService],

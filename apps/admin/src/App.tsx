@@ -8,6 +8,7 @@ import { CourierTracking } from "./pages/CourierTracking";
 import { Pricing } from "./pages/Pricing";
 import { AiAutopilot } from "./pages/AiAutopilot";
 import { Branding } from "./pages/Branding";
+import { StatusOrder } from "./pages/StatusOrder";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const authed = useAuth((s) => s.authenticated);
@@ -26,6 +27,7 @@ export function App() {
         <Route path="/pricing" element={<Protected><Pricing /></Protected>} />
         <Route path="/ai" element={<Protected><AiAutopilot /></Protected>} />
         <Route path="/branding" element={<Protected><Branding /></Protected>} />
+        <Route path="/status-order" element={<Protected><StatusOrder /></Protected>} />
         <Route path="*" element={<Navigate to="/settings" replace />} />
       </Routes>
     </BrowserRouter>

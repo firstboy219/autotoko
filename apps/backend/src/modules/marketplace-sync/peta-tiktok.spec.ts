@@ -97,8 +97,8 @@ describe("kelompokkanItem", () => {
 describe("statusInternal & majukanStatus", () => {
   it("memetakan status TikTok ke tahap gudang", () => {
     expect(statusInternal("UNPAID")).toBe("masuk");
-    expect(statusInternal("AWAITING_SHIPMENT")).toBe("approved");
-    expect(statusInternal("AWAITING_COLLECTION")).toBe("siap_kirim");
+    expect(statusInternal("AWAITING_SHIPMENT")).toBe("masuk");
+    expect(statusInternal("AWAITING_COLLECTION")).toBe("packing");
     expect(statusInternal("IN_TRANSIT")).toBe("dikirim");
     expect(statusInternal("COMPLETED")).toBe("selesai");
     expect(statusInternal("CANCELLED")).toBe("dibatalkan");

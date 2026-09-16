@@ -51,8 +51,32 @@ export function autoProses(
   return majukanStatus(status, "approved");
 }
 
-export function statusInternal(mp: string | null | undefined): StatusInternal {
-  switch (String(mp ?? "").toUpperCase()) {
+/**
+ * Peta DEFAULT status marketplace -> tahap internal. Bisa di-override lewat
+ * Admin CMS (setting order_status_mapping) tanpa deploy. Catatan doktrin:
+ * AWAITING_COLLECTION default = "packing" (Menunggu Dipacking) karena bukti
+ * "sudah dipacking" = SCAN packer, bukan status marketplace.
+ */
+export const DEFAULT_STATUS_MAP: Record<string, StatusInternal> = {
+  UNPAID: "masuk",
+  ON_HOLD: "masuk",
+  AWAITING_SHIPMENT: "masuk",
+  AWAITING_COLLECTION: "packing",
+  PARTIALLY_SHIPPING: "dikirim",
+  IN_TRANSIT: "dikirim",
+  DELIVERED: "selesai",
+  COMPLETED: "selesai",
+  CANCELLED: "dibatalkan",
+  CANCELED: "dibatalkan",
+};
+
+export function statusInternal(
+  mp: string | null | undefined,
+  override?: Record<string, StatusInternal>,
+): StatusInternal {
+  const key = String(mp ?? "").toUpperCase();
+  if (override && override[key]) return override[key];
+  switch (key) {
     case "UNPAID":
     case "ON_HOLD":
       return "masuk";
@@ -222,7 +246,7 @@ export interface BarisPesanan {
  * pemanggil). Angka uang disimpan sebagai string desimal karena kolomnya
  * numeric -- mengubahnya ke float lalu kembali adalah cara kehilangan sen.
  */
-export function petakanPesanan(o: PesananTikTok): BarisPesanan {
+export function petakanPesanan(o: PesananTikTok, override?: Record<string, StatusInternal>): BarisPesanan {
   const p = o.payment ?? {};
   const alamat = o.recipient_address ?? null;
   // Nomor resi: TikTok menaruhnya di pesanan DAN di tiap line item. Yang di
@@ -233,7 +257,7 @@ export function petakanPesanan(o: PesananTikTok): BarisPesanan {
   return {
     marketplaceOrderId: String(o.id),
     status: o.status ?? null,
-    fulfillmentStatus: statusInternal(o.status),
+    fulfillmentStatus: statusInternal(o.status, override),
     buyerName: alamat?.name || null,
     buyerPhone: alamat?.phone_number || null,
     shippingAddress: alamat,
