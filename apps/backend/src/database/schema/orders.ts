@@ -55,6 +55,8 @@ export const orders = pgTable(
     updatedAtMarketplace: timestamp("updated_at_marketplace", { withTimezone: true }),
     /** "TIKTOK_SHOP" / "TOKOPEDIA" -- satu toko TikTok memuat keduanya. */
     commercePlatform: varchar("commerce_platform", { length: 32 }),
+    /** Batch packing tempat order ini dikelompokkan (poin 1); null = tak berbatch. */
+    batchId: uuid("batch_id").references(() => orderBatches.id, { onDelete: "set null" }),
     /** Pesanan apa adanya dari marketplace, untuk audit. */
     raw: jsonb("raw"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -65,6 +67,26 @@ export const orders = pgTable(
     userIdx: index("orders_user_idx").on(t.userId),
     shopIdx: index("orders_shop_idx").on(t.shopId),
   }),
+);
+
+/**
+ * Batch packing (poin 1): sekumpulan order yang diproses bersama lewat menu
+ * Batch Packing di APK. Disimpan agar batch yang sudah dibuat TAMPIL di halaman
+ * order dan bisa DIEDIT (ganti catatan / ubah anggota). Keanggotaan disimpan di
+ * orders.batch_id, jadi order berada di paling banyak satu batch.
+ */
+export const orderBatches = pgTable(
+  "order_batches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    note: varchar("note", { length: 255 }),
+    handoverMethod: varchar("handover_method", { length: 32 }),
+    status: varchar("status", { length: 16 }).notNull().default("processed"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ userIdx: index("order_batches_user_idx").on(t.userId) }),
 );
 
 // PRD Bagian 9.1 — webhook idempotency (marketplaces may send the same event >1x).

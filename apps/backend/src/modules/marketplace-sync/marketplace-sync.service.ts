@@ -15,6 +15,7 @@ import {
   marketplaceConversations,
   marketplaceReturns,
   autopilotActivity,
+  orderBatches,
 } from "../../database/schema/index.js";
 import { CryptoService } from "../../common/crypto/crypto.service.js";
 import { TenantService } from "../../database/tenant.service.js";
@@ -708,6 +709,52 @@ export class MarketplaceSyncService {
    * lokal ke "packing". Frontend menggabung label jadi 1 PDF & membuat PDF
    * packing list. RTS = tulis outward -> hanya dipicu manual dari batch UI.
    */
+  /** Daftar batch packing (poin 1): tampil di halaman order. orderCount dihitung on-read. */
+  async listBatches(userId: string) {
+    const rows = await this.bypass(() => this.db.select().from(orderBatches)
+      .where(eq(orderBatches.userId, userId)).orderBy(desc(orderBatches.createdAt)).limit(100));
+    const counts = await this.bypass(() => this.db
+      .select({ bid: orders.batchId, n: sql<number>`count(*)::int` })
+      .from(orders).where(and(eq(orders.userId, userId), isNotNull(orders.batchId)))
+      .groupBy(orders.batchId));
+    const cmap = new Map(counts.map((c) => [c.bid, Number(c.n)]));
+    return rows.map((b) => ({ ...b, orderCount: cmap.get(b.id) ?? 0 }));
+  }
+
+  async getBatch(userId: string, id: string) {
+    const [b] = await this.bypass(() => this.db.select().from(orderBatches)
+      .where(and(eq(orderBatches.id, id), eq(orderBatches.userId, userId))).limit(1));
+    if (!b) throw new NotFoundException("Batch tidak ditemukan");
+    const ord = await this.bypass(() => this.db.select({
+      id: orders.id, marketplaceOrderId: orders.marketplaceOrderId,
+      shippingCourier: orders.shippingCourier, fulfillmentStatus: orders.fulfillmentStatus,
+      buyerName: orders.buyerName, totalAmount: orders.totalAmount,
+    }).from(orders).where(and(eq(orders.userId, userId), eq(orders.batchId, id)))
+      .orderBy(desc(orders.createdAt)));
+    return { ...b, orderCount: ord.length, orders: ord };
+  }
+
+  /** Edit batch (poin 1): ganti catatan &/atau ubah anggota (tambah/lepas order). */
+  async editBatch(
+    userId: string,
+    id: string,
+    dto: { note?: string; addOrderIds?: string[]; removeOrderIds?: string[] },
+  ) {
+    const [b] = await this.bypass(() => this.db.select().from(orderBatches)
+      .where(and(eq(orderBatches.id, id), eq(orderBatches.userId, userId))).limit(1));
+    if (!b) throw new NotFoundException("Batch tidak ditemukan");
+    const rem = [...new Set((dto.removeOrderIds ?? []).filter(Boolean))];
+    const add = [...new Set((dto.addOrderIds ?? []).filter(Boolean))];
+    if (rem.length) await this.bypass(() => this.db.update(orders).set({ batchId: null, updatedAt: new Date() })
+      .where(and(eq(orders.userId, userId), eq(orders.batchId, id), inArray(orders.id, rem))));
+    if (add.length) await this.bypass(() => this.db.update(orders).set({ batchId: id, updatedAt: new Date() })
+      .where(and(eq(orders.userId, userId), inArray(orders.id, add))));
+    if (dto.note !== undefined) await this.bypass(() => this.db.update(orderBatches)
+      .set({ note: dto.note!.slice(0, 255), updatedAt: new Date() })
+      .where(and(eq(orderBatches.id, id), eq(orderBatches.userId, userId))));
+    return this.getBatch(userId, id);
+  }
+
   async batchPacking(
     userId: string,
     orderIds: string[],
@@ -812,7 +859,25 @@ export class MarketplaceSyncService {
     }
     const labelsPdf = await this.gabungLabelPdf(labelBufs);
     const packingListPdf = await this.buatPackingListPdf(agg, hasil.filter((h) => h.ok).length);
-    return { total: ids.length, ok: hasil.filter((h) => h.ok).length, ditahan: takeouts.length, labelsPdf, packingListPdf, hasil };
+
+    // Persist batch (poin 1): order yang BERHASIL diproses dikelompokkan jadi satu
+    // batch yang tampil di halaman order & bisa diedit. Best-effort — kegagalan
+    // pencatatan tak menggagalkan hasil RTS yang sudah terjadi.
+    let batchId: string | null = null;
+    const okIds = hasil.filter((h) => h.ok).map((h) => h.orderId);
+    if (okIds.length) {
+      try {
+        const catatan = `Batch ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "short", timeStyle: "short" })}`;
+        const [b] = await this.bypass(() => this.db.insert(orderBatches)
+          .values({ userId, note: catatan, handoverMethod: opts.handoverMethod ?? null, status: "processed" })
+          .returning({ id: orderBatches.id }));
+        batchId = b?.id ?? null;
+        if (batchId) await this.bypass(() => this.db.update(orders)
+          .set({ batchId, updatedAt: new Date() })
+          .where(and(eq(orders.userId, userId), inArray(orders.id, okIds))));
+      } catch (e) { this.logger.warn(`Catat batch gagal: ${(e as Error).message}`); }
+    }
+    return { total: ids.length, ok: hasil.filter((h) => h.ok).length, ditahan: takeouts.length, batchId, labelsPdf, packingListPdf, hasil };
   }
 
   /** Gabung banyak PDF label jadi satu (pdf-lib) -> base64. Null bila kosong. */

@@ -5,6 +5,7 @@ import {
   Get,
   Logger,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -120,6 +121,27 @@ export class MarketplaceSyncController {
     @Body() body: { orderIds: string[]; handoverMethod?: string; takeouts?: { orderId: string; reason?: string }[] },
   ): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.sync.batchPacking(uid(req), body?.orderIds ?? [], { handoverMethod: body?.handoverMethod, takeouts: body?.takeouts }) };
+  }
+
+  /** Daftar batch yang sudah dibuat (poin 1: tampil di halaman order). */
+  @Get("batches")
+  async batches(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.listBatches(uid(req)) };
+  }
+
+  @Get("batches/:id")
+  async batch(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.getBatch(uid(req), id) };
+  }
+
+  /** Edit batch: ganti catatan &/atau ubah anggota (tambah/lepas order). */
+  @Patch("batches/:id")
+  async editBatch(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() body: { note?: string; addOrderIds?: string[]; removeOrderIds?: string[] },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.editBatch(uid(req), id, { note: body?.note, addOrderIds: body?.addOrderIds, removeOrderIds: body?.removeOrderIds }) };
   }
 
   /** Ambil URL label AWB order dari marketplace (read-only). */

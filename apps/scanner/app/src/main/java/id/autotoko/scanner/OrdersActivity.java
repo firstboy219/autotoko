@@ -275,11 +275,13 @@ public class OrdersActivity extends AppCompatActivity {
     @Override public boolean onCreateOptionsMenu(Menu m) {
         m.add(0, 1, 0, "Batch Packing").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         m.add(0, 2, 1, "Otomasi Order").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        m.add(0, 3, 2, "Daftar Batch").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         return true;
     }
     @Override public boolean onOptionsItemSelected(MenuItem item) {
         if (item.getItemId() == 1) { showBatch(); return true; }
         if (item.getItemId() == 2) { showOtomasi(); return true; }
+        if (item.getItemId() == 3) { showBatches(); return true; }
         return super.onOptionsItemSelected(item);
     }
 
@@ -520,6 +522,77 @@ public class OrdersActivity extends AppCompatActivity {
         new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle(judulStat(kind) + " (" + sel.size() + ")")
                 .setView(sc).setPositiveButton("Tutup", null).show();
+    }
+
+    // ---- Daftar & Edit Batch (poin 1) ----
+    private void showBatches() {
+        toast("Memuat batch\u2026");
+        api.batches(r -> {
+            if (r == null || !r.ok() || r.dataArray() == null) { toast(r == null ? "Gagal" : r.message("Gagal memuat batch")); return; }
+            JSONArray arr = r.dataArray();
+            LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL);
+            int pad = dp(16); box.setPadding(pad, pad, pad, pad);
+            if (arr.length() == 0) {
+                TextView e = new TextView(this); e.setText("Belum ada batch. Buat lewat menu Batch Packing."); e.setTextColor(getColor(R.color.ink3));
+                box.addView(e);
+            }
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject b = arr.optJSONObject(i); if (b == null) continue;
+                final String id = b.optString("id");
+                LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.VERTICAL);
+                row.setBackground(pill(getColor(R.color.surface), getColor(R.color.line)));
+                row.setPadding(dp(12), dp(10), dp(12), dp(10));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                lp.topMargin = dp(8); row.setLayoutParams(lp);
+                TextView t1 = new TextView(this); t1.setText(b.optString("note", "(tanpa catatan)")); t1.setTextSize(14);
+                t1.setTypeface(null, android.graphics.Typeface.BOLD); t1.setTextColor(getColor(R.color.ink));
+                TextView t2 = new TextView(this); t2.setText(b.optInt("orderCount", 0) + " order  \u00b7  " + b.optString("status", "")); t2.setTextSize(12); t2.setTextColor(getColor(R.color.ink2));
+                row.addView(t1); row.addView(t2);
+                row.setOnClickListener(v -> showBatchDetail(id));
+                box.addView(row);
+            }
+            ScrollView sc = new ScrollView(this); sc.addView(box);
+            new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Daftar Batch").setView(sc).setPositiveButton("Tutup", null).show();
+        });
+    }
+
+    private void showBatchDetail(final String id) {
+        api.batchDetail(id, r -> {
+            if (r == null || !r.ok() || r.data() == null) { toast(r == null ? "Gagal" : r.message("Gagal memuat batch")); return; }
+            JSONObject b = r.data();
+            JSONArray ord = b.optJSONArray("orders");
+            LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL);
+            int pad = dp(16); box.setPadding(pad, pad, pad, pad);
+            TextView lbl = new TextView(this); lbl.setText("Catatan batch"); lbl.setTextSize(12); lbl.setTextColor(getColor(R.color.ink2));
+            final EditText note = new EditText(this); note.setText(b.optString("note", "")); note.setTextSize(14); note.setSingleLine(true);
+            box.addView(lbl); box.addView(note);
+            TextView h = new TextView(this); h.setText("\nAnggota (centang = lepas dari batch):"); h.setTextSize(12); h.setTextColor(getColor(R.color.ink2)); box.addView(h);
+            final java.util.LinkedHashMap<String, CheckBox> cbs = new java.util.LinkedHashMap<>();
+            if (ord != null) for (int i = 0; i < ord.length(); i++) {
+                JSONObject o = ord.optJSONObject(i); if (o == null) continue;
+                final String oid = o.optString("id");
+                CheckBox cb = new CheckBox(this);
+                cb.setText(o.optString("marketplaceOrderId", "-") + "  \u00b7  " + o.optString("shippingCourier", "") + "  \u00b7  " + label(o.optString("fulfillmentStatus")));
+                cb.setTextSize(13);
+                cbs.put(oid, cb); box.addView(cb);
+            }
+            ScrollView sc = new ScrollView(this); sc.addView(box);
+            new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Edit Batch")
+                .setView(sc)
+                .setPositiveButton("Simpan", (d, w) -> {
+                    JSONArray rem = new JSONArray();
+                    for (Map.Entry<String, CheckBox> e : cbs.entrySet()) if (e.getValue().isChecked()) rem.put(e.getKey());
+                    JSONObject body = new JSONObject();
+                    try { body.put("note", note.getText().toString().trim()); body.put("removeOrderIds", rem); } catch (Exception ig) {}
+                    api.batchEdit(id, body, rr -> {
+                        if (rr == null || !rr.ok()) { toast(rr == null ? "Gagal" : rr.message("Gagal simpan")); return; }
+                        toast("Batch diperbarui."); muat();
+                    });
+                })
+                .setNegativeButton("Tutup", null)
+                .show();
+        });
     }
 
     private View card(JSONObject o) {

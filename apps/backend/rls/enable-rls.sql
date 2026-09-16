@@ -78,3 +78,12 @@ BEGIN
     $f$, r.tbl, r.fk, r.parent, r.fk, r.parent);
   END LOOP;
 END $anak$;
+
+
+-- Batch packing (poin 1) -- tabel induk ber-user_id, FORCE RLS.
+ALTER TABLE order_batches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE order_batches FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON order_batches;
+CREATE POLICY tenant_isolation ON order_batches FOR ALL
+  USING (user_id = nullif(current_setting('app.user_id', true), '')::uuid OR current_setting('app.bypass', true) = 'on')
+  WITH CHECK (user_id = nullif(current_setting('app.user_id', true), '')::uuid OR current_setting('app.bypass', true) = 'on');

@@ -150,6 +150,17 @@ public final class Api {
         } catch (Exception ignored) {}
         call("POST", session.baseUrl() + "/api/marketplace-sync/orders/batch-packing", session.token(), p, cb);
     }
+    /** Daftar batch packing (poin 1). */
+    public void batches(Cb cb) {
+        call("GET", session.baseUrl() + "/api/marketplace-sync/batches", session.token(), null, cb);
+    }
+    public void batchDetail(String id, Cb cb) {
+        call("GET", session.baseUrl() + "/api/marketplace-sync/batches/" + id, session.token(), null, cb);
+    }
+    public void batchEdit(String id, JSONObject body, Cb cb) {
+        call("PATCH", session.baseUrl() + "/api/marketplace-sync/batches/" + id, session.token(), body, cb);
+    }
+
     public void orderSettings(Cb cb) {
         call("GET", session.baseUrl() + "/api/orders/settings", session.token(), null, cb);
     }
