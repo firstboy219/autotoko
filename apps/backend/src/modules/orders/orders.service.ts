@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, lte, notInArray, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { orders, orderSettings, resiScans, resiScanCodes, shops, marketplaceSkuMap } from "../../database/schema/index.js";
+import { orders, orderSettings, resiScans, resiScanCodes, shops, marketplaceSkuMap, masterProducts } from "../../database/schema/index.js";
 
 export interface ListOrdersOpts {
   status?: FulfillmentStatus;
@@ -136,6 +136,23 @@ export class OrdersService {
     // dan tanpa penanda ini keduanya hanya dua baris yang kebetulan mirip.
     const terscanIds = await this.scannedOrderIds(userId, dariApi);
 
+    // Peta skuId (varian marketplace) -> nama master produk AutoToko, dari
+    // marketplace_sku_map. Dipakai menampilkan nama master di tiap item order.
+    const skuMasterRows = await this.db
+      .select({ sku: marketplaceSkuMap.sku, nama: masterProducts.name })
+      .from(marketplaceSkuMap)
+      .innerJoin(masterProducts, eq(masterProducts.id, marketplaceSkuMap.masterProductId))
+      .where(eq(marketplaceSkuMap.userId, userId));
+    const skuMaster = new Map(skuMasterRows.map((r) => [String(r.sku), r.nama]));
+    const enrichItems = (items: unknown): unknown => {
+      if (!Array.isArray(items)) return items;
+      return items.map((it) => {
+        const o2 = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
+        const sku = o2.skuId != null ? String(o2.skuId) : "";
+        return { ...o2, masterName: sku ? skuMaster.get(sku) ?? null : null };
+      });
+    };
+
     // Paket yang dipindai lewat aplikasi ikut terdaftar di sini.
     //
     // Sebelumnya menu ini hanya membaca tabel orders yang diisi API
@@ -207,6 +224,7 @@ export class OrdersService {
         shipDeadlineMs: this.deadlineOf(o),
         priorityLevel: this.prioOf(o),
         shopName: o.shopId ? namaToko.get(o.shopId) ?? null : null,
+        items: enrichItems(o.items),
       })),
       ...manualTerpilih,
     ]

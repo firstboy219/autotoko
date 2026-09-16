@@ -33,6 +33,8 @@ interface OrderItem {
   name?: string;
   skuName?: string;
   skuId?: string;
+  /** Nama master produk AutoToko hasil mapping varian (dari backend). */
+  masterName?: string | null;
   sellerSku?: string;
   qty?: number;
   salePrice?: number;
@@ -105,6 +107,14 @@ const FS_TONE: Record<string, Tone> = {
   retur: "warning", dibatalkan: "danger",
 };
 
+// Label ramah status MARKETPLACE mentah (orders.status) — beda dari status proses internal.
+const MP_STATUS_LABEL: Record<string, string> = {
+  UNPAID: "Belum Bayar", ON_HOLD: "Ditahan", AWAITING_SHIPMENT: "Menunggu Diproses",
+  AWAITING_COLLECTION: "Menunggu Pickup", PARTIALLY_SHIPPING: "Sebagian Dikirim",
+  IN_TRANSIT: "Dalam Pengiriman", DELIVERED: "Terkirim", COMPLETED: "Selesai",
+  CANCELLED: "Dibatalkan", CANCELED: "Dibatalkan",
+};
+
 const PAGE_SIZE = 15;
 
 type ViewMode = "tabel" | "kanban";
@@ -117,7 +127,7 @@ const VIEWS: { mode: ViewMode; label: string; icon: IconName }[] = [
 /** Nama produk pertama pada satu pesanan (bentuk baru atau lama). */
 function firstItemName(o: Order): string | null {
   const it = o.items?.[0];
-  return it ? (it.name ?? it.product_name ?? it.skuName ?? it.sellerSku ?? it.seller_sku ?? null) : null;
+  return it ? (it.masterName ?? it.name ?? it.product_name ?? it.skuName ?? it.sellerSku ?? it.seller_sku ?? null) : null;
 }
 
 // Aging & tenggat (poin 2 & 3). createdAtMarketplace lebih akurat dari createdAt.
@@ -543,6 +553,7 @@ export function Orders() {
                   <TH>Marketplace</TH>
                   <TH>Toko</TH>
                   <TH>Status Proses</TH>
+                  <TH>Status MP</TH>
                   <TH>Scan</TH>
                   <TH>Pembeli</TH>
                   <TH align="right">Total</TH>
@@ -552,10 +563,10 @@ export function Orders() {
               </THead>
               <tbody>
                 {loading ? (
-                  <SkeletonRows n={8} cols={11} />
+                  <SkeletonRows n={8} cols={12} />
                 ) : !rows.length ? (
                   <tr>
-                    <td colSpan={11}>
+                    <td colSpan={12}>
                       <EmptyState
                         icon="cart"
                         title={hasFilters ? "Tidak ada order yang cocok" : "Belum ada order"}
@@ -641,6 +652,11 @@ export function Orders() {
                         <Badge tone={FS_TONE[o.fulfillmentStatus] ?? "neutral"}>
                           {FS_LABEL[o.fulfillmentStatus] ?? o.fulfillmentStatus}
                         </Badge>
+                      </TD>
+                      <TD>
+                        {o.status ? (
+                          <span className="text-xs text-ink-2 whitespace-nowrap">{MP_STATUS_LABEL[o.status] ?? o.status}</span>
+                        ) : <span className="text-ink-3 text-xs">—</span>}
                       </TD>
                       <TD>
                         {(o.sumber ?? "api") === "manual" ? (
@@ -1330,7 +1346,8 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
             </div>
             <div className="divide-y divide-line">
               {order.items.map((it, i) => {
-                const nm = it.name ?? it.product_name ?? it.skuName ?? it.sellerSku ?? it.seller_sku ?? "-";
+                const mpNama = it.name ?? it.product_name ?? it.skuName ?? it.sellerSku ?? it.seller_sku ?? "-";
+                const nm = it.masterName ?? mpNama;
                 const qty = it.qty ?? it.quantity ?? 1;
                 const sku = it.skuId ?? it.item_id;
                 return (
