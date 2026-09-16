@@ -89,6 +89,13 @@ export class OrdersService {
         .from(resiScans).where(and(eq(resiScans.userId, userId), inArray(resiScans.orderId, ids)));
       for (const x of r) if (x.oid) hit.add(x.oid);
     }
+    // No. order kadang terbaca OCR sbg KODE (bukan label_order_no); cocokkan juga
+    // supaya order tidak keliru "belum discan".
+    if (noPesanan.length) {
+      const rc = await this.db.selectDistinct({ code: resiScanCodes.code })
+        .from(resiScanCodes).where(and(eq(resiScanCodes.userId, userId), inArray(resiScanCodes.code, noPesanan)));
+      for (const x of rc) if (x.code) for (const id of byNo.get(x.code) ?? []) hit.add(id);
+    }
     if (allResi.length) {
       const r1 = await this.db.selectDistinct({ resi: resiScans.resi })
         .from(resiScans).where(and(eq(resiScans.userId, userId), inArray(resiScans.resi, allResi)));
@@ -279,9 +286,11 @@ export class OrdersService {
               AND upper(regexp_replace(r.resi,'[^A-Za-z0-9]','','g')) = upper(regexp_replace(o.tracking_number,'[^A-Za-z0-9]','','g')))
         ))
       AND NOT EXISTS (
-        SELECT 1 FROM resi_scan_codes c WHERE c.user_id = o.user_id
-          AND o.tracking_number IS NOT NULL AND o.tracking_number <> ''
-          AND upper(regexp_replace(c.code,'[^A-Za-z0-9]','','g')) = upper(regexp_replace(o.tracking_number,'[^A-Za-z0-9]','','g')))`;
+        SELECT 1 FROM resi_scan_codes c WHERE c.user_id = o.user_id AND (
+          c.code = o.marketplace_order_id
+          OR (o.tracking_number IS NOT NULL AND o.tracking_number <> ''
+              AND upper(regexp_replace(c.code,'[^A-Za-z0-9]','','g')) = upper(regexp_replace(o.tracking_number,'[^A-Za-z0-9]','','g')))
+        ))`;
     const belumDiscan = {
       total: await cnt(sql`SELECT count(*)::int AS n FROM orders o WHERE ${wBelum}`),
       contoh: await one(sql`SELECT o.marketplace_order_id AS no, o.fulfillment_status AS fs, o.shipping_courier AS kurir, o.created_at AS at FROM orders o WHERE ${wBelum} ORDER BY o.created_at DESC LIMIT 50`),
