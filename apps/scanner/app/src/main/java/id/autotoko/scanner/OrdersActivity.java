@@ -822,7 +822,7 @@ public class OrdersActivity extends AppCompatActivity {
             if (nx != null) act.addView(btn("Lanjut ke " + label(nx), true, v -> { dlg.dismiss(); ubahStatus(id, nx); }));
         }
         act.addView(btn("Cetak AWB / Resi", false, v -> cetakAwb(id)));
-        act.addView(btn("Kirim ke marketplace (RTS)", true, v -> konfirmRts(id, o.optString("marketplaceOrderId"), dlg)));
+        act.addView(btn("Proses (kirim ke marketplace)", true, v -> konfirmRts(id, o.optString("marketplaceOrderId"), dlg)));
         col.addView(act);
 
         ScrollView sv = new ScrollView(this);
@@ -881,7 +881,7 @@ public class OrdersActivity extends AppCompatActivity {
 
     private void konfirmRts(String id, String no, BottomSheetDialog parent) {
         new MaterialAlertDialogBuilder(this)
-                .setTitle("Kirim ke marketplace (RTS)?")
+                .setTitle("Proses ke marketplace (RTS)?")
                 .setMessage("Order " + no + " akan di-RTS: status di seller center jadi menunggu kurir & AWB dibuat. Tindakan nyata dan sulit dibatalkan.")
                 .setNegativeButton("Batal", null)
                 .setPositiveButton("Kirim", (di, w) -> {
@@ -889,7 +889,7 @@ public class OrdersActivity extends AppCompatActivity {
                     toast("Mengirim…");
                     api.orderShip(id, "DROP_OFF", r -> {
                         boolean ok = r != null && r.ok() && r.data() != null && r.data().optBoolean("ok", false);
-                        toast(ok ? "Dikirim (RTS) → Siap Kirim" : (r == null ? "Gagal" : r.message("Gagal RTS")));
+                        toast(ok ? "Diproses (RTS) → Menunggu Dicetak" : (r == null ? "Gagal" : r.message("Gagal RTS")));
                         muat();
                     });
                 })

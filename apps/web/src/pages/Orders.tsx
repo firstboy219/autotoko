@@ -338,6 +338,7 @@ export function Orders() {
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchesOpen, setBatchesOpen] = useState(false);
+  const [petaOpen, setPetaOpen] = useState(false);
 
   return (
     <Layout title="Orders">
@@ -371,6 +372,9 @@ export function Orders() {
             </Button>
             <Button variant="outline" onClick={() => setOtomasiOpen(true)}>
               Otomasi Order
+            </Button>
+            <Button variant="outline" icon="activity" onClick={() => setPetaOpen(true)}>
+              Pemetaan Status
             </Button>
             <Button variant="outline" icon="refresh" loading={loading} onClick={() => reload()}>
               Segarkan
@@ -739,6 +743,7 @@ export function Orders() {
 
       {otomasiOpen && <OtomasiOrderModal onClose={() => setOtomasiOpen(false)} />}
       {batchesOpen && <BatchesModal onClose={() => setBatchesOpen(false)} onChanged={() => { reload(); reloadRingkas(); }} />}
+      {petaOpen && <PemetaanStatusModal onClose={() => setPetaOpen(false)} />}
       {batchOpen && (
         <BatchPackingModal
           onClose={() => setBatchOpen(false)}
@@ -854,6 +859,35 @@ function BatchPackingModal({ onClose, onDone }: { onClose: () => void; onDone: (
           </div>
         </div>
       )}
+    </Modal>
+  );
+}
+
+interface StatusMeta {
+  label: Record<string, string>;
+  marketplaceMap: Record<string, string>;
+  mpLabel: Record<string, string>;
+}
+/** Read-only: pemetaan status marketplace -> internal (diatur di Admin CMS). */
+function PemetaanStatusModal({ onClose }: { onClose: () => void }) {
+  const { data } = useFetch<StatusMeta>("/orders/status-meta");
+  const map = data?.marketplaceMap ?? {};
+  const mpLabel = data?.mpLabel ?? {};
+  const fsLabel = data?.label ?? {};
+  return (
+    <Modal open onClose={onClose} title="Pemetaan Status" width="max-w-lg">
+      <p className="text-sm text-ink-2 mb-3">
+        Status marketplace → tahap internal AutoToko. Diatur oleh admin (read-only di sini).
+      </p>
+      <div className="rounded-lg border border-line divide-y divide-line text-sm">
+        {Object.entries(map).map(([mp, internal]) => (
+          <div key={mp} className="flex items-center justify-between gap-3 px-3 py-2">
+            <span className="font-mono text-xs text-ink-2">{mp}<span className="text-ink-3"> · {mpLabel[mp] ?? ""}</span></span>
+            <Badge tone="neutral">{fsLabel[internal] ?? internal}</Badge>
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-end mt-4"><Button variant="text" onClick={onClose}>Tutup</Button></div>
     </Modal>
   );
 }
@@ -1279,8 +1313,8 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
         `/marketplace-sync/orders/${order.id}/ship`, {},
       );
       if (r.ok) {
-        toast("Order dikirim ke marketplace (RTS). Status → Siap Kirim.", "success");
-        onChanged({ ...order, fulfillmentStatus: "siap_kirim" });
+        toast("Diproses ke marketplace (RTS). Status → Menunggu Dicetak.", "success");
+        onChanged({ ...order, fulfillmentStatus: "approved" });
       } else {
         const e = r.hasil.find((h) => !h.ok)?.error;
         toast(`Gagal RTS: ${e ?? "tidak diketahui"}`, "danger");
@@ -1395,10 +1429,11 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
                     size="sm"
                     variant="filled"
                     icon="check"
-                    onClick={() => setStatus("approved")}
+                    onClick={kirimMarketplace}
                     loading={busy}
+                    title="Proses ke marketplace (RTS): AWAITING_SHIPMENT → AWAITING_COLLECTION"
                   >
-                    Setujui
+                    Proses
                   </Button>
                   <Button
                     size="sm"
@@ -1451,10 +1486,10 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
           <div className="text-xs font-medium text-ink-2 mb-2">Kirim ke marketplace <span className="text-emerald-600">· TikTok Shop tersambung</span></div>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" icon="package" loading={busy} onClick={cetakAwb}>
-              Cetak AWB / Resi
+              Print / Unduh Resi
             </Button>
             <Button size="sm" variant="filled" icon="check" loading={busy} onClick={kirimMarketplace}>
-              Kirim ke marketplace (RTS)
+              Proses (RTS ke marketplace)
             </Button>
           </div>
           <p className="text-[11px] text-ink-3 mt-2">

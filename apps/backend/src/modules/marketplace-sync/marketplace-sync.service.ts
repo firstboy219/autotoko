@@ -1080,7 +1080,7 @@ export class MarketplaceSyncService {
         .update(orders)
         .set({
           awbGenerated: true,
-          fulfillmentStatus: majukanStatus(order.fulfillmentStatus as StatusInternal, "packing"),
+          fulfillmentStatus: majukanStatus(order.fulfillmentStatus as StatusInternal, "approved"),
           updatedAt: new Date(),
         })
         .where(and(eq(orders.userId, userId), eq(orders.id, orderId))));

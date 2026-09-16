@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, lte, notInArray, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders, orderSettings, resiScans, resiScanCodes, shops, marketplaceSkuMap, masterProducts } from "../../database/schema/index.js";
+import { DEFAULT_STATUS_MAP } from "../marketplace-sync/peta-tiktok.js";
 
 export interface ListOrdersOpts {
   status?: FulfillmentStatus;
@@ -281,6 +282,15 @@ export class OrdersService {
         masuk: "Menunggu Disetujui / Perlu Diproses", approved: null, packing: null, siap_kirim: null,
         dikirim: "Dalam Pengiriman", selesai: "Selesai", retur: "Retur", dibatalkan: "Dibatalkan",
       } as Record<string, string | null>,
+      // Peta status MARKETPLACE -> internal (read-only utk halaman order; diatur
+      // di Admin CMS). Label ramah status marketplace mentah.
+      marketplaceMap: DEFAULT_STATUS_MAP as Record<string, string>,
+      mpLabel: {
+        UNPAID: "Belum Bayar", ON_HOLD: "Ditahan", AWAITING_SHIPMENT: "Menunggu Diproses",
+        AWAITING_COLLECTION: "Menunggu Pickup", PARTIALLY_SHIPPING: "Sebagian Dikirim",
+        IN_TRANSIT: "Dalam Pengiriman", DELIVERED: "Terkirim", COMPLETED: "Selesai",
+        CANCELLED: "Dibatalkan", CANCELED: "Dibatalkan",
+      } as Record<string, string>,
     };
   }
 
@@ -390,7 +400,7 @@ export class OrdersService {
     return { updated: rows.length, ids: rows.map((r) => r.id) };
   }
 
-  private readonly INSTANT_DEFAULT = ["instant", "sameday", "same day", "same-day"];
+  private readonly INSTANT_DEFAULT = ["instant", "sameday", "same day", "same-day", "gojek", "gosend", "grab", "grabexpress", "grab express", "gokilat", "borzo", "lalamove"];
 
   async getOrderSettings(userId: string) {
     const [row] = await this.db
