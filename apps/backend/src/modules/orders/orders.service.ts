@@ -419,12 +419,14 @@ export class OrdersService {
     return {
       autoSiapKirim: row?.autoSiapKirim ?? false,
       instantCouriers: row?.instantCouriers ?? this.INSTANT_DEFAULT,
+      docType: row?.docType ?? "SHIPPING_LABEL_AND_PACKING_SLIP",
+      docSize: row?.docSize ?? "A6",
     };
   }
 
   async updateOrderSettings(
     userId: string,
-    dto: { autoSiapKirim?: boolean; instantCouriers?: string[] },
+    dto: { autoSiapKirim?: boolean; instantCouriers?: string[]; docType?: string; docSize?: string },
   ) {
     const kini = await this.getOrderSettings(userId);
     const nilai = {
@@ -432,13 +434,15 @@ export class OrdersService {
       instantCouriers: (dto.instantCouriers ?? kini.instantCouriers)
         .map((s) => s.trim())
         .filter(Boolean),
+      docType: dto.docType ?? kini.docType,
+      docSize: dto.docSize ?? kini.docSize,
     };
     await this.db
       .insert(orderSettings)
-      .values({ userId, autoSiapKirim: nilai.autoSiapKirim, instantCouriers: nilai.instantCouriers, updatedAt: new Date() })
+      .values({ userId, autoSiapKirim: nilai.autoSiapKirim, instantCouriers: nilai.instantCouriers, docType: nilai.docType, docSize: nilai.docSize, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: orderSettings.userId,
-        set: { autoSiapKirim: nilai.autoSiapKirim, instantCouriers: nilai.instantCouriers, updatedAt: new Date() },
+        set: { autoSiapKirim: nilai.autoSiapKirim, instantCouriers: nilai.instantCouriers, docType: nilai.docType, docSize: nilai.docSize, updatedAt: new Date() },
       });
     return nilai;
   }

@@ -949,9 +949,9 @@ export class MarketplaceSyncService {
           }
         };
         for (const pid of pkgIds) {
-          const ambilLabel = () => call((c) => c.get<{ doc_url?: string; tracking_number?: string }>(
+          const ambilLabel = () => call(async (c) => c.get<{ doc_url?: string; tracking_number?: string }>(
             `/fulfillment/202309/packages/${pid}/shipping_documents`,
-            { document_type: "SHIPPING_LABEL", document_size: "A6" }));
+            await this.labelOpts(userId)));
           let doc: { doc_url?: string; tracking_number?: string } | null = null;
           try { doc = await ambilLabel(); } catch { doc = null; }
           if (!doc?.doc_url) {
@@ -1103,10 +1103,7 @@ export class MarketplaceSyncService {
         let doc: { doc_url?: string; tracking_number?: string } | undefined;
         for (;;) {
           try {
-            doc = await klien.get(`/fulfillment/202309/packages/${pid}/shipping_documents`, {
-              document_type: "SHIPPING_LABEL",
-              document_size: "A6",
-            });
+            doc = await klien.get(`/fulfillment/202309/packages/${pid}/shipping_documents`, await this.labelOpts(userId));
             break;
           } catch (e) {
             if (e instanceof TikTokApiError && e.tokenBermasalah && !sudahSegar) {
@@ -1433,6 +1430,17 @@ export class MarketplaceSyncService {
     return { ok: true, shopId, tanggal: clear ? null : tanggal, saldo: clear ? null : saldo };
   }
 
+  /** Tipe & ukuran dokumen resi dari pengaturan order; default packing slip (daftar produk) + A6. */
+  private async labelOpts(userId: string): Promise<{ document_type: string; document_size: string }> {
+    const [row] = await this.bypass(() => this.db
+      .select({ t: orderSettings.docType, s: orderSettings.docSize })
+      .from(orderSettings).where(eq(orderSettings.userId, userId)).limit(1));
+    return {
+      document_type: row?.t || "SHIPPING_LABEL_AND_PACKING_SLIP",
+      document_size: row?.s || "A6",
+    };
+  }
+
   private async cacheAwb(userId: string, orderId: string): Promise<string | null> {
     const [o] = await this.bypass(() => this.db
       .select({ awbUrl: orders.awbUrl, raw: orders.raw, shopId: orders.shopId })
@@ -1450,7 +1458,7 @@ export class MarketplaceSyncService {
         let doc: { doc_url?: string } | undefined;
         for (;;) {
           try {
-            doc = await klien.get(`/fulfillment/202309/packages/${pid}/shipping_documents`, { document_type: "SHIPPING_LABEL", document_size: "A6" });
+            doc = await klien.get(`/fulfillment/202309/packages/${pid}/shipping_documents`, await this.labelOpts(userId));
             break;
           } catch (e) {
             if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(toko); continue; }

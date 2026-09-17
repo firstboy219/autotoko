@@ -180,9 +180,14 @@ public final class Api {
     public void orderSettings(Cb cb) {
         call("GET", session.baseUrl() + "/api/orders/settings", session.token(), null, cb);
     }
-    public void orderSettingsSave(boolean autoSiapKirim, JSONArray instantCouriers, Cb cb) {
+    public void orderSettingsSave(boolean autoSiapKirim, JSONArray instantCouriers, String docType, String docSize, Cb cb) {
         JSONObject p = new JSONObject();
-        try { p.put("autoSiapKirim", autoSiapKirim); if (instantCouriers != null) p.put("instantCouriers", instantCouriers); } catch (Exception ignored) {}
+        try {
+            p.put("autoSiapKirim", autoSiapKirim);
+            if (instantCouriers != null) p.put("instantCouriers", instantCouriers);
+            if (docType != null) p.put("docType", docType);
+            if (docSize != null) p.put("docSize", docSize);
+        } catch (Exception ignored) {}
         call("PATCH", session.baseUrl() + "/api/orders/settings", session.token(), p, cb);
     }
 

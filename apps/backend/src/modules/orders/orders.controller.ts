@@ -43,6 +43,12 @@ class OrderSettingsDto {
 
   @IsOptional() @IsArray() @IsString({ each: true })
   instantCouriers?: string[];
+
+  @IsOptional() @IsString()
+  docType?: string;
+
+  @IsOptional() @IsString()
+  docSize?: string;
 }
 
 class ListOrdersQuery {

@@ -1153,15 +1153,19 @@ function BatchesModal({ onClose, onChanged }: { onClose: () => void; onChanged: 
 
 function OtomasiOrderModal({ onClose }: { onClose: () => void }) {
   const toast = useToast();
-  const { data, loading } = useFetch<{ autoSiapKirim: boolean; instantCouriers: string[] }>("/orders/settings");
+  const { data, loading } = useFetch<{ autoSiapKirim: boolean; instantCouriers: string[]; docType?: string; docSize?: string }>("/orders/settings");
   const [auto, setAuto] = useState(false);
   const [instant, setInstant] = useState("");
   const [saving, setSaving] = useState(false);
   const [siap, setSiap] = useState(false);
+  const [docType, setDocType] = useState("SHIPPING_LABEL_AND_PACKING_SLIP");
+  const [docSize, setDocSize] = useState("A6");
   useEffect(() => {
     if (data && !siap) {
       setAuto(data.autoSiapKirim);
       setInstant((data.instantCouriers ?? []).join(", "));
+      setDocType(data.docType ?? "SHIPPING_LABEL_AND_PACKING_SLIP");
+      setDocSize(data.docSize ?? "A6");
       setSiap(true);
     }
   }, [data, siap]);
@@ -1172,6 +1176,8 @@ function OtomasiOrderModal({ onClose }: { onClose: () => void }) {
       await api.patch("/orders/settings", {
         autoSiapKirim: auto,
         instantCouriers: instant.split(",").map((s) => s.trim()).filter(Boolean),
+        docType,
+        docSize,
       });
       toast("Pengaturan otomasi order disimpan", "success");
       onClose();
@@ -1217,6 +1223,25 @@ function OtomasiOrderModal({ onClose }: { onClose: () => void }) {
               Pisahkan dengan koma. Order yang nama kurirnya mengandung salah satu kata ini TIDAK diauto-setujui
               (butuh keputusan manual cepat).
             </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-ink mb-1.5">Dokumen resi</label>
+              <select value={docType} onChange={(e) => setDocType(e.target.value)} className="w-full rounded border border-line px-2 py-1.5 text-sm">
+                <option value="SHIPPING_LABEL_AND_PACKING_SLIP">Resi + Packing Slip (ada daftar produk)</option>
+                <option value="SHIPPING_LABEL">Resi saja</option>
+                <option value="PACKING_SLIP">Packing Slip saja</option>
+              </select>
+              <p className="text-xs text-ink-3 mt-1">Berlaku untuk semua cetak/unduh resi (batch, per-order, auto-unduh).</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-ink mb-1.5">Ukuran</label>
+              <select value={docSize} onChange={(e) => setDocSize(e.target.value)} className="w-full rounded border border-line px-2 py-1.5 text-sm">
+                <option value="A6">A6 (default)</option>
+                <option value="A5">A5</option>
+              </select>
+            </div>
           </div>
 
           <InlineAlert tone="warning">

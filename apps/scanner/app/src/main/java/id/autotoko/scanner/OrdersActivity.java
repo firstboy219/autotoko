@@ -1029,13 +1029,27 @@ public class OrdersActivity extends AppCompatActivity {
             lbl.setTextSize(12); lbl.setTextColor(getColor(R.color.ink2)); col.addView(lbl);
             EditText et = new EditText(this); et.setText(kur.toString()); et.setSingleLine(true); et.setTextSize(14);
             col.addView(et);
+            String docType = r != null && r.ok() && r.data() != null ? r.data().optString("docType", "SHIPPING_LABEL_AND_PACKING_SLIP") : "SHIPPING_LABEL_AND_PACKING_SLIP";
+            String docSize = r != null && r.ok() && r.data() != null ? r.data().optString("docSize", "A6") : "A6";
+            final String[] dtVals = {"SHIPPING_LABEL_AND_PACKING_SLIP", "SHIPPING_LABEL", "PACKING_SLIP"};
+            final String[] dtLabels = {"Resi + Packing Slip (daftar produk)", "Resi saja", "Packing Slip saja"};
+            TextView dtLbl = new TextView(this); dtLbl.setText("Dokumen resi"); dtLbl.setTextSize(12); dtLbl.setTextColor(getColor(R.color.ink2)); dtLbl.setPadding(0, dp(10), 0, 0); col.addView(dtLbl);
+            final android.widget.Spinner dtSp = new android.widget.Spinner(this);
+            dtSp.setAdapter(new android.widget.ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, dtLabels));
+            int dtIdx = 0; for (int i = 0; i < dtVals.length; i++) if (dtVals[i].equals(docType)) dtIdx = i;
+            dtSp.setSelection(dtIdx); col.addView(dtSp);
+            final String[] dsVals = {"A6", "A5"};
+            TextView dsLbl = new TextView(this); dsLbl.setText("Ukuran"); dsLbl.setTextSize(12); dsLbl.setTextColor(getColor(R.color.ink2)); dsLbl.setPadding(0, dp(8), 0, 0); col.addView(dsLbl);
+            final android.widget.Spinner dsSp = new android.widget.Spinner(this);
+            dsSp.setAdapter(new android.widget.ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, dsVals));
+            dsSp.setSelection("A5".equals(docSize) ? 1 : 0); col.addView(dsSp);
             new MaterialAlertDialogBuilder(this)
                     .setTitle("Otomasi Order").setView(col)
                     .setNegativeButton("Batal", null)
                     .setPositiveButton("Simpan", (di, w) -> {
                         JSONArray arr = new JSONArray();
                         for (String s : et.getText().toString().split(",")) { String t = s.trim(); if (!t.isEmpty()) arr.put(t); }
-                        api.orderSettingsSave(sw.isChecked(), arr, rr -> toast(rr != null && rr.ok() ? "Pengaturan disimpan" : "Gagal menyimpan"));
+                        api.orderSettingsSave(sw.isChecked(), arr, dtVals[dtSp.getSelectedItemPosition()], dsVals[dsSp.getSelectedItemPosition()], rr -> toast(rr != null && rr.ok() ? "Pengaturan disimpan" : "Gagal menyimpan"));
                     }).show();
         });
     }

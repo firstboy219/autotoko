@@ -121,5 +121,8 @@ export const orderSettings = pgTable("order_settings", {
   autoSiapKirim: boolean("auto_siap_kirim").notNull().default(false),
   /** Kata kunci kurir instant/sameday yang DIKECUALIKAN dari auto siap kirim. */
   instantCouriers: jsonb("instant_couriers").$type<string[]>().notNull(),
+  /** Tipe & ukuran dokumen resi TikTok. Default packing slip (ada daftar produk) A6. */
+  docType: varchar("doc_type", { length: 48 }).notNull().default("SHIPPING_LABEL_AND_PACKING_SLIP"),
+  docSize: varchar("doc_size", { length: 8 }).notNull().default("A6"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
