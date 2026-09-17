@@ -4,6 +4,7 @@ import {
   varchar,
   text,
   numeric,
+  jsonb,
   date,
   timestamp,
   index,
@@ -113,6 +114,10 @@ export const shops = pgTable(
     // WITHDRAW sukses) sejak tanggal itu. Null = tak pakai cutoff.
     saldoCutoffDate: date("saldo_cutoff_date"),
     saldoCutoffAmount: numeric("saldo_cutoff_amount", { precision: 15, scale: 2 }),
+    // Cache hasil "Saldo bisa ditarik" terakhir (objek per toko) + waktunya,
+    // agar kartu langsung tampil tanpa panggil API tiap buka halaman.
+    saldoLast: jsonb("saldo_last"),
+    saldoLastAt: timestamp("saldo_last_at", { withTimezone: true }),
   },
   (t) => ({
     userIdx: index("shops_user_idx").on(t.userId),

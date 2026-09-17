@@ -128,8 +128,9 @@ export class MarketplaceSyncController {
   async saldoTiktok(
     @Req() req: FastifyRequest,
     @Query("shopId") shopId?: string,
+    @Query("live") live?: string,
   ): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.sync.saldoTiktok(uid(req), shopId ?? null) };
+    return { success: true, data: await this.sync.saldoTiktok(uid(req), shopId ?? null, live === "1" || live === "true") };
   }
 
   /** Set/hapus cutoff Saldo Cepat sebuah toko. */
