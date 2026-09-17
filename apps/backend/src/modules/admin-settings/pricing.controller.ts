@@ -12,6 +12,7 @@ import {
   IsInt,
   IsNumberString,
   IsOptional,
+  IsObject,
 } from "class-validator";
 import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, AdminOnly } from "../auth/jwt-auth.guard.js";
@@ -24,6 +25,7 @@ class PricingDto {
   @IsOptional() @IsInt() maxShops?: number;
   @IsOptional() @IsInt() maxOrdersPerMonth?: number;
   @IsOptional() @IsBooleanString() isActive?: string;
+  @IsOptional() @IsObject() activityFees?: Record<string, number>;
 }
 
 const PLANS = ["freemium", "starter", "pro"] as const;

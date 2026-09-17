@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { WalletService } from "../billing/wallet.service.js";
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
@@ -79,6 +80,7 @@ export class MarketplaceSyncService {
     private readonly events: EventsGateway,
     private readonly uploads: UploadsService,
     private readonly adminSettings: AdminSettingsService,
+    private readonly wallet: WalletService,
   ) {}
 
   private statusMapCache: { at: number; map: Record<string, StatusInternal> } | null = null;
@@ -428,7 +430,7 @@ export class MarketplaceSyncService {
     });
 
     if (nilai.length) {
-      await this.bypass(() => this.db
+      const upsertRes = await this.bypass(() => this.db
         .insert(orders)
         .values(nilai)
         .onConflictDoUpdate({
@@ -460,7 +462,16 @@ export class MarketplaceSyncService {
             raw: sql`excluded.raw`,
             updatedAt: sql`excluded.updated_at`,
           },
-        }));
+        })
+        .returning({ id: orders.id, inserted: sql<boolean>`(xmax = 0)` }));
+      // Billing "order masuk": HANYA order yang benar-benar baru diinsert
+      // (xmax=0), bukan update -> tak menagih order lama & tak dobel dgn webhook.
+      const baru = upsertRes.filter((rw) => rw.inserted);
+      if (baru.length) {
+        await this.wallet.billActivity(toko.userId, "order", undefined, baru.length).catch(() => {});
+        await this.bypass(() => this.db.update(orders).set({ feeDeducted: true })
+          .where(inArray(orders.id, baru.map((rw) => rw.id)))).catch(() => {});
+      }
     }
 
     // Transparansi Autopilot: catat order baru yang OTOMATIS disetujui oleh

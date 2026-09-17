@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { BillingModule } from "../billing/billing.module.js";
 import { AuthModule } from "../auth/auth.module.js";
 import { ShopsModule } from "../shops/shops.module.js";
 import { MarketplaceModule } from "../../marketplace/marketplace.module.js";
@@ -14,7 +15,7 @@ import { MarketplaceSyncController } from "./marketplace-sync.controller.js";
  * keduanya. Menaruhnya di salah satu membuat impor melingkar.
  */
 @Module({
-  imports: [AuthModule, ShopsModule, MarketplaceModule, UploadsModule, AdminSettingsModule],
+  imports: [AuthModule, ShopsModule, MarketplaceModule, UploadsModule, AdminSettingsModule, BillingModule],
   controllers: [MarketplaceSyncController],
   providers: [MarketplaceSyncService, MarketplaceSyncTask],
   exports: [MarketplaceSyncService],

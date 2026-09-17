@@ -44,6 +44,8 @@ export const pricingConfig = pgTable("pricing_config", {
   maxShops: integer("max_shops"),
   maxOrdersPerMonth: integer("max_orders_per_month"),
   features: jsonb("features").$type<Record<string, boolean>>().default({}),
+  /** Fee per aktivitas (Rp) untuk paket ini: {order, shop_connect, product_create, audit_run, ...}. 0/absent = gratis. */
+  activityFees: jsonb("activity_fees").$type<Record<string, number>>().default({}),
   isActive: boolean("is_active").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { WalletService } from "../billing/wallet.service.js";
 import { createHash } from "node:crypto";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
@@ -40,7 +41,10 @@ import { biayaPerPesanan, cukupUntukDisarankan, ringkasBiaya } from "./biaya-mar
 export class StatementsService {
   private readonly logger = new Logger(StatementsService.name);
 
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly wallet: WalletService,
+  ) {}
 
   /* ------------------------------------------------------------- impor */
 
@@ -214,6 +218,8 @@ export class StatementsService {
     userId: string,
     q: { shopId?: string; from: string; to: string },
   ) {
+    // Billing: satu kali "hit" audit pesanan (best-effort; fee default 0).
+    void this.wallet.billActivity(userId, "audit_run").catch(() => {});
     const syaratScan = [
       eq(resiScans.userId, userId),
       gte(resiScans.scannedAt, new Date(q.from + "T00:00:00Z")),

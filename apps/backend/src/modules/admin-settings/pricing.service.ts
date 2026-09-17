@@ -12,6 +12,7 @@ export interface PricingInput {
   maxShops?: number;
   maxOrdersPerMonth?: number;
   isActive?: boolean;
+  activityFees?: Record<string, number>;
 }
 
 // PRD Bagian 4 / 7 — per-plan pricing set by admin; consumed by per-tx billing.

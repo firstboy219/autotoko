@@ -12,6 +12,7 @@ import {
   walletTransactions,
   platformInvoices,
   users,
+  pricingConfig,
 } from "../../database/schema/index.js";
 import { MidtransService } from "./midtrans.service.js";
 
@@ -162,6 +163,36 @@ export class WalletService {
       });
       return { balanceAfter: fromCents(afterC) };
     });
+  }
+
+  /**
+   * Potong wallet untuk sebuah AKTIVITAS, sesuai fee paket (pricing_config.activity_fees)
+   * user. Best-effort: kalau fee 0 / tak ada wallet / saldo kurang -> tidak memblokir
+   * aktivitas, hanya dilaporkan tak-tercharge. `qty` untuk potong banyak sekaligus
+   * (mis. beberapa order baru dari satu sync).
+   */
+  async billActivity(
+    userId: string,
+    activity: string,
+    referenceId?: string,
+    qty = 1,
+  ): Promise<{ charged: boolean; fee?: number; reason?: string }> {
+    if (qty <= 0) return { charged: false, reason: "no_qty" };
+    const [user] = await this.db.select({ planType: users.planType }).from(users).where(eq(users.id, userId)).limit(1);
+    if (!user) return { charged: false, reason: "user_not_found" };
+    const [pricing] = await this.db.select({ af: pricingConfig.activityFees })
+      .from(pricingConfig).where(eq(pricingConfig.planType, user.planType)).limit(1);
+    const fees = (pricing?.af ?? {}) as Record<string, number | string>;
+    const per = Number(fees[activity] ?? 0);
+    const fee = per > 0 ? per * qty : 0;
+    if (fee <= 0) return { charged: false, reason: "no_fee" };
+    try {
+      await this.deduct(userId, "deduct_transaction", fee, referenceId, `Aktivitas ${activity}${qty > 1 ? ` x${qty}` : ""}`);
+      return { charged: true, fee };
+    } catch (e) {
+      this.logger.warn(`billActivity ${activity} user ${userId}: ${(e as Error).message}`);
+      return { charged: false, reason: "insufficient_or_no_wallet" };
+    }
   }
 
   private async creditTx(

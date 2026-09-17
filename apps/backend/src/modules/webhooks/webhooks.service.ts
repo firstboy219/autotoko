@@ -355,28 +355,13 @@ export class WebhooksService {
 
   /** Per-transaction billing (PRD Bagian 4.3): deduct fee on new order. */
   private async chargeTransactionFee(userId: string, orderId: string) {
-    const [user] = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
-    if (!user) return { charged: false, reason: "user_not_found" };
-
-    const [pricing] = await this.db
-      .select()
-      .from(pricingConfig)
-      .where(eq(pricingConfig.planType, user.planType))
-      .limit(1);
-    const fee = Number(pricing?.perTransactionFee ?? 0);
-    if (!pricing || fee <= 0) return { charged: false, reason: "no_fee" };
-
-    try {
-      await this.wallet.deduct(userId, "deduct_transaction", fee, orderId, "Per-transaction fee");
-      await this.db
-        .update(orders)
-        .set({ feeDeducted: true, platformFee: fee.toFixed(2) })
-        .where(eq(orders.id, orderId));
-      return { charged: true, fee };
-    } catch (err) {
-      // Insufficient balance → flag, don't block the order (PRD Bagian 4.3).
-      this.logger.warn(`Fee charge failed for order ${orderId}: ${(err as Error).message}`);
-      return { charged: false, reason: "insufficient_balance", fee };
+    // Fee "order masuk" sesuai paket (pricing_config.activity_fees.order).
+    const [ord] = await this.db.select({ fee: orders.feeDeducted }).from(orders).where(eq(orders.id, orderId)).limit(1);
+    if (ord?.fee) return { charged: false, reason: "already" };
+    const res = await this.wallet.billActivity(userId, "order", orderId);
+    if (res.charged) {
+      await this.db.update(orders).set({ feeDeducted: true, platformFee: (res.fee ?? 0).toFixed(2) }).where(eq(orders.id, orderId));
     }
+    return res;
   }
 }

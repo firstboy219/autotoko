@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { WalletService } from "../billing/wallet.service.js";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   masterProductCategories,
@@ -41,7 +42,10 @@ export function catalogMatchKey(title: string | null | undefined): string {
 
 @Injectable()
 export class ProductsService {
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly wallet: WalletService,
+  ) {}
 
   async createMaster(userId: string, dto: CreateMasterDto) {
     const [existing] = await this.db
@@ -67,6 +71,8 @@ export class ProductsService {
         status: dto.status ?? "draft",
       })
       .returning();
+    // Billing: produk master baru (best-effort).
+    void this.wallet.billActivity(userId, "product_create", row?.id).catch(() => {});
 
     // Kategori ditulis lewat pembantunya, yang sekaligus mengisi kolom utama
     // shopCategoryId supaya penyaring lama langsung melihat produk baru ini.

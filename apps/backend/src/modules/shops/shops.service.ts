@@ -7,6 +7,7 @@ import {
   Logger,
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
+import { WalletService } from "../billing/wallet.service.js";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, lt, sql } from "drizzle-orm";
 import type { ConnectResult, Marketplace } from "@autotoko/shared";
@@ -174,6 +175,7 @@ export class ShopsService {
     private readonly marketplace: MarketplaceService,
     private readonly crypto: CryptoService,
     private readonly jwt: JwtService,
+    private readonly wallet: WalletService,
   ) {}
 
   /**
@@ -429,6 +431,8 @@ export class ShopsService {
     } else {
       await this.db.insert(shops).values(values);
       this.logger.log(`Connected new ${mp} shop ${r.shopId}`);
+      // Billing: toko baru berhasil connect (sekali per toko, best-effort).
+      void this.wallet.billActivity(userId, "shop_connect", r.shopId).catch(() => {});
     }
   }
 

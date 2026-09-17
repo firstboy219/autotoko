@@ -35,7 +35,7 @@ const fakeMarketplace = { getAuthAdapter: () => fakeAdapter };
   const db = drizzle(client, { schema }) as never;
   const USER = "00000000-0000-4000-8000-0000000000b2";
   const jwt = new JwtService({ secret: "test-secret" });
-  const shopsService = new ShopsService(db, fakeMarketplace as never, fakeCrypto as never, jwt);
+  const shopsService = new ShopsService(db, fakeMarketplace as never, fakeCrypto as never, jwt, { billActivity: async () => ({ charged: false }) } as never);
 
   beforeAll(async () => {
     await (db as ReturnType<typeof drizzle>).execute(sql`select set_config('app.user_id', ${USER}, false)`);
