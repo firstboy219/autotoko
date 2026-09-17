@@ -8,10 +8,11 @@ import { SmtpSettingsController } from "./smtp-settings.controller.js";
 import { OrderConfigController } from "./order-config.controller.js";
 import { PackagesService } from "./packages.service.js";
 import { PackagesController } from "./packages.controller.js";
+import { TiktokApisController } from "./tiktok-apis.controller.js";
 
 @Module({
   imports: [AuthModule], // provides JwtAuthGuard / JwtModule
-  controllers: [AdminSettingsController, PricingController, SmtpSettingsController, OrderConfigController, PackagesController],
+  controllers: [AdminSettingsController, PricingController, SmtpSettingsController, OrderConfigController, PackagesController, TiktokApisController],
   providers: [AdminSettingsService, PricingService, PackagesService],
   exports: [AdminSettingsService],
 })

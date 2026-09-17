@@ -13,6 +13,7 @@ const NAV = [
   { to: "/invoices", label: "Invoice & Top-up", icon: "🧾" },
   { to: "/ai", label: "AI Autopilot", icon: "🤖" },
   { to: "/branding", label: "Branding", icon: "🎨" },
+  { to: "/tiktok-apis", label: "API TikTok", icon: "🔌" },
 ];
 
 export function Layout({ children, title }: { children: React.ReactNode; title: string }) {

@@ -8,6 +8,7 @@ import { CourierTracking } from "./pages/CourierTracking";
 import { Pricing } from "./pages/Pricing";
 import { Invoices } from "./pages/Invoices";
 import { Packages } from "./pages/Packages";
+import { TiktokApis } from "./pages/TiktokApis";
 import { AiAutopilot } from "./pages/AiAutopilot";
 import { Branding } from "./pages/Branding";
 import { StatusOrder } from "./pages/StatusOrder";
@@ -29,6 +30,7 @@ export function App() {
         <Route path="/pricing" element={<Protected><Pricing /></Protected>} />
         <Route path="/invoices" element={<Protected><Invoices /></Protected>} />
         <Route path="/packages" element={<Protected><Packages /></Protected>} />
+        <Route path="/tiktok-apis" element={<Protected><TiktokApis /></Protected>} />
         <Route path="/ai" element={<Protected><AiAutopilot /></Protected>} />
         <Route path="/branding" element={<Protected><Branding /></Protected>} />
         <Route path="/status-order" element={<Protected><StatusOrder /></Protected>} />
