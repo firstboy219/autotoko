@@ -4,6 +4,7 @@ import {
   varchar,
   text,
   numeric,
+  date,
   timestamp,
   index,
   integer,
@@ -105,6 +106,13 @@ export const shops = pgTable(
     categoryId: uuid("category_id").references(() => shopCategories.id, {
       onDelete: "set null",
     }),
+
+    // Saldo Cepat cutoff: setelah seller mematikan program Saldo Cepat (yang
+    // gerakannya tak berarah di API), ia input saldo bisa-ditarik SAAT INI
+    // (cutoff) + tanggalnya. Saldo berikutnya dihitung = cutoff + (SETTLE -
+    // WITHDRAW sukses) sejak tanggal itu. Null = tak pakai cutoff.
+    saldoCutoffDate: date("saldo_cutoff_date"),
+    saldoCutoffAmount: numeric("saldo_cutoff_amount", { precision: 15, scale: 2 }),
   },
   (t) => ({
     userIdx: index("shops_user_idx").on(t.userId),

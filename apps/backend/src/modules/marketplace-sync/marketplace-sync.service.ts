@@ -1288,6 +1288,17 @@ export class MarketplaceSyncService {
    * lebih tinggi dari saldo asli karena TikTok tak memberi arah transfer di API.
    * READ-only.
    */
+  /**
+   * Saldo bisa ditarik per toko dari TikTok Finance (Get Withdrawals):
+   *  - Toko TANPA Saldo Cepat: Σ SETTLE(SUCCESS) − Σ WITHDRAW(SUCCESS) all-history.
+   *    Terverifikasi cocok Seller Center (Reysowner = 46.123).
+   *  - Toko yang PERNAH pakai Saldo Cepat: gerakan advance/pelunasan dilebur jadi
+   *    TRANSFER tak berarah di API sehingga all-history tak bisa. SOLUSI: seller
+   *    mematikan Saldo Cepat lalu input saldo saat ini (cutoff) + tanggal; saldo =
+   *    cutoff + (SETTLE − WITHDRAW) SEJAK cutoff (setelah itu mutasi normal).
+   *  - Toko ber-TRANSFER TAPI belum set cutoff: saldo=null, perluCutoff=true.
+   * READ-only.
+   */
   async saldoTiktok(userId: string, shopId?: string | null) {
     const tokoList = shopId
       ? await this.bypass(() => this.db.select().from(shops)
@@ -1298,7 +1309,6 @@ export class MarketplaceSyncService {
       const n = Number(String(v ?? "").replace(/[^0-9.-]/g, ""));
       return Number.isFinite(n) ? n : 0;
     };
-    const geSec = 1577836800; // 2020-01-01, all-history
     const nowSec = Math.floor(Date.now() / 1000) + 86400;
 
     const toko: Array<Record<string, unknown>> = [];
@@ -1315,6 +1325,12 @@ export class MarketplaceSyncService {
           }
         }
       };
+      const punyaCutoff = t.saldoCutoffDate != null && t.saldoCutoffAmount != null;
+      // Kalau cutoff: hitung mutasi mulai HARI SETELAH tanggal cutoff (cutoff =
+      // saldo di akhir tanggal itu). Kalau tidak: all-history.
+      const geSec = punyaCutoff
+        ? Math.floor(new Date(String(t.saldoCutoffDate) + "T00:00:00Z").getTime() / 1000) + 86400
+        : 1577836800;
       let settle = 0, withdraw = 0, transfer = 0, n = 0;
       let currency: string | null = null;
       try {
@@ -1323,7 +1339,7 @@ export class MarketplaceSyncService {
           const h = await call((c) => c.daftarWithdrawal({ createTimeGe: geSec, createTimeLt: nowSec, pageToken: page }));
           for (const w of h.data) {
             const rec = w as Record<string, unknown>;
-            if (String(rec.status ?? "").toUpperCase() !== "SUCCESS") continue; // FAILED/PROCESSING diabaikan
+            if (String(rec.status ?? "").toUpperCase() !== "SUCCESS") continue;
             const tipe = String(rec.type ?? "").toUpperCase();
             const amt = angka(rec.amount);
             if (!currency && rec.currency) currency = String(rec.currency);
@@ -1334,30 +1350,57 @@ export class MarketplaceSyncService {
           }
           page = h.nextPageToken;
         } while (page && ++guard < 500);
-        const adaTransfer = transfer > 0;
-        toko.push({
-          shopId: t.id,
-          shopName: t.displayName || t.shopName,
-          currency: currency ?? "IDR",
-          // Saldo cepat (type TRANSFER) tak berarah di API -> tak bisa dihitung
-          // akurat; jangan tampilkan angka yang salah, tandai perlu verifikasi.
-          saldo: adaTransfer ? null : Math.round(settle - withdraw),
-          saldoKotor: Math.round(settle - withdraw),
-          penghasilan: Math.round(settle),
-          penarikan: Math.round(withdraw),
-          transfer: Math.round(transfer),
-          adaTransfer,
-          mutasi: n,
-        });
+
+        if (punyaCutoff) {
+          const cutoffAmt = Number(t.saldoCutoffAmount) || 0;
+          toko.push({
+            shopId: t.id,
+            shopName: t.displayName || t.shopName,
+            currency: currency ?? "IDR",
+            saldo: Math.round(cutoffAmt + settle - withdraw),
+            cutoff: { tanggal: t.saldoCutoffDate, saldo: Math.round(cutoffAmt) },
+            deltaSejakCutoff: Math.round(settle - withdraw),
+            penghasilan: Math.round(settle),
+            penarikan: Math.round(withdraw),
+            // Kalau > 0: Saldo Cepat masih aktif setelah cutoff -> cutoff jadi tak valid.
+            transferSejakCutoff: Math.round(transfer),
+            adaTransfer: false,
+            mutasi: n,
+          });
+        } else {
+          const adaTransfer = transfer > 0;
+          toko.push({
+            shopId: t.id,
+            shopName: t.displayName || t.shopName,
+            currency: currency ?? "IDR",
+            saldo: adaTransfer ? null : Math.round(settle - withdraw),
+            penghasilan: Math.round(settle),
+            penarikan: Math.round(withdraw),
+            transfer: Math.round(transfer),
+            adaTransfer,
+            perluCutoff: adaTransfer,
+            mutasi: n,
+          });
+        }
       } catch (e) {
-        toko.push({
-          shopId: t.id, shopName: t.displayName || t.shopName,
-          currency: null, saldo: null, error: (e as Error).message,
-        });
+        toko.push({ shopId: t.id, shopName: t.displayName || t.shopName, currency: null, saldo: null, error: (e as Error).message });
       }
     }
     const total = toko.reduce((a, x) => a + (typeof x.saldo === "number" ? x.saldo : 0), 0);
     return { toko, total, diperbaruiPada: new Date().toISOString() };
+  }
+
+  /** Set/hapus cutoff Saldo Cepat sebuah toko (tanggal null = hapus cutoff). */
+  async setSaldoCutoff(userId: string, shopId: string, tanggal: string | null, saldo: number | null) {
+    const [shop] = await this.bypass(() => this.db.select({ id: shops.id })
+      .from(shops).where(and(eq(shops.id, shopId), eq(shops.userId, userId))).limit(1));
+    if (!shop) throw new NotFoundException("Toko tidak ditemukan");
+    const clear = !tanggal || saldo == null;
+    await this.bypass(() => this.db.update(shops).set({
+      saldoCutoffDate: clear ? null : tanggal,
+      saldoCutoffAmount: clear ? null : String(saldo),
+    }).where(and(eq(shops.id, shopId), eq(shops.userId, userId))));
+    return { ok: true, shopId, tanggal: clear ? null : tanggal, saldo: clear ? null : saldo };
   }
 
   private async cacheAwb(userId: string, orderId: string): Promise<string | null> {

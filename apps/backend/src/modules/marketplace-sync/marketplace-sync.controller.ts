@@ -132,6 +132,18 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.saldoTiktok(uid(req), shopId ?? null) };
   }
 
+  /** Set/hapus cutoff Saldo Cepat sebuah toko. */
+  @Post("saldo-cutoff")
+  async setSaldoCutoff(
+    @Req() req: FastifyRequest,
+    @Body() body: { shopId: string; tanggal?: string | null; saldo?: number | null },
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.sync.setSaldoCutoff(uid(req), body?.shopId, body?.tanggal ?? null, body?.saldo ?? null),
+    };
+  }
+
   /** Audit Pesanan sumber API: tarik settlement per pesanan dari TikTok Finance. */
   @Post("tarik-pencairan")
   async tarikPencairan(

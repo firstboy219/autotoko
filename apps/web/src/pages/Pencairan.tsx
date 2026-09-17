@@ -95,11 +95,14 @@ interface SaldoToko {
   shopName: string | null;
   currency: string | null;
   saldo: number | null;
-  saldoKotor?: number;
   penghasilan?: number;
   penarikan?: number;
   transfer?: number;
   adaTransfer?: boolean;
+  perluCutoff?: boolean;
+  cutoff?: { tanggal: string; saldo: number } | null;
+  deltaSejakCutoff?: number;
+  transferSejakCutoff?: number;
   mutasi?: number;
   error?: string;
 }
@@ -119,6 +122,36 @@ function SaldoTiktokCard() {
   const [data, setData] = useState<SaldoResp | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [editShop, setEditShop] = useState<string | null>(null);
+  const [fTanggal, setFTanggal] = useState("");
+  const [fSaldo, setFSaldo] = useState("");
+  const [saving, setSaving] = useState(false);
+  const bukaForm = (t: SaldoToko) => {
+    setEditShop(t.shopId);
+    setFTanggal(t.cutoff?.tanggal ?? new Date().toISOString().slice(0, 10));
+    setFSaldo(t.cutoff ? String(t.cutoff.saldo) : "");
+  };
+  const simpanCutoff = async (shopId: string) => {
+    setSaving(true);
+    setErr(null);
+    try {
+      await api.post("/marketplace-sync/saldo-cutoff", {
+        shopId, tanggal: fTanggal, saldo: Number(fSaldo.replace(/[^0-9.-]/g, "")) || 0,
+      });
+      setEditShop(null);
+      await cek();
+    } catch (e) { setErr((e as Error).message); }
+    finally { setSaving(false); }
+  };
+  const hapusCutoff = async (shopId: string) => {
+    setSaving(true);
+    try {
+      await api.post("/marketplace-sync/saldo-cutoff", { shopId, tanggal: null, saldo: null });
+      setEditShop(null);
+      await cek();
+    } catch (e) { setErr((e as Error).message); }
+    finally { setSaving(false); }
+  };
   const cek = async () => {
     setLoading(true);
     setErr(null);
@@ -162,32 +195,57 @@ function SaldoTiktokCard() {
                 <p className="text-sm text-ink-3">Tidak ada toko TikTok yang tersambung API.</p>
               )}
               {data.toko.map((t) => (
-                <div
-                  key={t.shopId}
-                  className="flex items-center justify-between gap-3 border-t border-line pt-2"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm text-ink truncate">{t.shopName ?? t.shopId}</div>
-                    {t.error ? (
-                      <div className="text-[11px] text-red-600">{t.error}</div>
-                    ) : (
-                      <div className="text-[11px] text-ink-3 tabular-nums">
-                        penghasilan {rupiah(t.penghasilan ?? 0)} · penarikan {rupiah(t.penarikan ?? 0)}
-                        {t.adaTransfer && (
-                          <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-amber-700" title="Toko ini pakai program Saldo Cepat. TikTok API tak memisahkan Pencairan vs Pelunasan Saldo Cepat (semua jadi 1 tipe tanpa arah), jadi saldonya belum bisa dihitung otomatis — cek langsung di Seller Center.">
-                            pakai Saldo Cepat — cek Seller Center
-                          </span>
+                <div key={t.shopId} className="border-t border-line pt-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm text-ink truncate">{t.shopName ?? t.shopId}</div>
+                      {t.error ? (
+                        <div className="text-[11px] text-red-600">{t.error}</div>
+                      ) : t.cutoff ? (
+                        <div className="text-[11px] text-ink-3 tabular-nums">
+                          cutoff {t.cutoff.tanggal} {rupiah(t.cutoff.saldo)} · Δ sejak cutoff {rupiah(t.deltaSejakCutoff ?? 0)}
+                          <button type="button" onClick={() => bukaForm(t)} className="ml-1 text-brand hover:underline">ubah</button>
+                          {(t.transferSejakCutoff ?? 0) > 0 && (
+                            <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-amber-700" title="Masih ada mutasi Saldo Cepat setelah tanggal cutoff — matikan Saldo Cepat di Seller Center lalu set ulang cutoff.">
+                              Saldo Cepat masih aktif
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-ink-3 tabular-nums">
+                          penghasilan {rupiah(t.penghasilan ?? 0)} · penarikan {rupiah(t.penarikan ?? 0)}
+                          {t.perluCutoff && (
+                            <button type="button" onClick={() => bukaForm(t)} className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 hover:bg-amber-200" title="Toko ini pakai Saldo Cepat; TikTok API tak memberi arah mutasinya. Matikan Saldo Cepat di Seller Center, lalu isi saldo saat ini sebagai cutoff — saldo berikutnya dihitung otomatis dari situ.">
+                              pakai Saldo Cepat — set cutoff
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-right tabular-nums whitespace-nowrap">
+                      {t.saldo == null ? (
+                        <span className="text-ink-3">—</span>
+                      ) : (
+                        <span className="text-lg font-semibold text-emerald-700">{rupiah(t.saldo)}</span>
+                      )}
+                    </div>
+                  </div>
+                  {editShop === t.shopId && (
+                    <div className="mt-2 rounded bg-ink/[0.03] p-2">
+                      <div className="text-[11px] text-ink-3 mb-1">
+                        Isi saldo cutoff dari Seller Center (“Nominal yang Bisa Ditarik”) SETELAH Saldo Cepat dimatikan. Saldo berikutnya = cutoff + (penghasilan − penarikan) sejak tanggal ini.
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input type="date" value={fTanggal} onChange={(e) => setFTanggal(e.target.value)} className="rounded border border-line px-2 py-1 text-xs" />
+                        <input type="text" inputMode="numeric" placeholder="saldo (Rp)" value={fSaldo} onChange={(e) => setFSaldo(e.target.value)} className="w-32 rounded border border-line px-2 py-1 text-xs tabular-nums" />
+                        <Button size="sm" variant="filled" loading={saving} onClick={() => simpanCutoff(t.shopId)}>Simpan</Button>
+                        <button type="button" onClick={() => setEditShop(null)} className="text-xs text-ink-3 hover:text-ink">Batal</button>
+                        {t.cutoff && (
+                          <button type="button" onClick={() => hapusCutoff(t.shopId)} className="ml-auto text-xs text-red-600 hover:underline">Hapus cutoff</button>
                         )}
                       </div>
-                    )}
-                  </div>
-                  <div className="text-right tabular-nums whitespace-nowrap">
-                    {t.saldo == null ? (
-                      <span className="text-ink-3">—</span>
-                    ) : (
-                      <span className="text-lg font-semibold text-emerald-700">{rupiah(t.saldo)}</span>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
