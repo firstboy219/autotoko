@@ -118,6 +118,8 @@ export const shops = pgTable(
     // agar kartu langsung tampil tanpa panggil API tiap buka halaman.
     saldoLast: jsonb("saldo_last"),
     saldoLastAt: timestamp("saldo_last_at", { withTimezone: true }),
+    // Watermark incremental: totals "beku" (final) utk create_time < upTo.
+    saldoFrozen: jsonb("saldo_frozen"),
   },
   (t) => ({
     userIdx: index("shops_user_idx").on(t.userId),

@@ -31,6 +31,7 @@ interface Settings {
   /** Null berarti "pakai bawaan", bukan "pesan kosong". */
   waTemplateSeller: string | null;
   waTemplateSubSeller: string | null;
+  manualInputMarketplaces?: string[];
 }
 
 interface TemplateMeta {
@@ -90,6 +91,7 @@ export function PencairanSettings() {
   const [err, setErr] = useState<string | null>(null);
   const [waSeller, setWaSeller] = useState("");
   const [waSub, setWaSub] = useState("");
+  const [manualMps, setManualMps] = useState<string[]>(["shopee"]);
   const meta = useFetch<TemplateMeta>("/payout/wa/template-meta");
 
   useEffect(() => {
@@ -109,6 +111,7 @@ export function PencairanSettings() {
     // menghapus isinya untuk kembali ke bawaan jadi tidak jelas caranya.
     setWaSeller(data.waTemplateSeller ?? "");
     setWaSub(data.waTemplateSubSeller ?? "");
+    setManualMps(data.manualInputMarketplaces?.length ? data.manualInputMarketplaces : ["shopee"]);
   }, [data]);
 
   const sedekahNum = Number(rate);
@@ -160,6 +163,7 @@ export function PencairanSettings() {
         // dimengerti server sebagai "kembalikan ke bawaan".
         waTemplateSeller: waSeller,
         waTemplateSubSeller: waSub,
+        manualInputMarketplaces: manualMps,
       });
       toast("Pengaturan tersimpan", "success");
       reload();
@@ -375,6 +379,29 @@ export function PencairanSettings() {
                   onChange={(e) => setMinTransfer(e.target.value.replace(/\D/g, ""))}
                   className="tabular-nums"
                 />
+              </Field>
+              <Field
+                label="Input Manual Pencairan — Marketplace"
+                hint="Toko yang muncul di form input manual Tahap 1. Default Shopee saja. TikTok biasanya sudah lewat fitur Auto-ambil, jadi tak perlu manual — centang bila memang ingin."
+              >
+                <div className="flex flex-wrap gap-3">
+                  {["shopee", "tiktok", "tokopedia", "lazada"].map((mp) => (
+                    <label key={mp} className="flex items-center gap-1.5 text-sm capitalize text-ink-2">
+                      <input
+                        type="checkbox"
+                        checked={manualMps.includes(mp)}
+                        onChange={(e) =>
+                          setManualMps((prev) =>
+                            e.target.checked
+                              ? Array.from(new Set([...prev, mp]))
+                              : prev.filter((x) => x !== mp),
+                          )
+                        }
+                      />
+                      {mp}
+                    </label>
+                  ))}
+                </div>
               </Field>
               {/* Ongkos, bukan potongan. Sedekah dan sub-seller diambil DARI
                   kredit yang cair; fee admin dibayar terpisah, satu kali per

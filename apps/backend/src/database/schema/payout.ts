@@ -205,6 +205,9 @@ export const payoutSettings = pgTable("payout_settings", {
   materialReserveRate: numeric("material_reserve_rate", { precision: 5, scale: 4 })
     .notNull()
     .default("0.0000"),
+  /** Marketplace yang boleh diinput MANUAL di Tahap 1 (default Shopee saja;
+   * TikTok umumnya lewat Auto-ambil). Toko di luar ini disembunyikan dari form. */
+  manualInputMarketplaces: jsonb("manual_input_marketplaces").$type<string[]>().default(["shopee"]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

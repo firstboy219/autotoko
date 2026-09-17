@@ -356,6 +356,9 @@ export class PayoutSellersService {
         ...(dto.waTemplateSeller != null
           ? { waTemplateSeller: dto.waTemplateSeller.trim() || null }
           : {}),
+        ...(dto.manualInputMarketplaces != null
+          ? { manualInputMarketplaces: dto.manualInputMarketplaces }
+          : {}),
         ...(dto.waTemplateSubSeller != null
           ? { waTemplateSubSeller: dto.waTemplateSubSeller.trim() || null }
           : {}),

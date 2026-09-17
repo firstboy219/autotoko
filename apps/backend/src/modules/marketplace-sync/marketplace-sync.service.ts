@@ -1380,29 +1380,60 @@ export class MarketplaceSyncService {
       let currency: string | null = null;
       let obj: Record<string, unknown>;
       try {
-        let page: string | null = null, guard = 0;
-        do {
-          const h = await call((c) => c.daftarWithdrawal({ createTimeGe: geSec, createTimeLt: nowSec, pageToken: page }));
-          for (const w of h.data) {
-            const rec = w as Record<string, unknown>;
-            const st = String(rec.status ?? "").toUpperCase();
-            if (st === "FAILED") continue; // penarikan gagal/REVERSE: dana kembali, tak mengurangi saldo
-            const tipe = String(rec.type ?? "").toUpperCase();
-            const amt = angka(rec.amount);
-            if (!currency && rec.currency) currency = String(rec.currency);
-            if (tipe === "SETTLE") {
-              if (st === "SUCCESS") { settle += amt; n += 1; }
-            } else if (tipe === "WITHDRAW") {
-              // Penarikan SUKSES maupun SEDANG DIPROSES sama-sama mengurangi "bisa
-              // ditarik" — TikTok sudah memindahkan dananya keluar dari saldo tersedia.
-              if (st === "SUCCESS") { withdraw += amt; n += 1; }
-              else if (st === "PROCESSING") { withdrawProc += amt; n += 1; }
-            } else if (tipe === "TRANSFER") {
-              if (st === "SUCCESS") { transfer += amt; n += 1; }
+        const akum = async (geS: number, ltS: number, incProc: boolean) => {
+          let s = 0, w = 0, wp = 0, tr = 0, cnt = 0;
+          let cur: string | null = null;
+          let page: string | null = null, guard = 0;
+          do {
+            const h = await call((c) => c.daftarWithdrawal({ createTimeGe: geS, createTimeLt: ltS, pageToken: page }));
+            for (const row of h.data) {
+              const rec = row as Record<string, unknown>;
+              const st = String(rec.status ?? "").toUpperCase();
+              if (st === "FAILED") continue; // gagal/REVERSE: dana kembali
+              const tipe = String(rec.type ?? "").toUpperCase();
+              const amt = angka(rec.amount);
+              if (!cur && rec.currency) cur = String(rec.currency);
+              if (tipe === "SETTLE") { if (st === "SUCCESS") { s += amt; cnt += 1; } }
+              else if (tipe === "WITHDRAW") {
+                if (st === "SUCCESS") { w += amt; cnt += 1; }
+                else if (incProc && st === "PROCESSING") { wp += amt; cnt += 1; }
+              } else if (tipe === "TRANSFER") { if (st === "SUCCESS") { tr += amt; cnt += 1; } }
             }
-          }
-          page = h.nextPageToken;
-        } while (page && ++guard < 500);
+            page = h.nextPageToken;
+          } while (page && ++guard < 500);
+          return { s, w, wp, tr, cnt, cur };
+        };
+        // Incremental (watermark): totals "beku" (status final) utk create_time
+        // < upTo disimpan di shops.saldo_frozen; tiap klik cukup hitung ulang
+        // window volatil 60 hari terakhir (tangkap PROCESSING->SUCCESS/FAILED).
+        // Klik pertama membangun beku sekali (all-history), berikutnya cepat.
+        const TRAILING = 60 * 86400;
+        const freezeBoundary = Math.floor(Date.now() / 1000) - TRAILING;
+        type Frozen = { base: number; upTo: number; settle: number; withdraw: number; transfer: number; n: number };
+        const rawFrozen = t.saldoFrozen as Frozen | null;
+        let frozen: Frozen =
+          rawFrozen && rawFrozen.base === geSec && rawFrozen.upTo >= geSec
+            ? rawFrozen
+            : { base: geSec, upTo: geSec, settle: 0, withdraw: 0, transfer: 0, n: 0 };
+        if (freezeBoundary > frozen.upTo) {
+          const f = await akum(frozen.upTo, freezeBoundary, false);
+          frozen = {
+            base: geSec, upTo: freezeBoundary,
+            settle: frozen.settle + f.s, withdraw: frozen.withdraw + f.w,
+            transfer: frozen.transfer + f.tr, n: frozen.n + f.cnt,
+          };
+          if (f.cur && !currency) currency = f.cur;
+          await this.bypass(() => this.db.update(shops)
+            .set({ saldoFrozen: frozen as unknown as Record<string, unknown> })
+            .where(and(eq(shops.id, t.id), eq(shops.userId, userId)))).catch(() => {});
+        }
+        const vol = await akum(frozen.upTo, nowSec, true);
+        settle = frozen.settle + vol.s;
+        withdraw = frozen.withdraw + vol.w;
+        withdrawProc = vol.wp;
+        transfer = frozen.transfer + vol.tr;
+        n = frozen.n + vol.cnt;
+        if (!currency) currency = vol.cur;
 
         if (punyaCutoff) {
           const cutoffAmt = Number(t.saldoCutoffAmount) || 0;

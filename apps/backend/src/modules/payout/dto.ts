@@ -79,6 +79,7 @@ export class UpdatePayoutSettingsDto {
    */
   @IsOptional() @IsString() @MaxLength(4000) waTemplateSeller?: string;
   @IsOptional() @IsString() @MaxLength(4000) waTemplateSubSeller?: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) manualInputMarketplaces?: string[];
 }
 
 /** Bukti transfer fee admin sebuah batch. */

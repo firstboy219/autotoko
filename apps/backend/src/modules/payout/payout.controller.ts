@@ -253,7 +253,21 @@ export class PayoutController {
 
   @Post("batches/:id/close-input")
   async closeInput(@Req() req: FastifyRequest, @Param("id") id: string) {
-    return ok(await this.batches.closeInput(uid(req), id));
+    const u = uid(req);
+    // Syarat lanjut ke Tahap 2: verifikasi penarikan tak boleh ada nominal beda
+    // atau penarikan yang dobel masuk >1 batch. (tidak_ditemukan tak memblokir.)
+    const v = await this.reconcile.verifyBatch(u, id);
+    if (v.summary.beda > 0 || v.summary.duplikat > 0) {
+      throw new BadRequestException({
+        code: "VERIFY_FAILED",
+        message:
+          `Belum bisa lanjut: verifikasi menemukan ${v.summary.beda} nominal beda ` +
+          `dari TikTok & ${v.summary.duplikat} penarikan dobel batch. Buka kartu ` +
+          `"Verifikasi penarikan vs TikTok", perbaiki dulu, lalu tutup input lagi.`,
+        summary: v.summary,
+      });
+    }
+    return ok(await this.batches.closeInput(u, id));
   }
 
   /** Tahap 4 — "Tutup Batch": only once every disbursement is validated/overridden. */

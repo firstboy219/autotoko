@@ -37,6 +37,7 @@ interface Settings {
   sedekahRate: string;
   materialReserveRate: string;
   sedekahBasis: SedekahBasis;
+  manualInputMarketplaces?: string[];
 }
 interface Mutation {
   id: string;
@@ -817,10 +818,21 @@ function MutationForm({
       />
       <form onSubmit={submit} className="p-5">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Toko" required>
+          <Field
+            label="Toko"
+            required
+            hint="Default hanya toko Shopee. Aktifkan marketplace lain untuk input manual di Pengaturan Pencairan."
+          >
             <Select value={shopId} onChange={(e) => setShopId(e.target.value)} required>
               <option value="">— pilih toko —</option>
-              {shops.map((s) => (
+              {shops
+                .filter((s) =>
+                  (settings.manualInputMarketplaces?.length
+                    ? settings.manualInputMarketplaces
+                    : ["shopee"]
+                  ).includes(s.marketplace),
+                )
+                .map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.shopName} ({s.marketplace}) · Skenario {s.scenario}
                   {s.subSellerName ? ` · ${s.subSellerName}` : ""}
