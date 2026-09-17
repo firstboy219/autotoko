@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { calculatePayoutSplit, type SedekahBasis } from "@autotoko/shared";
 import { Layout } from "../components/Layout";
@@ -174,7 +174,6 @@ export function PencairanBatch() {
                 startOpen={batch.mutations.length === 0}
               />
               <MutationList batch={batch} shops={shops} onChange={reload} />
-              <VerifyWithdrawalsCard batchId={batch.id} hasMutations={batch.mutations.length > 0} />
             </>
           )}
           {batch.status !== "berjalan" && (
@@ -1027,6 +1026,56 @@ function MutationList({
   // not the header/button bar above it.
   const captureRef = useRef<HTMLDivElement>(null);
 
+  // Verifikasi TikTok OTOMATIS (tanpa klik): centang tiap pencairan TikTok yang
+  // cocok dengan API TikTok. Server juga menjaga: close-input ditolak bila ada
+  // pencairan TikTok yang belum cocok.
+  const mutSig = batch.mutations.map((m) => `${m.id}:${m.creditAmount}`).join(",");
+  const [verify, setVerify] = useState<VerifyResp | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (!batch.mutations.length) {
+      setVerify(null);
+      return;
+    }
+    setVerifying(true);
+    api
+      .get<VerifyResp>(`/payout/batches/${batch.id}/verify-withdrawals`)
+      .then((r) => { if (alive) setVerify(r); })
+      .catch(() => { if (alive) setVerify(null); })
+      .finally(() => { if (alive) setVerifying(false); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batch.id, mutSig]);
+  const vmap = useMemo(
+    () => new Map((verify?.rows ?? []).map((r) => [r.mutationId, r])),
+    [verify],
+  );
+  const verifBadge = (id: string) => {
+    const v = vmap.get(id);
+    if (verifying && !v) return <Badge tone="neutral">cek TikTok…</Badge>;
+    if (!v) return null;
+    const dup =
+      v.duplikatDiBatch.length > 1 ? (
+        <Badge tone="danger">dobel batch: {v.duplikatDiBatch.join(", ")}</Badge>
+      ) : null;
+    if (!v.requiresApi) return dup;
+    const main =
+      v.status === "cocok" ? (
+        <Badge tone="success">✓ cocok TikTok</Badge>
+      ) : v.status === "beda" ? (
+        <Badge tone="danger">✗ beda nominal TikTok</Badge>
+      ) : (
+        <Badge tone="danger">✗ tak ada di TikTok</Badge>
+      );
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1">
+        {main}
+        {dup}
+      </span>
+    );
+  };
+
   // Sum of what each recipient bucket is owed across every shop recorded so
   // far in this batch — lets staff sanity-check the total before closing
   // input, without adding up the per-shop rows by hand.
@@ -1172,6 +1221,22 @@ function MutationList({
             </div>
           )}
 
+          {batch.mutations.length > 0 && (verifying || verify) && (
+            <div className="px-5 pb-2">
+              {verifying && !verify ? (
+                <InlineAlert tone="info">Mengecek pencairan dengan API TikTok…</InlineAlert>
+              ) : verify && verify.summary.tiktokUnverified > 0 ? (
+                <InlineAlert tone="warning">
+                  {verify.summary.tiktokUnverified} pencairan TikTok belum cocok dengan API TikTok.
+                  Batch tidak bisa lanjut ke Tahap 2 sampai semua pencairan TikTok tercentang (✓ cocok).
+                </InlineAlert>
+              ) : verify && verify.summary.tiktokTotal > 0 ? (
+                <InlineAlert tone="success">
+                  Semua {verify.summary.tiktokTotal} pencairan TikTok sudah cocok dengan API TikTok ✓
+                </InlineAlert>
+              ) : null}
+            </div>
+          )}
           {!batch.mutations.length ? (
             <EmptyState
               icon="inbox"
@@ -1200,6 +1265,7 @@ function MutationList({
                           {shopName(m.shopId)}
                         </div>
                         <div className="text-xs text-ink-3 mt-0.5">{dateShort(m.payoutDate)}</div>
+                        <div className="mt-1">{verifBadge(m.id)}</div>
                       </div>
                       <div className="text-right shrink-0">
                         {komisi > 0 ? (
@@ -1961,6 +2027,7 @@ function AutoImportCard({ batchId, shops, onDone }: { batchId: string; shops: Sh
 // ---- Item 3: verifikasi nominal vs TikTok + deteksi 1 penarikan di >1 batch ----
 interface VerifyRow {
   mutationId: string; shop: string; tanggal: string;
+  marketplace: string; requiresApi: boolean;
   nominalInput: number; nominalTiktok: number | null;
   dataSource: string; externalRef: string | null;
   status: "cocok" | "beda" | "tidak_ditemukan";
@@ -1968,7 +2035,7 @@ interface VerifyRow {
 }
 interface VerifyResp {
   rows: VerifyRow[];
-  summary: { total: number; cocok: number; beda: number; tidakDitemukan: number; duplikat: number };
+  summary: { total: number; cocok: number; beda: number; tidakDitemukan: number; duplikat: number; tiktokTotal: number; tiktokVerified: number; tiktokUnverified: number };
   range: { from: string; to: string } | null;
 }
 function VerifyWithdrawalsCard({ batchId, hasMutations }: { batchId: string; hasMutations: boolean }) {

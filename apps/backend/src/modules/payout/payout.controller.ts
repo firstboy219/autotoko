@@ -257,13 +257,13 @@ export class PayoutController {
     // Syarat lanjut ke Tahap 2: verifikasi penarikan tak boleh ada nominal beda
     // atau penarikan yang dobel masuk >1 batch. (tidak_ditemukan tak memblokir.)
     const v = await this.reconcile.verifyBatch(u, id);
-    if (v.summary.beda > 0 || v.summary.duplikat > 0) {
+    if (v.summary.tiktokUnverified > 0 || v.summary.duplikat > 0) {
       throw new BadRequestException({
         code: "VERIFY_FAILED",
         message:
-          `Belum bisa lanjut: verifikasi menemukan ${v.summary.beda} nominal beda ` +
-          `dari TikTok & ${v.summary.duplikat} penarikan dobel batch. Buka kartu ` +
-          `"Verifikasi penarikan vs TikTok", perbaiki dulu, lalu tutup input lagi.`,
+          `Belum bisa lanjut ke Tahap 2: ${v.summary.tiktokUnverified} pencairan TikTok ` +
+          `belum terbukti cocok dengan API TikTok${v.summary.duplikat > 0 ? ` & ${v.summary.duplikat} penarikan dobel batch` : ""}. ` +
+          `Semua pencairan TikTok wajib tercentang (cocok) dulu.`,
         summary: v.summary,
       });
     }

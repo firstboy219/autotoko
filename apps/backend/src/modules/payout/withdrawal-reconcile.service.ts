@@ -83,12 +83,13 @@ export class WithdrawalReconcileService {
       amount: payoutMutations.creditAmount, externalRef: payoutMutations.externalRef, dataSource: payoutMutations.dataSource,
     }).from(payoutMutations).where(and(eq(payoutMutations.userId, userId), eq(payoutMutations.batchId, batchId)));
     if (!muts.length)
-      return { rows: [], summary: { total: 0, cocok: 0, beda: 0, tidakDitemukan: 0, duplikat: 0 }, range: null };
+      return { rows: [], summary: { total: 0, cocok: 0, beda: 0, tidakDitemukan: 0, duplikat: 0, tiktokTotal: 0, tiktokVerified: 0, tiktokUnverified: 0 }, range: null };
 
     const shopIds = [...new Set(muts.map((m) => m.shopId))];
-    const shopRows = await this.db.select({ id: shops.id, name: shops.displayName, name2: shops.shopName })
+    const shopRows = await this.db.select({ id: shops.id, name: shops.displayName, name2: shops.shopName, mp: shops.marketplace })
       .from(shops).where(inArray(shops.id, shopIds));
     const shopName = new Map(shopRows.map((s) => [s.id, s.name || s.name2 || s.id]));
+    const shopMp = new Map(shopRows.map((s) => [s.id, s.mp]));
 
     const R = (n: unknown) => Math.round(Number(n) || 0);
     const shift = (d: string, days: number) => {
@@ -120,7 +121,7 @@ export class WithdrawalReconcileService {
 
     const near = (a: string, b: string) =>
       Math.abs(new Date(a + "T00:00:00Z").getTime() - new Date(b + "T00:00:00Z").getTime()) <= 2 * 86400000;
-    let cocok = 0, beda = 0, tidak = 0, duplikat = 0;
+    let cocok = 0, beda = 0, tidak = 0, duplikat = 0, tiktokTotal = 0, tiktokVerified = 0, tiktokUnverified = 0;
     const rows = muts.map((m) => {
       const credit = R(m.amount);
       const wds = byShopWd.get(m.shopId) ?? [];
@@ -130,15 +131,23 @@ export class WithdrawalReconcileService {
       const amountMatch = match ? nominalTiktok === credit : false;
       const status = !match ? "tidak_ditemukan" : amountMatch ? "cocok" : "beda";
       if (status === "cocok") cocok++; else if (status === "beda") beda++; else tidak++;
+      const marketplace = shopMp.get(m.shopId) ?? "";
+      const requiresApi = marketplace === "tiktok";
+      if (requiresApi) { tiktokTotal++; if (status === "cocok") tiktokVerified++; else tiktokUnverified++; }
       const dupCodes = dupByKey.get(keyOf(m.shopId, m.amount)) ?? [];
       const isDup = dupCodes.length > 1;
       if (isDup) duplikat++;
       return {
         mutationId: m.id, shop: shopName.get(m.shopId) ?? m.shopId, tanggal: m.payoutDate,
+        marketplace, requiresApi,
         nominalInput: credit, nominalTiktok, dataSource: m.dataSource, externalRef: m.externalRef,
         status, duplikatDiBatch: isDup ? dupCodes : [],
       };
     });
-    return { rows, summary: { total: muts.length, cocok, beda, tidakDitemukan: tidak, duplikat }, range: { from, to } };
+    return {
+      rows,
+      summary: { total: muts.length, cocok, beda, tidakDitemukan: tidak, duplikat, tiktokTotal, tiktokVerified, tiktokUnverified },
+      range: { from, to },
+    };
   }
 }
