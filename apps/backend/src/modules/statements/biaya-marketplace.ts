@@ -47,6 +47,8 @@ export interface BarisPesanan {
   tanggalCair?: string | null;
   tanggalOrder?: string | null;
   discan?: boolean | null;
+  /** Tanggal mulai delivery (collection/rts) "YYYY-MM-DD" dari orders.raw. */
+  tanggalDelivery?: string | null;
   itemsOrder?: Array<{ name?: string; skuName?: string; skuId?: string; qty?: number }> | null;
 }
 
@@ -248,6 +250,10 @@ export interface BarisBiayaPesanan {
   tanggalCair: string;
   /** Selisih hari tanggal cair - tanggal order; null bila salah satunya kosong. */
   durasiCairHari: number | null;
+  /** Tanggal mulai delivery (paket dikoleksi kurir / ready-to-ship). */
+  tanggalDelivery: string;
+  /** Selisih hari tanggal delivery - tanggal order (durasi packing). */
+  durasiPackingHari: number | null;
   discan: boolean | null;
   /** Rincian produk dalam order ini + pencairan per produk (expand). */
   rincianProduk: RincianProduk[];
@@ -415,6 +421,7 @@ export function biayaPerPesanan(
 
     const tanggalOrder = (b.tanggalOrder ?? tanggal ?? "") || "";
     const tanggalCair = (b.tanggalCair ?? "") || "";
+    const tanggalDelivery = (b.tanggalDelivery ?? "") || "";
 
     if (pendapatan <= 0) tanpaPendapatan += 1;
     isi.push({
@@ -424,6 +431,8 @@ export function biayaPerPesanan(
       tanggalOrder,
       tanggalCair,
       durasiCairHari: selisihHari(tanggalOrder, tanggalCair),
+      tanggalDelivery,
+      durasiPackingHari: selisihHari(tanggalOrder, tanggalDelivery),
       discan: b.discan ?? null,
       rincianProduk,
       pendapatan, biaya, cair, produk,

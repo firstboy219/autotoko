@@ -387,6 +387,8 @@ export class StatementsService {
             items: orders.items,
             dibuat: orders.createdAtMarketplace,
             shopId: orders.shopId,
+            collectionTime: sql<string | null>`${orders.raw}->>'collection_time'`,
+            rtsTime: sql<string | null>`${orders.raw}->>'rts_time'`,
           })
           .from(orders)
           .where(and(eq(orders.userId, userId), inArray(orders.marketplaceOrderId, orderIds)))
@@ -403,6 +405,11 @@ export class StatementsService {
       const x = d instanceof Date ? d : new Date(String(d));
       return Number.isNaN(x.getTime()) ? null : x.toISOString().slice(0, 10);
     };
+    const unixHari = (v: unknown): string | null => {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n <= 0) return null;
+      return new Date(n * 1000).toISOString().slice(0, 10);
+    };
 
     const biayaPesanan = biayaPerPesanan(
       pesanan.map((p) => {
@@ -417,6 +424,7 @@ export class StatementsService {
           tanggalCair: (p.occurredOn as string | null) ?? null,
           tanggalOrder: tglOnly(od?.dibuat),
           discan: p.externalRef ? terpakai.has(p.externalRef) : null,
+          tanggalDelivery: unixHari(od?.collectionTime) ?? unixHari(od?.rtsTime),
           itemsOrder: Array.isArray(od?.items)
             ? (od!.items as Array<{ name?: string; skuName?: string; skuId?: string; qty?: number }>)
             : null,

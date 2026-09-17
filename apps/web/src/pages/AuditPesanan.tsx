@@ -73,6 +73,8 @@ interface Audit {
       tanggalOrder: string;
       tanggalCair: string;
       durasiCairHari: number | null;
+      tanggalDelivery: string;
+      durasiPackingHari: number | null;
       discan: boolean | null;
       rincianProduk: { nama: string | null; sku: string | null; qty: number; pencairan: number }[];
       pendapatan: number;
@@ -379,6 +381,8 @@ export default function AuditPesanan() {
                         <TH>Toko</TH>
                         <TH>Marketplace</TH>
                         <TH>Tgl Order</TH>
+                        <TH>Mulai Delivery</TH>
+                        <TH align="right">Durasi Packing</TH>
                         <TH>Tgl Cair</TH>
                         <TH align="right">Durasi</TH>
                         <TH>Scan</TH>
@@ -408,6 +412,10 @@ export default function AuditPesanan() {
                               <TD className="text-xs text-ink-2">{x.namaToko ?? "-"}</TD>
                               <TD className="text-xs text-ink-2">{x.marketplace ?? x.sumber}</TD>
                               <TD className="text-xs text-ink-2 whitespace-nowrap">{x.tanggalOrder || "-"}</TD>
+                              <TD className="text-xs text-ink-2 whitespace-nowrap">{x.tanggalDelivery || "-"}</TD>
+                              <TD align="right" className="tabular-nums text-xs">
+                                {x.durasiPackingHari == null ? "—" : `${x.durasiPackingHari} hr`}
+                              </TD>
                               <TD className="text-xs text-ink-2 whitespace-nowrap">{x.tanggalCair || "-"}</TD>
                               <TD align="right" className="tabular-nums text-xs">
                                 {x.durasiCairHari == null ? "—" : `${x.durasiCairHari} hr`}
@@ -436,7 +444,7 @@ export default function AuditPesanan() {
                             </TR>
                             {isOpen && bisaExpand && (
                               <tr>
-                                <td colSpan={11} className="px-4 py-2 border-t border-line">
+                                <td colSpan={13} className="px-4 py-2 border-t border-line">
                                   <div className="text-[11px] uppercase tracking-wide text-ink-3 mb-1">
                                     Produk dalam order ini
                                   </div>
