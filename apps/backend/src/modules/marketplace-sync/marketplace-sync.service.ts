@@ -1267,10 +1267,11 @@ export class MarketplaceSyncService {
   }
 
   /**
-   * Saldo tersedia (bisa ditarik) per toko, direkonstruksi dari mutasi Finance
-   * API TikTok (Get Withdrawals): SETTLE = masuk, WITHDRAW = keluar. TikTok tak
-   * menyediakan endpoint saldo langsung, jadi ini acuan (masuk - keluar); angka
-   * pastinya tetap di Seller Center. READ-only ke marketplace.
+   * "Sudah dicairkan TikTok tapi belum ditarik" per toko, DIAMBIL dari Get
+   * Statements (bukan hitungan kami): tiap statement membawa settlement_amount +
+   * payment_status. Statement yang statusnya BUKAN paid (mis. PENDING/PROCESSING)
+   * = sudah di-settle TikTok tapi belum cair ke rekening. Rincian per status ikut
+   * dikembalikan supaya bisa dicocokkan langsung ke Seller Center. READ-only.
    */
   async saldoTiktok(userId: string, shopId?: string | null) {
     const tokoList = shopId
@@ -1278,10 +1279,13 @@ export class MarketplaceSyncService {
           .where(and(eq(shops.id, shopId), eq(shops.userId, userId))).limit(1))
       : await this.tokoSiap(userId);
 
-    const bersihAngka = (v: unknown): number => {
+    const angka = (v: unknown): number => {
       const n = Number(String(v ?? "").replace(/[^0-9.-]/g, ""));
-      return Number.isFinite(n) ? Math.abs(n) : 0;
+      return Number.isFinite(n) ? n : 0;
     };
+    const sudahCairKeBank = (st: string): boolean => /PAID|SUCCESS|COMPLETED/i.test(st);
+    const nowSec = Math.floor(Date.now() / 1000);
+    const geSec = nowSec - 420 * 86400;
 
     const toko: Array<Record<string, unknown>> = [];
     for (const t of tokoList) {
@@ -1297,22 +1301,22 @@ export class MarketplaceSyncService {
           }
         }
       };
-      let masuk = 0, keluar = 0, lain = 0, n = 0;
+      const perStatus = new Map<string, { amount: number; count: number }>();
+      let belumDitarik = 0, sudahDitarik = 0, n = 0;
       let currency: string | null = null;
       try {
         let page: string | null = null, guard = 0;
         do {
-          const h = await call((c) => c.daftarWithdrawal({ pageToken: page }));
-          for (const w of h.data) {
-            const rec = w as Record<string, unknown>;
-            const tipe = String(rec.type ?? "").toUpperCase();
-            const amt = bersihAngka(rec.amount);
+          const h = await call((c) => c.daftarStatement({ statementTimeGe: geSec, statementTimeLt: nowSec + 86400, pageToken: page }));
+          for (const stx of h.data) {
+            const rec = stx as Record<string, unknown>;
+            const status = String(rec.payment_status ?? rec.status ?? rec.settlement_status ?? "UNKNOWN").toUpperCase();
+            const amt = angka(rec.settlement_amount ?? rec.amount);
             if (!currency && rec.currency) currency = String(rec.currency);
             n += 1;
-            if (tipe === "SETTLE") masuk += amt;
-            else if (tipe === "WITHDRAW") keluar += amt;
-            else if (tipe === "REVERSE") masuk += amt; // penarikan dibatalkan -> uang kembali
-            else lain += amt; // TRANSFER dll -> ditampilkan terpisah
+            const b = perStatus.get(status) ?? { amount: 0, count: 0 };
+            b.amount += amt; b.count += 1; perStatus.set(status, b);
+            if (sudahCairKeBank(status)) sudahDitarik += amt; else belumDitarik += amt;
           }
           page = h.nextPageToken;
         } while (page && ++guard < 100);
@@ -1320,22 +1324,21 @@ export class MarketplaceSyncService {
           shopId: t.id,
           shopName: t.displayName || t.shopName,
           currency: currency ?? "IDR",
-          saldo: Math.round(masuk - keluar),
-          masuk: Math.round(masuk),
-          keluar: Math.round(keluar),
-          lain: Math.round(lain),
-          mutasi: n,
+          belumDitarik: Math.round(belumDitarik),
+          sudahDitarik: Math.round(sudahDitarik),
+          statement: n,
+          perStatus: [...perStatus.entries()].map(([status, v]) => ({ status, amount: Math.round(v.amount), count: v.count })),
         });
       } catch (e) {
         toko.push({
           shopId: t.id,
           shopName: t.displayName || t.shopName,
-          currency: null, saldo: null,
+          currency: null, belumDitarik: null,
           error: (e as Error).message,
         });
       }
     }
-    const total = toko.reduce((a, x) => a + (typeof x.saldo === "number" ? x.saldo : 0), 0);
+    const total = toko.reduce((a, x) => a + (typeof x.belumDitarik === "number" ? x.belumDitarik : 0), 0);
     return { toko, total, diperbaruiPada: new Date().toISOString() };
   }
 

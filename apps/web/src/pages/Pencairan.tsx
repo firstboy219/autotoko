@@ -94,11 +94,10 @@ interface SaldoToko {
   shopId: string;
   shopName: string | null;
   currency: string | null;
-  saldo: number | null;
-  masuk?: number;
-  keluar?: number;
-  lain?: number;
-  mutasi?: number;
+  belumDitarik: number | null;
+  sudahDitarik?: number;
+  statement?: number;
+  perStatus?: { status: string; amount: number; count: number }[];
   error?: string;
 }
 interface SaldoResp {
@@ -131,8 +130,8 @@ function SaldoTiktokCard() {
   return (
     <Card className="mb-4" padded={false}>
       <CardHeader
-        title="Saldo bisa ditarik (TikTok Finance API)"
-        subtitle="Estimasi dari mutasi Finance TikTok (SETTLE masuk − WITHDRAW keluar). Angka pasti tetap lihat di Seller Center."
+        title="Sudah dicairkan TikTok, belum ditarik"
+        subtitle="Dari Get Statements TikTok: total settlement yang statusnya belum PAID (belum cair ke rekening). Rincian per status di bawah agar bisa dicocokkan dgn Seller Center."
         action={
           <Button size="sm" variant="outline" loading={loading} onClick={cek}>
             {data ? "Perbarui" : "Cek saldo"}
@@ -149,7 +148,7 @@ function SaldoTiktokCard() {
         {data && (
           <>
             <div className="mb-3">
-              <div className="text-xs text-ink-3">Total semua toko</div>
+              <div className="text-xs text-ink-3">Total belum ditarik (semua toko)</div>
               <div className="text-2xl font-semibold text-emerald-700 tabular-nums">
                 {rupiah(data.total)}
               </div>
@@ -169,18 +168,30 @@ function SaldoTiktokCard() {
                     {t.error ? (
                       <div className="text-[11px] text-red-600">{t.error}</div>
                     ) : (
-                      <div className="text-[11px] text-ink-3 tabular-nums">
-                        masuk {rupiah(t.masuk ?? 0)} · keluar {rupiah(t.keluar ?? 0)}
-                        {t.lain ? ` · lain ${rupiah(t.lain)}` : ""}
-                        {t.mutasi ? ` · ${t.mutasi} mutasi` : ""}
+                      <div className="text-[11px] text-ink-3">
+                        {t.sudahDitarik ? `sudah ditarik ${rupiah(t.sudahDitarik)} · ` : ""}
+                        {t.statement ? `${t.statement} statement` : ""}
+                        {t.perStatus && t.perStatus.length > 0 && (
+                          <span className="ml-1">
+                            {t.perStatus.map((ps) => (
+                              <span
+                                key={ps.status}
+                                className="mr-1 inline-block rounded bg-ink/5 px-1 py-0.5 tabular-nums"
+                                title={`${ps.count} statement`}
+                              >
+                                {ps.status}: {rupiah(ps.amount)}
+                              </span>
+                            ))}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
                   <div className="text-right tabular-nums whitespace-nowrap">
-                    {t.saldo == null ? (
+                    {t.belumDitarik == null ? (
                       <span className="text-ink-3">—</span>
                     ) : (
-                      <span className="text-lg font-semibold text-ink">{rupiah(t.saldo)}</span>
+                      <span className="text-lg font-semibold text-emerald-700">{rupiah(t.belumDitarik)}</span>
                     )}
                   </div>
                 </div>
