@@ -1451,6 +1451,60 @@ export class MarketplaceSyncService {
     return { ok: true, shopId, tanggal: clear ? null : tanggal, saldo: clear ? null : saldo };
   }
 
+  /**
+   * Daftar penarikan (WITHDRAW) sebuah toko TikTok dalam rentang tanggal — untuk
+   * import & verifikasi Pencairan Dana. Hanya type WITHDRAW (uang keluar ke bank).
+   * Default status SUCCESS; includeProcessing menambah yang masih diproses.
+   */
+  async daftarPenarikanToko(
+    userId: string,
+    shopId: string,
+    opts: { from: string; to: string; includeProcessing?: boolean },
+  ): Promise<Array<{ externalRef: string; amount: number; tanggal: string; status: string; currency: string }>> {
+    const [t] = await this.bypass(() => this.db.select().from(shops)
+      .where(and(eq(shops.id, shopId), eq(shops.userId, userId))).limit(1));
+    if (!t) throw new NotFoundException("Toko tidak ditemukan");
+    if (t.marketplace !== "tiktok" || !t.accessToken || !t.shopCipher)
+      throw new BadRequestException("Toko bukan TikTok atau belum tersambung API");
+    const geSec = Math.floor(new Date(opts.from + "T00:00:00Z").getTime() / 1000);
+    const ltSec = Math.floor(new Date(opts.to + "T00:00:00Z").getTime() / 1000) + 86400;
+    const angka = (v: unknown): number => {
+      const n = Number(String(v ?? "").replace(/[^0-9.-]/g, ""));
+      return Number.isFinite(n) ? n : 0;
+    };
+    let klien = await this.klien(t);
+    let segar = false;
+    const call = async <T>(fn: (c: TikTokClient) => Promise<T>): Promise<T> => {
+      for (;;) {
+        try { return await fn(klien); }
+        catch (e) {
+          if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(t); continue; }
+          throw e;
+        }
+      }
+    };
+    const out: Array<{ externalRef: string; amount: number; tanggal: string; status: string; currency: string }> = [];
+    let page: string | null = null, guard = 0;
+    do {
+      const h = await call((c) => c.daftarWithdrawal({ createTimeGe: geSec, createTimeLt: ltSec, pageToken: page }));
+      for (const w of h.data) {
+        const rec = w as Record<string, unknown>;
+        if (String(rec.type ?? "").toUpperCase() !== "WITHDRAW") continue;
+        const st = String(rec.status ?? "").toUpperCase();
+        if (st !== "SUCCESS" && !(opts.includeProcessing && st === "PROCESSING")) continue;
+        const ctSec = Number(rec.create_time ?? 0);
+        const tanggal = ctSec ? new Date(ctSec * 1000).toISOString().slice(0, 10) : opts.from;
+        out.push({
+          externalRef: String(rec.id ?? rec.withdraw_id ?? `${ctSec}_${angka(rec.amount)}`),
+          amount: angka(rec.amount),
+          tanggal, status: st, currency: String(rec.currency ?? "IDR"),
+        });
+      }
+      page = h.nextPageToken;
+    } while (page && ++guard < 500);
+    return out;
+  }
+
   /** Tipe & ukuran dokumen resi dari pengaturan order; default packing slip (daftar produk) + A6. */
   private async labelOpts(userId: string): Promise<{ document_type: string; document_size: string }> {
     const [row] = await this.bypass(() => this.db

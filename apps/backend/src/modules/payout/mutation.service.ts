@@ -145,7 +145,7 @@ export class PayoutMutationService {
       .orderBy(desc(payoutMutations.payoutDate));
   }
 
-  async create(userId: string, createdByUserId: string, dto: CreateMutationDto) {
+  async create(userId: string, createdByUserId: string, dto: CreateMutationDto, meta?: { dataSource?: string; externalRef?: string }) {
     const batch = await this.requireOpenBatch(userId, dto.batchId);
 
     const [shop] = await this.db
@@ -186,6 +186,8 @@ export class PayoutMutationService {
         batchId: dto.batchId,
         userId,
         shopId: dto.shopId,
+        dataSource: meta?.dataSource ?? "manual",
+        externalRef: meta?.externalRef ?? null,
         payoutDate: dto.payoutDate,
         creditAmount: dto.marketplaceProofAmount.toFixed(2),
         marketplaceProofAmount: dto.marketplaceProofAmount.toFixed(2),

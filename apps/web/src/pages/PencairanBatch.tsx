@@ -164,6 +164,7 @@ export function PencairanBatch() {
           )}
           {batch.status === "berjalan" && shops && settings && (
             <>
+              <AutoImportCard batchId={batch.id} shops={shops} onDone={reload} />
               <MutationForm
                 batchId={batch.id}
                 shops={shops}
@@ -172,6 +173,7 @@ export function PencairanBatch() {
                 startOpen={batch.mutations.length === 0}
               />
               <MutationList batch={batch} shops={shops} onChange={reload} />
+              <VerifyWithdrawalsCard batchId={batch.id} hasMutations={batch.mutations.length > 0} />
             </>
           )}
           {batch.status !== "berjalan" && (
@@ -1846,5 +1848,192 @@ function DisbursementRow({ d, onChange }: { d: Disbursement; onChange: () => voi
         </div>
       )}
     </div>
+  );
+}
+
+// ---- Item 2: auto-ambil penarikan dari TikTok jadi mutasi (tahap 1) ----
+interface ImportResult {
+  created: number;
+  totalFetched: number;
+  skipped: { shop: string; amount: number; tanggal: string; reason: string }[];
+}
+function AutoImportCard({ batchId, shops, onDone }: { batchId: string; shops: ShopOpt[]; onDone: () => void }) {
+  const toast = useToast();
+  const tiktokShops = shops.filter((x) => x.marketplace === "tiktok");
+  const today = new Date().toISOString().slice(0, 10);
+  const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const [open, setOpen] = useState(false);
+  const [shopId, setShopId] = useState("");
+  const [from, setFrom] = useState(monthAgo);
+  const [to, setTo] = useState(today);
+  const [incProc, setIncProc] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  if (!tiktokShops.length) return null;
+
+  const jalankan = async () => {
+    setBusy(true); setErr(null); setResult(null);
+    try {
+      const r = await api.post<ImportResult>(`/payout/batches/${batchId}/import-withdrawals`, {
+        shopId: shopId || undefined, from, to, includeProcessing: incProc,
+      });
+      setResult(r);
+      if (r.created > 0) { toast(`${r.created} penarikan ditambahkan dari TikTok`, "success"); onDone(); }
+      else toast("Tidak ada penarikan baru untuk ditambahkan", "info");
+    } catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Card padded={false}>
+      <CardHeader
+        title="Auto-ambil penarikan dari TikTok"
+        subtitle="Tarik data penarikan/withdraw langsung dari TikTok jadi mutasi — tak perlu input manual. Input manual di bawah tetap tersedia untuk kasus khusus."
+        action={
+          <Button size="sm" variant={open ? "outline" : "filled"} onClick={() => setOpen(!open)}>
+            {open ? "Tutup" : "Buka"}
+          </Button>
+        }
+      />
+      {open && (
+        <div className="p-4 space-y-3">
+          {err && <InlineAlert tone="danger">{err}</InlineAlert>}
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Toko">
+              <Select value={shopId} onChange={(e) => setShopId(e.target.value)}>
+                <option value="">Semua toko TikTok</option>
+                {tiktokShops.map((x) => (
+                  <option key={x.id} value={x.id}>{x.shopName}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Dari tanggal">
+              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            </Field>
+            <Field label="Sampai tanggal">
+              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            </Field>
+            <label className="flex items-center gap-1.5 pb-2 text-xs text-ink-2">
+              <input type="checkbox" checked={incProc} onChange={(e) => setIncProc(e.target.checked)} />
+              termasuk yang masih diproses
+            </label>
+            <Button size="sm" variant="filled" loading={busy} onClick={jalankan}>
+              Ambil dari TikTok
+            </Button>
+          </div>
+          {result && (
+            <div className="rounded bg-ink/[0.03] p-2 text-xs">
+              <div className="text-ink-2">
+                Diambil {result.totalFetched} penarikan ·{" "}
+                <span className="font-semibold text-emerald-700">{result.created} ditambahkan</span>
+                {result.skipped.length ? ` · ${result.skipped.length} dilewati` : ""}.
+              </div>
+              {result.skipped.length > 0 && (
+                <ul className="mt-1 list-disc pl-4 text-ink-3">
+                  {result.skipped.slice(0, 12).map((x, i) => (
+                    <li key={i}>{x.shop} {x.tanggal} {x.amount ? rupiah(x.amount) : ""} — {x.reason}</li>
+                  ))}
+                  {result.skipped.length > 12 && <li>…dan {result.skipped.length - 12} lagi</li>}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ---- Item 3: verifikasi nominal vs TikTok + deteksi 1 penarikan di >1 batch ----
+interface VerifyRow {
+  mutationId: string; shop: string; tanggal: string;
+  nominalInput: number; nominalTiktok: number | null;
+  dataSource: string; externalRef: string | null;
+  status: "cocok" | "beda" | "tidak_ditemukan";
+  duplikatDiBatch: string[];
+}
+interface VerifyResp {
+  rows: VerifyRow[];
+  summary: { total: number; cocok: number; beda: number; tidakDitemukan: number; duplikat: number };
+  range: { from: string; to: string } | null;
+}
+function VerifyWithdrawalsCard({ batchId, hasMutations }: { batchId: string; hasMutations: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [data, setData] = useState<VerifyResp | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  if (!hasMutations) return null;
+
+  const jalankan = async () => {
+    setBusy(true); setErr(null);
+    try { setData(await api.get<VerifyResp>(`/payout/batches/${batchId}/verify-withdrawals`)); }
+    catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const badge = (st: VerifyRow["status"]) =>
+    st === "cocok" ? <Badge tone="success">cocok</Badge>
+    : st === "beda" ? <Badge tone="danger">beda nominal</Badge>
+    : <Badge tone="warning">tidak ditemukan</Badge>;
+
+  return (
+    <Card padded={false}>
+      <CardHeader
+        title="Verifikasi penarikan vs TikTok"
+        subtitle="Cek nominal tiap mutasi cocok dengan penarikan di TikTok, dan pastikan satu penarikan tidak masuk ke lebih dari satu batch."
+        action={
+          <Button size="sm" variant="filled" loading={busy} onClick={jalankan}>Verifikasi</Button>
+        }
+      />
+      {(err || data) && (
+        <div className="p-4">
+          {err && <InlineAlert tone="danger">{err}</InlineAlert>}
+          {data && (
+            <>
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                <Badge tone="success">{data.summary.cocok} cocok</Badge>
+                {data.summary.beda > 0 && <Badge tone="danger">{data.summary.beda} beda nominal</Badge>}
+                {data.summary.tidakDitemukan > 0 && <Badge tone="warning">{data.summary.tidakDitemukan} tak ditemukan</Badge>}
+                {data.summary.duplikat > 0 && <Badge tone="danger">{data.summary.duplikat} dobel batch</Badge>}
+                {data.range && <span className="text-ink-3">rentang cek {data.range.from} … {data.range.to}</span>}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-ink-3">
+                      <th className="py-1 pr-2">Toko</th>
+                      <th className="py-1 pr-2">Tgl</th>
+                      <th className="py-1 pr-2 text-right">Input</th>
+                      <th className="py-1 pr-2 text-right">TikTok</th>
+                      <th className="py-1 pr-2">Status</th>
+                      <th className="py-1">Catatan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.rows.map((r) => (
+                      <tr key={r.mutationId} className="border-t border-line">
+                        <td className="py-1 pr-2">{r.shop}</td>
+                        <td className="py-1 pr-2 whitespace-nowrap">{r.tanggal}</td>
+                        <td className="py-1 pr-2 text-right tabular-nums">{rupiah(r.nominalInput)}</td>
+                        <td className="py-1 pr-2 text-right tabular-nums">{r.nominalTiktok == null ? "—" : rupiah(r.nominalTiktok)}</td>
+                        <td className="py-1 pr-2">{badge(r.status)}</td>
+                        <td className="py-1 text-ink-3">
+                          {r.dataSource === "api" ? "dari API" : "manual"}
+                          {r.duplikatDiBatch.length > 1 && (
+                            <span className="ml-1 rounded bg-red-100 px-1 py-0.5 text-red-700">
+                              dobel di batch: {r.duplikatDiBatch.join(", ")}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }

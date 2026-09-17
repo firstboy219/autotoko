@@ -172,3 +172,10 @@ export class ReopenBatchDto {
   /** Explicitly accept losing transfer proofs already uploaded. */
   @IsOptional() @IsBoolean() force?: boolean;
 }
+
+export class ImportWithdrawalsDto {
+  @IsOptional() @IsUUID() shopId?: string;
+  @IsDateString() from!: string;
+  @IsDateString() to!: string;
+  @IsOptional() includeProcessing?: boolean;
+}

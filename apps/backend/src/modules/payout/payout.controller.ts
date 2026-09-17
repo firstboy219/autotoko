@@ -20,6 +20,7 @@ import { PayoutMutationService } from "./mutation.service.js";
 import { DisbursementsService } from "./disbursements.service.js";
 import { OcrService } from "./ocr.service.js";
 import { PayoutProfitService } from "./profit.service.js";
+import { WithdrawalReconcileService } from "./withdrawal-reconcile.service.js";
 import {
   AdminFeeProofDto,
   CreateSubSellerDto,
@@ -38,6 +39,7 @@ import {
   ReopenBatchDto,
   ProfitQueryDto,
   ReleaseCarryoversDto,
+  ImportWithdrawalsDto,
 } from "./dto.js";
 
 import { NAMA_TERSEDIA, TEMPLATE_BAWAAN } from "./payout-wa.js";
@@ -60,6 +62,7 @@ export class PayoutController {
     private readonly disbursements: DisbursementsService,
     private readonly ocr: OcrService,
     private readonly profit: PayoutProfitService,
+    private readonly reconcile: WithdrawalReconcileService,
   ) {}
 
   /**
@@ -268,6 +271,22 @@ export class PayoutController {
   @Post("batches/:id/recalculate")
   async recalculateBatch(@Req() req: FastifyRequest, @Param("id") id: string) {
     return ok(await this.mutations.recalculateBatch(uid(req), id));
+  }
+
+  /** Item 2: auto-ambil penarikan/withdraw dari TikTok jadi mutasi (tahap 1). */
+  @Post("batches/:id/import-withdrawals")
+  async importWithdrawals(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: ImportWithdrawalsDto,
+  ) {
+    return ok(await this.reconcile.importWithdrawals(uid(req), id, dto));
+  }
+
+  /** Item 3: verifikasi nominal mutasi vs TikTok + deteksi 1 penarikan di >1 batch. */
+  @Get("batches/:id/verify-withdrawals")
+  async verifyWithdrawals(@Req() req: FastifyRequest, @Param("id") id: string) {
+    return ok(await this.reconcile.verifyBatch(uid(req), id));
   }
 
   @Post("batches/:id/close")
