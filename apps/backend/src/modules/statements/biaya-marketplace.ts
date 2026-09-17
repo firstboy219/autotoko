@@ -72,6 +72,56 @@ export function angka(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * Satu baris pesanan bisa datang dari DUA sumber dengan nama kolom berbeda:
+ *  - unggahan laporan Excel TikTok (kolom bahasa Indonesia), atau
+ *  - API Finance TikTok (source='api', kunci snake_case).
+ * Fungsi ini menyeragamkannya jadi field kanonik yang dipakai audit, sehingga
+ * tabel "Potongan marketplace per pesanan" terisi untuk kedua sumber.
+ *
+ * Untuk baris API: pendapatan = revenue_amount, cair = settlement_amount, dan
+ * yang dipotong = pendapatan - cair (konsisten dengan kolom "Total Biaya"
+ * laporan; revenue - fee = settlement pada data TikTok).
+ */
+export interface BarisKanonik {
+  orderNo: string;
+  pendapatan: number;
+  biaya: number;
+  cair: number;
+  sumber: string;
+  tanggal: string;
+  detailProduk: unknown;
+}
+
+export function bacaBaris(r: Record<string, unknown>, marketplaceFallback: string): BarisKanonik {
+  const mp = (marketplaceFallback ?? "").trim();
+  // Format API: dikenali dari settlement_amount / order_id.
+  if (r["settlement_amount"] !== undefined || r["order_id"] !== undefined) {
+    const pendapatan = angka(r["revenue_amount"] ?? r["net_sales_amount"] ?? r["gross_sales_amount"] ?? r["customer_payment_amount"]);
+    const cair = angka(r["settlement_amount"]);
+    const biaya = Math.max(0, pendapatan - cair);
+    const t = Number(r["order_create_time"] ?? r["statement_time"]);
+    const tanggal = Number.isFinite(t) && t > 0 ? new Date(t * 1000).toISOString().slice(0, 10) : "";
+    return {
+      orderNo: String(r["order_id"] ?? "").trim(),
+      pendapatan, biaya, cair,
+      sumber: mp || "TikTok Shop",
+      tanggal,
+      detailProduk: r["sku_transactions"] ?? r["sku_details"] ?? undefined,
+    };
+  }
+  // Format laporan Excel (kolom bahasa Indonesia).
+  return {
+    orderNo: String(r["ID Pesanan/Penyesuaian"] ?? "").trim(),
+    pendapatan: angka(r["Total Pendapatan"]),
+    biaya: Math.abs(angka(r["Total Biaya"])),
+    cair: angka(r["Jumlah penyelesaian pembayaran"]),
+    sumber: String(r["Sumber pesanan"] ?? "").trim() || mp || "(tidak disebut)",
+    tanggal: String(r["Waktu pemesanan"] ?? r["Waktu pembayaran pesanan"] ?? "").trim(),
+    detailProduk: r["Detail produk terjual"],
+  };
+}
+
 function tgl(v: string | Date | null): string {
   if (!v) return "";
   const d = v instanceof Date ? v : new Date(v);
@@ -103,16 +153,15 @@ export function ringkasBiaya(baris: BarisPesanan[]): RingkasanBiaya[] {
 
   for (const b of baris) {
     const r = (b.raw ?? {}) as Record<string, unknown>;
-    const pendapatan = angka(r["Total Pendapatan"]);
+    const kb = bacaBaris(r, (b.marketplace ?? "").trim());
+    const pendapatan = kb.pendapatan;
     // Pesanan berpendapatan nol adalah pembatalan atau retur. Memasukkannya
     // menghasilkan pembagian dengan nol, dan menghitungnya sebagai "biaya 0%"
     // akan menyeret rata-rata ke bawah dengan pesanan yang tidak pernah jadi.
     if (pendapatan <= 0) continue;
-    const biaya = Math.abs(angka(r["Total Biaya"]));
+    const biaya = kb.biaya;
 
-    const sumber = String(r["Sumber pesanan"] ?? "").trim()
-      || (b.marketplace ?? "").trim()
-      || "(tidak disebut)";
+    const sumber = kb.sumber;
     const toko = (b.namaToko ?? "").trim() || "(tanpa toko)";
     const kunci = `${toko}||${sumber}`;
 
@@ -277,17 +326,16 @@ export function biayaPerPesanan(
 
   for (const b of baris) {
     const r = (b.raw ?? {}) as Record<string, unknown>;
-    const orderNo = String(r["ID Pesanan/Penyesuaian"] ?? "").trim();
-    const pendapatan = angka(r["Total Pendapatan"]);
-    const biaya = Math.abs(angka(r["Total Biaya"]));
-    const cair = angka(r["Jumlah penyelesaian pembayaran"]);
-    const sumber = String(r["Sumber pesanan"] ?? "").trim()
-      || (b.marketplace ?? "").trim()
-      || "(tidak disebut)";
-    const tanggal = String(r["Waktu pemesanan"] ?? r["Waktu pembayaran pesanan"] ?? "").trim();
+    const kb = bacaBaris(r, (b.marketplace ?? "").trim());
+    const orderNo = kb.orderNo;
+    const pendapatan = kb.pendapatan;
+    const biaya = kb.biaya;
+    const cair = kb.cair;
+    const sumber = kb.sumber;
+    const tanggal = kb.tanggal;
 
     const produk = cocokkanKeKatalog(
-      uraikanDetailProduk(r["Detail produk terjual"]),
+      uraikanDetailProduk(kb.detailProduk),
       petaSku,
     );
     const totalQty = produk.reduce((a, x) => a + x.qty, 0);
