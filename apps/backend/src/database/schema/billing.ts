@@ -49,3 +49,22 @@ export const pricingConfig = pgTable("pricing_config", {
   isActive: boolean("is_active").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Paket langganan DINAMIS (di luar 3 tier bawaan freemium/starter/pro yang tetap
+// di pricing_config). Dibuat/dikelola admin; di-assign ke user via users.package_code.
+// Sumber fee-per-aktivitas & limit untuk paket dinamis (base tier tetap pricing_config).
+export const subscriptionPackages = pgTable("subscription_packages", {
+  code: varchar("code", { length: 64 }).primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  setupFee: numeric("setup_fee", { precision: 15, scale: 2 }).notNull().default("0"),
+  monthlyFee: numeric("monthly_fee", { precision: 15, scale: 2 }).notNull().default("0"),
+  perTransactionFee: numeric("per_transaction_fee", { precision: 15, scale: 2 }).notNull().default("0"),
+  maxShops: integer("max_shops"),
+  maxOrdersPerMonth: integer("max_orders_per_month"),
+  features: jsonb("features").$type<Record<string, boolean>>().default({}),
+  activityFees: jsonb("activity_fees").$type<Record<string, number>>().default({}),
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

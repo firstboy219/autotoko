@@ -144,6 +144,7 @@ export class AdminUsersService {
       whatsapp: u.whatsapp,
       fullName: u.fullName,
       planType: u.planType,
+      packageCode: u.packageCode,
       planStartedAt: u.planStartedAt,
       planExpiredAt: u.planExpiredAt,
       isActive: u.isActive,
@@ -195,6 +196,13 @@ export class AdminUsersService {
     if (dto.planType != null) set.planType = dto.planType;
     if (dto.planExpiredAt !== undefined) {
       set.planExpiredAt = dto.planExpiredAt ? new Date(dto.planExpiredAt) : null;
+    }
+    if (dto.packageCode !== undefined) {
+      const code = dto.packageCode;
+      const BASE = ["freemium", "starter", "pro"];
+      if (!code) set.packageCode = null;
+      else if (BASE.includes(code)) { set.planType = code; set.packageCode = null; }
+      else set.packageCode = code;
     }
     const [row] = await this.db.update(users).set(set).where(eq(users.id, id)).returning();
     return row;

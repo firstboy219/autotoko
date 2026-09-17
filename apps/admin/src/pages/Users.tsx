@@ -35,6 +35,7 @@ interface SubSellerNode extends SubSubSellerNode {
   subSubSellers: SubSubSellerNode[];
 }
 interface UserDetail extends UserRow {
+  packageCode: string | null;
   planStartedAt: string | null;
   hasPassword: boolean;
   hierarchy: SubSellerNode[];
@@ -225,10 +226,11 @@ export function Users() {
 
 function UserDetailPanel({ id, onChange }: { id: string; onChange: () => void }) {
   const { data: u, loading, reload } = useFetch<UserDetail>(`/admin/users/${id}`);
+  const { data: pkgs } = useFetch<Array<{ code: string; name: string; isActive: boolean }>>("/admin/packages");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [fullName, setFullName] = useState("");
-  const [planType, setPlanType] = useState<PlanType>("freemium");
+  const [assignCode, setAssignCode] = useState<string>("freemium");
   const [planExpiredAt, setPlanExpiredAt] = useState("");
   const [editing, setEditing] = useState(false);
   const [confirmText, setConfirmText] = useState("");
@@ -242,7 +244,7 @@ function UserDetailPanel({ id, onChange }: { id: string; onChange: () => void })
   function startEdit() {
     if (!u) return;
     setFullName(u.fullName ?? "");
-    setPlanType(u.planType);
+    setAssignCode(u.packageCode || u.planType);
     setPlanExpiredAt(u.planExpiredAt ? u.planExpiredAt.slice(0, 10) : "");
     setEditing(true);
   }
@@ -252,7 +254,7 @@ function UserDetailPanel({ id, onChange }: { id: string; onChange: () => void })
     try {
       await api.patch(`/admin/users/${id}`, {
         fullName: fullName || undefined,
-        planType,
+        packageCode: assignCode,
         planExpiredAt: planExpiredAt ? planExpiredAt : null,
       });
       setEditing(false);
@@ -326,7 +328,7 @@ function UserDetailPanel({ id, onChange }: { id: string; onChange: () => void })
               <div className="text-xs text-slate-400 mt-1">{u.email ?? "-"}</div>
               <div className="text-xs text-slate-400">{u.whatsapp ?? "-"}</div>
               <div className="text-xs text-slate-400 mt-1">
-                Plan: <span className="text-slate-200 font-semibold">{PLAN_LABEL[u.planType]}</span>
+                Plan: <span className="text-slate-200 font-semibold">{u.packageCode ? ((pkgs ?? []).find((p) => p.code === u.packageCode)?.name ?? u.packageCode) : PLAN_LABEL[u.planType]}</span>
                 {u.planExpiredAt && ` (s/d ${dateShort(u.planExpiredAt)})`}
               </div>
               <button onClick={startEdit} className="text-xs text-brand font-semibold hover:underline mt-2">
@@ -337,11 +339,17 @@ function UserDetailPanel({ id, onChange }: { id: string; onChange: () => void })
             <div className="space-y-2">
               <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Nama lengkap"
                 className="w-full px-2 py-1.5 rounded bg-[#1e293b] border border-white/10 text-xs text-slate-100" />
-              <select value={planType} onChange={(e) => setPlanType(e.target.value as PlanType)}
+              <select value={assignCode} onChange={(e) => setAssignCode(e.target.value)}
                 className="w-full px-2 py-1.5 rounded bg-[#1e293b] border border-white/10 text-xs text-slate-100">
                 <option value="freemium">Freemium</option>
                 <option value="starter">Starter</option>
                 <option value="pro">Pro</option>
+                {(pkgs ?? []).map((p) => (
+                  <option key={p.code} value={p.code}>
+                    {p.name}
+                    {p.isActive ? "" : " (nonaktif)"}
+                  </option>
+                ))}
               </select>
               <label className="block text-[10px] text-slate-500">Plan berlaku s/d (opsional)</label>
               <input type="date" value={planExpiredAt} onChange={(e) => setPlanExpiredAt(e.target.value)}

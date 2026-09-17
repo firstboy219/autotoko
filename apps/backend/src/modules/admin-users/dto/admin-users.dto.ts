@@ -18,6 +18,8 @@ export class UpdateUserDto {
   // ISO date string to set, or null to clear. Loosely typed on purpose — an
   // internal admin-only field, coerced/validated in the service instead.
   @IsOptional() planExpiredAt?: string | null;
+  // Paket dinamis (subscription_packages.code). "" / base-tier code -> clear packageCode.
+  @IsOptional() @IsString() @MaxLength(64) packageCode?: string;
 }
 
 export class AdjustWalletDto {

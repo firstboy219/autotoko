@@ -7,6 +7,7 @@ import { Smtp } from "./pages/Smtp";
 import { CourierTracking } from "./pages/CourierTracking";
 import { Pricing } from "./pages/Pricing";
 import { Invoices } from "./pages/Invoices";
+import { Packages } from "./pages/Packages";
 import { AiAutopilot } from "./pages/AiAutopilot";
 import { Branding } from "./pages/Branding";
 import { StatusOrder } from "./pages/StatusOrder";
@@ -27,6 +28,7 @@ export function App() {
         <Route path="/cek-resi" element={<Protected><CourierTracking /></Protected>} />
         <Route path="/pricing" element={<Protected><Pricing /></Protected>} />
         <Route path="/invoices" element={<Protected><Invoices /></Protected>} />
+        <Route path="/packages" element={<Protected><Packages /></Protected>} />
         <Route path="/ai" element={<Protected><AiAutopilot /></Protected>} />
         <Route path="/branding" element={<Protected><Branding /></Protected>} />
         <Route path="/status-order" element={<Protected><StatusOrder /></Protected>} />

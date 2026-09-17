@@ -13,6 +13,7 @@ import {
   platformInvoices,
   users,
   pricingConfig,
+  subscriptionPackages,
 } from "../../database/schema/index.js";
 import { MidtransService } from "./midtrans.service.js";
 
@@ -178,11 +179,23 @@ export class WalletService {
     qty = 1,
   ): Promise<{ charged: boolean; fee?: number; reason?: string }> {
     if (qty <= 0) return { charged: false, reason: "no_qty" };
-    const [user] = await this.db.select({ planType: users.planType }).from(users).where(eq(users.id, userId)).limit(1);
+    const [user] = await this.db
+      .select({ planType: users.planType, packageCode: users.packageCode })
+      .from(users).where(eq(users.id, userId)).limit(1);
     if (!user) return { charged: false, reason: "user_not_found" };
-    const [pricing] = await this.db.select({ af: pricingConfig.activityFees })
-      .from(pricingConfig).where(eq(pricingConfig.planType, user.planType)).limit(1);
-    const fees = (pricing?.af ?? {}) as Record<string, number | string>;
+    // Paket dinamis (package_code) menang; kalau tak ada/tak ketemu -> tier bawaan (pricing_config).
+    let af: Record<string, number> | null = null;
+    if (user.packageCode) {
+      const [pkg] = await this.db.select({ af: subscriptionPackages.activityFees })
+        .from(subscriptionPackages).where(eq(subscriptionPackages.code, user.packageCode)).limit(1);
+      af = pkg?.af ?? null;
+    }
+    if (af == null) {
+      const [pricing] = await this.db.select({ af: pricingConfig.activityFees })
+        .from(pricingConfig).where(eq(pricingConfig.planType, user.planType)).limit(1);
+      af = pricing?.af ?? {};
+    }
+    const fees = af as Record<string, number | string>;
     const per = Number(fees[activity] ?? 0);
     const fee = per > 0 ? per * qty : 0;
     if (fee <= 0) return { charged: false, reason: "no_fee" };

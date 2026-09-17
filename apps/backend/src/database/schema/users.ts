@@ -21,6 +21,9 @@ export const users = pgTable("users", {
   // account is passwordless (OTP-only), which stays the default.
   passwordHash: varchar("password_hash", { length: 255 }),
   planType: planTypeEnum("plan_type").notNull().default("freemium"),
+  // Paket dinamis (subscription_packages.code). Bila diisi, menang atas
+  // planType untuk billing per-aktivitas. NULL = pakai tier bawaan planType.
+  packageCode: varchar("package_code", { length: 64 }),
   planStartedAt: timestamp("plan_started_at", { withTimezone: true }),
   planExpiredAt: timestamp("plan_expired_at", { withTimezone: true }),
   isActive: boolean("is_active").notNull().default(true),
