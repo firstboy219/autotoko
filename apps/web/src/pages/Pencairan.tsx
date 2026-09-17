@@ -95,6 +95,7 @@ interface SaldoToko {
   shopName: string | null;
   currency: string | null;
   saldo: number | null;
+  saldoKotor?: number;
   penghasilan?: number;
   penarikan?: number;
   transfer?: number;
@@ -173,8 +174,8 @@ function SaldoTiktokCard() {
                       <div className="text-[11px] text-ink-3 tabular-nums">
                         penghasilan {rupiah(t.penghasilan ?? 0)} · penarikan {rupiah(t.penarikan ?? 0)}
                         {t.adaTransfer && (
-                          <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-amber-700" title="Toko ini pakai fitur transfer saldo (mis. ke Saldo Iklan). TikTok tak memberi arah transfer di API, jadi angka bisa lebih tinggi dari saldo asli.">
-                            ada transfer — perlu verifikasi
+                          <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-amber-700" title="Toko ini pakai program Saldo Cepat. TikTok API tak memisahkan Pencairan vs Pelunasan Saldo Cepat (semua jadi 1 tipe tanpa arah), jadi saldonya belum bisa dihitung otomatis — cek langsung di Seller Center.">
+                            pakai Saldo Cepat — cek Seller Center
                           </span>
                         )}
                       </div>

@@ -1334,15 +1334,19 @@ export class MarketplaceSyncService {
           }
           page = h.nextPageToken;
         } while (page && ++guard < 500);
+        const adaTransfer = transfer > 0;
         toko.push({
           shopId: t.id,
           shopName: t.displayName || t.shopName,
           currency: currency ?? "IDR",
-          saldo: Math.round(settle - withdraw),
+          // Saldo cepat (type TRANSFER) tak berarah di API -> tak bisa dihitung
+          // akurat; jangan tampilkan angka yang salah, tandai perlu verifikasi.
+          saldo: adaTransfer ? null : Math.round(settle - withdraw),
+          saldoKotor: Math.round(settle - withdraw),
           penghasilan: Math.round(settle),
           penarikan: Math.round(withdraw),
           transfer: Math.round(transfer),
-          adaTransfer: transfer > 0,
+          adaTransfer,
           mutasi: n,
         });
       } catch (e) {
