@@ -227,4 +227,30 @@ export class TikTokClient {
       totalCount: d?.total_count ?? null,
     };
   }
+
+  /**
+   * Mutasi saldo Finance TikTok (Get Withdrawals): SETTLE = uang masuk ke saldo,
+   * WITHDRAW = uang ditarik keluar, TRANSFER/REVERSE = penyesuaian. TikTok TIDAK
+   * punya endpoint "saldo bisa ditarik" langsung, jadi saldo direkonstruksi dari
+   * ledger ini: kira-kira Σ(SETTLE) - Σ(WITHDRAW).
+   */
+  async daftarWithdrawal(
+    opts: { pageToken?: string | null; pageSize?: number } = {},
+  ): Promise<Halaman<Record<string, unknown>>> {
+    const query: Record<string, string | number> = {
+      page_size: Math.min(100, Math.max(1, opts.pageSize ?? 100)),
+      types: "WITHDRAW,SETTLE,TRANSFER,REVERSE",
+    };
+    if (opts.pageToken) query.page_token = opts.pageToken;
+    const d = await this.get<{
+      withdrawals?: Record<string, unknown>[];
+      next_page_token?: string;
+      total_count?: number;
+    }>("/finance/202309/withdrawals", query);
+    return {
+      data: d?.withdrawals ?? [],
+      nextPageToken: d?.next_page_token || null,
+      totalCount: d?.total_count ?? null,
+    };
+  }
 }

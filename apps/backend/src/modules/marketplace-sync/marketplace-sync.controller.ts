@@ -123,6 +123,15 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.batchPacking(uid(req), body?.orderIds ?? [], { handoverMethod: body?.handoverMethod, takeouts: body?.takeouts }) };
   }
 
+  /** Saldo bisa ditarik per toko, direkonstruksi dari Finance API (Get Withdrawals). */
+  @Get("saldo-tiktok")
+  async saldoTiktok(
+    @Req() req: FastifyRequest,
+    @Query("shopId") shopId?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.saldoTiktok(uid(req), shopId ?? null) };
+  }
+
   /** Audit Pesanan sumber API: tarik settlement per pesanan dari TikTok Finance. */
   @Post("tarik-pencairan")
   async tarikPencairan(

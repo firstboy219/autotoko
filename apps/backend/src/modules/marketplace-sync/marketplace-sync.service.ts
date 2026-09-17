@@ -1266,6 +1266,79 @@ export class MarketplaceSyncService {
     return { toko: tokoList.length, statement: statementRows, pesanan: totalPesanan };
   }
 
+  /**
+   * Saldo tersedia (bisa ditarik) per toko, direkonstruksi dari mutasi Finance
+   * API TikTok (Get Withdrawals): SETTLE = masuk, WITHDRAW = keluar. TikTok tak
+   * menyediakan endpoint saldo langsung, jadi ini acuan (masuk - keluar); angka
+   * pastinya tetap di Seller Center. READ-only ke marketplace.
+   */
+  async saldoTiktok(userId: string, shopId?: string | null) {
+    const tokoList = shopId
+      ? await this.bypass(() => this.db.select().from(shops)
+          .where(and(eq(shops.id, shopId), eq(shops.userId, userId))).limit(1))
+      : await this.tokoSiap(userId);
+
+    const bersihAngka = (v: unknown): number => {
+      const n = Number(String(v ?? "").replace(/[^0-9.-]/g, ""));
+      return Number.isFinite(n) ? Math.abs(n) : 0;
+    };
+
+    const toko: Array<Record<string, unknown>> = [];
+    for (const t of tokoList) {
+      if (t.marketplace !== "tiktok" || !t.accessToken || !t.shopCipher) continue;
+      let klien = await this.klien(t);
+      let segar = false;
+      const call = async <T>(fn: (c: TikTokClient) => Promise<T>): Promise<T> => {
+        for (;;) {
+          try { return await fn(klien); }
+          catch (e) {
+            if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(t); continue; }
+            throw e;
+          }
+        }
+      };
+      let masuk = 0, keluar = 0, lain = 0, n = 0;
+      let currency: string | null = null;
+      try {
+        let page: string | null = null, guard = 0;
+        do {
+          const h = await call((c) => c.daftarWithdrawal({ pageToken: page }));
+          for (const w of h.data) {
+            const rec = w as Record<string, unknown>;
+            const tipe = String(rec.type ?? "").toUpperCase();
+            const amt = bersihAngka(rec.amount);
+            if (!currency && rec.currency) currency = String(rec.currency);
+            n += 1;
+            if (tipe === "SETTLE") masuk += amt;
+            else if (tipe === "WITHDRAW") keluar += amt;
+            else if (tipe === "REVERSE") masuk += amt; // penarikan dibatalkan -> uang kembali
+            else lain += amt; // TRANSFER dll -> ditampilkan terpisah
+          }
+          page = h.nextPageToken;
+        } while (page && ++guard < 100);
+        toko.push({
+          shopId: t.id,
+          shopName: t.displayName || t.shopName,
+          currency: currency ?? "IDR",
+          saldo: Math.round(masuk - keluar),
+          masuk: Math.round(masuk),
+          keluar: Math.round(keluar),
+          lain: Math.round(lain),
+          mutasi: n,
+        });
+      } catch (e) {
+        toko.push({
+          shopId: t.id,
+          shopName: t.displayName || t.shopName,
+          currency: null, saldo: null,
+          error: (e as Error).message,
+        });
+      }
+    }
+    const total = toko.reduce((a, x) => a + (typeof x.saldo === "number" ? x.saldo : 0), 0);
+    return { toko, total, diperbaruiPada: new Date().toISOString() };
+  }
+
   private async cacheAwb(userId: string, orderId: string): Promise<string | null> {
     const [o] = await this.bypass(() => this.db
       .select({ awbUrl: orders.awbUrl, raw: orders.raw, shopId: orders.shopId })

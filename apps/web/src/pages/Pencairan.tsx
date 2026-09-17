@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
-import { dateShort } from "../lib/fmt";
+import { dateShort, rupiah } from "../lib/fmt";
 import { Icon, type IconName } from "../components/Icon";
 import {
   Badge,
@@ -90,6 +90,109 @@ function NavTile({
   );
 }
 
+interface SaldoToko {
+  shopId: string;
+  shopName: string | null;
+  currency: string | null;
+  saldo: number | null;
+  masuk?: number;
+  keluar?: number;
+  lain?: number;
+  mutasi?: number;
+  error?: string;
+}
+interface SaldoResp {
+  toko: SaldoToko[];
+  total: number;
+  diperbaruiPada: string;
+}
+
+/**
+ * Saldo bisa ditarik per toko, diambil dari TikTok Finance API. TikTok tak
+ * punya endpoint saldo langsung, jadi ini direkonstruksi dari mutasi
+ * (Get Withdrawals): SETTLE masuk - WITHDRAW keluar. Dimuat saat diklik
+ * (bukan otomatis) karena memanggil API marketplace per toko.
+ */
+function SaldoTiktokCard() {
+  const [data, setData] = useState<SaldoResp | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const cek = async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      setData(await api.get<SaldoResp>("/marketplace-sync/saldo-tiktok"));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <Card className="mb-4" padded={false}>
+      <CardHeader
+        title="Saldo bisa ditarik (TikTok Finance API)"
+        subtitle="Estimasi dari mutasi Finance TikTok (SETTLE masuk − WITHDRAW keluar). Angka pasti tetap lihat di Seller Center."
+        action={
+          <Button size="sm" variant="outline" loading={loading} onClick={cek}>
+            {data ? "Perbarui" : "Cek saldo"}
+          </Button>
+        }
+      />
+      <div className="p-4">
+        {err && <InlineAlert tone="danger">{err}</InlineAlert>}
+        {!data && !err && (
+          <p className="text-sm text-ink-3">
+            Klik “Cek saldo” untuk mengambil saldo terkini tiap toko langsung dari TikTok.
+          </p>
+        )}
+        {data && (
+          <>
+            <div className="mb-3">
+              <div className="text-xs text-ink-3">Total semua toko</div>
+              <div className="text-2xl font-semibold text-emerald-700 tabular-nums">
+                {rupiah(data.total)}
+              </div>
+              <div className="text-[11px] text-ink-3">diperbarui {dateShort(data.diperbaruiPada)}</div>
+            </div>
+            <div className="space-y-2">
+              {data.toko.length === 0 && (
+                <p className="text-sm text-ink-3">Tidak ada toko TikTok yang tersambung API.</p>
+              )}
+              {data.toko.map((t) => (
+                <div
+                  key={t.shopId}
+                  className="flex items-center justify-between gap-3 border-t border-line pt-2"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm text-ink truncate">{t.shopName ?? t.shopId}</div>
+                    {t.error ? (
+                      <div className="text-[11px] text-red-600">{t.error}</div>
+                    ) : (
+                      <div className="text-[11px] text-ink-3 tabular-nums">
+                        masuk {rupiah(t.masuk ?? 0)} · keluar {rupiah(t.keluar ?? 0)}
+                        {t.lain ? ` · lain ${rupiah(t.lain)}` : ""}
+                        {t.mutasi ? ` · ${t.mutasi} mutasi` : ""}
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-right tabular-nums whitespace-nowrap">
+                    {t.saldo == null ? (
+                      <span className="text-ink-3">—</span>
+                    ) : (
+                      <span className="text-lg font-semibold text-ink">{rupiah(t.saldo)}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 export function Pencairan() {
   const navigate = useNavigate();
   const toast = useToast();
@@ -165,6 +268,8 @@ export function Pencairan() {
           </div>
         }
       />
+
+      <SaldoTiktokCard />
 
       {err && (
         <div className="mb-4">
