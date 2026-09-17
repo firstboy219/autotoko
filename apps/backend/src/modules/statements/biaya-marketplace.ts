@@ -42,6 +42,12 @@ export interface BarisPesanan {
   marketplace: string | null;
   periodeDari: string | Date | null;
   periodeSampai: string | Date | null;
+  /** Pengayaan opsional dari join ke tabel orders (sumber API): tanggal cair
+   *  (occurred_on), tanggal order, status scan, dan daftar item order. */
+  tanggalCair?: string | null;
+  tanggalOrder?: string | null;
+  discan?: boolean | null;
+  itemsOrder?: Array<{ name?: string; skuName?: string; skuId?: string; qty?: number }> | null;
 }
 
 export interface RingkasanBiaya {
@@ -135,6 +141,14 @@ function median(a: number[]): number {
   return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
 }
 
+/** Selisih hari antara dua tanggal "YYYY-MM-DD"; null bila salah satu kosong. */
+function selisihHari(orderDate: string, cairDate: string): number | null {
+  const a = Date.parse((orderDate || "").slice(0, 10));
+  const b = Date.parse((cairDate || "").slice(0, 10));
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return Math.round((b - a) / 86400000);
+}
+
 /**
  * Meringkas biaya marketplace per toko dan per sumber pesanan.
  *
@@ -215,10 +229,28 @@ export function cukupUntukDisarankan(r: RingkasanBiaya): boolean {
 
 // ------------------------------------------------- per nomor pesanan
 
+export interface RincianProduk {
+  nama: string | null;
+  sku: string | null;
+  qty: number;
+  /** Bagian pencairan order yang dialokasikan ke produk ini (proporsi qty). */
+  pencairan: number;
+}
+
 export interface BarisBiayaPesanan {
   orderNo: string;
   tanggal: string;
   sumber: string;
+  /** Kolom baru: toko, marketplace, tanggal & durasi cair, status scan. */
+  namaToko: string | null;
+  marketplace: string | null;
+  tanggalOrder: string;
+  tanggalCair: string;
+  /** Selisih hari tanggal cair - tanggal order; null bila salah satunya kosong. */
+  durasiCairHari: number | null;
+  discan: boolean | null;
+  /** Rincian produk dalam order ini + pencairan per produk (expand). */
+  rincianProduk: RincianProduk[];
   pendapatan: number;
   biaya: number;
   cair: number;
@@ -354,9 +386,47 @@ export function biayaPerPesanan(
       belum.set(p.sku, g);
     }
 
+    // Rincian produk + alokasi pencairan (proporsi qty). Utamakan item order
+    // tersinkron (sumber API), fallback ke detail produk laporan (unggahan).
+    let rincianProduk: RincianProduk[];
+    if (b.itemsOrder && b.itemsOrder.length) {
+      const items = b.itemsOrder;
+      const totalQty = items.reduce((a, it) => a + (Number(it.qty) || 1), 0) || items.length;
+      rincianProduk = items.map((it) => {
+        const qty = Number(it.qty) || 1;
+        const nm = (it.skuId && petaSku?.get(String(it.skuId))?.nama)
+          || (it.name ?? "") || (it.skuName ?? "") || null;
+        return {
+          nama: nm || null,
+          sku: it.skuId ? String(it.skuId) : null,
+          qty,
+          pencairan: totalQty > 0 ? Math.round(cair * qty / totalQty) : 0,
+        };
+      });
+    } else {
+      const totalQty = produk.reduce((a, x) => a + x.qty, 0) || produk.length;
+      rincianProduk = produk.map((x) => ({
+        nama: x.nama,
+        sku: x.sku,
+        qty: x.qty,
+        pencairan: totalQty > 0 ? Math.round(cair * x.qty / totalQty) : 0,
+      }));
+    }
+
+    const tanggalOrder = (b.tanggalOrder ?? tanggal ?? "") || "";
+    const tanggalCair = (b.tanggalCair ?? "") || "";
+
     if (pendapatan <= 0) tanpaPendapatan += 1;
     isi.push({
-      orderNo, tanggal, sumber, pendapatan, biaya, cair, produk,
+      orderNo, tanggal, sumber,
+      namaToko: b.namaToko,
+      marketplace: b.marketplace,
+      tanggalOrder,
+      tanggalCair,
+      durasiCairHari: selisihHari(tanggalOrder, tanggalCair),
+      discan: b.discan ?? null,
+      rincianProduk,
+      pendapatan, biaya, cair, produk,
       // Null, bukan nol. Nol terbaca sebagai "tidak dipotong sama sekali",
       // sedangkan yang benar adalah "tidak bisa dihitung" -- pesanan yang
       // dibatalkan tidak punya persentase potongan.

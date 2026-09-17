@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
@@ -68,6 +68,13 @@ interface Audit {
       orderNo: string;
       tanggal: string;
       sumber: string;
+      namaToko: string | null;
+      marketplace: string | null;
+      tanggalOrder: string;
+      tanggalCair: string;
+      durasiCairHari: number | null;
+      discan: boolean | null;
+      rincianProduk: { nama: string | null; sku: string | null; qty: number; pencairan: number }[];
       pendapatan: number;
       biaya: number;
       cair: number;
@@ -127,6 +134,13 @@ export default function AuditPesanan() {
   const [memuat, setMemuat] = useState(false);
   const [mengunggah, setMengunggah] = useState(false);
   const [menarik, setMenarik] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpand = (k: string) =>
+    setExpanded((prev) => {
+      const n = new Set(prev);
+      if (n.has(k)) n.delete(k); else n.add(k);
+      return n;
+    });
 
   async function jalankan() {
     setMemuat(true);
@@ -362,7 +376,12 @@ export default function AuditPesanan() {
                     <THead>
                       <TR>
                         <TH>Order ID</TH>
-                        <TH>Sumber</TH>
+                        <TH>Toko</TH>
+                        <TH>Marketplace</TH>
+                        <TH>Tgl Order</TH>
+                        <TH>Tgl Cair</TH>
+                        <TH align="right">Durasi</TH>
+                        <TH>Scan</TH>
                         <TH align="right">Harga jual</TH>
                         <TH align="right">Dipotong</TH>
                         <TH align="right">Cair</TH>
@@ -370,27 +389,78 @@ export default function AuditPesanan() {
                       </TR>
                     </THead>
                     <tbody>
-                      {data.biayaPesanan.baris.map((x) => (
-                        <TR key={x.orderNo || `${x.tanggal}-${x.cair}`}>
-                          <TD className="font-mono text-xs">{x.orderNo || "-"}</TD>
-                          <TD className="text-xs text-ink-2">{x.sumber}</TD>
-                          <TD align="right" className="tabular-nums">{rupiah(x.pendapatan)}</TD>
-                          <TD align="right" className="tabular-nums">{rupiah(x.biaya)}</TD>
-                          <TD align="right" className="tabular-nums">{rupiah(x.cair)}</TD>
-                          <TD align="right" className="tabular-nums">
-                            {x.persen == null ? (
-                              // Bukan "0%". Pesanan yang dibatalkan tidak
-                              // dipotong nol persen -- ia tidak punya
-                              // persentase sama sekali.
-                              <span className="text-ink-3" title="Batal atau retur">—</span>
-                            ) : x.mencurigakan ? (
-                              <Badge tone="danger">{pct(x.persen)}</Badge>
-                            ) : (
-                              <span>{pct(x.persen)}</span>
+                      {data.biayaPesanan.baris.map((x) => {
+                        const key = x.orderNo || `${x.tanggal}-${x.cair}`;
+                        const isOpen = expanded.has(key);
+                        const bisaExpand = (x.rincianProduk?.length ?? 0) > 0;
+                        return (
+                          <Fragment key={key}>
+                            <TR
+                              className={bisaExpand ? "cursor-pointer" : undefined}
+                              onClick={() => bisaExpand && toggleExpand(key)}
+                            >
+                              <TD className="font-mono text-xs whitespace-nowrap">
+                                {bisaExpand && (
+                                  <span className="text-ink-3 mr-1">{isOpen ? "▾" : "▸"}</span>
+                                )}
+                                {x.orderNo || "-"}
+                              </TD>
+                              <TD className="text-xs text-ink-2">{x.namaToko ?? "-"}</TD>
+                              <TD className="text-xs text-ink-2">{x.marketplace ?? x.sumber}</TD>
+                              <TD className="text-xs text-ink-2 whitespace-nowrap">{x.tanggalOrder || "-"}</TD>
+                              <TD className="text-xs text-ink-2 whitespace-nowrap">{x.tanggalCair || "-"}</TD>
+                              <TD align="right" className="tabular-nums text-xs">
+                                {x.durasiCairHari == null ? "—" : `${x.durasiCairHari} hr`}
+                              </TD>
+                              <TD>
+                                {x.discan == null ? (
+                                  <span className="text-ink-3 text-xs">—</span>
+                                ) : x.discan ? (
+                                  <Badge tone="success">discan</Badge>
+                                ) : (
+                                  <Badge tone="warning">belum</Badge>
+                                )}
+                              </TD>
+                              <TD align="right" className="tabular-nums">{rupiah(x.pendapatan)}</TD>
+                              <TD align="right" className="tabular-nums">{rupiah(x.biaya)}</TD>
+                              <TD align="right" className="tabular-nums">{rupiah(x.cair)}</TD>
+                              <TD align="right" className="tabular-nums">
+                                {x.persen == null ? (
+                                  <span className="text-ink-3" title="Batal atau retur">—</span>
+                                ) : x.mencurigakan ? (
+                                  <Badge tone="danger">{pct(x.persen)}</Badge>
+                                ) : (
+                                  <span>{pct(x.persen)}</span>
+                                )}
+                              </TD>
+                            </TR>
+                            {isOpen && bisaExpand && (
+                              <tr>
+                                <td colSpan={11} className="px-4 py-2 border-t border-line">
+                                  <div className="text-[11px] uppercase tracking-wide text-ink-3 mb-1">
+                                    Produk dalam order ini
+                                  </div>
+                                  <div className="space-y-1">
+                                    {x.rincianProduk.map((r, i) => (
+                                      <div
+                                        key={i}
+                                        className="flex items-center justify-between gap-3 text-xs"
+                                      >
+                                        <span className="text-ink truncate">
+                                          {r.nama ?? (r.sku ? `SKU ${r.sku}` : "-")}
+                                        </span>
+                                        <span className="text-ink-3 tabular-nums whitespace-nowrap">
+                                          ×{r.qty} · cair {rupiah(r.pencairan)}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
                             )}
-                          </TD>
-                        </TR>
-                      ))}
+                          </Fragment>
+                        );
+                      })}
                     </tbody>
                   </Table>
                 </TableWrap>

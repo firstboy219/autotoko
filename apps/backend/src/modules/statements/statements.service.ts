@@ -14,6 +14,7 @@ import {
   marketplaceStatementLines,
   marketplaceStatements,
   masterProducts,
+  orders,
   payoutMutations,
   resiScans,
   shops,
@@ -375,14 +376,52 @@ export class StatementsService {
       .where(eq(masterProducts.userId, userId))
       .orderBy(asc(masterProducts.name));
 
+    // Pengayaan per-order untuk tabel "Potongan per pesanan": nama produk (buat
+    // detail per order), tanggal order, nama toko, dan status scan -- dari join
+    // ke tabel orders (hasil sync API) via order_id.
+    const orderIds = [...new Set(pesanan.map((p) => p.externalRef).filter((x): x is string => !!x))];
+    const ordersRows = orderIds.length
+      ? await this.db
+          .select({
+            no: orders.marketplaceOrderId,
+            items: orders.items,
+            dibuat: orders.createdAtMarketplace,
+            shopId: orders.shopId,
+          })
+          .from(orders)
+          .where(and(eq(orders.userId, userId), inArray(orders.marketplaceOrderId, orderIds)))
+      : [];
+    const petaOrder = new Map(ordersRows.map((o) => [o.no, o] as const));
+    const namaTokoById = new Map(
+      (await this.db
+        .select({ id: shops.id, nama: sql<string>`COALESCE(${shops.shopName}, ${shops.displayName})` })
+        .from(shops)
+        .where(eq(shops.userId, userId))).map((r) => [r.id, r.nama] as const),
+    );
+    const tglOnly = (d: unknown): string | null => {
+      if (!d) return null;
+      const x = d instanceof Date ? d : new Date(String(d));
+      return Number.isNaN(x.getTime()) ? null : x.toISOString().slice(0, 10);
+    };
+
     const biayaPesanan = biayaPerPesanan(
-      pesanan.map((p) => ({
-        raw: p.raw,
-        namaToko: null,
-        marketplace: p.marketplace ?? null,
-        periodeDari: p.periodeDari ?? null,
-        periodeSampai: p.periodeSampai ?? null,
-      })),
+      pesanan.map((p) => {
+        const od = p.externalRef ? petaOrder.get(p.externalRef) : undefined;
+        const shopId = od?.shopId ?? p.shopId ?? null;
+        return {
+          raw: p.raw,
+          namaToko: shopId ? namaTokoById.get(shopId) ?? null : null,
+          marketplace: p.marketplace ?? null,
+          periodeDari: p.periodeDari ?? null,
+          periodeSampai: p.periodeSampai ?? null,
+          tanggalCair: (p.occurredOn as string | null) ?? null,
+          tanggalOrder: tglOnly(od?.dibuat),
+          discan: p.externalRef ? terpakai.has(p.externalRef) : null,
+          itemsOrder: Array.isArray(od?.items)
+            ? (od!.items as Array<{ name?: string; skuName?: string; skuId?: string; qty?: number }>)
+            : null,
+        };
+      }),
       peta,
     );
 
