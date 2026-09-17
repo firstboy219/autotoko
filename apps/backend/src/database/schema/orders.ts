@@ -61,6 +61,10 @@ export const orders = pgTable(
     awbUrl: varchar("awb_url", { length: 255 }),
     /** Pesanan apa adanya dari marketplace, untuk audit. */
     raw: jsonb("raw"),
+    /** GetPriceDetail (202407) TikTok: rincian harga/diskon/pajak per order. */
+    priceDetail: jsonb("price_detail"),
+    /** GetTracking (202309) TikTok: linimasa pengiriman terakhir. */
+    trackingLast: jsonb("tracking_last"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -124,5 +128,7 @@ export const orderSettings = pgTable("order_settings", {
   /** Tipe & ukuran dokumen resi TikTok. Default packing slip (ada daftar produk) A6. */
   docType: varchar("doc_type", { length: 48 }).notNull().default("SHIPPING_LABEL_AND_PACKING_SLIP"),
   docSize: varchar("doc_size", { length: 8 }).notNull().default("A6"),
+  /** Estimasi komisi+biaya TikTok (fraksi 0..1) untuk hitung "estimasi pencairan net" di menu order. */
+  estCommissionRate: numeric("est_commission_rate", { precision: 5, scale: 4 }).notNull().default("0.0800"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

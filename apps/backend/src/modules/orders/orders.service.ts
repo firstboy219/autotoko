@@ -62,15 +62,33 @@ export class OrdersService {
    * produk seller = sub_total - seller_discount. Belum potong komisi TikTok
    * (komisi tak tersedia di detail order); fallback ke kolom subtotal/total.
    */
-  private estPencairan(o: { raw?: unknown; subtotal?: unknown; totalAmount?: unknown }): string | null {
-    const p = this.rawObj(o).payment as Record<string, unknown> | undefined;
-    if (p && typeof p === "object") {
-      const sub = Number(p.sub_total ?? 0);
-      const disc = Number(p.seller_discount ?? 0);
-      if (Number.isFinite(sub) && sub > 0) return String(Math.max(0, sub - (Number.isFinite(disc) ? disc : 0)));
+  private estPencairan(
+    o: { raw?: unknown; priceDetail?: unknown; subtotal?: unknown; totalAmount?: unknown },
+    rate = 0,
+  ): string | null {
+    // Basis "harga publish - diskon": utamakan GetPriceDetail (sku_sale_price),
+    // lalu raw.payment (sub_total - seller_discount), lalu kolom subtotal/total.
+    let base: number | null = null;
+    const pd = o.priceDetail && typeof o.priceDetail === "object" ? (o.priceDetail as Record<string, unknown>) : null;
+    if (pd) {
+      const ssp = Number(pd.sku_sale_price ?? pd.subtotal ?? 0);
+      if (Number.isFinite(ssp) && ssp > 0) base = ssp;
     }
-    if (o.subtotal != null) return String(o.subtotal);
-    return o.totalAmount != null ? String(o.totalAmount) : null;
+    if (base == null) {
+      const p = this.rawObj(o).payment as Record<string, unknown> | undefined;
+      if (p && typeof p === "object") {
+        const sub = Number(p.sub_total ?? 0);
+        const disc = Number(p.seller_discount ?? 0);
+        if (Number.isFinite(sub) && sub > 0) base = Math.max(0, sub - (Number.isFinite(disc) ? disc : 0));
+      }
+    }
+    if (base == null && o.subtotal != null) base = Number(o.subtotal);
+    if (base == null && o.totalAmount != null) base = Number(o.totalAmount);
+    if (base == null || !Number.isFinite(base)) return null;
+    // Net = basis x (1 - estimasi komisi). TikTok tak beri komisi di API order,
+    // jadi rate ini estimasi (afiliasi + komisi marketplace + biaya lain).
+    const net = base * (1 - (Number.isFinite(rate) ? rate : 0));
+    return String(Math.max(0, Math.round(net)));
   }
 
   private prioOf(o: { raw?: unknown }): number | null {
@@ -236,6 +254,13 @@ export class OrdersService {
     const manualTerpilih =
       opts.active || (opts.status && opts.status !== "dikirim") ? [] : barisManual;
 
+    const [osRow] = await this.db
+      .select({ r: orderSettings.estCommissionRate })
+      .from(orderSettings)
+      .where(eq(orderSettings.userId, userId))
+      .limit(1);
+    const rate = Math.min(0.9, Math.max(0, Number(osRow?.r ?? 0.08) || 0));
+
     return [
       ...dariApi.map((o) => ({
         ...o, sumber: "api" as const,
@@ -244,7 +269,7 @@ export class OrdersService {
         isCod: this.isCodOf(o),
         shipDeadlineMs: this.deadlineOf(o),
         priorityLevel: this.prioOf(o),
-        estPencairan: this.estPencairan(o),
+        estPencairan: this.estPencairan(o, rate),
         shopName: o.shopId ? namaToko.get(o.shopId) ?? null : null,
         items: enrichItems(o.items),
       })),
@@ -421,12 +446,13 @@ export class OrdersService {
       instantCouriers: row?.instantCouriers ?? this.INSTANT_DEFAULT,
       docType: row?.docType ?? "SHIPPING_LABEL_AND_PACKING_SLIP",
       docSize: row?.docSize ?? "A6",
+      estCommissionRate: Number(row?.estCommissionRate ?? 0.08),
     };
   }
 
   async updateOrderSettings(
     userId: string,
-    dto: { autoSiapKirim?: boolean; instantCouriers?: string[]; docType?: string; docSize?: string },
+    dto: { autoSiapKirim?: boolean; instantCouriers?: string[]; docType?: string; docSize?: string; estCommissionRate?: number },
   ) {
     const kini = await this.getOrderSettings(userId);
     const nilai = {
@@ -436,13 +462,15 @@ export class OrdersService {
         .filter(Boolean),
       docType: dto.docType ?? kini.docType,
       docSize: dto.docSize ?? kini.docSize,
+      estCommissionRate:
+        dto.estCommissionRate != null ? Math.min(0.9, Math.max(0, dto.estCommissionRate)) : kini.estCommissionRate,
     };
     await this.db
       .insert(orderSettings)
-      .values({ userId, autoSiapKirim: nilai.autoSiapKirim, instantCouriers: nilai.instantCouriers, docType: nilai.docType, docSize: nilai.docSize, updatedAt: new Date() })
+      .values({ userId, autoSiapKirim: nilai.autoSiapKirim, instantCouriers: nilai.instantCouriers, docType: nilai.docType, docSize: nilai.docSize, estCommissionRate: String(nilai.estCommissionRate), updatedAt: new Date() })
       .onConflictDoUpdate({
         target: orderSettings.userId,
-        set: { autoSiapKirim: nilai.autoSiapKirim, instantCouriers: nilai.instantCouriers, docType: nilai.docType, docSize: nilai.docSize, updatedAt: new Date() },
+        set: { autoSiapKirim: nilai.autoSiapKirim, instantCouriers: nilai.instantCouriers, docType: nilai.docType, docSize: nilai.docSize, estCommissionRate: String(nilai.estCommissionRate), updatedAt: new Date() },
       });
     return nilai;
   }

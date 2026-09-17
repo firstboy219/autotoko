@@ -274,6 +274,18 @@ export class TikTokClient {
   }
 
   /** Slot jadwal jemput (pickup) untuk sebuah paket sameday/instant. */
+  /** Get Price Detail 202407: rincian harga per order (basis "estimasi pencairan"). */
+  async priceDetail(orderId: string) {
+    return this.get<Record<string, unknown>>(`/order/202407/orders/${orderId}/price_detail`);
+  }
+
+  /** Get Tracking 202309: linimasa pengiriman sebuah order. */
+  async orderTracking(orderId: string) {
+    return this.get<{ tracking?: Array<Record<string, unknown>> }>(
+      `/fulfillment/202309/orders/${orderId}/tracking`,
+    );
+  }
+
   async slotJemput(packageId: string): Promise<{
     can_drop_off?: boolean;
     can_pickup?: boolean;

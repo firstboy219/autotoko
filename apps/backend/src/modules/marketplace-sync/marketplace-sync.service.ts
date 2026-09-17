@@ -1469,6 +1469,45 @@ export class MarketplaceSyncService {
     return { toko, total, diperbaruiPada: new Date().toISOString(), cached: false };
   }
 
+  /**
+   * Refresh data TikTok untuk SATU order (on-demand): GetPriceDetail + GetTracking,
+   * disimpan ke orders.price_detail / orders.tracking_last. Dipakai tombol refresh
+   * per order & saat buka detail order.
+   */
+  async refreshOrderTiktok(userId: string, orderId: string) {
+    const [o] = await this.bypass(() => this.db.select().from(orders)
+      .where(and(eq(orders.id, orderId), eq(orders.userId, userId))).limit(1));
+    if (!o) throw new NotFoundException("Order tidak ditemukan");
+    if (o.marketplace !== "tiktok") throw new BadRequestException("Order ini bukan dari TikTok");
+    const [t] = await this.bypass(() => this.db.select().from(shops)
+      .where(and(eq(shops.id, o.shopId as string), eq(shops.userId, userId))).limit(1));
+    if (!t || !t.accessToken || !t.shopCipher) throw new BadRequestException("Toko TikTok belum tersambung API");
+    let klien = await this.klien(t);
+    let segar = false;
+    const call = async <T>(fn: (c: TikTokClient) => Promise<T>): Promise<T> => {
+      for (;;) {
+        try { return await fn(klien); }
+        catch (e) {
+          if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(t); continue; }
+          throw e;
+        }
+      }
+    };
+    const oid = o.marketplaceOrderId as string;
+    let priceDetail: unknown = o.priceDetail ?? null;
+    let tracking: unknown = o.trackingLast ?? null;
+    try { priceDetail = await call((c) => c.priceDetail(oid)); }
+    catch (e) { this.logger.warn(`priceDetail ${oid}: ${(e as Error).message}`); }
+    try {
+      const tr = await call((c) => c.orderTracking(oid));
+      tracking = (tr as { tracking?: unknown })?.tracking ?? tr;
+    } catch (e) { this.logger.warn(`tracking ${oid}: ${(e as Error).message}`); }
+    await this.bypass(() => this.db.update(orders)
+      .set({ priceDetail: priceDetail as Record<string, unknown> | null, trackingLast: tracking as Record<string, unknown> | null, updatedAt: new Date() })
+      .where(and(eq(orders.id, orderId), eq(orders.userId, userId))));
+    return { ok: true, priceDetail, tracking };
+  }
+
   /** Set/hapus cutoff Saldo Cepat sebuah toko (tanggal null = hapus cutoff). */
   async setSaldoCutoff(userId: string, shopId: string, tanggal: string | null, saldo: number | null) {
     const [shop] = await this.bypass(() => this.db.select({ id: shops.id })

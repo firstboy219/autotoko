@@ -19,6 +19,7 @@ import {
   FULFILLMENT_STATUSES,
   type FulfillmentStatus,
 } from "./orders.service.js";
+import { MarketplaceSyncService } from "../marketplace-sync/marketplace-sync.service.js";
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
@@ -49,6 +50,9 @@ class OrderSettingsDto {
 
   @IsOptional() @IsString()
   docSize?: string;
+
+  @IsOptional() @Type(() => Number)
+  estCommissionRate?: number;
 }
 
 class ListOrdersQuery {
@@ -77,7 +81,10 @@ class ListOrdersQuery {
 @Controller("orders")
 @UseGuards(JwtAuthGuard)
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly sync: MarketplaceSyncService,
+  ) {}
 
   @Get()
   async list(
@@ -165,5 +172,14 @@ export class OrdersController {
     @Param("id") id: string,
   ): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.orders.generateAwb(uid(req), id) };
+  }
+
+  /** Refresh data TikTok (price detail + tracking) untuk satu order. */
+  @Post(":id/refresh-tiktok")
+  async refreshTiktok(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.refreshOrderTiktok(uid(req), id) };
   }
 }

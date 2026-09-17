@@ -81,6 +81,8 @@ interface Order {
   priorityLevel?: number | null;
   /** Estimasi pencairan marketplace dari detail order (backend). */
   estPencairan?: string | null;
+  priceDetail?: Record<string, unknown> | null;
+  trackingLast?: Array<Record<string, unknown>> | null;
   /** URL PDF AWB/resi yang sudah di-cache ke server (backend). */
   awbUrl?: string | null;
 }
@@ -719,7 +721,7 @@ export function Orders() {
                         {o.estPencairan == null ? (
                           <span className="text-ink-3">—</span>
                         ) : (
-                          <span className="text-emerald-700" title="Estimasi dari detail order (sub_total − diskon seller; belum potong komisi TikTok)">≈ {rupiah(o.estPencairan)}</span>
+                          <span className="text-emerald-700" title="Estimasi NET: harga setelah diskon − estimasi komisi (atur % di Otomasi Order). Komisi asli TikTok tak tersedia di API order.">≈ {rupiah(o.estPencairan)}</span>
                         )}
                       </TD>
                       <TD align="right" className="tabular-nums whitespace-nowrap">
@@ -1153,19 +1155,21 @@ function BatchesModal({ onClose, onChanged }: { onClose: () => void; onChanged: 
 
 function OtomasiOrderModal({ onClose }: { onClose: () => void }) {
   const toast = useToast();
-  const { data, loading } = useFetch<{ autoSiapKirim: boolean; instantCouriers: string[]; docType?: string; docSize?: string }>("/orders/settings");
+  const { data, loading } = useFetch<{ autoSiapKirim: boolean; instantCouriers: string[]; docType?: string; docSize?: string; estCommissionRate?: number }>("/orders/settings");
   const [auto, setAuto] = useState(false);
   const [instant, setInstant] = useState("");
   const [saving, setSaving] = useState(false);
   const [siap, setSiap] = useState(false);
   const [docType, setDocType] = useState("SHIPPING_LABEL_AND_PACKING_SLIP");
   const [docSize, setDocSize] = useState("A6");
+  const [komisi, setKomisi] = useState("8");
   useEffect(() => {
     if (data && !siap) {
       setAuto(data.autoSiapKirim);
       setInstant((data.instantCouriers ?? []).join(", "));
       setDocType(data.docType ?? "SHIPPING_LABEL_AND_PACKING_SLIP");
       setDocSize(data.docSize ?? "A6");
+      setKomisi(String((data.estCommissionRate ?? 0.08) * 100));
       setSiap(true);
     }
   }, [data, siap]);
@@ -1178,6 +1182,7 @@ function OtomasiOrderModal({ onClose }: { onClose: () => void }) {
         instantCouriers: instant.split(",").map((s) => s.trim()).filter(Boolean),
         docType,
         docSize,
+        estCommissionRate: (Number(komisi) || 0) / 100,
       });
       toast("Pengaturan otomasi order disimpan", "success");
       onClose();
@@ -1242,6 +1247,21 @@ function OtomasiOrderModal({ onClose }: { onClose: () => void }) {
                 <option value="A5">A5</option>
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1.5">Estimasi komisi TikTok (%)</label>
+            <Input
+              value={komisi}
+              onChange={(e) => setKomisi(e.target.value.replace(/[^0-9.]/g, ""))}
+              placeholder="8"
+              className="tabular-nums"
+            />
+            <p className="text-xs text-ink-3 mt-1">
+              Dipakai untuk kolom <b>Est. Pencairan (net)</b> di menu order: harga setelah diskon dikurangi estimasi
+              komisi + biaya afiliasi/marketplace. Komisi asli TikTok tak tersedia di API order, jadi sesuaikan sendiri
+              (mis. 8). 0 = tidak potong komisi.
+            </p>
           </div>
 
           <InlineAlert tone="warning">
@@ -1435,6 +1455,23 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
   const [err, setErr] = useState<string | null>(null);
   const [confirmStatus, setConfirmStatus] = useState<string | null>(null);
   const toast = useToast();
+  const [tt, setTt] = useState<{ priceDetail?: unknown; tracking?: unknown } | null>(null);
+  const [ttBusy, setTtBusy] = useState(false);
+  async function refreshTiktok() {
+    setTtBusy(true); setErr(null);
+    try {
+      const r = await api.post<{ ok: boolean; priceDetail?: unknown; tracking?: unknown }>(
+        `/orders/${order.id}/refresh-tiktok`,
+      );
+      setTt({ priceDetail: r.priceDetail, tracking: r.tracking });
+      toast("Data TikTok (price detail & tracking) diperbarui", "success");
+    } catch (e) { setErr((e as Error).message); }
+    finally { setTtBusy(false); }
+  }
+  useEffect(() => {
+    if (order.marketplace === "tiktok" && !order.priceDetail && !tt) void refreshTiktok();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const idx = FLOW.indexOf(order.fulfillmentStatus as (typeof FLOW)[number]);
   const next = idx >= 0 && idx < FLOW.length - 1 ? FLOW[idx + 1] : null;
@@ -1519,6 +1556,14 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
     ["Pembeli", order.buyerName ?? "-"],
     ["Total", <span className="tabular-nums">{rupiah(order.totalAmount)}</span>],
     [
+      "Est. pencairan (net)",
+      order.estPencairan != null ? (
+        <span className="tabular-nums text-emerald-700">≈ {rupiah(order.estPencairan)}</span>
+      ) : (
+        "-"
+      ),
+    ],
+    [
       "Fee platform",
       order.feeDeducted ? <span className="tabular-nums">{rupiah(order.platformFee)}</span> : "pending",
     ],
@@ -1549,6 +1594,72 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
             </div>
           ))}
         </dl>
+
+        {order.marketplace === "tiktok" && (
+          <div className="rounded-lg border border-line mb-4">
+            <div className="px-3.5 py-2.5 border-b border-line flex items-center justify-between">
+              <span className="text-xs font-medium text-ink-2">Rincian TikTok (price detail &amp; tracking)</span>
+              <Button size="sm" variant="outline" icon="refresh" loading={ttBusy} onClick={refreshTiktok}>
+                Refresh
+              </Button>
+            </div>
+            <div className="p-3.5 text-xs space-y-2">
+              {(() => {
+                const pd = (tt?.priceDetail ?? order.priceDetail) as Record<string, unknown> | null | undefined;
+                if (!pd) {
+                  return <div className="text-ink-3">{ttBusy ? "Mengambil dari TikTok…" : "Belum ada rincian harga — klik Refresh."}</div>;
+                }
+                const R = (k: string) => (pd[k] != null ? rupiah(String(pd[k])) : "-");
+                const rows: [string, string][] = [
+                  ["Harga publish (SKU)", "sku_list_price"],
+                  ["Setelah diskon (SKU)", "sku_sale_price"],
+                  ["Diskon seller", "subtotal_deduction_seller"],
+                  ["Diskon platform", "subtotal_deduction_platform"],
+                  ["Pajak", "tax_amount"],
+                  ["Ongkir (harga jual)", "shipping_sale_price"],
+                  ["Total bayar pembeli", "payment"],
+                ];
+                return (
+                  <dl className="divide-y divide-line">
+                    {rows.map(([label, key]) => (
+                      <div key={key} className="flex justify-between py-1">
+                        <dt className="text-ink-3">{label}</dt>
+                        <dd className="tabular-nums text-ink">{R(key)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                );
+              })()}
+              {(() => {
+                const tr = (tt?.tracking ?? order.trackingLast) as Array<Record<string, unknown>> | null | undefined;
+                if (!tr || !tr.length) return null;
+                return (
+                  <div className="pt-1">
+                    <div className="text-ink-2 font-medium mb-1">Tracking</div>
+                    <ul className="space-y-0.5">
+                      {tr.slice(0, 8).map((ev, i) => (
+                        <li key={i} className="flex justify-between gap-2 text-ink-3">
+                          <span>{String(ev.description ?? "-")}</span>
+                          <span className="shrink-0 tabular-nums">
+                            {ev.update_time_millis
+                              ? new Date(Number(ev.update_time_millis)).toLocaleString("id-ID", {
+                                  day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+                                })
+                              : ""}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })()}
+              <p className="text-[11px] text-ink-3">
+                Est. pencairan (net) = harga setelah diskon − estimasi komisi (atur % di Otomasi Order). Komisi asli
+                TikTok tidak tersedia di API order, jadi angka ini estimasi.
+              </p>
+            </div>
+          </div>
+        )}
 
         {order.items && order.items.length > 0 && (
           <div className="rounded-lg border border-line mb-4">
