@@ -118,9 +118,9 @@ export class MarketplaceSyncController {
   @Post("orders/batch-packing")
   async batchPacking(
     @Req() req: FastifyRequest,
-    @Body() body: { orderIds: string[]; handoverMethod?: string; takeouts?: { orderId: string; reason?: string }[] },
+    @Body() body: { orderIds: string[]; handoverMethod?: string; pickupSlot?: { startTime: number; endTime: number }; takeouts?: { orderId: string; reason?: string }[] },
   ): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.sync.batchPacking(uid(req), body?.orderIds ?? [], { handoverMethod: body?.handoverMethod, takeouts: body?.takeouts }) };
+    return { success: true, data: await this.sync.batchPacking(uid(req), body?.orderIds ?? [], { handoverMethod: body?.handoverMethod, pickupSlot: body?.pickupSlot, takeouts: body?.takeouts }) };
   }
 
   /** Saldo bisa ditarik per toko, direkonstruksi dari Finance API (Get Withdrawals). */
@@ -203,14 +203,20 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.labelOrder(uid(req), id) };
   }
 
+  /** Slot jadwal jemput (pickup) untuk order sameday/instant. */
+  @Get("orders/:id/slot-jemput")
+  async slotJemput(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.slotJemputOrder(uid(req), id) };
+  }
+
   /** RTS / arrange shipment ke marketplace (menulis; outward). */
   @Post("orders/:id/ship")
   async shipOrder(
     @Req() req: FastifyRequest,
     @Param("id") id: string,
-    @Body() body: { handoverMethod?: string },
+    @Body() body: { handoverMethod?: string; pickupSlot?: { startTime: number; endTime: number } },
   ): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.sync.shipOrder(uid(req), id, { handoverMethod: body?.handoverMethod }) };
+    return { success: true, data: await this.sync.shipOrder(uid(req), id, { handoverMethod: body?.handoverMethod, pickupSlot: body?.pickupSlot }) };
   }
 
   @Get("shops/:id/runs")

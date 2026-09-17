@@ -349,6 +349,7 @@ export function Orders() {
   }
 
   const [batchOpen, setBatchOpen] = useState(false);
+  const [jemputOpen, setJemputOpen] = useState(false);
   const [batchesOpen, setBatchesOpen] = useState(false);
   const [petaOpen, setPetaOpen] = useState(false);
 
@@ -378,6 +379,9 @@ export function Orders() {
             </div>
             <Button variant="filled" icon="package" onClick={() => setBatchOpen(true)}>
               Mulai Batch Packing
+            </Button>
+            <Button variant="outline" onClick={() => setJemputOpen(true)}>
+              Jadwalkan Jemput
             </Button>
             <Button variant="outline" icon="fileText" onClick={() => setBatchesOpen(true)}>
               Daftar Batch
@@ -785,7 +789,120 @@ export function Orders() {
           onDone={() => { reload(); reloadRingkas(); }}
         />
       )}
+      {jemputOpen && (
+        <JadwalJemputModal
+          onClose={() => setJemputOpen(false)}
+          onDone={() => { reload(); reloadRingkas(); }}
+        />
+      )}
     </Layout>
+  );
+}
+
+
+type Slot = { startTime: number; endTime: number; tersedia: boolean };
+type SlotResp = { orderId: string; packageId: string; bisaJemput: boolean; bisaDropOff: boolean; dropOffUrl: string | null; slots: Slot[] };
+const INSTANT_KEYS = ["instant", "sameday", "same day", "same-day", "gojek", "gosend", "grab", "grabexpress", "grab express", "gokilat", "borzo", "lalamove", "spx instant", "spx sameday"];
+const isSameday = (o: Order) => { const c = (o.shippingCourier ?? "").toLowerCase(); return INSTANT_KEYS.some((k) => c.includes(k)); };
+const fmtSlot = (s: Slot) => {
+  const a = new Date(s.startTime * 1000), b = new Date(s.endTime * 1000);
+  const d = a.toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  const e = b.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+  return `${d} \u2013 ${e}`;
+};
+
+function JadwalJemputModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const { data, loading } = useFetch<Order[]>("/orders?active=1");
+  const kandidat = (data ?? []).filter((o) => (o.sumber ?? "api") === "api" && o.fulfillmentStatus !== "dikirim" && isSameday(o));
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [slotState, setSlotState] = useState<SlotResp | null>(null);
+  const [pickedIdx, setPickedIdx] = useState<number | null>(null);
+  const [loadingSlot, setLoadingSlot] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [hasil, setHasil] = useState<{ ok: number; gagal: number } | null>(null);
+
+  const selArr = kandidat.filter((o) => sel.has(o.id));
+  const toggle = (id: string) => setSel((x) => { const n = new Set(x); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  async function muatSlot() {
+    if (!selArr.length) { toast("Pilih order dulu", "warning"); return; }
+    setLoadingSlot(true); setSlotState(null); setPickedIdx(null);
+    try {
+      const r = await api.get<SlotResp>(`/marketplace-sync/orders/${selArr[0]!.id}/slot-jemput`);
+      setSlotState(r);
+      if (!r.bisaJemput) toast("Order ini tak mendukung jemput (pickup). Pakai Batch Packing biasa (drop-off).", "warning");
+    } catch (e) { toast((e as Error).message, "danger"); }
+    finally { setLoadingSlot(false); }
+  }
+
+  async function proses() {
+    if (pickedIdx == null || !slotState) return;
+    const slot = slotState.slots[pickedIdx]!;
+    if (!window.confirm(`Jadwalkan jemput ${selArr.length} order pada ${fmtSlot(slot)}, lalu RTS + buat resi. Tindakan nyata \u2014 lanjutkan?`)) return;
+    setBusy(true);
+    try {
+      const r = await api.post<BatchResp>("/marketplace-sync/orders/batch-packing", {
+        orderIds: selArr.map((o) => o.id),
+        pickupSlot: { startTime: slot.startTime, endTime: slot.endTime },
+      });
+      if (r.labelsPdf) unduhBase64Pdf(r.labelsPdf, "resi-jemput.pdf");
+      if (r.packingListPdf) unduhBase64Pdf(r.packingListPdf, "packing-list.pdf");
+      const gagal = r.hasil.filter((h) => !h.ok).length;
+      setHasil({ ok: r.ok, gagal });
+      toast(`Jemput terjadwal: ${r.ok} order diproses${gagal ? `, ${gagal} gagal` : ""}.`, gagal ? "warning" : "success");
+      onDone();
+    } catch (e) { toast((e as Error).message, "danger"); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Jadwalkan Jemput (Sameday/Instant)" width="max-w-2xl">
+      {hasil ? (
+        <div className="space-y-3">
+          <InlineAlert tone={hasil.gagal ? "warning" : "success"}>Selesai: {hasil.ok} order dijadwalkan jemput &amp; diproses{hasil.gagal ? `, ${hasil.gagal} gagal` : ""}. PDF resi terunduh.</InlineAlert>
+          <div className="flex justify-end"><Button variant="filled" onClick={onClose}>Tutup</Button></div>
+        </div>
+      ) : loading ? (
+        <Skeleton className="h-40 w-full" />
+      ) : kandidat.length === 0 ? (
+        <EmptyState icon="cart" title="Tidak ada order sameday/instant" description="Order kurir instant/sameday (gosend, grab, dll.) muncul di sini untuk dijadwalkan jemput." />
+      ) : (
+        <div className="space-y-3">
+          <div className="text-sm text-ink-2">{kandidat.length} order sameday/instant \u00b7 {selArr.length} dipilih</div>
+          <div className="max-h-[36vh] overflow-y-auto border border-line rounded-lg divide-y divide-line">
+            {kandidat.map((o) => (
+              <label key={o.id} className="flex items-center gap-3 px-3 py-2.5 cursor-pointer">
+                <input type="checkbox" checked={sel.has(o.id)} onChange={() => toggle(o.id)} className="w-4 h-4 accent-brand" />
+                <ProductThumbs order={o} size={34} max={2} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-ink truncate"><span className="font-mono text-xs">{o.marketplaceOrderId}</span> \u00b7 {o.buyerName ?? "-"}</div>
+                  <div className="text-[11px] text-ink-3 truncate">{o.shippingCourier ?? "-"} \u00b7 {FS_LABEL[o.fulfillmentStatus] ?? o.fulfillmentStatus}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" loading={loadingSlot} disabled={!selArr.length} onClick={muatSlot}>Muat jadwal jemput</Button>
+            {slotState && <span className="text-[11px] text-ink-3">{slotState.bisaJemput ? `${slotState.slots.length} slot tersedia` : "tak mendukung jemput"}</span>}
+          </div>
+          {slotState && slotState.slots.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[24vh] overflow-y-auto">
+              {slotState.slots.map((sl, i) => (
+                <label key={i} className={`flex items-center gap-2 rounded border px-2 py-1.5 text-xs cursor-pointer ${pickedIdx === i ? "border-brand bg-brand/5" : "border-line"} ${sl.tersedia ? "" : "opacity-40"}`}>
+                  <input type="radio" name="slotjemput" disabled={!sl.tersedia} checked={pickedIdx === i} onChange={() => setPickedIdx(i)} className="accent-brand" />
+                  {fmtSlot(sl)}
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="text" onClick={onClose} disabled={busy}>Batal</Button>
+            <Button variant="filled" icon="package" loading={busy} disabled={pickedIdx == null} onClick={proses}>Jadwalkan &amp; Proses {selArr.length} order \u2192</Button>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 

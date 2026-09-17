@@ -888,7 +888,7 @@ export class MarketplaceSyncService {
   async batchPacking(
     userId: string,
     orderIds: string[],
-    opts: { handoverMethod?: string; takeouts?: { orderId: string; reason?: string }[] },
+    opts: { handoverMethod?: string; pickupSlot?: { startTime: number; endTime: number }; takeouts?: { orderId: string; reason?: string }[] },
   ) {
     const ids = [...new Set((orderIds ?? []).filter(Boolean))];
     const takeouts = (opts.takeouts ?? []).filter((t) => t?.orderId);
@@ -956,7 +956,12 @@ export class MarketplaceSyncService {
           try { doc = await ambilLabel(); } catch { doc = null; }
           if (!doc?.doc_url) {
             const body: Record<string, unknown> = {};
-            if (opts.handoverMethod) body.handover_method = opts.handoverMethod;
+            if (opts.pickupSlot) {
+              body.handover_method = "PICKUP";
+              body.pickup_slot = { start_time: opts.pickupSlot.startTime, end_time: opts.pickupSlot.endTime };
+            } else if (opts.handoverMethod) {
+              body.handover_method = opts.handoverMethod;
+            }
             await call((c) => c.post(`/fulfillment/202309/packages/${pid}/ship`, body));
             doc = await ambilLabel();
           }
@@ -1465,7 +1470,41 @@ export class MarketplaceSyncService {
     return null;
   }
 
-  async shipOrder(userId: string, orderId: string, opts: { handoverMethod?: string }) {
+  /**
+   * Slot jadwal jemput (pickup) untuk order sameday/instant. Diambil dari paket
+   * pertama order (umumnya satu paket). READ-only ke marketplace.
+   */
+  async slotJemputOrder(userId: string, orderId: string) {
+    const { order, toko } = await this.ambilOrderToko(userId, orderId);
+    const ids = this.packageIds(order.raw);
+    if (!ids.length) throw new BadRequestException("Order belum punya paket di marketplace");
+    let klien = await this.klien(toko);
+    let segar = false;
+    const call = async <T>(fn: (c: TikTokClient) => Promise<T>): Promise<T> => {
+      for (;;) {
+        try { return await fn(klien); }
+        catch (e) {
+          if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(toko); continue; }
+          throw e;
+        }
+      }
+    };
+    const pid = ids[0]!;
+    const d = await call((c) => c.slotJemput(pid));
+    const slots = (d.pickup_slots ?? [])
+      .filter((sl) => sl.start_time && sl.end_time)
+      .map((sl) => ({ startTime: Number(sl.start_time), endTime: Number(sl.end_time), tersedia: sl.avaliable !== false }));
+    return {
+      orderId,
+      packageId: pid,
+      bisaJemput: d.can_pickup !== false,
+      bisaDropOff: !!d.can_drop_off,
+      dropOffUrl: d.drop_off_point_url ?? null,
+      slots,
+    };
+  }
+
+  async shipOrder(userId: string, orderId: string, opts: { handoverMethod?: string; pickupSlot?: { startTime: number; endTime: number } }) {
     const { order, toko } = await this.ambilOrderToko(userId, orderId);
     const ids = this.packageIds(order.raw);
     if (!ids.length) throw new BadRequestException("Order belum punya paket di marketplace");
@@ -1474,7 +1513,12 @@ export class MarketplaceSyncService {
     const hasil: { packageId: string; ok: boolean; error?: string }[] = [];
     for (const pid of ids) {
       const body: Record<string, unknown> = {};
-      if (opts.handoverMethod) body.handover_method = opts.handoverMethod;
+      if (opts.pickupSlot) {
+        body.handover_method = "PICKUP";
+        body.pickup_slot = { start_time: opts.pickupSlot.startTime, end_time: opts.pickupSlot.endTime };
+      } else if (opts.handoverMethod) {
+        body.handover_method = opts.handoverMethod;
+      }
       try {
         for (;;) {
           try {

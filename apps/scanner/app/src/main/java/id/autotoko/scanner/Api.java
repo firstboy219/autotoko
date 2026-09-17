@@ -141,6 +141,19 @@ public final class Api {
         try { if (handover != null) p.put("handoverMethod", handover); } catch (Exception ignored) {}
         call("POST", session.baseUrl() + "/api/marketplace-sync/orders/" + id + "/ship", session.token(), p, cb);
     }
+    public void orderSlotJemput(String id, Cb cb) {
+        call("GET", session.baseUrl() + "/api/marketplace-sync/orders/" + id + "/slot-jemput", session.token(), null, cb);
+    }
+    public void orderShipPickup(String id, long startTime, long endTime, Cb cb) {
+        JSONObject p = new JSONObject();
+        try {
+            JSONObject slot = new JSONObject();
+            slot.put("startTime", startTime);
+            slot.put("endTime", endTime);
+            p.put("pickupSlot", slot);
+        } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/marketplace-sync/orders/" + id + "/ship", session.token(), p, cb);
+    }
     public void orderBatchPacking(JSONArray orderIds, JSONArray takeouts, String handover, Cb cb) {
         JSONObject p = new JSONObject();
         try {

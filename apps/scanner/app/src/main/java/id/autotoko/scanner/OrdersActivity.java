@@ -864,7 +864,11 @@ public class OrdersActivity extends AppCompatActivity {
                 act.addView(btn("Ambil Resi dari TikTok", false, v -> cetakAwb(id)));
             }
         }
-        act.addView(btn("Proses (kirim ke marketplace)", true, v -> konfirmRts(id, o.optString("marketplaceOrderId"), dlg)));
+        if (isSameday(o.optString("shippingCourier", ""))) {
+            act.addView(btn("Jadwalkan jemput & proses", true, v -> konfirmJemput(id, o.optString("marketplaceOrderId"), dlg)));
+        } else {
+            act.addView(btn("Proses (kirim ke marketplace)", true, v -> konfirmRts(id, o.optString("marketplaceOrderId"), dlg)));
+        }
         col.addView(act);
 
         ScrollView sv = new ScrollView(this);
@@ -936,6 +940,70 @@ public class OrdersActivity extends AppCompatActivity {
                     });
                 })
                 .show();
+    }
+
+    private boolean isSameday(String kurir) {
+        if (kurir == null) return false;
+        String c = kurir.toLowerCase(java.util.Locale.ROOT);
+        String[] keys = {"instant","sameday","same day","same-day","gojek","gosend","grab","grabexpress","grab express","gokilat","borzo","lalamove","spx instant","spx sameday"};
+        for (String k : keys) if (c.contains(k)) return true;
+        return false;
+    }
+
+    private String fmtSlot(long startSec, long endSec) {
+        java.util.Locale id = new java.util.Locale("id");
+        java.text.SimpleDateFormat f1 = new java.text.SimpleDateFormat("dd MMM HH:mm", id);
+        java.text.SimpleDateFormat f2 = new java.text.SimpleDateFormat("HH:mm", id);
+        return f1.format(new java.util.Date(startSec * 1000)) + " \u2013 " + f2.format(new java.util.Date(endSec * 1000));
+    }
+
+    /** Order sameday/instant: ambil slot jemput -> pilih -> ship pickup. */
+    private void konfirmJemput(String id, String no, com.google.android.material.bottomsheet.BottomSheetDialog parent) {
+        toast("Mengambil jadwal jemput\u2026");
+        api.orderSlotJemput(id, r -> {
+            if (r == null || !r.ok() || r.data() == null) { toast(r == null ? "Gagal ambil jadwal" : r.message("Gagal ambil jadwal jemput")); return; }
+            org.json.JSONObject d = r.data();
+            org.json.JSONArray slots = d.optJSONArray("slots");
+            boolean bisa = d.optBoolean("bisaJemput", true);
+            if (!bisa || slots == null || slots.length() == 0) {
+                new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                        .setTitle("Tak ada slot jemput")
+                        .setMessage("Order ini tak punya slot jemput tersedia. Proses sebagai drop-off biasa?")
+                        .setNegativeButton("Batal", null)
+                        .setPositiveButton("Proses drop-off", (di, w) -> konfirmRts(id, no, parent))
+                        .show();
+                return;
+            }
+            final java.util.List<Long> starts = new java.util.ArrayList<>();
+            final java.util.List<Long> ends = new java.util.ArrayList<>();
+            final java.util.List<String> labels = new java.util.ArrayList<>();
+            for (int i = 0; i < slots.length(); i++) {
+                org.json.JSONObject s = slots.optJSONObject(i);
+                if (s == null) continue;
+                long st = s.optLong("startTime", 0), en = s.optLong("endTime", 0);
+                if (st <= 0 || en <= 0) continue;
+                boolean tersedia = s.optBoolean("tersedia", true);
+                starts.add(st); ends.add(en);
+                labels.add(fmtSlot(st, en) + (tersedia ? "" : " (penuh)"));
+            }
+            if (labels.isEmpty()) { toast("Tak ada slot valid"); return; }
+            final int[] pick = { 0 };
+            new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                    .setTitle("Pilih jadwal jemput \u2014 " + no)
+                    .setSingleChoiceItems(labels.toArray(new String[0]), 0, (di, w) -> pick[0] = w)
+                    .setNegativeButton("Batal", null)
+                    .setPositiveButton("Jadwalkan & proses", (di, w) -> {
+                        long st = starts.get(pick[0]), en = ends.get(pick[0]);
+                        if (parent != null) parent.dismiss();
+                        toast("Menjadwalkan jemput\u2026");
+                        api.orderShipPickup(id, st, en, r2 -> {
+                            boolean ok = r2 != null && r2.ok() && r2.data() != null && r2.data().optBoolean("ok", false);
+                            toast(ok ? "Jemput terjadwal \u2192 diproses" : (r2 == null ? "Gagal" : r2.message("Gagal jadwal jemput")));
+                            muat();
+                        });
+                    })
+                    .show();
+        });
     }
 
     // ---- Otomasi Order ----

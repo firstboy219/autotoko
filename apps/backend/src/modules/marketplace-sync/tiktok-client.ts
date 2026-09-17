@@ -272,4 +272,15 @@ export class TikTokClient {
       "/finance/202309/payments", query);
     return { data: d?.payments ?? [], nextPageToken: d?.next_page_token || null, totalCount: d?.total_count ?? null };
   }
+
+  /** Slot jadwal jemput (pickup) untuk sebuah paket sameday/instant. */
+  async slotJemput(packageId: string): Promise<{
+    can_drop_off?: boolean;
+    can_pickup?: boolean;
+    can_van_collection?: boolean;
+    drop_off_point_url?: string;
+    pickup_slots?: { avaliable?: boolean; start_time?: number; end_time?: number }[];
+  }> {
+    return this.get(`/fulfillment/202309/packages/${packageId}/handover_time_slots`);
+  }
 }
