@@ -1273,6 +1273,21 @@ export class MarketplaceSyncService {
    * = sudah di-settle TikTok tapi belum cair ke rekening. Rincian per status ikut
    * dikembalikan supaya bisa dicocokkan langsung ke Seller Center. READ-only.
    */
+  /**
+   * DIAGNOSTIK saldo: net mutasi wallet (Get Withdrawals) all-history. Balance =
+   * jumlah SEMUA amount ber-tanda (income - penarikan). Mengembalikan ringkasan
+   * per-type ber-tanda + contoh mentah agar formula final bisa dikunci ke angka
+   * Seller Center. READ-only.
+   */
+  /**
+   * Saldo bisa ditarik per toko dari TikTok Finance (Get Withdrawals, all-history):
+   * penghasilan (SETTLE) - penarikan (WITHDRAW), HANYA status SUCCESS (WITHDRAW
+   * FAILED tidak mengurangi saldo). Terverifikasi cocok dengan Seller Center pada
+   * toko tanpa fitur transfer (mis. Reysowner = 46.123). Toko yang memakai fitur
+   * "transfer saldo" (mis. ke Saldo Iklan) ditandai adaTransfer -- angkanya bisa
+   * lebih tinggi dari saldo asli karena TikTok tak memberi arah transfer di API.
+   * READ-only.
+   */
   async saldoTiktok(userId: string, shopId?: string | null) {
     const tokoList = shopId
       ? await this.bypass(() => this.db.select().from(shops)
@@ -1283,9 +1298,8 @@ export class MarketplaceSyncService {
       const n = Number(String(v ?? "").replace(/[^0-9.-]/g, ""));
       return Number.isFinite(n) ? n : 0;
     };
-    const sudahCairKeBank = (st: string): boolean => /PAID|SUCCESS|COMPLETED/i.test(st);
-    const nowSec = Math.floor(Date.now() / 1000);
-    const geSec = nowSec - 420 * 86400;
+    const geSec = 1577836800; // 2020-01-01, all-history
+    const nowSec = Math.floor(Date.now() / 1000) + 86400;
 
     const toko: Array<Record<string, unknown>> = [];
     for (const t of tokoList) {
@@ -1301,44 +1315,44 @@ export class MarketplaceSyncService {
           }
         }
       };
-      const perStatus = new Map<string, { amount: number; count: number }>();
-      let belumDitarik = 0, sudahDitarik = 0, n = 0;
+      let settle = 0, withdraw = 0, transfer = 0, n = 0;
       let currency: string | null = null;
       try {
         let page: string | null = null, guard = 0;
         do {
-          const h = await call((c) => c.daftarStatement({ statementTimeGe: geSec, statementTimeLt: nowSec + 86400, pageToken: page }));
-          for (const stx of h.data) {
-            const rec = stx as Record<string, unknown>;
-            const status = String(rec.payment_status ?? rec.status ?? rec.settlement_status ?? "UNKNOWN").toUpperCase();
-            const amt = angka(rec.settlement_amount ?? rec.amount);
+          const h = await call((c) => c.daftarWithdrawal({ createTimeGe: geSec, createTimeLt: nowSec, pageToken: page }));
+          for (const w of h.data) {
+            const rec = w as Record<string, unknown>;
+            if (String(rec.status ?? "").toUpperCase() !== "SUCCESS") continue; // FAILED/PROCESSING diabaikan
+            const tipe = String(rec.type ?? "").toUpperCase();
+            const amt = angka(rec.amount);
             if (!currency && rec.currency) currency = String(rec.currency);
             n += 1;
-            const b = perStatus.get(status) ?? { amount: 0, count: 0 };
-            b.amount += amt; b.count += 1; perStatus.set(status, b);
-            if (sudahCairKeBank(status)) sudahDitarik += amt; else belumDitarik += amt;
+            if (tipe === "SETTLE") settle += amt;
+            else if (tipe === "WITHDRAW") withdraw += amt;
+            else if (tipe === "TRANSFER") transfer += amt;
           }
           page = h.nextPageToken;
-        } while (page && ++guard < 100);
+        } while (page && ++guard < 500);
         toko.push({
           shopId: t.id,
           shopName: t.displayName || t.shopName,
           currency: currency ?? "IDR",
-          belumDitarik: Math.round(belumDitarik),
-          sudahDitarik: Math.round(sudahDitarik),
-          statement: n,
-          perStatus: [...perStatus.entries()].map(([status, v]) => ({ status, amount: Math.round(v.amount), count: v.count })),
+          saldo: Math.round(settle - withdraw),
+          penghasilan: Math.round(settle),
+          penarikan: Math.round(withdraw),
+          transfer: Math.round(transfer),
+          adaTransfer: transfer > 0,
+          mutasi: n,
         });
       } catch (e) {
         toko.push({
-          shopId: t.id,
-          shopName: t.displayName || t.shopName,
-          currency: null, belumDitarik: null,
-          error: (e as Error).message,
+          shopId: t.id, shopName: t.displayName || t.shopName,
+          currency: null, saldo: null, error: (e as Error).message,
         });
       }
     }
-    const total = toko.reduce((a, x) => a + (typeof x.belumDitarik === "number" ? x.belumDitarik : 0), 0);
+    const total = toko.reduce((a, x) => a + (typeof x.saldo === "number" ? x.saldo : 0), 0);
     return { toko, total, diperbaruiPada: new Date().toISOString() };
   }
 

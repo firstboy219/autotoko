@@ -235,12 +235,15 @@ export class TikTokClient {
    * ledger ini: kira-kira Σ(SETTLE) - Σ(WITHDRAW).
    */
   async daftarWithdrawal(
-    opts: { pageToken?: string | null; pageSize?: number } = {},
+    opts: { pageToken?: string | null; pageSize?: number; createTimeGe?: number; createTimeLt?: number } = {},
   ): Promise<Halaman<Record<string, unknown>>> {
     const query: Record<string, string | number> = {
       page_size: Math.min(100, Math.max(1, opts.pageSize ?? 100)),
       types: "WITHDRAW,SETTLE,TRANSFER,REVERSE",
+      sort_field: "create_time",
     };
+    if (opts.createTimeGe != null) query.create_time_ge = opts.createTimeGe;
+    if (opts.createTimeLt != null) query.create_time_lt = opts.createTimeLt;
     if (opts.pageToken) query.page_token = opts.pageToken;
     const d = await this.get<{
       withdrawals?: Record<string, unknown>[];
@@ -252,5 +255,21 @@ export class TikTokClient {
       nextPageToken: d?.next_page_token || null,
       totalCount: d?.total_count ?? null,
     };
+  }
+
+  /** Get Payments 202309: catatan payout/pembayaran ke seller. */
+  async daftarPayment(
+    opts: { pageToken?: string | null; pageSize?: number; createTimeGe?: number; createTimeLt?: number } = {},
+  ): Promise<Halaman<Record<string, unknown>>> {
+    const query: Record<string, string | number> = {
+      page_size: Math.min(100, Math.max(1, opts.pageSize ?? 100)),
+      sort_field: "create_time",
+    };
+    if (opts.createTimeGe != null) query.create_time_ge = opts.createTimeGe;
+    if (opts.createTimeLt != null) query.create_time_lt = opts.createTimeLt;
+    if (opts.pageToken) query.page_token = opts.pageToken;
+    const d = await this.get<{ payments?: Record<string, unknown>[]; next_page_token?: string; total_count?: number }>(
+      "/finance/202309/payments", query);
+    return { data: d?.payments ?? [], nextPageToken: d?.next_page_token || null, totalCount: d?.total_count ?? null };
   }
 }

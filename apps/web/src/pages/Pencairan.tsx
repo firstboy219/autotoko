@@ -94,10 +94,12 @@ interface SaldoToko {
   shopId: string;
   shopName: string | null;
   currency: string | null;
-  belumDitarik: number | null;
-  sudahDitarik?: number;
-  statement?: number;
-  perStatus?: { status: string; amount: number; count: number }[];
+  saldo: number | null;
+  penghasilan?: number;
+  penarikan?: number;
+  transfer?: number;
+  adaTransfer?: boolean;
+  mutasi?: number;
   error?: string;
 }
 interface SaldoResp {
@@ -130,8 +132,8 @@ function SaldoTiktokCard() {
   return (
     <Card className="mb-4" padded={false}>
       <CardHeader
-        title="Sudah dicairkan TikTok, belum ditarik"
-        subtitle="Dari Get Statements TikTok: total settlement yang statusnya belum PAID (belum cair ke rekening). Rincian per status di bawah agar bisa dicocokkan dgn Seller Center."
+        title="Saldo bisa ditarik (TikTok)"
+        subtitle="Dari mutasi Finance TikTok, all-history: penghasilan (SETTLE) − penarikan sukses (WITHDRAW). Cocok dgn Seller Center untuk toko tanpa fitur transfer saldo."
         action={
           <Button size="sm" variant="outline" loading={loading} onClick={cek}>
             {data ? "Perbarui" : "Cek saldo"}
@@ -148,7 +150,7 @@ function SaldoTiktokCard() {
         {data && (
           <>
             <div className="mb-3">
-              <div className="text-xs text-ink-3">Total belum ditarik (semua toko)</div>
+              <div className="text-xs text-ink-3">Total saldo bisa ditarik (semua toko)</div>
               <div className="text-2xl font-semibold text-emerald-700 tabular-nums">
                 {rupiah(data.total)}
               </div>
@@ -168,30 +170,21 @@ function SaldoTiktokCard() {
                     {t.error ? (
                       <div className="text-[11px] text-red-600">{t.error}</div>
                     ) : (
-                      <div className="text-[11px] text-ink-3">
-                        {t.sudahDitarik ? `sudah ditarik ${rupiah(t.sudahDitarik)} · ` : ""}
-                        {t.statement ? `${t.statement} statement` : ""}
-                        {t.perStatus && t.perStatus.length > 0 && (
-                          <span className="ml-1">
-                            {t.perStatus.map((ps) => (
-                              <span
-                                key={ps.status}
-                                className="mr-1 inline-block rounded bg-ink/5 px-1 py-0.5 tabular-nums"
-                                title={`${ps.count} statement`}
-                              >
-                                {ps.status}: {rupiah(ps.amount)}
-                              </span>
-                            ))}
+                      <div className="text-[11px] text-ink-3 tabular-nums">
+                        penghasilan {rupiah(t.penghasilan ?? 0)} · penarikan {rupiah(t.penarikan ?? 0)}
+                        {t.adaTransfer && (
+                          <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-amber-700" title="Toko ini pakai fitur transfer saldo (mis. ke Saldo Iklan). TikTok tak memberi arah transfer di API, jadi angka bisa lebih tinggi dari saldo asli.">
+                            ada transfer — perlu verifikasi
                           </span>
                         )}
                       </div>
                     )}
                   </div>
                   <div className="text-right tabular-nums whitespace-nowrap">
-                    {t.belumDitarik == null ? (
+                    {t.saldo == null ? (
                       <span className="text-ink-3">—</span>
                     ) : (
-                      <span className="text-lg font-semibold text-emerald-700">{rupiah(t.belumDitarik)}</span>
+                      <span className="text-lg font-semibold text-emerald-700">{rupiah(t.saldo)}</span>
                     )}
                   </div>
                 </div>
