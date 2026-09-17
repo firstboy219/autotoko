@@ -4,10 +4,11 @@ import { AdminSettingsModule } from "../admin-settings/admin-settings.module.js"
 import { MidtransService } from "./midtrans.service.js";
 import { WalletService } from "./wallet.service.js";
 import { WalletController } from "./wallet.controller.js";
+import { AdminBillingController } from "./admin-billing.controller.js";
 
 @Module({
   imports: [AuthModule, AdminSettingsModule],
-  controllers: [WalletController],
+  controllers: [WalletController, AdminBillingController],
   providers: [MidtransService, WalletService],
   exports: [WalletService], // for per-transaction billing in the orders module
 })

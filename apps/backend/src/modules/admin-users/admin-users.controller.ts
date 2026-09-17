@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } f
 import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, AdminOnly } from "../auth/jwt-auth.guard.js";
 import { AdminUsersService } from "./admin-users.service.js";
-import { ListUsersQueryDto, UpdateUserDto } from "./dto/admin-users.dto.js";
+import { ListUsersQueryDto, UpdateUserDto, AdjustWalletDto } from "./dto/admin-users.dto.js";
 
 const ok = <T>(data: T): ApiResponse<T> => ({ success: true, data });
 
@@ -25,6 +25,16 @@ export class AdminUsersController {
   @Patch(":id")
   async update(@Param("id") id: string, @Body() dto: UpdateUserDto) {
     return ok(await this.service.update(id, dto));
+  }
+
+  @Get(":id/wallet")
+  async wallet(@Param("id") id: string) {
+    return ok(await this.service.wallet(id));
+  }
+
+  @Post(":id/wallet/adjust")
+  async adjustWallet(@Param("id") id: string, @Body() dto: AdjustWalletDto) {
+    return ok(await this.service.adjustWallet(id, dto));
   }
 
   @Post(":id/suspend")

@@ -471,6 +471,8 @@ function UserDetailPanel({ id, onChange }: { id: string; onChange: () => void })
         </div>
       </div>
 
+      <WalletSection id={id} />
+
       <div className="bg-[#0f172a] rounded-lg border border-white/10 p-3">
         <div className="text-[10px] uppercase text-slate-500 mb-2">
           Hierarki Sub-seller ({u.hierarchy.length}) — dikelola oleh seller sendiri, tampilan di sini read-only
@@ -500,6 +502,144 @@ function UserDetailPanel({ id, onChange }: { id: string; onChange: () => void })
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+const TX_LABEL: Record<string, string> = {
+  topup: "Top-up",
+  deduct_subscription: "Langganan",
+  deduct_transaction: "Aktivitas",
+  deduct_setup: "Setup",
+  refund: "Penyesuaian / Refund",
+};
+
+interface WalletTx {
+  id: string;
+  type: string;
+  amount: string;
+  balanceAfter: string;
+  description: string | null;
+  referenceId: string | null;
+  createdAt: string;
+}
+
+function WalletSection({ id }: { id: string }) {
+  const { data, loading, reload } = useFetch<{ balance: string; currency: string; transactions: WalletTx[] }>(
+    `/admin/users/${id}/wallet`,
+  );
+  const [dir, setDir] = useState<"credit" | "debit">("credit");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const amt = Math.round(Number(amount));
+    if (!amt || amt <= 0) {
+      setErr("Nominal harus lebih dari 0");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.post(`/admin/users/${id}/wallet/adjust`, {
+        direction: dir,
+        amount: amt,
+        description: note || undefined,
+      });
+      setAmount("");
+      setNote("");
+      reload();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="bg-[#0f172a] rounded-lg border border-white/10 p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] uppercase text-slate-500">Wallet &amp; Mutasi</div>
+        <div className="text-sm font-bold text-emerald-400">{loading ? "…" : rupiah(data?.balance ?? "0")}</div>
+      </div>
+
+      <form onSubmit={submit} className="flex flex-wrap gap-2 items-end mb-3">
+        <div>
+          <label className="block text-[10px] text-slate-500 mb-1">Jenis</label>
+          <select
+            value={dir}
+            onChange={(e) => setDir(e.target.value as "credit" | "debit")}
+            className="px-2 py-1.5 rounded bg-[#1e293b] border border-white/10 text-xs text-slate-100"
+          >
+            <option value="credit">Tambah saldo</option>
+            <option value="debit">Kurangi saldo</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] text-slate-500 mb-1">Nominal (Rp)</label>
+          <input
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            inputMode="numeric"
+            placeholder="0"
+            className="w-32 px-2 py-1.5 rounded bg-[#1e293b] border border-white/10 text-xs text-slate-100"
+          />
+        </div>
+        <div className="flex-1 min-w-[160px]">
+          <label className="block text-[10px] text-slate-500 mb-1">Catatan (opsional)</label>
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Alasan penyesuaian…"
+            className="w-full px-2 py-1.5 rounded bg-[#1e293b] border border-white/10 text-xs text-slate-100"
+          />
+        </div>
+        <button
+          disabled={busy}
+          className="text-xs px-3 py-1.5 rounded bg-brand hover:bg-brand-dark text-white font-semibold disabled:opacity-50"
+        >
+          {busy ? "…" : "Terapkan"}
+        </button>
+      </form>
+      {err && <div className="text-red-400 text-[11px] mb-2">{err}</div>}
+
+      {!data?.transactions.length ? (
+        <div className="text-xs text-slate-500">Belum ada mutasi.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="text-left text-slate-500 uppercase text-[9px]">
+                <th className="py-1 pr-2">Tanggal</th>
+                <th className="py-1 pr-2">Jenis</th>
+                <th className="py-1 pr-2 text-right">Nominal</th>
+                <th className="py-1 pr-2 text-right">Saldo</th>
+                <th className="py-1">Keterangan</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.transactions.map((t) => {
+                const credit = t.type === "topup" || t.type === "refund";
+                return (
+                  <tr key={t.id} className="border-t border-white/5 text-slate-300">
+                    <td className="py-1 pr-2 whitespace-nowrap">{dateShort(t.createdAt)}</td>
+                    <td className="py-1 pr-2">{TX_LABEL[t.type] ?? t.type}</td>
+                    <td className={`py-1 pr-2 text-right font-semibold ${credit ? "text-emerald-400" : "text-red-400"}`}>
+                      {credit ? "+" : "−"}
+                      {rupiah(t.amount)}
+                    </td>
+                    <td className="py-1 pr-2 text-right text-slate-400">{rupiah(t.balanceAfter)}</td>
+                    <td className="py-1 text-slate-500">{t.description ?? "-"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

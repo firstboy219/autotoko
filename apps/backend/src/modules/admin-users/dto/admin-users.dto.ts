@@ -19,3 +19,9 @@ export class UpdateUserDto {
   // internal admin-only field, coerced/validated in the service instead.
   @IsOptional() planExpiredAt?: string | null;
 }
+
+export class AdjustWalletDto {
+  @IsIn(["credit", "debit"]) direction!: "credit" | "debit";
+  @Type(() => Number) @IsInt() @Min(1) amount!: number;
+  @IsOptional() @IsString() @MaxLength(255) description?: string;
+}

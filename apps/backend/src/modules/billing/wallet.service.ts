@@ -5,7 +5,7 @@ import {
   BadRequestException,
   Logger,
 } from "@nestjs/common";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   wallets,
@@ -193,6 +193,65 @@ export class WalletService {
       this.logger.warn(`billActivity ${activity} user ${userId}: ${(e as Error).message}`);
       return { charged: false, reason: "insufficient_or_no_wallet" };
     }
+  }
+
+  /** Admin view: never throws for a user with no wallet yet — returns zeroed. */
+  async getWalletAdmin(userId: string, limit = 50) {
+    const [w] = await this.db.select().from(wallets).where(eq(wallets.userId, userId)).limit(1);
+    if (!w) return { balance: "0", currency: "IDR", transactions: [] as (typeof walletTransactions.$inferSelect)[] };
+    const txs = await this.db
+      .select()
+      .from(walletTransactions)
+      .where(eq(walletTransactions.walletId, w.id))
+      .orderBy(desc(walletTransactions.createdAt))
+      .limit(limit);
+    return { balance: w.balance, currency: w.currency, transactions: txs };
+  }
+
+  /** Manual admin balance adjustment (support/koreksi). Credit membuat wallet bila belum ada. */
+  async adminAdjust(
+    userId: string,
+    direction: "credit" | "debit",
+    amount: number,
+    description?: string,
+  ) {
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException("Amount must be positive");
+    const desc0 = description?.trim() || "Penyesuaian saldo (admin)";
+    if (direction === "credit") {
+      await this.db.insert(wallets).values({ userId }).onConflictDoNothing();
+      return this.db.transaction(async (tx) => {
+        await this.creditTx(tx, userId, amount, "refund", undefined, desc0);
+        const [w] = await tx.select().from(wallets).where(eq(wallets.userId, userId)).limit(1);
+        return { balanceAfter: w!.balance };
+      });
+    }
+    return this.deduct(userId, "deduct_transaction", amount, undefined, desc0);
+  }
+
+  /** Admin: list platform invoices (topup/subscription/setup), optionally by user/status. */
+  async listInvoices(opts: { userId?: string; status?: string; limit?: number }) {
+    const conds = [];
+    if (opts.userId) conds.push(eq(platformInvoices.userId, opts.userId));
+    if (opts.status)
+      conds.push(eq(platformInvoices.status, opts.status as "pending" | "paid" | "failed" | "cancelled"));
+    const where = conds.length ? and(...conds) : undefined;
+    return this.db
+      .select({
+        id: platformInvoices.id,
+        userId: platformInvoices.userId,
+        userEmail: users.email,
+        userName: users.fullName,
+        type: platformInvoices.type,
+        amount: platformInvoices.amount,
+        status: platformInvoices.status,
+        paidAt: platformInvoices.paidAt,
+        createdAt: platformInvoices.createdAt,
+      })
+      .from(platformInvoices)
+      .leftJoin(users, eq(users.id, platformInvoices.userId))
+      .where(where)
+      .orderBy(desc(platformInvoices.createdAt))
+      .limit(opts.limit ?? 100);
   }
 
   private async creditTx(

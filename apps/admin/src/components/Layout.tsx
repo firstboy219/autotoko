@@ -9,6 +9,7 @@ const NAV = [
   { to: "/cek-resi", label: "Cek Resi Kurir", icon: "📦" },
   { to: "/status-order", label: "Status Order & Aturan", icon: "📦" },
   { to: "/pricing", label: "Pricing", icon: "💰" },
+  { to: "/invoices", label: "Invoice & Top-up", icon: "🧾" },
   { to: "/ai", label: "AI Autopilot", icon: "🤖" },
   { to: "/branding", label: "Branding", icon: "🎨" },
 ];

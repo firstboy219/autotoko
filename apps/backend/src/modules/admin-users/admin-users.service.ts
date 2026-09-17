@@ -12,6 +12,7 @@ import type { ListUsersQueryDto, UpdateUserDto } from "./dto/admin-users.dto.js"
 import { invalidateSuspensionCache } from "../auth/jwt-auth.guard.js";
 import { hashPassword } from "../auth/password.util.js";
 import { randomInt } from "node:crypto";
+import { WalletService } from "../billing/wallet.service.js";
 
 /**
  * Admin-only management of SELLER accounts (the `users` table — the top of
@@ -26,7 +27,10 @@ import { randomInt } from "node:crypto";
 @Injectable()
 export class AdminUsersService {
   private readonly logger = new Logger(AdminUsersService.name);
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly walletSvc: WalletService,
+  ) {}
 
   async list(q: ListUsersQueryDto) {
     const page = q.page ?? 1;
@@ -166,6 +170,22 @@ export class AdminUsersService {
         })),
       })),
     };
+  }
+
+  /** Wallet balance + mutasi untuk satu seller (admin view). */
+  async wallet(id: string) {
+    await this.getOrThrow(id);
+    return this.walletSvc.getWalletAdmin(id);
+  }
+
+  /** Penyesuaian saldo manual oleh admin (credit/debit). */
+  async adjustWallet(
+    id: string,
+    dto: { direction: "credit" | "debit"; amount: number; description?: string },
+  ) {
+    await this.getOrThrow(id);
+    this.logger.warn(`Admin ${dto.direction} wallet user ${id} Rp${dto.amount}`);
+    return this.walletSvc.adminAdjust(id, dto.direction, dto.amount, dto.description);
   }
 
   async update(id: string, dto: UpdateUserDto) {

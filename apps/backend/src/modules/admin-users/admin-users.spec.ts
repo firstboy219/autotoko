@@ -16,7 +16,10 @@ const DB_URL = process.env.E2E_DATABASE_URL;
   const client = postgres(DB_URL!, { max: 1 });
   const db = drizzle(client, { schema }) as never;
   const USER = "00000000-0000-4000-8000-0000000000e6";
-  const service = new AdminUsersService(db);
+  const service = new AdminUsersService(db, {
+    getWalletAdmin: async () => ({ balance: "0", currency: "IDR", transactions: [] }),
+    adminAdjust: async () => ({ balanceAfter: "0" }),
+  } as never);
   const jwt = new JwtService({ secret: "test-secret" });
   // RLS_ENABLED unset here -> TenantService.runBypass()/runAsUser() are pure
   // no-op passthroughs (see tenant.service.ts), so this exercises the guard's
