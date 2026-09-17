@@ -1317,7 +1317,8 @@ export class MarketplaceSyncService {
    * supaya kartu langsung tampil tanpa panggil API. `live=true` menghitung ulang
    * dari TikTok Finance lalu memperbarui cache. Rumus per toko: toko normal =
    * Σ SETTLE(SUCCESS) − Σ WITHDRAW(SUCCESS) all-history; toko ber-cutoff Saldo
-   * Cepat = cutoff + (SETTLE − WITHDRAW) sejak tanggal cutoff.
+   * Cepat = cutoff + (SETTLE − WITHDRAW) sejak tanggal cutoff. WITHDRAW yang
+   * masih PROCESSING ikut dikurangi (dana sudah keluar); FAILED tidak.
    */
   async saldoTiktok(userId: string, shopId?: string | null, live = false) {
     const tokoList = shopId
@@ -1375,7 +1376,7 @@ export class MarketplaceSyncService {
       const geSec = punyaCutoff
         ? Math.floor(new Date(String(t.saldoCutoffDate) + "T00:00:00Z").getTime() / 1000) + 86400
         : 1577836800;
-      let settle = 0, withdraw = 0, transfer = 0, n = 0;
+      let settle = 0, withdraw = 0, withdrawProc = 0, transfer = 0, n = 0;
       let currency: string | null = null;
       let obj: Record<string, unknown>;
       try {
@@ -1384,14 +1385,21 @@ export class MarketplaceSyncService {
           const h = await call((c) => c.daftarWithdrawal({ createTimeGe: geSec, createTimeLt: nowSec, pageToken: page }));
           for (const w of h.data) {
             const rec = w as Record<string, unknown>;
-            if (String(rec.status ?? "").toUpperCase() !== "SUCCESS") continue;
+            const st = String(rec.status ?? "").toUpperCase();
+            if (st === "FAILED") continue; // penarikan gagal/REVERSE: dana kembali, tak mengurangi saldo
             const tipe = String(rec.type ?? "").toUpperCase();
             const amt = angka(rec.amount);
             if (!currency && rec.currency) currency = String(rec.currency);
-            n += 1;
-            if (tipe === "SETTLE") settle += amt;
-            else if (tipe === "WITHDRAW") withdraw += amt;
-            else if (tipe === "TRANSFER") transfer += amt;
+            if (tipe === "SETTLE") {
+              if (st === "SUCCESS") { settle += amt; n += 1; }
+            } else if (tipe === "WITHDRAW") {
+              // Penarikan SUKSES maupun SEDANG DIPROSES sama-sama mengurangi "bisa
+              // ditarik" — TikTok sudah memindahkan dananya keluar dari saldo tersedia.
+              if (st === "SUCCESS") { withdraw += amt; n += 1; }
+              else if (st === "PROCESSING") { withdrawProc += amt; n += 1; }
+            } else if (tipe === "TRANSFER") {
+              if (st === "SUCCESS") { transfer += amt; n += 1; }
+            }
           }
           page = h.nextPageToken;
         } while (page && ++guard < 500);
@@ -1400,18 +1408,20 @@ export class MarketplaceSyncService {
           const cutoffAmt = Number(t.saldoCutoffAmount) || 0;
           obj = {
             shopId: t.id, shopName: t.displayName || t.shopName, currency: currency ?? "IDR",
-            saldo: Math.round(cutoffAmt + settle - withdraw),
+            saldo: Math.round(cutoffAmt + settle - withdraw - withdrawProc),
             cutoff: { tanggal: t.saldoCutoffDate, saldo: Math.round(cutoffAmt) },
-            deltaSejakCutoff: Math.round(settle - withdraw),
+            deltaSejakCutoff: Math.round(settle - withdraw - withdrawProc),
             penghasilan: Math.round(settle), penarikan: Math.round(withdraw),
+            penarikanDiproses: Math.round(withdrawProc),
             transferSejakCutoff: Math.round(transfer), adaTransfer: false, mutasi: n,
           };
         } else {
           const adaTransfer = transfer > 0;
           obj = {
             shopId: t.id, shopName: t.displayName || t.shopName, currency: currency ?? "IDR",
-            saldo: adaTransfer ? null : Math.round(settle - withdraw),
+            saldo: adaTransfer ? null : Math.round(settle - withdraw - withdrawProc),
             penghasilan: Math.round(settle), penarikan: Math.round(withdraw),
+            penarikanDiproses: Math.round(withdrawProc),
             transfer: Math.round(transfer), adaTransfer, perluCutoff: adaTransfer, mutasi: n,
           };
         }

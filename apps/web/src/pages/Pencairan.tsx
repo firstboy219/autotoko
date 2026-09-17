@@ -97,6 +97,7 @@ interface SaldoToko {
   saldo: number | null;
   penghasilan?: number;
   penarikan?: number;
+  penarikanDiproses?: number;
   transfer?: number;
   adaTransfer?: boolean;
   perluCutoff?: boolean;
@@ -172,7 +173,7 @@ function SaldoTiktokCard() {
     <Card className="mb-4" padded={false}>
       <CardHeader
         title="Saldo bisa ditarik (TikTok)"
-        subtitle="Penghasilan (SETTLE) − penarikan sukses (WITHDRAW). Angka tersimpan; klik “Update saldo” untuk cek terkini dari TikTok."
+        subtitle="Penghasilan (SETTLE) − penarikan sukses & yang sedang diproses (WITHDRAW). Angka tersimpan; klik “Update saldo” untuk cek terkini dari TikTok."
         action={
           <Button size="sm" variant="filled" loading={loading} onClick={() => muat(true)}>
             Update saldo
@@ -225,6 +226,9 @@ function SaldoTiktokCard() {
                         ) : t.cutoff ? (
                           <span className="text-[11px] text-ink-3 tabular-nums">
                             cutoff {t.cutoff.tanggal} {rupiah(t.cutoff.saldo)} · Δ {rupiah(t.deltaSejakCutoff ?? 0)}
+                            {(t.penarikanDiproses ?? 0) > 0 && (
+                              <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-amber-700" title="Penarikan yang sedang diproses TikTok — sudah ikut dikurangi dari saldo bisa ditarik.">diproses {rupiah(t.penarikanDiproses ?? 0)}</span>
+                            )}
                             <button type="button" onClick={() => bukaForm(t)} className="ml-1 text-brand hover:underline">ubah</button>
                             {(t.transferSejakCutoff ?? 0) > 0 && (
                               <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-amber-700" title="Masih ada mutasi Saldo Cepat setelah tanggal cutoff — matikan di Seller Center lalu set ulang cutoff.">Saldo Cepat masih aktif</span>
@@ -233,6 +237,9 @@ function SaldoTiktokCard() {
                         ) : (
                           <span className="text-[11px] text-ink-3 tabular-nums">
                             penghasilan {rupiah(t.penghasilan ?? 0)} · penarikan {rupiah(t.penarikan ?? 0)}
+                            {(t.penarikanDiproses ?? 0) > 0 && (
+                              <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-amber-700" title="Penarikan yang sedang diproses TikTok — sudah ikut dikurangi dari saldo bisa ditarik.">diproses {rupiah(t.penarikanDiproses ?? 0)}</span>
+                            )}
                             {t.perluCutoff && (
                               <button type="button" onClick={() => bukaForm(t)} className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 hover:bg-amber-200" title="Toko pakai Saldo Cepat; API tak beri arah mutasinya. Matikan Saldo Cepat di Seller Center, lalu isi saldo saat ini sebagai cutoff.">pakai Saldo Cepat — set cutoff</button>
                             )}
