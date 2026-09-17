@@ -572,6 +572,7 @@ export function Orders() {
                   <TH>Status MP</TH>
                   <TH>Scan</TH>
                   <TH>Pembeli</TH>
+                  <TH>Nomor Resi</TH>
                   <TH align="right">Total</TH>
                   <TH align="right">Est. Pencairan</TH>
                   <TH align="right">Fee</TH>
@@ -580,10 +581,10 @@ export function Orders() {
               </THead>
               <tbody>
                 {loading ? (
-                  <SkeletonRows n={8} cols={13} />
+                  <SkeletonRows n={8} cols={14} />
                 ) : !rows.length ? (
                   <tr>
-                    <td colSpan={13}>
+                    <td colSpan={14}>
                       <EmptyState
                         icon="cart"
                         title={hasFilters ? "Tidak ada order yang cocok" : "Belum ada order"}
@@ -692,6 +693,13 @@ export function Orders() {
                         )}
                       </TD>
                       <TD>{o.buyerName ?? "-"}</TD>
+                      <TD>
+                        {o.trackingNumber ? (
+                          <span className="font-mono text-xs text-ink whitespace-nowrap" title="Nomor resi / AWB">{o.trackingNumber}</span>
+                        ) : (
+                          <span className="text-ink-3 text-xs">—</span>
+                        )}
+                      </TD>
                       <TD align="right" className="tabular-nums whitespace-nowrap">
                         {o.totalAmount == null ? (
                           // Bukan "Rp 0". Nol berarti terjual nol rupiah;

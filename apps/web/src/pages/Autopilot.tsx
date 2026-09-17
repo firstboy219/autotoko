@@ -12,6 +12,7 @@ interface Activity {
   summary: string | null;
   refType: string | null;
   refId: string | null;
+  meta?: { orderNo?: string; awbUrl?: string } | null;
   createdAt: string;
 }
 
@@ -27,6 +28,7 @@ const FEATURE_LABEL: Record<string, string> = {
   affiliate_chat: "Auto Chat Affiliator",
   review_reply: "Auto Balas Review",
   product_optimize: "Optimasi Produk",
+  awb: "Auto Unduh Resi/AWB",
 };
 
 function timeAgo(iso: string): string {
@@ -101,6 +103,15 @@ export function Autopilot() {
                   <div className="text-[11px] text-slate-400 mt-0.5">
                     {a.refType}: {a.refId}
                   </div>
+                )}
+                {a.meta?.awbUrl && (
+                  <button
+                    type="button"
+                    onClick={() => window.open(a.meta!.awbUrl!, "_blank", "noopener")}
+                    className="mt-1 inline-flex items-center gap-1 text-[12px] font-medium text-brand hover:underline"
+                  >
+                    📄 Lihat PDF Resi{a.meta?.orderNo ? ` · ${a.meta.orderNo}` : ""}
+                  </button>
                 )}
               </div>
               <div className="text-[11px] text-slate-400 whitespace-nowrap">{timeAgo(a.createdAt)}</div>

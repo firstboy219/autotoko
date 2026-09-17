@@ -16,6 +16,8 @@ import {
   marketplaceReturns,
   autopilotActivity,
   orderBatches,
+  marketplaceStatements,
+  marketplaceStatementLines,
 } from "../../database/schema/index.js";
 import { CryptoService } from "../../common/crypto/crypto.service.js";
 import { TenantService } from "../../database/tenant.service.js";
@@ -496,6 +498,40 @@ export class MarketplaceSyncService {
         catch (e) { this.logger.warn(`Auto-RTS ${r.id}: ${(e as Error).message}`); }
       }
     }
+
+    // Auto-unduh AWB/resi: order yang sudah AWAITING_COLLECTION (label sudah
+    // dibuat di marketplace) tapi file resinya belum tersimpan di server kita,
+    // diunduh OTOMATIS + dicatat ke Autopilot (bisa dibuka PDF-nya di sana).
+    // Dibatasi 20/run, best-effort, hanya membaca dari marketplace.
+    try {
+      const perluAwb = await this.bypass(() => this.db
+        .select({ id: orders.id, no: orders.marketplaceOrderId })
+        .from(orders)
+        .where(and(
+          eq(orders.userId, toko.userId),
+          eq(orders.shopId, toko.id),
+          eq(orders.status, "AWAITING_COLLECTION"),
+          isNull(orders.awbUrl),
+        ))
+        .limit(20));
+      for (const o of perluAwb) {
+        try {
+          const url = await this.cacheAwb(toko.userId, o.id);
+          if (url) {
+            await this.bypass(() => this.db.insert(autopilotActivity).values({
+              userId: toko.userId,
+              feature: "awb",
+              action: "auto_unduh",
+              status: "done" as const,
+              summary: `Resi/AWB order ${o.no} tersimpan otomatis`,
+              refType: "order",
+              refId: o.id,
+              meta: { orderNo: o.no, awbUrl: url },
+            })).catch(() => {});
+          }
+        } catch (e) { this.logger.warn(`Auto-unduh AWB ${o.id}: ${(e as Error).message}`); }
+      }
+    } catch (e) { this.logger.warn(`Auto-unduh AWB pass: ${(e as Error).message}`); }
 
     // Nama SKU hanya ada di line item pesanan, bukan di daftar produk. Diisi
     // dari sini, dan tidak ditimpa null oleh sinkronisasi produk sesudahnya.
@@ -1116,6 +1152,120 @@ export class MarketplaceSyncService {
    * Dipakai setelah RTS supaya tombol Cetak Resi menunjuk file di server, bukan
    * memanggil marketplace tiap kali. Best-effort; lewati jika sudah ter-cache.
    */
+  /**
+   * Audit Pesanan sumber API: tarik penyelesaian (settlement) per pesanan dari
+   * TikTok Finance API (Get Statements -> Get Statement Transactions) dan tulis
+   * sebagai baris statement `source='api'` -- bentuknya sama dengan hasil unggah
+   * laporan, jadi rekonsiliasi audit tidak berubah. Idempoten: tarik-ulang
+   * periode yang sama membuang baris API lamanya lebih dulu. READ-only ke
+   * marketplace; tidak pernah menulis ke TikTok.
+   */
+  async tarikPencairanApi(
+    userId: string,
+    q: { shopId?: string | null; from: string; to: string },
+  ): Promise<{ toko: number; statement: number; pesanan: number }> {
+    if (!q.from || !q.to) throw new BadRequestException("Rentang tanggal wajib diisi");
+    const tokoList = q.shopId
+      ? await this.bypass(() => this.db.select().from(shops)
+          .where(and(eq(shops.id, q.shopId!), eq(shops.userId, userId))).limit(1))
+      : await this.tokoSiap(userId);
+    if (!tokoList.length) throw new NotFoundException("Toko tidak ditemukan / belum tersambung API");
+
+    const fromUnix = Math.floor(new Date(q.from + "T00:00:00Z").getTime() / 1000);
+    const toUnix = Math.floor(new Date(q.to + "T23:59:59Z").getTime() / 1000);
+    const tglDari = (unix: unknown): string => {
+      const n = Number(unix);
+      if (!Number.isFinite(n) || n <= 0) return q.to;
+      return new Date(n * 1000).toISOString().slice(0, 10);
+    };
+    const angka = (v: unknown): number => {
+      const n = Number(String(v ?? "").replace(/[^0-9.-]/g, ""));
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    let totalPesanan = 0, statementRows = 0;
+    for (const toko of tokoList) {
+      if (toko.marketplace !== "tiktok" || !toko.accessToken || !toko.shopCipher) continue;
+      let klien = await this.klien(toko);
+      let segar = false;
+      const call = async <T>(fn: (c: TikTokClient) => Promise<T>): Promise<T> => {
+        for (;;) {
+          try { return await fn(klien); }
+          catch (e) {
+            if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(toko); continue; }
+            throw e;
+          }
+        }
+      };
+
+      // Satu baris statement sintetis per (toko, periode) sumber API, dipakai
+      // ulang saat ditarik ulang agar tidak menumpuk.
+      const hash = `api:${toko.id}:${q.from}:${q.to}`;
+      const [ada] = await this.bypass(() => this.db.select({ id: marketplaceStatements.id })
+        .from(marketplaceStatements)
+        .where(and(eq(marketplaceStatements.userId, userId), eq(marketplaceStatements.fileHash, hash)))
+        .limit(1));
+      let statementId = ada?.id;
+      if (statementId) {
+        await this.bypass(() => this.db.delete(marketplaceStatementLines)
+          .where(eq(marketplaceStatementLines.statementId, statementId!)));
+      } else {
+        const [ins] = await this.bypass(() => this.db.insert(marketplaceStatements).values({
+          userId, shopId: toko.id, marketplace: "tiktok", source: "api",
+          periodFrom: q.from, periodTo: q.to, currency: null,
+          fileName: `API TikTok ${q.from}..${q.to}`, fileHash: hash,
+        }).returning({ id: marketplaceStatements.id }));
+        statementId = ins?.id;
+      }
+      if (!statementId) continue;
+      statementRows += 1;
+
+      const lines: {
+        statementId: string; userId: string; kind: string; externalRef: string | null;
+        occurredOn: string; amount: string; status: string | null; raw: unknown;
+      }[] = [];
+      let stPage: string | null = null, guardS = 0;
+      do {
+        const hs = await call((c) => c.daftarStatement({ statementTimeGe: fromUnix, statementTimeLt: toUnix, pageToken: stPage }));
+        for (const st of hs.data) {
+          const sid = String((st as Record<string, unknown>).id ?? (st as Record<string, unknown>).statement_id ?? "");
+          if (!sid) continue;
+          const cairOn = tglDari((st as Record<string, unknown>).statement_time);
+          const status = String((st as Record<string, unknown>).payment_status ?? (st as Record<string, unknown>).status ?? "SETTLED");
+          let txPage: string | null = null, guardT = 0;
+          do {
+            const ht = await call((c) => c.transaksiStatement(sid, { pageToken: txPage }));
+            for (const tx of ht.data) {
+              const t = tx as Record<string, unknown>;
+              const orderId = String(t.order_id ?? "").trim();
+              if (!orderId) continue;
+              lines.push({
+                statementId: statementId!, userId, kind: "order",
+                externalRef: orderId, occurredOn: cairOn,
+                amount: angka(t.settlement_amount).toString(), status, raw: tx,
+              });
+            }
+            txPage = ht.nextPageToken;
+          } while (txPage && ++guardT < 500);
+        }
+        stPage = hs.nextPageToken;
+      } while (stPage && ++guardS < 500);
+
+      for (let i = 0; i < lines.length; i += 200) {
+        const chunk = lines.slice(i, i + 200);
+        if (chunk.length) await this.bypass(() => this.db.insert(marketplaceStatementLines).values(chunk));
+      }
+      totalPesanan += lines.length;
+
+      const total = lines.reduce((acc, l) => acc + Number(l.amount), 0);
+      await this.bypass(() => this.db.update(marketplaceStatements)
+        .set({ settlementAmount: total.toString(), importedAt: new Date(), updatedAt: new Date() })
+        .where(eq(marketplaceStatements.id, statementId!)));
+    }
+
+    return { toko: tokoList.length, statement: statementRows, pesanan: totalPesanan };
+  }
+
   private async cacheAwb(userId: string, orderId: string): Promise<string | null> {
     const [o] = await this.bypass(() => this.db
       .select({ awbUrl: orders.awbUrl, raw: orders.raw, shopId: orders.shopId })

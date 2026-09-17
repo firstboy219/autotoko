@@ -168,4 +168,63 @@ export class TikTokClient {
       totalCount: d?.total_count ?? null,
     };
   }
+
+  /* -------------------------------------------------- finance 202309 */
+
+  /**
+   * Daftar statement (penyelesaian) toko, diurut waktu terbaru. Rentang waktu
+   * opsional dalam unix detik. Ini padanan API dari mengunggah berkas laporan
+   * penyelesaian: tiap statement mengelompokkan transaksi satu periode payout.
+   */
+  async daftarStatement(opts: {
+    statementTimeGe?: number;
+    statementTimeLt?: number;
+    pageToken?: string | null;
+    pageSize?: number;
+  }): Promise<Halaman<Record<string, unknown>>> {
+    const query: Record<string, string | number> = {
+      page_size: Math.min(100, Math.max(1, opts.pageSize ?? 100)),
+      sort_field: "statement_time",
+      sort_order: "DESC",
+    };
+    if (opts.statementTimeGe != null) query.statement_time_ge = opts.statementTimeGe;
+    if (opts.statementTimeLt != null) query.statement_time_lt = opts.statementTimeLt;
+    if (opts.pageToken) query.page_token = opts.pageToken;
+    const d = await this.get<{
+      statements?: Record<string, unknown>[];
+      next_page_token?: string;
+      total_count?: number;
+    }>("/finance/202309/statements", query);
+    return {
+      data: d?.statements ?? [],
+      nextPageToken: d?.next_page_token || null,
+      totalCount: d?.total_count ?? null,
+    };
+  }
+
+  /**
+   * Transaksi (per pesanan / penyesuaian) di dalam satu statement. Tiap baris
+   * memuat order_id + settlement_amount: inilah "berapa sebenarnya cair per
+   * pesanan" yang dipakai Audit Pesanan sumber API.
+   */
+  async transaksiStatement(
+    statementId: string,
+    opts: { pageToken?: string | null; pageSize?: number } = {},
+  ): Promise<Halaman<Record<string, unknown>>> {
+    const query: Record<string, string | number> = {
+      page_size: Math.min(100, Math.max(1, opts.pageSize ?? 100)),
+      sort_field: "order_create_time",
+    };
+    if (opts.pageToken) query.page_token = opts.pageToken;
+    const d = await this.get<{
+      statement_transactions?: Record<string, unknown>[];
+      next_page_token?: string;
+      total_count?: number;
+    }>(`/finance/202309/statements/${statementId}/statement_transactions`, query);
+    return {
+      data: d?.statement_transactions ?? [],
+      nextPageToken: d?.next_page_token || null,
+      totalCount: d?.total_count ?? null,
+    };
+  }
 }

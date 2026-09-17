@@ -123,6 +123,22 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.batchPacking(uid(req), body?.orderIds ?? [], { handoverMethod: body?.handoverMethod, takeouts: body?.takeouts }) };
   }
 
+  /** Audit Pesanan sumber API: tarik settlement per pesanan dari TikTok Finance. */
+  @Post("tarik-pencairan")
+  async tarikPencairan(
+    @Req() req: FastifyRequest,
+    @Body() body: { shopId?: string | null; from: string; to: string },
+  ): Promise<ApiResponse<unknown>> {
+    return {
+      success: true,
+      data: await this.sync.tarikPencairanApi(uid(req), {
+        shopId: body?.shopId ?? null,
+        from: body?.from,
+        to: body?.to,
+      }),
+    };
+  }
+
   /** E: dorong SKU varian mengikuti SKU master (push ke listing TikTok). */
   @Post("skus/:skuId/push-seller-sku")
   async pushSellerSku(@Req() req: FastifyRequest, @Param("skuId") skuId: string): Promise<ApiResponse<unknown>> {

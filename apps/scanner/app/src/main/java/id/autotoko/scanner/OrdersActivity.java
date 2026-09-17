@@ -539,6 +539,15 @@ public class OrdersActivity extends AppCompatActivity {
                     + (o.optBoolean("isCod", false) ? "  ·  COD" : ""));
             t2.setTextSize(12); t2.setTextColor(getColor(R.color.ink2));
             row.addView(t1); row.addView(t2);
+            String resi = o.optString("trackingNumber", "");
+            if (!resi.isEmpty()) {
+                TextView t3 = new TextView(this);
+                t3.setText("Resi: " + resi);
+                t3.setTextSize(12);
+                t3.setTypeface(android.graphics.Typeface.MONOSPACE);
+                t3.setTextColor(getColor(R.color.ink2));
+                row.addView(t3);
+            }
             row.setOnClickListener(v -> showDetail(o));
             box.addView(row);
         }
@@ -794,6 +803,7 @@ public class OrdersActivity extends AppCompatActivity {
         col.addView(kv("Toko", o.optString("shopName", "-")));
         col.addView(kv("Pembeli", o.optString("buyerName", "-")));
         col.addView(kv("Kurir", o.optString("shippingCourier", "-")));
+        col.addView(kv("Nomor Resi", o.optString("trackingNumber", "-")));
         String amt = o.isNull("totalAmount") ? null : o.optString("totalAmount", null);
         col.addView(kv("Total", amt == null ? "—" : rupiah(amt)));
         LinearLayout srow = new LinearLayout(this);

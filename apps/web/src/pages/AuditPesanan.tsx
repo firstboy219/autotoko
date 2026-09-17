@@ -126,6 +126,7 @@ export default function AuditPesanan() {
   const [data, setData] = useState<Audit | null>(null);
   const [memuat, setMemuat] = useState(false);
   const [mengunggah, setMengunggah] = useState(false);
+  const [menarik, setMenarik] = useState(false);
 
   async function jalankan() {
     setMemuat(true);
@@ -172,6 +173,25 @@ export default function AuditPesanan() {
       toast((e as Error).message, "danger");
     } finally {
       setMengunggah(false);
+    }
+  }
+
+  async function tarikApi() {
+    setMenarik(true);
+    try {
+      const d = await api.post<{ toko: number; statement: number; pesanan: number }>(
+        "/marketplace-sync/tarik-pencairan",
+        { shopId: shopId || null, from: dari, to: sampai },
+      );
+      toast(
+        `Tarik dari API selesai: ${d.pesanan} pesanan pencairan dari ${d.toko} toko. Menjalankan audit…`,
+        "success",
+      );
+      void jalankan();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setMenarik(false);
     }
   }
 
@@ -234,6 +254,21 @@ export default function AuditPesanan() {
             }}
             className="text-sm"
           />
+        </div>
+
+        <div className="mt-4 border-t border-line pt-4">
+          <div className="text-xs uppercase tracking-wide text-ink-3 mb-1">
+            Atau tarik otomatis dari API TikTok
+          </div>
+          <p className="text-xs text-ink-3 mb-2">
+            Tanpa unggah berkas: sistem menarik <b>penyelesaian (settlement) per pesanan</b> langsung
+            dari TikTok Finance API untuk rentang tanggal di atas, lalu dipakai sebagai pembanding
+            audit — sama seperti laporan yang diunggah. Pilih toko yang sudah tersambung API
+            (kosongkan untuk semua toko).
+          </p>
+          <Button variant="outline" loading={menarik} onClick={tarikApi}>
+            Tarik pencairan dari API TikTok
+          </Button>
         </div>
       </Card>
 
