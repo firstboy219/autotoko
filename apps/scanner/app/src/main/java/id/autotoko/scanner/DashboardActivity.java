@@ -74,6 +74,18 @@ public class DashboardActivity extends AppCompatActivity {
         return true;
     }
 
+    @Override
+    public boolean onCreateOptionsMenu(android.view.Menu menu) {
+        menu.add(0, 9001, 0, "Akun");
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(android.view.MenuItem item) {
+        if (item.getItemId() == 9001) { AccountSwitcher.show(this, new Session(this)); return true; }
+        return super.onOptionsItemSelected(item);
+    }
+
     /**
      * Empat sumber, digambar setelah semuanya pulang.
      *

@@ -3,6 +3,9 @@ package id.autotoko.scanner;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 /** Base URL, bearer token and the device label, kept across launches. */
 public final class Session {
     private static final String PREFS = "autotoko_scanner";
@@ -12,6 +15,7 @@ public final class Session {
     private static final String K_DEVICE = "device";
     private static final String K_REMIND = "remind_stock";
     private static final String K_REMIND_HOUR = "remind_stock_hour";
+    private static final String K_ACCOUNTS = "accounts";
 
     public static final String DEFAULT_BASE = "https://viewtoko.cosger.online";
 
@@ -30,6 +34,59 @@ public final class Session {
 
     public void save(String baseUrl, String token, String email) {
         p.edit().putString(K_BASE, baseUrl).putString(K_TOKEN, token).putString(K_EMAIL, email).apply();
+        upsertAccount(baseUrl, token, email);
+    }
+
+    /** Daftar akun tersimpan untuk switch akun: array JSON {email, base, token}. */
+    public JSONArray accountsRaw() {
+        try { return new JSONArray(p.getString(K_ACCOUNTS, "[]")); } catch (Exception e) { return new JSONArray(); }
+    }
+    private void upsertAccount(String base, String token, String email) {
+        if (email == null || email.isEmpty()) return;
+        try {
+            JSONArray a = accountsRaw();
+            JSONArray out = new JSONArray();
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.optJSONObject(i);
+                if (o != null && !email.equalsIgnoreCase(o.optString("email"))) out.put(o);
+            }
+            JSONObject me = new JSONObject();
+            me.put("email", email); me.put("base", base); me.put("token", token);
+            out.put(me);
+            p.edit().putString(K_ACCOUNTS, out.toString()).apply();
+        } catch (Exception ignored) {}
+    }
+    /** Jadikan akun tersimpan (email) sebagai aktif. */
+    public boolean switchTo(String email) {
+        if (email == null) return false;
+        JSONArray a = accountsRaw();
+        for (int i = 0; i < a.length(); i++) {
+            JSONObject o = a.optJSONObject(i);
+            if (o != null && email.equalsIgnoreCase(o.optString("email"))) {
+                p.edit().putString(K_BASE, o.optString("base", DEFAULT_BASE))
+                        .putString(K_TOKEN, o.optString("token", ""))
+                        .putString(K_EMAIL, o.optString("email", email)).apply();
+                return true;
+            }
+        }
+        return false;
+    }
+    public void removeAccount(String email) {
+        if (email == null) return;
+        try {
+            JSONArray a = accountsRaw();
+            JSONArray out = new JSONArray();
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.optJSONObject(i);
+                if (o != null && !email.equalsIgnoreCase(o.optString("email"))) out.put(o);
+            }
+            p.edit().putString(K_ACCOUNTS, out.toString()).apply();
+        } catch (Exception ignored) {}
+    }
+    /** Logout akun aktif: lupakan akun ini dari daftar + hapus token aktif. */
+    public void logout() {
+        removeAccount(email());
+        p.edit().remove(K_TOKEN).apply();
     }
 
     public void setDevice(String label) { p.edit().putString(K_DEVICE, label).apply(); }

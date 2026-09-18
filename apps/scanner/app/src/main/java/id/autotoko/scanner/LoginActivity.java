@@ -22,7 +22,8 @@ public class LoginActivity extends AppCompatActivity {
         session = new Session(this);
         api = new Api(session);
 
-        if (session.loggedIn()) {
+        // Mode "Tambah akun": jangan lompat ke Dashboard walau ada sesi aktif.
+        if (session.loggedIn() && !getIntent().getBooleanExtra("add_account", false)) {
             startActivity(new Intent(this, DashboardActivity.class));
             finish();
             return;

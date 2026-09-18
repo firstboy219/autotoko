@@ -2594,6 +2594,7 @@ public class ScanActivity extends AppCompatActivity {
         TextView account = sheet.findViewById(R.id.menuAccount);
         String who = session.email();
         account.setText(who == null || who.isEmpty() ? "Keluar dari aplikasi" : who);
+        account.setOnClickListener(v -> { dialog.dismiss(); AccountSwitcher.show(this, session); });
 
         sheet.findViewById(R.id.menuPesanan).setOnClickListener(v -> {
             dialog.dismiss();
