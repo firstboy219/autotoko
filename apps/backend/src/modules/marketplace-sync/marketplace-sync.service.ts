@@ -1857,6 +1857,23 @@ export class MarketplaceSyncService {
   }
 
   // ---------------------------------------------------------- (chat)
+  /** Agregat order (jumlah + total) satu toko dlm rentang waktu (bypass RLS, aman utk cron). */
+  async ordersAggByShop(userId: string, shopId: string, fromISO: string, toISO: string): Promise<{ n: number; total: number }> {
+    const rows = await this.bypass(() => this.db.execute(sql`
+      SELECT count(*)::int AS n, COALESCE(sum(total_amount), 0)::float8 AS total
+        FROM orders
+       WHERE user_id = ${userId} AND shop_id = ${shopId}
+         AND created_at_marketplace >= ${fromISO} AND created_at_marketplace < ${toISO}`));
+    const r = (rows as unknown as Array<{ n: number; total: number }>)[0] ?? { n: 0, total: 0 };
+    return { n: Number(r.n) || 0, total: Number(r.total) || 0 };
+  }
+
+  /** Estimasi komisi (fraksi) dari order_settings (bypass). */
+  async komisiRate(userId: string): Promise<number> {
+    const [o] = await this.bypass(() => this.db.select({ r: orderSettings.estCommissionRate }).from(orderSettings).where(eq(orderSettings.userId, userId)).limit(1));
+    return Math.min(0.9, Math.max(0, Number(o?.r ?? 0.08) || 0));
+  }
+
   /** Panggil TikTok utk sebuah toko dgn auto-refresh token sekali saat 401. */
   private async panggilTikTok<T>(t: typeof shops.$inferSelect, fn: (c: TikTokClient) => Promise<T>): Promise<T> {
     let klien = await this.klien(t);

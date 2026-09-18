@@ -41,6 +41,7 @@ export function Promotion() {
   const [q, setQ] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [showAuto, setShowAuto] = useState(false);
+  const [showAutomation, setShowAutomation] = useState(false);
   const [manage, setManage] = useState<{ shopId: string; activityId: string; title: string } | null>(null);
   const [confirmDeact, setConfirmDeact] = useState<Row | null>(null);
   const [manageC, setManageC] = useState<{ shopId: string; couponId: string; title: string } | null>(null);
@@ -135,6 +136,7 @@ export function Promotion() {
           <div className="ml-auto flex gap-2">
             <Button size="sm" variant="outline" icon="refresh" loading={acts.loading} onClick={() => { acts.reload(); coups.reload(); }}>Refresh</Button>
             <Button size="sm" variant="tonal" icon="settings" onClick={() => setShowAuto(true)}>Auto-ikut</Button>
+            <Button size="sm" variant="tonal" onClick={() => setShowAutomation(true)}>Otomasi</Button>
             <Button size="sm" variant="filled" icon="plus" onClick={() => setShowCreate(true)}>Buat Promo</Button>
           </div>
         </div>
@@ -220,6 +222,7 @@ export function Promotion() {
 
       {showCreate && <CreateActivityModal shops={shops} onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); acts.reload(); }} />}
       {showAuto && <AutoJoinModal shops={shops} onClose={() => setShowAuto(false)} />}
+      {showAutomation && <AutomationModal onClose={() => setShowAutomation(false)} />}
       {manage && <ManageProductsModal ctx={manage} onClose={() => setManage(null)} />}
       {manageC && <CouponDetailModal ctx={manageC} onClose={() => setManageC(null)} />}
       {editAct && <EditActivityModal row={editAct} onClose={() => setEditAct(null)} onDone={() => { setEditAct(null); acts.reload(); }} />}
@@ -627,6 +630,132 @@ function ReplicateModal({ row, shops, onClose, onDone }: { row: Row; shops: Shop
           <Button variant="text" onClick={onClose} disabled={busy}>Tutup</Button>
           <Button variant="filled" loading={busy} onClick={run} disabled={!targets.length}>Replikasi</Button>
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+interface AutoSettings {
+  enabled: boolean; dryRun: boolean; onlyOngoing: boolean; minUpliftPct: number; requireProfit: boolean;
+  minOrders: number; autoExtend: boolean; extendDays: number; autoReplicate: boolean; replicateDiscountPct: number;
+  lastRunAt?: string | null;
+}
+interface RunRow {
+  shop: string; title: string; status?: string; skipped?: string;
+  window?: { orders: number; sales: number; net: number }; baseline?: { orders: number; sales: number };
+  upliftPct?: number; positive?: boolean; actions?: string[];
+}
+const rp = (n: number) => "Rp " + Math.round(n || 0).toLocaleString("id-ID");
+
+function AutomationModal({ onClose }: { onClose: () => void }) {
+  const toast = useToast();
+  const { data } = useFetch<AutoSettings>("/promotion/automation");
+  const [f, setF] = useState<AutoSettings | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [report, setReport] = useState<RunRow[] | null>(null);
+  useEffect(() => { if (data && !f) setF(data); }, [data, f]);
+
+  if (!f) {
+    return (
+      <Modal open onClose={onClose} title="Otomasi Promosi" width="max-w-3xl">
+        <Skeleton className="h-40 w-full" />
+      </Modal>
+    );
+  }
+  const upd = (p: Partial<AutoSettings>) => setF({ ...f, ...p });
+  async function save() {
+    setBusy(true);
+    try { await api.put("/promotion/automation", f); toast("Pengaturan otomasi disimpan", "success"); }
+    catch (e) { toast((e as Error).message, "danger"); } finally { setBusy(false); }
+  }
+  async function run() {
+    setRunning(true); setReport(null);
+    try {
+      const r = await api.post<{ dryRun: boolean; summary: { total: number; positif: number }; report: RunRow[] }>(
+        "/promotion/automation/run", { dryRun: f!.dryRun },
+      );
+      setReport(r.report);
+      toast(`Otomasi ${r.dryRun ? "(uji coba) " : ""}selesai: ${r.summary.positif}/${r.summary.total} promo positif`, "success");
+    } catch (e) { toast((e as Error).message, "danger"); } finally { setRunning(false); }
+  }
+  const numF = (label: string, key: keyof AutoSettings) => (
+    <div>
+      <label className="block text-[11px] text-ink-3 mb-1">{label}</label>
+      <input
+        value={String(f[key] as number)}
+        onChange={(e) => upd({ [key]: Number(e.target.value.replace(/[^0-9.]/g, "")) || 0 } as Partial<AutoSettings>)}
+        className="w-24 rounded border border-line px-2 py-1 text-sm tabular-nums"
+      />
+    </div>
+  );
+  const chk = (label: string, key: keyof AutoSettings, hint?: string) => (
+    <label className="flex items-start gap-2 text-sm text-ink-2">
+      <input type="checkbox" className="mt-0.5" checked={f[key] as boolean} onChange={(e) => upd({ [key]: e.target.checked } as Partial<AutoSettings>)} />
+      <span>{label}{hint && <span className="block text-[11px] text-ink-3">{hint}</span>}</span>
+    </label>
+  );
+
+  return (
+    <Modal open onClose={onClose} title="Otomasi Promosi" width="max-w-3xl">
+      <div className="space-y-3">
+        <InlineAlert tone="info">
+          Alur: cek tiap promo → bandingkan penjualan rentang promo vs periode sebelum yang sama panjang → hitung net
+          pencairan → bila positif, perpanjang rentang & replikasi ke semua toko. <b>Mode uji coba</b> hanya melaporkan
+          tanpa mengubah apa pun. Aksi live mengubah harga nyata di TikTok.
+        </InlineAlert>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {chk("Aktifkan otomasi terjadwal (harian)", "enabled", "Jalan otomatis tiap hari untuk akun ini.")}
+          {chk("Mode uji coba (dry-run)", "dryRun", "Hanya laporan, TIDAK mengeksekusi aksi.")}
+          {chk("Hanya promo yang sedang berjalan", "onlyOngoing")}
+          {chk("Wajib untung (net > 0)", "requireProfit")}
+        </div>
+        <div className="flex flex-wrap gap-3">
+          {numF("Min. kenaikan penjualan %", "minUpliftPct")}
+          {numF("Min. jumlah order", "minOrders")}
+        </div>
+        <div className="space-y-2 rounded-lg border border-line p-3">
+          <div className="text-xs font-semibold text-ink-2">Aksi bila hasil positif</div>
+          <div className="flex flex-wrap items-end gap-3">
+            {chk("Perpanjang rentang", "autoExtend")}
+            {numF("+ hari", "extendDays")}
+            {chk("Replikasi ke semua toko", "autoReplicate")}
+            {numF("Diskon replikasi %", "replicateDiscountPct")}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="filled" loading={busy} onClick={save}>Simpan Pengaturan</Button>
+          <Button variant="tonal" loading={running} onClick={run}>Jalankan Sekarang{f.dryRun ? " (uji coba)" : ""}</Button>
+          {data?.lastRunAt && <span className="text-[11px] text-ink-3">terakhir: {new Date(data.lastRunAt).toLocaleString("id-ID")}</span>}
+        </div>
+        {report && (
+          <div className="max-h-72 overflow-y-auto overflow-x-auto rounded border border-line">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-surface">
+                <tr className="text-left text-ink-3">
+                  <th className="px-2 py-1">Toko</th><th className="px-2 py-1">Promo</th>
+                  <th className="px-2 py-1 text-right">Order (promo/sblm)</th><th className="px-2 py-1 text-right">Uplift</th>
+                  <th className="px-2 py-1 text-right">Net</th><th className="px-2 py-1">Hasil</th><th className="px-2 py-1">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.map((r, i) => (
+                  <tr key={i} className="border-t border-line">
+                    <td className="px-2 py-1">{r.shop}</td>
+                    <td className="px-2 py-1">{r.title}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">{r.skipped ? "—" : `${r.window?.orders ?? 0} / ${r.baseline?.orders ?? 0}`}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">{r.skipped ? "—" : `${r.upliftPct ?? 0}%`}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">{r.skipped ? "—" : rp(r.window?.net ?? 0)}</td>
+                    <td className="px-2 py-1">{r.skipped ? <span className="text-ink-3">{r.skipped}</span> : r.positive ? <Badge tone="success">positif</Badge> : <Badge tone="neutral">-</Badge>}</td>
+                    <td className="px-2 py-1 text-ink-3">{(r.actions ?? []).join("; ")}</td>
+                  </tr>
+                ))}
+                {!report.length && <tr><td colSpan={7} className="px-2 py-3 text-center text-ink-3">Tak ada promo yang cocok kriteria.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="flex justify-end"><Button variant="text" onClick={onClose}>Tutup</Button></div>
       </div>
     </Modal>
   );

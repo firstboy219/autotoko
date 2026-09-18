@@ -4,6 +4,7 @@ import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, TenantOwnerOnly, type JwtPayload } from "../auth/jwt-auth.guard.js";
 import { MarketplaceSyncService } from "../marketplace-sync/marketplace-sync.service.js";
+import { PromotionAutomationService } from "./promotion-automation.service.js";
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
@@ -33,6 +34,21 @@ class ReplicateDto {
   @IsArray() @IsString({ each: true }) targetShopIds!: string[];
   @IsOptional() @IsNumber() @Min(0) @Max(99) discountPct?: number;
 }
+class AutomationDto {
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsBoolean() dryRun?: boolean;
+  @IsOptional() @IsBoolean() onlyOngoing?: boolean;
+  @IsOptional() @IsNumber() @Min(0) minUpliftPct?: number;
+  @IsOptional() @IsBoolean() requireProfit?: boolean;
+  @IsOptional() @IsNumber() @Min(0) minOrders?: number;
+  @IsOptional() @IsBoolean() autoExtend?: boolean;
+  @IsOptional() @IsNumber() @Min(1) @Max(90) extendDays?: number;
+  @IsOptional() @IsBoolean() autoReplicate?: boolean;
+  @IsOptional() @IsNumber() @Min(0) @Max(99) replicateDiscountPct?: number;
+}
+class RunDto {
+  @IsOptional() @IsBoolean() dryRun?: boolean;
+}
 class PromoSettingsDto {
   @IsOptional() @IsBoolean() autoJoin?: boolean;
   @IsOptional() @IsString() activityId?: string | null;
@@ -43,7 +59,10 @@ class PromoSettingsDto {
 @UseGuards(JwtAuthGuard)
 @TenantOwnerOnly()
 export class PromotionController {
-  constructor(private readonly sync: MarketplaceSyncService) {}
+  constructor(
+    private readonly sync: MarketplaceSyncService,
+    private readonly auto: PromotionAutomationService,
+  ) {}
 
   @Get("activities")
   async activities(@Req() req: FastifyRequest, @Query("status") status?: string, @Query("type") type?: string, @Query("title") title?: string) {
@@ -128,5 +147,28 @@ export class PromotionController {
   @Post("settings/:shopId/apply")
   async applyAutoJoin(@Req() req: FastifyRequest, @Param("shopId") shopId: string) {
     return ok(await this.sync.applyAutoJoin(uid(req), shopId));
+  }
+
+  // --- Otomasi Promosi ---
+  @Get("automation")
+  async getAutomation(@Req() req: FastifyRequest) {
+    return ok(await this.auto.getSettings(uid(req)));
+  }
+
+  @Put("automation")
+  async setAutomation(@Req() req: FastifyRequest, @Body() dto: AutomationDto) {
+    return ok(await this.auto.setSettings(uid(req), dto));
+  }
+
+  /** Jalankan alur otomasi sekarang (hormati dryRun; aksi outward bila live). */
+  @Post("automation/run")
+  async runAutomation(@Req() req: FastifyRequest, @Body() dto: RunDto) {
+    return ok(await this.auto.run(uid(req), { dryRun: dto.dryRun }));
+  }
+
+  /** Evaluasi 1 promo (penjualan vs periode sebelum + net). */
+  @Get("activities/:shopId/:activityId/evaluate")
+  async evaluate(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("activityId") activityId: string) {
+    return ok(await this.auto.evaluateActivity(uid(req), shopId, activityId));
   }
 }
