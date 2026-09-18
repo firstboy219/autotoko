@@ -45,6 +45,7 @@ import { PencairanProfit } from "./pages/PencairanProfit";
 import { RequestStok } from "./pages/RequestStok";
 import { KesehatanPesanan } from "./pages/KesehatanPesanan";
 import { Chat } from "./pages/Chat";
+import { Promotion } from "./pages/Promotion";
 import { Retur } from "./pages/Retur";
 import { StokOmnichannel } from "./pages/StokOmnichannel";
 function Protected({ children }: { children: React.ReactNode }) {
@@ -92,6 +93,7 @@ export function App() {
         <Route path="/laporan" element={<Protected><Laporan /></Protected>} />
         <Route path="/katalog" element={<Protected><Katalog /></Protected>} />
         <Route path="/affiliate" element={<Protected><Affiliate /></Protected>} />
+        <Route path="/promo" element={<Protected><Promotion /></Protected>} />
         <Route path="/wallet" element={<Protected><Wallet /></Protected>} />
         <Route path="/pencairan" element={<Protected><Pencairan /></Protected>} />
         <Route path="/pencairan/batch/:id" element={<Protected><PencairanBatch /></Protected>} />

@@ -15,6 +15,7 @@ import {
   shops,
   marketplaceConversations,
   marketplaceMessages,
+  promotionSettings,
   marketplaceReturns,
   autopilotActivity,
   orderBatches,
@@ -1707,6 +1708,93 @@ export class MarketplaceSyncService {
     return { orderId, ok: semuaOk, hasil };
   }
 
+  // ---------------------------------------------------------- Promotion
+  async promoListActivities(userId: string, opts: { status?: string; type?: string; title?: string; pageSize?: number } = {}) {
+    const toko = await this.tokoSiap(userId);
+    const out: Array<Record<string, unknown>> = [];
+    for (const t of toko) {
+      if (t.marketplace !== "tiktok") continue;
+      try {
+        const resp = await this.panggilTikTok(t, (c) => c.promoSearchActivities({
+          page_size: opts.pageSize ?? 50,
+          ...(opts.status ? { status: opts.status } : {}),
+          ...(opts.type ? { activity_type: opts.type } : {}),
+          ...(opts.title ? { activity_title: opts.title } : {}),
+        }));
+        const acts = ((resp as any)?.activities ?? (resp as any)?.activity_list ?? []) as unknown[];
+        out.push({ shopId: t.id, shopName: t.shopName ?? t.id, activities: acts });
+      } catch (e) { out.push({ shopId: t.id, shopName: t.shopName ?? t.id, activities: [], error: (e as Error).message }); }
+    }
+    return out;
+  }
+  async promoActivityDetail(userId: string, shopId: string, activityId: string) {
+    const t = await this.tokoTikTok(userId, shopId);
+    return this.panggilTikTok(t, (c) => c.promoGetActivity(activityId));
+  }
+  async promoAddProducts(userId: string, shopId: string, activityId: string, products: Array<Record<string, unknown>>) {
+    const t = await this.tokoTikTok(userId, shopId);
+    return this.panggilTikTok(t, (c) => c.promoUpdateProducts(activityId, products));
+  }
+  async promoRemoveProducts(userId: string, shopId: string, activityId: string, productIds: string[]) {
+    const t = await this.tokoTikTok(userId, shopId);
+    return this.panggilTikTok(t, (c) => c.promoRemoveProducts(activityId, productIds));
+  }
+  async promoDeactivate(userId: string, shopId: string, activityId: string) {
+    const t = await this.tokoTikTok(userId, shopId);
+    return this.panggilTikTok(t, (c) => c.promoDeactivateActivity(activityId));
+  }
+  async promoCreate(userId: string, shopId: string, body: Record<string, unknown>) {
+    const t = await this.tokoTikTok(userId, shopId);
+    return this.panggilTikTok(t, (c) => c.promoCreateActivity(body));
+  }
+  async promoListCoupons(userId: string, opts: { status?: string; pageSize?: number } = {}) {
+    const toko = await this.tokoSiap(userId);
+    const out: Array<Record<string, unknown>> = [];
+    for (const t of toko) {
+      if (t.marketplace !== "tiktok") continue;
+      try {
+        const resp = await this.panggilTikTok(t, (c) => c.promoSearchCoupons({
+          page_size: opts.pageSize ?? 50, ...(opts.status ? { status: opts.status } : {}),
+        }));
+        out.push({ shopId: t.id, shopName: t.shopName ?? t.id, coupons: ((resp as any)?.coupons ?? (resp as any)?.coupon_list ?? []) });
+      } catch (e) { out.push({ shopId: t.id, shopName: t.shopName ?? t.id, coupons: [], error: (e as Error).message }); }
+    }
+    return out;
+  }
+  async getPromoSettings(userId: string) {
+    return this.bypass(() => this.db.select().from(promotionSettings).where(eq(promotionSettings.userId, userId)));
+  }
+  async setPromoSettings(userId: string, shopId: string, dto: { autoJoin?: boolean; activityId?: string | null; discountPct?: number }) {
+    await this.tokoTikTok(userId, shopId);
+    const vals = {
+      userId, shopId, autoJoin: !!dto.autoJoin,
+      activityId: dto.activityId || null,
+      discountPct: String(dto.discountPct ?? 10),
+      updatedAt: new Date(),
+    };
+    await this.bypass(() => this.db.insert(promotionSettings).values(vals).onConflictDoUpdate({
+      target: [promotionSettings.userId, promotionSettings.shopId],
+      set: { autoJoin: vals.autoJoin, activityId: vals.activityId, discountPct: vals.discountPct, updatedAt: new Date() },
+    }));
+    return vals;
+  }
+  /** Auto-ikut: daftarkan produk aktif toko (halaman pertama) ke activity target dgn diskon default. */
+  async applyAutoJoin(userId: string, shopId: string) {
+    const [ps] = await this.bypass(() => this.db.select().from(promotionSettings)
+      .where(and(eq(promotionSettings.userId, userId), eq(promotionSettings.shopId, shopId))).limit(1));
+    if (!ps || !ps.activityId) throw new BadRequestException("Pilih activity target dulu di pengaturan Auto-ikut");
+    const t = await this.tokoTikTok(userId, shopId);
+    const disc = String(Number(ps.discountPct) || 10);
+    const resp = await this.panggilTikTok(t, (c) => c.cariProduk({ pageSize: 50 }));
+    const products = (resp?.data ?? [])
+      .map((p) => ({ id: String((p as Record<string, unknown>).id ?? ""), discount: disc }))
+      .filter((p) => p.id);
+    if (!products.length) return { added: 0, activityId: ps.activityId };
+    await this.panggilTikTok(t, (c) => c.promoUpdateProducts(ps.activityId as string, products));
+    return { added: products.length, activityId: ps.activityId };
+  }
+
+  // ---------------------------------------------------------- (chat)
   /** Panggil TikTok utk sebuah toko dgn auto-refresh token sekali saat 401. */
   private async panggilTikTok<T>(t: typeof shops.$inferSelect, fn: (c: TikTokClient) => Promise<T>): Promise<T> {
     let klien = await this.klien(t);

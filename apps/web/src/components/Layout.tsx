@@ -24,6 +24,7 @@ export const NAV: NavItem[] = [
   { to: "/autopilot", label: "Autopilot", icon: "bot" },
   { to: "/chat", label: "Chat Pelanggan", icon: "users" },
   { to: "/affiliate", label: "Affiliate", icon: "users" },
+  { to: "/promo", label: "Promosi", icon: "tag" },
   { to: "/laporan", label: "Laporan", icon: "trending" },
   { to: "/bom", label: "BOM / Bahan", icon: "beaker" },
   { to: "/pembelian", label: "Pembelian Stok", icon: "package" },
@@ -64,6 +65,7 @@ const NAV_PERM: Record<string, string> = {
   "/request-stok": "bom",
   "/autopilot": "produk",
   "/affiliate": "toko",
+  "/promo": "toko",
   "/laporan": "dashboard",
   "/bom": "bahan",
   "/pembelian": "bahan",
@@ -92,7 +94,7 @@ const DEFAULT_SECTIONS: { id: string; label: string; paths: string[] }[] = [
   { id: "produk", label: "Produk & Katalog", paths: ["/produk", "/katalog", "/hpp", "/toko"] },
   { id: "gudang", label: "Gudang & Stok", paths: ["/bom", "/pembelian", "/request-stok", "/stok-omnichannel"] },
   { id: "keuangan", label: "Keuangan", paths: ["/pencairan", "/laporan-bagian", "/wallet", "/laporan"] },
-  { id: "pertumbuhan", label: "Pertumbuhan", paths: ["/chat", "/affiliate"] },
+  { id: "pertumbuhan", label: "Pertumbuhan", paths: ["/chat", "/affiliate", "/promo"] },
   { id: "pengaturan", label: "Pengaturan & Akses", paths: ["/karyawan", "/aplikasi", "/pending"] },
 ];
 

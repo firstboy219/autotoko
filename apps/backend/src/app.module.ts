@@ -37,6 +37,7 @@ import { MaterialsModule } from "./modules/materials/materials.module.js";
 import { ResiModule } from "./modules/resi/resi.module.js";
 
 import { StockRequestsModule } from "./modules/stock-requests/stock-requests.module.js";
+import { PromotionModule } from "./modules/promotion/promotion.module.js";
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -79,6 +80,7 @@ import { StockRequestsModule } from "./modules/stock-requests/stock-requests.mod
     MarketplaceSyncModule,
     MaterialsModule,
     StockRequestsModule,
+    PromotionModule,
     ResiModule,
   ],
   providers: [

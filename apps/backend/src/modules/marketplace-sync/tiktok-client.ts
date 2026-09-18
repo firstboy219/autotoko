@@ -69,8 +69,16 @@ export class TikTokClient {
     return this.kirim<T>("GET", path, query, undefined);
   }
 
+  async put<T = unknown>(path: string, body: Record<string, unknown>, query: Record<string, string | number> = {}): Promise<T> {
+    return this.kirim<T>("PUT", path, query, body);
+  }
+
+  async del<T = unknown>(path: string, body?: Record<string, unknown>, query: Record<string, string | number> = {}): Promise<T> {
+    return this.kirim<T>("DELETE", path, query, body);
+  }
+
   private async kirim<T>(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT" | "DELETE",
     path: string,
     query: Record<string, string | number>,
     body: Record<string, unknown> | undefined,
@@ -274,6 +282,35 @@ export class TikTokClient {
   }
 
   /** Slot jadwal jemput (pickup) untuk sebuah paket sameday/instant. */
+  /* -------------------------------------------------- promotion 202309/202406 */
+  async promoSearchActivities(body: Record<string, unknown>) {
+    return this.post<Record<string, unknown>>("/promotion/202309/activities/search", body);
+  }
+  async promoGetActivity(id: string) {
+    return this.get<Record<string, unknown>>(`/promotion/202309/activities/${id}`);
+  }
+  async promoCreateActivity(body: Record<string, unknown>) {
+    return this.post<Record<string, unknown>>("/promotion/202309/activities", body);
+  }
+  async promoUpdateActivity(id: string, body: Record<string, unknown>) {
+    return this.put<Record<string, unknown>>(`/promotion/202309/activities/${id}`, body);
+  }
+  async promoDeactivateActivity(id: string) {
+    return this.post<Record<string, unknown>>(`/promotion/202309/activities/${id}/deactivate`, {});
+  }
+  async promoUpdateProducts(id: string, products: Array<Record<string, unknown>>) {
+    return this.put<Record<string, unknown>>(`/promotion/202309/activities/${id}/products`, { activity_id: id, products });
+  }
+  async promoRemoveProducts(id: string, productIds: string[]) {
+    return this.del<Record<string, unknown>>(`/promotion/202309/activities/${id}/products`, { activity_id: id, product_ids: productIds });
+  }
+  async promoSearchCoupons(body: Record<string, unknown>) {
+    return this.post<Record<string, unknown>>("/promotion/202406/coupons/search", body);
+  }
+  async promoGetCoupon(id: string) {
+    return this.get<Record<string, unknown>>(`/promotion/202406/coupons/${id}`);
+  }
+
   /** Get Price Detail 202407: rincian harga per order (basis "estimasi pencairan"). */
   async priceDetail(orderId: string) {
     return this.get<Record<string, unknown>>(`/order/202407/orders/${orderId}/price_detail`);

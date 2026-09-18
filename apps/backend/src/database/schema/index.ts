@@ -15,3 +15,4 @@ export * from "./sku-map.js";
 export * from "./marketplace-sync.js";
 export * from "./chat.js";
 export * from "./returns.js";
+export * from "./promotion.js";
