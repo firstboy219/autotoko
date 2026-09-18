@@ -4,6 +4,7 @@ import { Login } from "./pages/Login";
 import { Dashboard } from "./pages/Dashboard";
 import { Toko } from "./pages/Toko";
 import { Produk } from "./pages/Produk";
+import { MasterPostingan } from "./pages/MasterPostingan";
 import { Wallet } from "./pages/Wallet";
 import { Orders } from "./pages/Orders";
 import { ProduksiPacking } from "./pages/ProduksiPacking";
@@ -76,6 +77,7 @@ export function App() {
         <Route path="/" element={<Protected><DashboardV2 /></Protected>} />
         <Route path="/toko" element={<Protected><Toko /></Protected>} />
         <Route path="/produk" element={<Protected><Produk /></Protected>} />
+        <Route path="/master-postingan" element={<Protected><MasterPostingan /></Protected>} />
         <Route path="/stok-omnichannel" element={<Protected><StokOmnichannel /></Protected>} />
         <Route path="/orders" element={<Protected><Orders /></Protected>} />
         <Route path="/kesehatan-pesanan" element={<Protected><KesehatanPesanan /></Protected>} />
