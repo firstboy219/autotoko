@@ -16,6 +16,8 @@ interface Entry {
 interface Resp {
   catalog: Entry[];
   stats: { total: number; used: number };
+  autoDetected?: boolean;
+  scannedAt?: string;
 }
 
 const METHOD_CLS: Record<string, string> = {
@@ -96,7 +98,7 @@ export function TiktokApis() {
           className="w-full mt-3 px-3 py-2 rounded-md bg-[#0f172a] border border-white/10 text-sm text-slate-100 placeholder:text-slate-500"
         />
         <p className="text-[11px] text-slate-500 mt-2">
-          Katalog otomatis dari TikTok Shop OpenAPI. ✔ = dipakai AutoToko (dengan fitur & fungsinya); ○ = tersedia tapi belum dipakai.
+          Katalog otomatis dari TikTok Shop OpenAPI. Status ✔ <b>dipakai</b> / ○ <b>belum</b> dideteksi OTOMATIS dari kode backend yang ter-deploy — begitu sebuah API mulai/berhenti dipakai di source code, statusnya berubah sendiri. Fitur/fungsi dari peta kurasi.{data?.scannedAt ? ` · dipindai ${new Date(data.scannedAt).toLocaleString("id-ID")}` : ""}
         </p>
       </div>
 

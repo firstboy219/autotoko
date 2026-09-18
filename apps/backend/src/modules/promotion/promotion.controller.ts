@@ -99,6 +99,11 @@ export class PromotionController {
     return ok(await this.sync.promoListCoupons(uid(req), { status }));
   }
 
+  @Get("coupons/:shopId/:couponId")
+  async couponDetail(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("couponId") couponId: string) {
+    return ok(await this.sync.promoCouponDetail(uid(req), shopId, couponId));
+  }
+
   @Get("settings")
   async getSettings(@Req() req: FastifyRequest) {
     return ok(await this.sync.getPromoSettings(uid(req)));

@@ -1765,6 +1765,10 @@ export class MarketplaceSyncService {
     }
     return out;
   }
+  async promoCouponDetail(userId: string, shopId: string, couponId: string) {
+    const t = await this.tokoTikTok(userId, shopId);
+    return this.panggilTikTok(t, (c) => c.promoGetCoupon(couponId));
+  }
   async getPromoSettings(userId: string) {
     return this.bypass(() => this.db.select().from(promotionSettings).where(eq(promotionSettings.userId, userId)));
   }

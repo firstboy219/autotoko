@@ -43,6 +43,8 @@ export function Promotion() {
   const [showAuto, setShowAuto] = useState(false);
   const [manage, setManage] = useState<{ shopId: string; activityId: string; title: string } | null>(null);
   const [confirmDeact, setConfirmDeact] = useState<Row | null>(null);
+  const [manageC, setManageC] = useState<{ shopId: string; couponId: string; title: string } | null>(null);
+  const [editAct, setEditAct] = useState<Row | null>(null);
   const [busy, setBusy] = useState(false);
 
   const shops = acts.data ?? [];
@@ -174,6 +176,7 @@ export function Promotion() {
                     <td className="px-3 py-2">
                       <div className="flex justify-end gap-2">
                         <button onClick={() => setManage({ shopId: r.shopId, activityId: actId(r), title: actTitle(r) })} className="text-brand hover:underline">Produk</button>
+                        <button onClick={() => setEditAct(r)} className="text-ink-2 hover:underline">Edit</button>
                         <button onClick={() => setConfirmDeact(r)} className="text-red-600 hover:underline">Nonaktifkan</button>
                       </div>
                     </td>
@@ -193,7 +196,7 @@ export function Promotion() {
               <thead>
                 <tr className="bg-ink/[0.03] text-left text-[11px] uppercase text-ink-3">
                   <th className="px-3 py-2">Toko</th><th className="px-3 py-2">Judul</th><th className="px-3 py-2">Kode</th>
-                  <th className="px-3 py-2">Tipe</th><th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">Tipe</th><th className="px-3 py-2">Status</th><th className="px-3 py-2"></th>
                 </tr>
               </thead>
               <tbody>
@@ -204,6 +207,7 @@ export function Promotion() {
                     <td className="px-3 py-2 font-mono text-xs text-ink-2">{c.promo_code ?? "-"}</td>
                     <td className="px-3 py-2 text-ink-2">{c.display_type ?? "-"}</td>
                     <td className="px-3 py-2"><Badge tone={statusTone(c.status)}>{c.status ?? "-"}</Badge></td>
+                    <td className="px-3 py-2 text-right"><button onClick={() => setManageC({ shopId: c.shopId, couponId: c.id ?? c.coupon_id ?? "", title: c.title ?? "-" })} className="text-brand hover:underline">Detail</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -215,6 +219,8 @@ export function Promotion() {
       {showCreate && <CreateActivityModal shops={shops} onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); acts.reload(); }} />}
       {showAuto && <AutoJoinModal shops={shops} onClose={() => setShowAuto(false)} />}
       {manage && <ManageProductsModal ctx={manage} onClose={() => setManage(null)} />}
+      {manageC && <CouponDetailModal ctx={manageC} onClose={() => setManageC(null)} />}
+      {editAct && <EditActivityModal row={editAct} onClose={() => setEditAct(null)} onDone={() => { setEditAct(null); acts.reload(); }} />}
 
       <ConfirmModal
         open={confirmDeact != null}
@@ -459,6 +465,94 @@ function AutoJoinModal({ shops, onClose }: { shops: ShopActivities[]; onClose: (
           );
         })}
         <div className="flex justify-end"><Button variant="text" onClick={onClose}>Tutup</Button></div>
+      </div>
+    </Modal>
+  );
+}
+
+function CouponDetailModal({ ctx, onClose }: { ctx: { shopId: string; couponId: string; title: string }; onClose: () => void }) {
+  const [d, setD] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    api.get<Record<string, unknown>>(`/promotion/coupons/${ctx.shopId}/${ctx.couponId}`)
+      .then(setD).catch((e) => setErr((e as Error).message)).finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const row = (k: string, v: unknown) =>
+    v == null ? null : (
+      <div className="flex justify-between gap-4 py-1">
+        <dt className="text-ink-3">{k}</dt>
+        <dd className="text-right text-ink break-all">{typeof v === "object" ? JSON.stringify(v) : String(v)}</dd>
+      </div>
+    );
+  return (
+    <Modal open onClose={onClose} title={`Coupon — ${ctx.title}`} width="max-w-lg">
+      {err && <InlineAlert tone="danger">{err}</InlineAlert>}
+      {loading ? (
+        <Skeleton className="h-32 w-full" />
+      ) : d ? (
+        <dl className="divide-y divide-line text-sm">
+          {row("ID", d.id ?? d.coupon_id)}
+          {row("Judul", d.title)}
+          {row("Status", d.status)}
+          {row("Tipe tampilan", d.display_type)}
+          {row("Kode promo", d.promo_code)}
+          {row("Diskon", d.discount)}
+          {row("Threshold", d.threshold)}
+          {row("Cakupan produk", d.product_scope)}
+          {row("Batas pakai", d.usage_limits)}
+        </dl>
+      ) : (
+        <div className="text-sm text-ink-3">Tidak ada data.</div>
+      )}
+      <div className="flex justify-end pt-2"><Button variant="text" onClick={onClose}>Tutup</Button></div>
+    </Modal>
+  );
+}
+
+function EditActivityModal({ row, onClose, onDone }: { row: Row; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [title, setTitle] = useState(actTitle(row));
+  const [begin, setBegin] = useState(row.begin_time ? new Date(row.begin_time * 1000).toISOString().slice(0, 16) : "");
+  const [end, setEnd] = useState(row.end_time ? new Date(row.end_time * 1000).toISOString().slice(0, 16) : "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function save() {
+    setBusy(true); setErr(null);
+    try {
+      await api.put(`/promotion/activities/${row.shopId}/${actId(row)}`, {
+        title: title.trim() || undefined,
+        ...(begin ? { beginTime: toUnix(begin) } : {}),
+        ...(end ? { endTime: toUnix(end) } : {}),
+      });
+      toast("Promo diperbarui", "success");
+      onDone();
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  }
+  return (
+    <Modal open onClose={onClose} title={`Edit Promo — ${actTitle(row)}`} width="max-w-md">
+      <div className="space-y-3">
+        {err && <InlineAlert tone="danger">{err}</InlineAlert>}
+        <div>
+          <label className="block text-xs text-ink-2 mb-1">Judul</label>
+          <Input value={title} maxLength={50} onChange={(e) => setTitle(e.target.value)} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-ink-2 mb-1">Mulai</label>
+            <Input type="datetime-local" value={begin} onChange={(e) => setBegin(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs text-ink-2 mb-1">Selesai</label>
+            <Input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} />
+          </div>
+        </div>
+        <p className="text-[11px] text-ink-3">Perubahan waktu umumnya hanya diterima TikTok sebelum promo berjalan.</p>
+        <div className="flex justify-end gap-2">
+          <Button variant="text" onClick={onClose} disabled={busy}>Batal</Button>
+          <Button variant="filled" loading={busy} onClick={save}>Simpan</Button>
+        </div>
       </div>
     </Modal>
   );
