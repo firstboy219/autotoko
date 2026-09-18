@@ -1747,6 +1747,10 @@ export class MarketplaceSyncService {
     const t = await this.tokoTikTok(userId, shopId);
     return this.panggilTikTok(t, (c) => c.promoCreateActivity(body));
   }
+  async promoUpdate(userId: string, shopId: string, activityId: string, body: Record<string, unknown>) {
+    const t = await this.tokoTikTok(userId, shopId);
+    return this.panggilTikTok(t, (c) => c.promoUpdateActivity(activityId, body));
+  }
   async promoListCoupons(userId: string, opts: { status?: string; pageSize?: number } = {}) {
     const toko = await this.tokoSiap(userId);
     const out: Array<Record<string, unknown>> = [];

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
-import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, Max, Min } from "class-validator";
+import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 import type { FastifyRequest } from "fastify";
 import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, TenantOwnerOnly, type JwtPayload } from "../auth/jwt-auth.guard.js";
@@ -12,6 +12,22 @@ const ok = <T>(data: T): ApiResponse<T> => ({ success: true, data });
 
 class AddProductsDto {
   @IsArray() products!: Array<Record<string, unknown>>;
+}
+class CreateActivityDto {
+  @IsString() activityType!: string;
+  @IsString() @MaxLength(50) title!: string;
+  @IsOptional() @IsNumber() beginTime?: number;
+  @IsOptional() @IsNumber() endTime?: number;
+  @IsOptional() @IsString() durationType?: string;
+  @IsOptional() @IsString() productLevel?: string;
+}
+class UpdateActivityDto {
+  @IsOptional() @IsString() @MaxLength(50) title?: string;
+  @IsOptional() @IsNumber() beginTime?: number;
+  @IsOptional() @IsNumber() endTime?: number;
+}
+class RemoveProductsDto {
+  @IsArray() @IsString({ each: true }) productIds!: string[];
 }
 class PromoSettingsDto {
   @IsOptional() @IsBoolean() autoJoin?: boolean;
@@ -30,6 +46,31 @@ export class PromotionController {
     return ok(await this.sync.promoListActivities(uid(req), { status, type, title }));
   }
 
+  /** Buat activity promo baru (aksi outward). */
+  @Post("activities/:shopId")
+  async create(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Body() dto: CreateActivityDto) {
+    const body: Record<string, unknown> = {
+      activity_type: dto.activityType,
+      title: dto.title,
+      product_level: dto.productLevel ?? "PRODUCT",
+      duration_type: dto.durationType ?? "NORMAL",
+      ...(dto.beginTime ? { begin_time: dto.beginTime } : {}),
+      ...(dto.endTime ? { end_time: dto.endTime } : {}),
+    };
+    return ok(await this.sync.promoCreate(uid(req), shopId, body));
+  }
+
+  /** Ubah activity (judul/waktu). */
+  @Put("activities/:shopId/:activityId")
+  async update(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("activityId") activityId: string, @Body() dto: UpdateActivityDto) {
+    const body: Record<string, unknown> = {
+      ...(dto.title != null ? { title: dto.title } : {}),
+      ...(dto.beginTime ? { begin_time: dto.beginTime } : {}),
+      ...(dto.endTime ? { end_time: dto.endTime } : {}),
+    };
+    return ok(await this.sync.promoUpdate(uid(req), shopId, activityId, body));
+  }
+
   @Get("activities/:shopId/:activityId")
   async activityDetail(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("activityId") activityId: string) {
     return ok(await this.sync.promoActivityDetail(uid(req), shopId, activityId));
@@ -39,6 +80,12 @@ export class PromotionController {
   @Put("activities/:shopId/:activityId/products")
   async addProducts(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("activityId") activityId: string, @Body() dto: AddProductsDto) {
     return ok(await this.sync.promoAddProducts(uid(req), shopId, activityId, dto.products));
+  }
+
+  /** Hapus produk dari activity (aksi outward). */
+  @Post("activities/:shopId/:activityId/products/remove")
+  async removeProducts(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("activityId") activityId: string, @Body() dto: RemoveProductsDto) {
+    return ok(await this.sync.promoRemoveProducts(uid(req), shopId, activityId, dto.productIds));
   }
 
   /** Nonaktifkan activity (aksi outward). */
