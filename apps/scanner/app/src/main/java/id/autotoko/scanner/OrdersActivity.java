@@ -565,6 +565,7 @@ public class OrdersActivity extends AppCompatActivity {
             JSONArray arr = r.dataArray();
             LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL);
             int pad = dp(16); box.setPadding(pad, pad, pad, pad);
+            TextView hint = new TextView(this); hint.setText("Ketuk batch untuk lihat status & unduh PDF. Tekan lama untuk kelola anggota."); hint.setTextSize(12); hint.setTextColor(getColor(R.color.ink3)); box.addView(hint);
             if (arr.length() == 0) {
                 TextView e = new TextView(this); e.setText("Belum ada batch. Buat lewat menu Batch Packing."); e.setTextColor(getColor(R.color.ink3));
                 box.addView(e);
@@ -581,7 +582,8 @@ public class OrdersActivity extends AppCompatActivity {
                 t1.setTypeface(null, android.graphics.Typeface.BOLD); t1.setTextColor(getColor(R.color.ink));
                 TextView t2 = new TextView(this); t2.setText(b.optInt("orderCount", 0) + " order  \u00b7  " + b.optString("status", "")); t2.setTextSize(12); t2.setTextColor(getColor(R.color.ink2));
                 row.addView(t1); row.addView(t2);
-                row.setOnClickListener(v -> showBatchDetail(id));
+                row.setOnClickListener(v -> startActivity(new Intent(this, BatchingListActivity.class).putExtra("batchId", id)));
+                row.setOnLongClickListener(v -> { showBatchDetail(id); return true; });
                 box.addView(row);
             }
             ScrollView sc = new ScrollView(this); sc.addView(box);
@@ -1125,61 +1127,12 @@ public class OrdersActivity extends AppCompatActivity {
                         if (r == null || !r.ok() || r.data() == null) { toast(r == null ? "Gagal" : r.message("Gagal batch")); muat(); return; }
                         String batchId = r.data().optString("batchId", "");
                         muat();
-                        if (!batchId.isEmpty()) showBatchingList(batchId);
+                        if (!batchId.isEmpty()) startActivity(new Intent(OrdersActivity.this, BatchingListActivity.class).putExtra("batchId", batchId));
                         else toast("Batch dimulai.");
                     });
                 }).show();
     }
 
-    /** Halaman Batching List: poll status batch di server, lalu tombol Unduh Resi /
-     *  Unduh Packing List. Proses PDF di backend -> koneksi tak putus. */
-    private void showBatchingList(String batchId) {
-        LinearLayout col = new LinearLayout(this); col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(dp(20), dp(16), dp(20), dp(8));
-        final TextView status = new TextView(this);
-        status.setTextSize(14); status.setTextColor(getColor(R.color.ink));
-        status.setText("Memproses batch di server…"); col.addView(status);
-        final LinearLayout btns = new LinearLayout(this); btns.setOrientation(LinearLayout.VERTICAL);
-        btns.setPadding(0, dp(14), 0, 0); col.addView(btns);
-        new MaterialAlertDialogBuilder(this)
-                .setTitle("Batching List").setView(col)
-                .setPositiveButton("Tutup", (d, w) -> muat()).show();
-
-        final Session ses = new Session(this);
-        final android.os.Handler h = new android.os.Handler(getMainLooper());
-        final int[] tries = {0};
-        final Runnable[] poll = new Runnable[1];
-        poll[0] = () -> api.batchPackingStatus(batchId, r -> {
-            if (r == null || !r.ok() || r.data() == null) {
-                if (++tries[0] < 90) h.postDelayed(poll[0], 2000);
-                else status.setText("Gagal mengambil status batch.");
-                return;
-            }
-            JSONObject d = r.data();
-            String st = d.optString("status", "");
-            if ("processing".equals(st)) {
-                status.setText("Memproses batch di server… (" + (tries[0] + 1) + ")");
-                if (++tries[0] < 120) h.postDelayed(poll[0], 2000);
-                else status.setText("Masih diproses — cek lagi nanti dari Daftar Batch.");
-                return;
-            }
-            if ("error".equals(st)) { status.setText("Gagal: " + d.optString("errorMessage", "tidak diketahui")); return; }
-            JSONObject res = d.optJSONObject("result");
-            int ok = res != null ? res.optInt("ok", 0) : 0;
-            status.setText("Selesai. " + ok + " order diproses → Packing.");
-            btns.removeAllViews();
-            final String resiUrl = d.isNull("resiPdfUrl") ? "" : d.optString("resiPdfUrl", "");
-            final String packUrl = d.isNull("packingListPdfUrl") ? "" : d.optString("packingListPdfUrl", "");
-            if (!resiUrl.isEmpty()) btns.addView(btn("Unduh Resi", true, v -> bukaUrl(ses.baseUrl() + resiUrl)));
-            if (!packUrl.isEmpty()) btns.addView(btn("Unduh Packing List", false, v -> bukaUrl(ses.baseUrl() + packUrl)));
-            if (resiUrl.isEmpty() && packUrl.isEmpty()) {
-                TextView t = new TextView(this); t.setText("Tidak ada PDF dihasilkan (mungkin semua gagal).");
-                t.setTextColor(getColor(R.color.ink2)); btns.addView(t);
-            }
-            muat();
-        });
-        h.postDelayed(poll[0], 1500);
-    }
 
     private void bukaUrl(String url) {
         try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); }

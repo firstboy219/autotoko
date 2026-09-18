@@ -174,5 +174,10 @@
             android:name=".OrdersActivity"
             android:exported="false"
             android:label="Daftar Pesanan" />
+        <activity
+            android:name=".BatchingListActivity"
+            android:exported="false"
+            android:label="Batching List"
+            android:screenOrientation="portrait" />
     </application>
 </manifest>
