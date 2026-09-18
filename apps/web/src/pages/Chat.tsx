@@ -71,11 +71,18 @@ export function Chat() {
     if (!sel || !teks.trim()) return;
     setKirim(true);
     try {
-      await api.post(`/chat/conversations/${sel.id}/reply`, { text: teks.trim() });
+      const r = await api.post<{ sent?: boolean; queued?: boolean; error?: string }>(
+        `/chat/conversations/${sel.id}/reply`,
+        { text: teks.trim() },
+      );
       setTeks("");
       const m = await api.get<Msg[]>(`/chat/conversations/${sel.id}/messages`);
       setMsgs(m);
-      toast("Balasan diantre — terkirim saat koneksi TikTok IM aktif.", "success");
+      if (r?.sent) toast("Balasan terkirim ke pembeli.", "success");
+      else toast(
+        r?.error ? `Belum terkirim (${r.error}) — disimpan & diantre.` : "Balasan diantre — terkirim saat koneksi TikTok IM aktif.",
+        "warning",
+      );
     } catch (e) {
       toast((e as Error).message, "danger");
     } finally {
@@ -86,8 +93,9 @@ export function Chat() {
   return (
     <Layout title="Chat Pelanggan">
       <InlineAlert tone="info">
-        Inbox chat pembeli akan terisi begitu <b>koneksi TikTok IM (scope Customer Service)</b> diaktifkan.
-        Balasan yang Anda tulis sekarang aman disimpan &amp; diantre, lalu terkirim otomatis saat koneksi hidup.
+        Balasan <b>langsung terkirim ke pembeli</b> begitu <b>scope Customer Service (TikTok IM)</b> aktif pada koneksi toko.
+        Bila scope belum aktif, balasan tetap tersimpan &amp; diantre (tidak hilang). Klik <b>Sinkron</b> untuk menarik
+        percakapan &amp; pesan terbaru dari TikTok. Buka sebuah percakapan untuk menarik pesannya otomatis.
       </InlineAlert>
 
       <div className="grid gap-3 md:grid-cols-[320px_1fr] mt-4">

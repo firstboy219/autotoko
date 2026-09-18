@@ -37,4 +37,10 @@ export class ChatController {
   ): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.chat.reply(uid(req), id, dto.text) };
   }
+
+  /** Mulai chat dgn pembeli dari sebuah order. */
+  @Post("from-order/:orderId")
+  async fromOrder(@Req() req: FastifyRequest, @Param("orderId") orderId: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.chat.startFromOrder(uid(req), orderId) };
+  }
 }

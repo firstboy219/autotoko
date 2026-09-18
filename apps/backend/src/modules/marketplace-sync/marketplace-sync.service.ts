@@ -14,6 +14,7 @@ import {
   orders,
   shops,
   marketplaceConversations,
+  marketplaceMessages,
   marketplaceReturns,
   autopilotActivity,
   orderBatches,
@@ -1704,6 +1705,90 @@ export class MarketplaceSyncService {
       await this.cacheAwb(userId, orderId).catch(() => {});
     }
     return { orderId, ok: semuaOk, hasil };
+  }
+
+  /** Panggil TikTok utk sebuah toko dgn auto-refresh token sekali saat 401. */
+  private async panggilTikTok<T>(t: typeof shops.$inferSelect, fn: (c: TikTokClient) => Promise<T>): Promise<T> {
+    let klien = await this.klien(t);
+    let segar = false;
+    for (;;) {
+      try { return await fn(klien); }
+      catch (e) {
+        if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(t); continue; }
+        throw e;
+      }
+    }
+  }
+
+  private async tokoTikTok(userId: string, shopId: string) {
+    const [t] = await this.bypass(() => this.db.select().from(shops)
+      .where(and(eq(shops.id, shopId), eq(shops.userId, userId))).limit(1));
+    if (!t) throw new NotFoundException("Toko tidak ditemukan");
+    if (t.marketplace !== "tiktok" || !t.accessToken || !t.shopCipher)
+      throw new BadRequestException("Toko TikTok belum tersambung API");
+    return t;
+  }
+
+  /** Kirim pesan TEXT ke pembeli via TikTok IM. Return message_id TikTok. */
+  async kirimPesanChat(userId: string, shopId: string, conversationCid: string, text: string): Promise<string> {
+    const t = await this.tokoTikTok(userId, shopId);
+    const resp = await this.panggilTikTok(t, (c) => c.post<{ message_id?: string }>(
+      `/customer_service/202309/conversations/${conversationCid}/messages`,
+      { type: "TEXT", content: JSON.stringify({ content: text }) },
+    ));
+    return String(resp?.message_id ?? "");
+  }
+
+  /** Buat percakapan baru dgn pembeli (dari order). Return conversation_id TikTok. */
+  async buatPercakapanChat(userId: string, shopId: string, buyerUserId: string): Promise<string> {
+    const t = await this.tokoTikTok(userId, shopId);
+    const resp = await this.panggilTikTok(t, (c) => c.post<{ conversation_id?: string }>(
+      `/customer_service/202309/conversations`, { buyer_user_id: String(buyerUserId) },
+    ));
+    return String(resp?.conversation_id ?? "");
+  }
+
+  /** Tandai percakapan sudah dibaca (best-effort). */
+  async tandaiDibacaChat(userId: string, shopId: string, conversationCid: string): Promise<void> {
+    const t = await this.tokoTikTok(userId, shopId);
+    await this.panggilTikTok(t, (c) => c.post(
+      `/customer_service/202309/conversations/${conversationCid}/messages/read`, {},
+    ));
+  }
+
+  /** Tarik pesan satu percakapan dari TikTok -> marketplace_messages (dedupe by id). */
+  async syncPesanPercakapan(userId: string, shopId: string, conversationCid: string, ourConvId: string): Promise<number> {
+    const t = await this.tokoTikTok(userId, shopId);
+    const resp = await this.panggilTikTok(t, (c) => c.get<{ messages?: Record<string, unknown>[] }>(
+      `/customer_service/202309/conversations/${conversationCid}/messages`, { page_size: 50 }));
+    const list = resp?.messages ?? [];
+    if (!list.length) return 0;
+    const existing = await this.bypass(() => this.db
+      .select({ mid: marketplaceMessages.marketplaceMessageId })
+      .from(marketplaceMessages)
+      .where(and(eq(marketplaceMessages.conversationId, ourConvId), eq(marketplaceMessages.userId, userId))));
+    const seen = new Set(existing.map((r) => r.mid).filter(Boolean) as string[]);
+    let added = 0;
+    for (const mm of list) {
+      const rec = mm as Record<string, any>;
+      const mid = String(rec.id ?? "");
+      if (!mid || seen.has(mid)) continue;
+      const role = String(rec.sender?.role ?? "").toUpperCase();
+      const direction = role === "BUYER" ? "in" : "out";
+      const sender = role === "BUYER" ? "buyer" : (role === "SYSTEM" || role === "ROBOT") ? "system" : "seller";
+      const text = (() => {
+        const c = rec.content;
+        if (typeof c !== "string") return null;
+        try { const o = JSON.parse(c); return typeof o?.content === "string" ? o.content : c; } catch { return c; }
+      })();
+      const at = rec.create_time ? new Date(Number(rec.create_time) * 1000) : new Date();
+      await this.bypass(() => this.db.insert(marketplaceMessages).values({
+        userId, conversationId: ourConvId, marketplaceMessageId: mid,
+        direction, sender, text, status: direction === "in" ? "received" : "sent", raw: rec, createdAt: at,
+      }));
+      added += 1;
+    }
+    return added;
   }
 
   /**

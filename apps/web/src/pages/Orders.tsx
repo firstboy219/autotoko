@@ -1472,6 +1472,15 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
     if (order.marketplace === "tiktok" && !order.priceDetail && !tt) void refreshTiktok();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  async function chatBuyer() {
+    setBusy(true); setErr(null);
+    try {
+      await api.post(`/chat/from-order/${order.id}`);
+      toast("Percakapan dibuka — menuju menu Chat…", "success");
+      window.location.href = "/chat";
+    } catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  }
 
   const idx = FLOW.indexOf(order.fulfillmentStatus as (typeof FLOW)[number]);
   const next = idx >= 0 && idx < FLOW.length - 1 ? FLOW[idx + 1] : null;
@@ -1787,6 +1796,11 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
             <Button size="sm" variant="filled" icon="check" loading={busy} onClick={kirimMarketplace}>
               Proses (RTS ke marketplace)
             </Button>
+            {order.marketplace === "tiktok" && (
+              <Button size="sm" variant="tonal" icon="users" loading={busy} onClick={chatBuyer} title="Buka / mulai chat dengan pembeli order ini">
+                Chat pembeli
+              </Button>
+            )}
           </div>
           <p className="text-[11px] text-ink-3 mt-2">
             <b>Cetak AWB</b> membuka label PDF dari marketplace (read-only, tak mengubah apa pun).
