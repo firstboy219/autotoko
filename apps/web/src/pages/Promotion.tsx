@@ -45,6 +45,7 @@ export function Promotion() {
   const [confirmDeact, setConfirmDeact] = useState<Row | null>(null);
   const [manageC, setManageC] = useState<{ shopId: string; couponId: string; title: string } | null>(null);
   const [editAct, setEditAct] = useState<Row | null>(null);
+  const [replicate, setReplicate] = useState<Row | null>(null);
   const [busy, setBusy] = useState(false);
 
   const shops = acts.data ?? [];
@@ -177,6 +178,7 @@ export function Promotion() {
                       <div className="flex justify-end gap-2">
                         <button onClick={() => setManage({ shopId: r.shopId, activityId: actId(r), title: actTitle(r) })} className="text-brand hover:underline">Produk</button>
                         <button onClick={() => setEditAct(r)} className="text-ink-2 hover:underline">Edit</button>
+                        <button onClick={() => setReplicate(r)} className="text-emerald-600 hover:underline">Replikasi</button>
                         <button onClick={() => setConfirmDeact(r)} className="text-red-600 hover:underline">Nonaktifkan</button>
                       </div>
                     </td>
@@ -221,6 +223,7 @@ export function Promotion() {
       {manage && <ManageProductsModal ctx={manage} onClose={() => setManage(null)} />}
       {manageC && <CouponDetailModal ctx={manageC} onClose={() => setManageC(null)} />}
       {editAct && <EditActivityModal row={editAct} onClose={() => setEditAct(null)} onDone={() => { setEditAct(null); acts.reload(); }} />}
+      {replicate && <ReplicateModal row={replicate} shops={shops} onClose={() => setReplicate(null)} onDone={() => acts.reload()} />}
 
       <ConfirmModal
         open={confirmDeact != null}
@@ -552,6 +555,77 @@ function EditActivityModal({ row, onClose, onDone }: { row: Row; onClose: () => 
         <div className="flex justify-end gap-2">
           <Button variant="text" onClick={onClose} disabled={busy}>Batal</Button>
           <Button variant="filled" loading={busy} onClick={save}>Simpan</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+interface RepResult { shopId: string; shopName?: string; activityId?: string; added?: number; error?: string }
+function ReplicateModal({ row, shops, onClose, onDone }: { row: Row; shops: ShopActivities[]; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const targets = shops.filter((s) => s.shopId !== row.shopId);
+  const [sel, setSel] = useState<string[]>([]);
+  const [disc, setDisc] = useState("10");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [results, setResults] = useState<RepResult[] | null>(null);
+  const toggle = (id: string) => setSel((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  async function run() {
+    if (!sel.length) { setErr("Pilih minimal satu toko target"); return; }
+    setBusy(true); setErr(null); setResults(null);
+    try {
+      const r = await api.post<{ results: RepResult[] }>(
+        `/promotion/activities/${row.shopId}/${actId(row)}/replicate`,
+        { targetShopIds: sel, discountPct: Number(disc) || 0 },
+      );
+      setResults(r.results);
+      const okN = r.results.filter((x) => !x.error).length;
+      toast(`Replikasi selesai: ${okN}/${r.results.length} toko`, okN ? "success" : "warning");
+      onDone();
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Replikasi Promo — ${actTitle(row)}`} width="max-w-lg">
+      <div className="space-y-3">
+        <InlineAlert tone="info">
+          Menggulirkan promo yang sukses ke toko lain: dibuat activity baru dgn tipe/judul/durasi yang sama, lalu produk
+          aktif tiap toko target didaftarkan dgn diskon di bawah. Aksi nyata — mengubah harga di toko target. Waktu digeser
+          ke masa depan otomatis bila jadwal promo asal sudah lewat.
+        </InlineAlert>
+        {err && <InlineAlert tone="danger">{err}</InlineAlert>}
+        <div>
+          <label className="block text-xs text-ink-2 mb-1">Diskon % di toko target</label>
+          <Input value={disc} onChange={(e) => setDisc(e.target.value.replace(/[^0-9.]/g, ""))} className="w-24 tabular-nums" />
+        </div>
+        <div>
+          <div className="text-xs text-ink-2 mb-1">Toko target</div>
+          {!targets.length ? (
+            <div className="text-xs text-ink-3">Tak ada toko lain.</div>
+          ) : (
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded border border-line p-2">
+              {targets.map((t) => (
+                <label key={t.shopId} className="flex items-center gap-2 text-sm text-ink-2">
+                  <input type="checkbox" checked={sel.includes(t.shopId)} onChange={() => toggle(t.shopId)} /> {t.shopName}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+        {results && (
+          <div className="space-y-1 rounded bg-ink/[0.03] p-2 text-xs">
+            {results.map((x, i) => (
+              <div key={i} className={x.error ? "text-red-600" : "text-emerald-700"}>
+                {x.shopName ?? x.shopId}: {x.error ? `gagal — ${x.error}` : `dibuat (${x.added ?? 0} produk)`}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="text" onClick={onClose} disabled={busy}>Tutup</Button>
+          <Button variant="filled" loading={busy} onClick={run} disabled={!targets.length}>Replikasi</Button>
         </div>
       </div>
     </Modal>

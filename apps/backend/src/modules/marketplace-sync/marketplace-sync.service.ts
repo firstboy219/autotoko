@@ -1747,6 +1747,60 @@ export class MarketplaceSyncService {
     const t = await this.tokoTikTok(userId, shopId);
     return this.panggilTikTok(t, (c) => c.promoCreateActivity(body));
   }
+
+  /**
+   * Replikasi sebuah promo (activity) yang sukses ke toko lain: buat activity
+   * baru dgn konfigurasi sama (tipe/judul/durasi/waktu) di tiap toko target,
+   * lalu daftarkan produk aktif toko itu dgn diskon yang diminta. Aksi outward
+   * (mengubah harga) — dipicu klik seller. Waktu digeser ke masa depan bila
+   * waktu sumber sudah lewat (TikTok menolak begin_time di masa lalu).
+   */
+  async replicatePromo(
+    userId: string,
+    sourceShopId: string,
+    sourceActivityId: string,
+    targetShopIds: string[],
+    discountPct: number,
+  ) {
+    const src = (await this.promoActivityDetail(userId, sourceShopId, sourceActivityId)) as Record<string, unknown>;
+    const type = String(src.activity_type ?? "DIRECT_DISCOUNT");
+    const durationType = String(src.duration_type ?? "NORMAL");
+    const title = (`${String(src.title ?? "Promo")} (Replikasi)`).slice(0, 50);
+    const disc = String(Number(discountPct) || 10);
+    const now = Math.floor(Date.now() / 1000);
+    const results: Array<Record<string, unknown>> = [];
+    for (const shopId of targetShopIds) {
+      try {
+        const t = await this.tokoTikTok(userId, shopId);
+        const body: Record<string, unknown> = { activity_type: type, title, product_level: "PRODUCT", duration_type: durationType };
+        if (durationType === "NORMAL") {
+          let b = Number(src.begin_time) || 0;
+          let e = Number(src.end_time) || 0;
+          const dur = e > b ? e - b : 7 * 86400;
+          if (b <= now + 300) { b = now + 3600; e = b + dur; }
+          body.begin_time = b;
+          body.end_time = e;
+        }
+        const created = (await this.panggilTikTok(t, (c) => c.promoCreateActivity(body))) as Record<string, unknown>;
+        const newId = String(created?.activity_id ?? created?.id ?? "");
+        let added = 0;
+        if (newId) {
+          const resp = await this.panggilTikTok(t, (c) => c.cariProduk({ pageSize: 50 }));
+          const products = (resp?.data ?? [])
+            .map((p) => ({ id: String((p as Record<string, unknown>).id ?? ""), discount: disc }))
+            .filter((p) => p.id);
+          if (products.length) {
+            await this.panggilTikTok(t, (c) => c.promoUpdateProducts(newId, products));
+            added = products.length;
+          }
+        }
+        results.push({ shopId, shopName: t.shopName ?? shopId, activityId: newId, added });
+      } catch (e) {
+        results.push({ shopId, error: (e as Error).message });
+      }
+    }
+    return { source: { shopId: sourceShopId, activityId: sourceActivityId }, discountPct: Number(disc), results };
+  }
   async promoUpdate(userId: string, shopId: string, activityId: string, body: Record<string, unknown>) {
     const t = await this.tokoTikTok(userId, shopId);
     return this.panggilTikTok(t, (c) => c.promoUpdateActivity(activityId, body));

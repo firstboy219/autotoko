@@ -29,6 +29,10 @@ class UpdateActivityDto {
 class RemoveProductsDto {
   @IsArray() @IsString({ each: true }) productIds!: string[];
 }
+class ReplicateDto {
+  @IsArray() @IsString({ each: true }) targetShopIds!: string[];
+  @IsOptional() @IsNumber() @Min(0) @Max(99) discountPct?: number;
+}
 class PromoSettingsDto {
   @IsOptional() @IsBoolean() autoJoin?: boolean;
   @IsOptional() @IsString() activityId?: string | null;
@@ -86,6 +90,12 @@ export class PromotionController {
   @Post("activities/:shopId/:activityId/products/remove")
   async removeProducts(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("activityId") activityId: string, @Body() dto: RemoveProductsDto) {
     return ok(await this.sync.promoRemoveProducts(uid(req), shopId, activityId, dto.productIds));
+  }
+
+  /** Replikasi promo ke toko lain (aksi outward). */
+  @Post("activities/:shopId/:activityId/replicate")
+  async replicate(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("activityId") activityId: string, @Body() dto: ReplicateDto) {
+    return ok(await this.sync.replicatePromo(uid(req), shopId, activityId, dto.targetShopIds, dto.discountPct ?? 10));
   }
 
   /** Nonaktifkan activity (aksi outward). */
