@@ -89,6 +89,11 @@ export const orderBatches = pgTable(
     note: varchar("note", { length: 255 }),
     handoverMethod: varchar("handover_method", { length: 32 }),
     status: varchar("status", { length: 16 }).notNull().default("processed"),
+    /** Batch packing ASINKRON: URL PDF hasil + ringkasan + error. */
+    resiPdfUrl: varchar("resi_pdf_url", { length: 255 }),
+    packingListPdfUrl: varchar("packing_list_pdf_url", { length: 255 }),
+    result: jsonb("result"),
+    errorMessage: text("error_message"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

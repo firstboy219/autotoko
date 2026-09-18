@@ -901,7 +901,7 @@ export class MarketplaceSyncService {
   async batchPacking(
     userId: string,
     orderIds: string[],
-    opts: { handoverMethod?: string; pickupSlot?: { startTime: number; endTime: number }; takeouts?: { orderId: string; reason?: string }[] },
+    opts: { handoverMethod?: string; pickupSlot?: { startTime: number; endTime: number }; takeouts?: { orderId: string; reason?: string }[]; skipRecord?: boolean },
   ) {
     const ids = [...new Set((orderIds ?? []).filter(Boolean))];
     const takeouts = (opts.takeouts ?? []).filter((t) => t?.orderId);
@@ -1019,7 +1019,7 @@ export class MarketplaceSyncService {
     // pencatatan tak menggagalkan hasil RTS yang sudah terjadi.
     let batchId: string | null = null;
     const okIds = hasil.filter((h) => h.ok).map((h) => h.orderId);
-    if (okIds.length) {
+    if (okIds.length && !opts.skipRecord) {
       try {
         const catatan = `Batch ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "short", timeStyle: "short" })}`;
         const [b] = await this.bypass(() => this.db.insert(orderBatches)
@@ -1032,6 +1032,65 @@ export class MarketplaceSyncService {
       } catch (e) { this.logger.warn(`Catat batch gagal: ${(e as Error).message}`); }
     }
     return { total: ids.length, ok: hasil.filter((h) => h.ok).length, ditahan: takeouts.length, batchId, labelsPdf, packingListPdf, hasil };
+  }
+
+  /**
+   * Mulai batch packing ASINKRON: buat batch (status "processing") + kembalikan id
+   * cepat, lalu proses RTS+label+PDF di background (uploads ke URL). APK/web tinggal
+   * poll getBatchPacking lalu unduh resi & packing list. Menghindari request panjang
+   * yang bikin koneksi (APK) putus.
+   */
+  async batchPackingStart(
+    userId: string,
+    orderIds: string[],
+    opts: { handoverMethod?: string; pickupSlot?: { startTime: number; endTime: number }; takeouts?: { orderId: string; reason?: string }[] },
+  ) {
+    const ids = [...new Set((orderIds ?? []).filter(Boolean))];
+    if (!ids.length) throw new BadRequestException("Tidak ada order dipilih");
+    const catatan = `Batch ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "short", timeStyle: "short" })}`;
+    const [b] = await this.bypass(() => this.db.insert(orderBatches)
+      .values({ userId, note: catatan, handoverMethod: opts.handoverMethod ?? null, status: "processing" })
+      .returning({ id: orderBatches.id }));
+    const batchId = b!.id;
+    await this.bypass(() => this.db.update(orders).set({ batchId, updatedAt: new Date() })
+      .where(and(eq(orders.userId, userId), inArray(orders.id, ids))));
+    setImmediate(() => { void this.batchPackingBackground(userId, batchId, ids, opts); });
+    return { batchId, status: "processing" as const, total: ids.length };
+  }
+
+  private async batchPackingBackground(
+    userId: string,
+    batchId: string,
+    ids: string[],
+    opts: { handoverMethod?: string; pickupSlot?: { startTime: number; endTime: number }; takeouts?: { orderId: string; reason?: string }[] },
+  ) {
+    try {
+      const r = await this.batchPacking(userId, ids, { ...opts, skipRecord: true });
+      let resiUrl: string | null = null;
+      let packUrl: string | null = null;
+      if (r.labelsPdf) { try { resiUrl = (await this.uploads.saveFile(Buffer.from(r.labelsPdf, "base64"), "pdf")).url; } catch { /* best-effort */ } }
+      if (r.packingListPdf) { try { packUrl = (await this.uploads.saveFile(Buffer.from(r.packingListPdf, "base64"), "pdf")).url; } catch { /* best-effort */ } }
+      await this.bypass(() => this.db.update(orderBatches).set({
+        status: "done", resiPdfUrl: resiUrl, packingListPdfUrl: packUrl,
+        result: { total: r.total, ok: r.ok, ditahan: r.ditahan, hasil: r.hasil }, updatedAt: new Date(),
+      }).where(and(eq(orderBatches.id, batchId), eq(orderBatches.userId, userId))));
+    } catch (e) {
+      this.logger.warn(`Batch packing ${batchId}: ${(e as Error).message}`);
+      await this.bypass(() => this.db.update(orderBatches).set({ status: "error", errorMessage: (e as Error).message, updatedAt: new Date() })
+        .where(and(eq(orderBatches.id, batchId), eq(orderBatches.userId, userId)))).catch(() => {});
+    }
+  }
+
+  /** Status + hasil batch packing (utk polling APK/web). */
+  async getBatchPacking(userId: string, batchId: string) {
+    const [b] = await this.bypass(() => this.db.select().from(orderBatches)
+      .where(and(eq(orderBatches.id, batchId), eq(orderBatches.userId, userId))).limit(1));
+    if (!b) throw new NotFoundException("Batch tidak ditemukan");
+    return {
+      id: b.id, status: b.status, note: b.note, createdAt: b.createdAt,
+      resiPdfUrl: b.resiPdfUrl ?? null, packingListPdfUrl: b.packingListPdfUrl ?? null,
+      result: b.result ?? null, errorMessage: b.errorMessage ?? null,
+    };
   }
 
   /** Gabung banyak PDF label jadi satu (pdf-lib) -> base64. Null bila kosong. */

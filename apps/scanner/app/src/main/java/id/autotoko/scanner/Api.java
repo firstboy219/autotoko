@@ -163,6 +163,20 @@ public final class Api {
         } catch (Exception ignored) {}
         call("POST", session.baseUrl() + "/api/marketplace-sync/orders/batch-packing", session.token(), p, cb);
     }
+    /** Mulai batch packing ASINKRON (backend proses PDF di background). */
+    public void orderBatchPackingStart(JSONArray orderIds, JSONArray takeouts, String handover, Cb cb) {
+        JSONObject p = new JSONObject();
+        try {
+            p.put("orderIds", orderIds);
+            if (takeouts != null) p.put("takeouts", takeouts);
+            if (handover != null) p.put("handoverMethod", handover);
+        } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/marketplace-sync/orders/batch-packing-start", session.token(), p, cb);
+    }
+    /** Status + URL PDF sebuah batch packing (utk polling). */
+    public void batchPackingStatus(String id, Cb cb) {
+        call("GET", session.baseUrl() + "/api/marketplace-sync/batch-packing/" + id, session.token(), null, cb);
+    }
     /** Daftar batch packing (poin 1). */
     public void batches(Cb cb) {
         call("GET", session.baseUrl() + "/api/marketplace-sync/batches", session.token(), null, cb);

@@ -123,6 +123,21 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.batchPacking(uid(req), body?.orderIds ?? [], { handoverMethod: body?.handoverMethod, pickupSlot: body?.pickupSlot, takeouts: body?.takeouts }) };
   }
 
+  /** Mulai batch packing ASINKRON (kembalikan batchId cepat; proses PDF di background). */
+  @Post("orders/batch-packing-start")
+  async batchPackingStart(
+    @Req() req: FastifyRequest,
+    @Body() body: { orderIds: string[]; handoverMethod?: string; pickupSlot?: { startTime: number; endTime: number }; takeouts?: { orderId: string; reason?: string }[] },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.batchPackingStart(uid(req), body?.orderIds ?? [], { handoverMethod: body?.handoverMethod, pickupSlot: body?.pickupSlot, takeouts: body?.takeouts }) };
+  }
+
+  /** Status + hasil (URL PDF resi & packing list) sebuah batch packing. */
+  @Get("batch-packing/:id")
+  async getBatchPacking(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.getBatchPacking(uid(req), id) };
+  }
+
   /** Saldo bisa ditarik per toko, direkonstruksi dari Finance API (Get Withdrawals). */
   @Get("saldo-tiktok")
   async saldoTiktok(
