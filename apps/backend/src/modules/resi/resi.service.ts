@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { and, asc, desc, eq, ilike, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
+import { majukanStatus, type StatusInternal } from "../marketplace-sync/peta-tiktok.js";
 import {
   masterProducts,
   orders,
@@ -85,8 +86,9 @@ const MAX_EXTRA_PAGES = 5;
 const MIN_RESI_LEN = 6;
 const MAX_RESI_LEN = 64;
 
-/** Where a scanned parcel lands in the order pipeline. */
-const SHIPPED: "dikirim" = "dikirim";
+/** Scan packer = paket dikemas & siap dijemput -> "siap_kirim" (Menunggu Dipickup).
+ * "dikirim" hanya saat kurir scan (TikTok IN_TRANSIT) via sinkron order. */
+const PACKED: "siap_kirim" = "siap_kirim";
 
 /** Same shape as a resi: upper case, alphanumerics only. */
 function normaliseCode(v: string | null | undefined): string {
@@ -349,17 +351,20 @@ export class ResiService {
     mapping.confirmed = Boolean((mapping.shopId || mapping.marketplace) && mapping.courier);
 
     let linkedOrder: ScanResult["linkedOrder"] = null;
-    if (match && match.fulfillmentStatus !== SHIPPED) {
-      await this.db
-        .update(orders)
-        .set({ fulfillmentStatus: SHIPPED, updatedAt: new Date() })
-        .where(and(eq(orders.id, match.id), eq(orders.userId, userId)));
-      linkedOrder = {
-        id: match.id,
-        marketplaceOrderId: match.marketplaceOrderId,
-        from: match.fulfillmentStatus,
-        to: SHIPPED,
-      };
+    if (match) {
+      const tujuan = majukanStatus(match.fulfillmentStatus as StatusInternal, PACKED);
+      if (tujuan !== match.fulfillmentStatus) {
+        await this.db
+          .update(orders)
+          .set({ fulfillmentStatus: tujuan, updatedAt: new Date() })
+          .where(and(eq(orders.id, match.id), eq(orders.userId, userId)));
+        linkedOrder = {
+          id: match.id,
+          marketplaceOrderId: match.marketplaceOrderId,
+          from: match.fulfillmentStatus,
+          to: tujuan,
+        };
+      }
     }
 
     // Ask the courier before recording anything. Refusing here rather than
@@ -683,9 +688,10 @@ export class ResiService {
       throw new ConflictException(`Order ini sudah punya resi (${taken.resi}).`);
     }
 
+    const tujuan = majukanStatus(order.fulfillmentStatus as StatusInternal, PACKED);
     await this.db
       .update(orders)
-      .set({ trackingNumber: scan.resi, fulfillmentStatus: SHIPPED, updatedAt: new Date() })
+      .set({ trackingNumber: scan.resi, fulfillmentStatus: tujuan, updatedAt: new Date() })
       .where(and(eq(orders.id, orderId), eq(orders.userId, userId)));
 
     await this.db
@@ -694,7 +700,7 @@ export class ResiService {
       .where(and(eq(resiScans.id, scanId), eq(resiScans.userId, userId)));
 
     this.logger.log(
-      `Resi ${scan.resi} linked to order ${order.marketplaceOrderId} (${order.fulfillmentStatus} -> ${SHIPPED})`,
+      `Resi ${scan.resi} linked to order ${order.marketplaceOrderId} (${order.fulfillmentStatus} -> ${tujuan})`,
     );
 
     return {
@@ -704,7 +710,7 @@ export class ResiService {
         id: order.id,
         marketplaceOrderId: order.marketplaceOrderId,
         from: order.fulfillmentStatus,
-        to: SHIPPED,
+        to: tujuan,
       },
     };
   }
@@ -729,7 +735,7 @@ export class ResiService {
       // Only roll the status back if this scan is what moved it. If someone
       // has since advanced the order to selesai, undoing a link must not drag
       // it backwards.
-      const shouldRestore = scan.previousStatus && order.fulfillmentStatus === SHIPPED;
+      const shouldRestore = scan.previousStatus && order.fulfillmentStatus === PACKED;
       await this.db
         .update(orders)
         .set({
