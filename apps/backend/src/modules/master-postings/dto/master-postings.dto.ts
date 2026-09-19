@@ -46,6 +46,9 @@ export class SetSkuDto {
 
 export class AddMappingDto {
   @IsUUID() shopId!: string;
-  @IsString() @MaxLength(64) productId!: string;
+  /** Wajib untuk mode "update" (listing yang diperbarui); kosong untuk mode "create". */
+  @IsOptional() @IsString() @MaxLength(64) productId?: string;
   @IsOptional() @IsString() @MaxLength(32) marketplace?: string;
+  /** "update" = perbarui listing yang ada; "create" = jadikan posting baru di toko ini. */
+  @IsOptional() @IsString() @MaxLength(20) mode?: string;
 }

@@ -686,7 +686,10 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
               {d.mappings.map((m) => (
                 <div key={m.id} className="flex items-center gap-2 rounded-lg border border-line px-3 py-2">
                   <Badge tone="neutral" icon="store">{m.shopName ?? m.shopId.slice(0, 8)}</Badge>
-                  <span className="text-xs text-ink-2 font-mono">{m.productId}</span>
+                  <Badge tone={m.status === "create" ? "warning" : "info"}>
+                    {m.status === "create" ? "Posting baru" : "Update listing"}
+                  </Badge>
+                  <span className="text-xs text-ink-2 font-mono">{m.productId || "(akan dibuat)"}</span>
                   {m.lastStatus && <Badge tone={STATUS_TONE[m.lastStatus] ?? "neutral"}>{m.lastStatus}</Badge>}
                   {m.lastMessage && <span className="text-[11px] text-ink-3 truncate max-w-[280px]" title={m.lastMessage}>{m.lastMessage}</span>}
                   <button
@@ -713,7 +716,11 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
         title="Terapkan ke semua toko?"
         confirmLabel="Ya, terapkan"
         loading={applying}
-        description={`Ini menulis ke marketplace: nama & deskripsi listing di ${d.mappings.length} toko akan diperbarui mengikuti master ini. Tindakan nyata pada listing yang sedang tayang.`}
+        description={(() => {
+          const upd = d.mappings.filter((m) => m.status !== "create").length;
+          const cre = d.mappings.length - upd;
+          return `Ini menulis ke marketplace: nama & deskripsi diperbarui pada ${upd} listing (mode update) yang sedang tayang — tindakan nyata.${cre ? ` ${cre} toko bermode "posting baru" distage (pembuatan listing baru menyusul, belum difire).` : ""}`;
+        })()}
       />
     </Layout>
   );
@@ -827,6 +834,7 @@ function SkuRowEditor({
 
 function MappingAdder({ postingId, shops, onAdded }: { postingId: string; shops: ShopOpt[]; onAdded: () => Promise<void> }) {
   const [shopId, setShopId] = useState("");
+  const [mode, setMode] = useState<"update" | "create">("update");
   const [products, setProducts] = useState<ShopProduct[]>([]);
   const [productId, setProductId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -834,7 +842,7 @@ function MappingAdder({ postingId, shops, onAdded }: { postingId: string; shops:
   const toast = useToast();
 
   useEffect(() => {
-    if (!shopId) {
+    if (!shopId || mode === "create") {
       setProducts([]);
       setProductId("");
       return;
@@ -845,16 +853,20 @@ function MappingAdder({ postingId, shops, onAdded }: { postingId: string; shops:
       .then(setProducts)
       .catch((e) => toast((e as Error).message || "Gagal memuat produk toko", "danger"))
       .finally(() => setLoading(false));
-  }, [shopId, toast]);
+  }, [shopId, mode, toast]);
 
   async function add() {
-    if (!shopId || !productId) return;
+    if (!shopId) return;
+    if (mode === "update" && !productId) return;
     setBusy(true);
     try {
-      await api.post(`/master-postings/${postingId}/mappings`, { shopId, productId });
+      await api.post(
+        `/master-postings/${postingId}/mappings`,
+        mode === "create" ? { shopId, mode } : { shopId, productId, mode },
+      );
       setProductId("");
       await onAdded();
-      toast("Listing dipetakan", "success");
+      toast(mode === "create" ? "Toko ditandai: posting baru" : "Listing dipetakan (mode update)", "success");
     } catch (e) {
       toast((e as Error).message || "Gagal memetakan", "danger");
     } finally {
@@ -864,7 +876,7 @@ function MappingAdder({ postingId, shops, onAdded }: { postingId: string; shops:
 
   return (
     <div className="flex flex-wrap items-end gap-2">
-      <Field label="Toko" className="min-w-[180px]">
+      <Field label="Toko" className="min-w-[160px]">
         <Select value={shopId} onChange={(e) => setShopId(e.target.value)}>
           <option value="">Pilih toko…</option>
           {shops.map((s) => (
@@ -874,17 +886,25 @@ function MappingAdder({ postingId, shops, onAdded }: { postingId: string; shops:
           ))}
         </Select>
       </Field>
-      <Field label="Listing marketplace" className="min-w-[260px] flex-1">
-        <Select value={productId} onChange={(e) => setProductId(e.target.value)} disabled={!shopId || loading}>
-          <option value="">{loading ? "Memuat…" : "Pilih listing…"}</option>
-          {products.map((p) => (
-            <option key={p.productId} value={p.productId}>
-              {(p.title ?? "(tanpa judul)").slice(0, 70)} · {p.productId}
-            </option>
-          ))}
+      <Field label="Mode" className="min-w-[170px]">
+        <Select value={mode} onChange={(e) => setMode(e.target.value as "update" | "create")}>
+          <option value="update">Update listing yang ada</option>
+          <option value="create">Jadikan posting baru</option>
         </Select>
       </Field>
-      <Button variant="outline" icon="link" loading={busy} disabled={!shopId || !productId} onClick={add}>
+      {mode === "update" && (
+        <Field label="Listing marketplace" className="min-w-[240px] flex-1">
+          <Select value={productId} onChange={(e) => setProductId(e.target.value)} disabled={!shopId || loading}>
+            <option value="">{loading ? "Memuat…" : "Pilih listing…"}</option>
+            {products.map((p) => (
+              <option key={p.productId} value={p.productId}>
+                {(p.title ?? "(tanpa judul)").slice(0, 70)} · {p.productId}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
+      <Button variant="outline" icon="link" loading={busy} disabled={!shopId || (mode === "update" && !productId)} onClick={add}>
         Petakan
       </Button>
     </div>

@@ -439,7 +439,7 @@ export class MasterPostingsService {
     // Peta listing sumber (siap di-Terapkan).
     await this.db
       .insert(masterPostingMappings)
-      .values({ userId, masterPostingId: postingId, shopId, marketplace, productId, status: "mapped" })
+      .values({ userId, masterPostingId: postingId, shopId, marketplace, productId, status: "update" })
       .onConflictDoNothing();
 
     return this.get(userId, postingId);
@@ -532,6 +532,10 @@ export class MasterPostingsService {
       .limit(1);
     if (!shop) throw new BadRequestException("Toko tidak ditemukan untuk pengguna ini");
     const marketplace = dto.marketplace ?? "tiktok";
+    // mode disimpan di kolom status: "create" = posting baru, selain itu = update.
+    const mode = dto.mode === "create" ? "create" : "update";
+    const productId = mode === "create" ? "" : (dto.productId ?? "").trim();
+    if (mode === "update" && !productId) throw new BadRequestException("Pilih listing yang akan diperbarui");
     const [row] = await this.db
       .insert(masterPostingMappings)
       .values({
@@ -539,8 +543,8 @@ export class MasterPostingsService {
         masterPostingId: postingId,
         shopId: dto.shopId,
         marketplace,
-        productId: dto.productId,
-        status: "mapped",
+        productId,
+        status: mode,
       })
       .onConflictDoUpdate({
         target: [
@@ -548,7 +552,7 @@ export class MasterPostingsService {
           masterPostingMappings.shopId,
           masterPostingMappings.productId,
         ],
-        set: { status: "mapped", updatedAt: new Date() },
+        set: { status: mode, updatedAt: new Date() },
       })
       .returning();
     return row;
@@ -613,6 +617,19 @@ export class MasterPostingsService {
     for (const m of mappings) {
       let shop = shopById.get(m.shopId);
       const nama = shop?.shopName ?? null;
+      // Mode "create" (posting baru): pembuatan listing baru butuh unggah gambar
+      // TikTok yang belum terpasang → distage, tidak difire (hindari listing rusak).
+      if (m.status === "create") {
+        const alasan = "Posting baru — pembuatan listing baru belum didukung (butuh unggah gambar TikTok, tahap berikutnya)";
+        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "skipped", reason: alasan });
+        await this.tandaiMapping(m.id, "skipped", alasan);
+        continue;
+      }
+      if (!m.productId) {
+        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "skipped", reason: "listing belum dipilih" });
+        await this.tandaiMapping(m.id, "skipped", "listing belum dipilih");
+        continue;
+      }
       if (!shop || !shop.accessToken || !shop.shopCipher) {
         hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "skipped", reason: "toko tidak tersambung API" });
         await this.tandaiMapping(m.id, "skipped", "toko tidak tersambung API");
