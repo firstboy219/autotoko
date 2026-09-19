@@ -21,7 +21,6 @@ import {
   EmptyState,
   Modal,
   ConfirmModal,
-  InlineAlert,
   useToast,
 } from "../components/ui";
 
@@ -107,7 +106,15 @@ interface ApplyResult {
     pending?: string[];
     reason?: string;
     error?: string;
+    url?: string | null;
+    verifiedTitle?: string | null;
   }[];
+}
+
+function listingUrl(marketplace: string, productId: string | null): string | null {
+  if (!productId) return null;
+  if (marketplace === "tiktok") return `https://shop.tiktok.com/view/product/${productId}`;
+  return null;
 }
 
 const STATUS_TONE: Record<string, "success" | "neutral" | "warning" | "danger" | "info"> = {
@@ -492,26 +499,42 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
       />
 
       {applyResult && (
-        <div className="mb-4">
-          <InlineAlert tone={applyResult.gagal ? "warning" : "success"}>
-            <div className="font-medium">
-              Terapkan: {applyResult.ok} berhasil · {applyResult.gagal} gagal · {applyResult.dilewati} dilewati
+        <Card className="mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-medium text-ink">Bukti Penerapan — cek langsung di tiap toko</div>
+            <div className="text-xs text-ink-2">
+              {applyResult.ok} berhasil · {applyResult.gagal} gagal · {applyResult.dilewati} distage
             </div>
-            {applyResult.catatanGambar && <div className="mt-1 text-xs">{applyResult.catatanGambar}</div>}
-            {applyResult.catatan && <div className="mt-1 text-xs">{applyResult.catatan}</div>}
-            {applyResult.hasil.some((h) => h.status !== "ok") && (
-              <ul className="mt-1 text-xs list-disc pl-4">
-                {applyResult.hasil
-                  .filter((h) => h.status !== "ok")
-                  .map((h, i) => (
-                    <li key={i}>
-                      {h.shop ?? h.productId}: {h.reason ?? h.error}
-                    </li>
-                  ))}
-              </ul>
-            )}
-          </InlineAlert>
-        </div>
+          </div>
+          {applyResult.catatanGambar && <div className="mt-1 text-xs text-ink-3">{applyResult.catatanGambar}</div>}
+          {applyResult.catatan && <div className="mt-1 text-xs text-ink-3">{applyResult.catatan}</div>}
+          <div className="mt-3 divide-y divide-line">
+            {applyResult.hasil.map((h, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-2 py-2">
+                <Badge tone={h.status === "ok" ? "success" : h.status === "failed" ? "danger" : "warning"}>
+                  {h.status === "ok" ? "Diperbarui" : h.status === "failed" ? "Gagal" : "Distage"}
+                </Badge>
+                <span className="text-sm text-ink">{h.shop ?? h.productId}</span>
+                {h.verifiedTitle && (
+                  <span className="text-xs text-ink-2 truncate max-w-[360px]" title={h.verifiedTitle}>
+                    judul kini di TikTok: “{h.verifiedTitle}”
+                  </span>
+                )}
+                {(h.reason || h.error) && <span className="text-xs text-ink-3">{h.reason ?? h.error}</span>}
+                {h.url && (
+                  <a
+                    href={h.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-brand-ink hover:underline"
+                  >
+                    Cek listing <Icon name="externalLink" size={13} />
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -698,6 +721,16 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
                   {m.lastStatus && <Badge tone={STATUS_TONE[m.lastStatus] ?? "neutral"}>{m.lastStatus}</Badge>}
                   {m.lastMessage && <span className="text-[11px] text-ink-3 truncate max-w-[220px]" title={m.lastMessage}>{m.lastMessage}</span>}
                   <div className="ml-auto flex items-center gap-1.5">
+                    {listingUrl(m.marketplace, m.productId) && (
+                      <a
+                        href={listingUrl(m.marketplace, m.productId)!}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-brand-ink hover:underline"
+                      >
+                        Cek <Icon name="externalLink" size={13} />
+                      </a>
+                    )}
                     <Button variant="outline" size="sm" icon="upload" loading={applying} onClick={() => setConfirmTarget(m.id)}>
                       Terapkan
                     </Button>

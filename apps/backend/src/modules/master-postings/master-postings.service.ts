@@ -618,32 +618,35 @@ export class MasterPostingsService {
       pending?: string[];
       reason?: string;
       error?: string;
+      url?: string | null;
+      verifiedTitle?: string | null;
     };
     const hasil: Baris[] = [];
 
     for (const m of mappings) {
       let shop = shopById.get(m.shopId);
       const nama = shop?.shopName ?? null;
+      const url = m.productId ? this.listingUrl(m.marketplace, m.productId) : null;
       // Mode "create" (posting baru): pembuatan listing baru butuh unggah gambar
       // TikTok yang belum terpasang → distage, tidak difire (hindari listing rusak).
       if (m.status === "create") {
         const alasan = "Posting baru — pembuatan listing baru belum didukung (butuh unggah gambar TikTok, tahap berikutnya)";
-        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "skipped", reason: alasan });
+        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "skipped", reason: alasan, url });
         await this.tandaiMapping(m.id, "skipped", alasan);
         continue;
       }
       if (!m.productId) {
-        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "skipped", reason: "listing belum dipilih" });
+        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "skipped", reason: "listing belum dipilih", url });
         await this.tandaiMapping(m.id, "skipped", "listing belum dipilih");
         continue;
       }
       if (!shop || !shop.accessToken || !shop.shopCipher) {
-        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "skipped", reason: "toko tidak tersambung API" });
+        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "skipped", reason: "toko tidak tersambung API", url });
         await this.tandaiMapping(m.id, "skipped", "toko tidak tersambung API");
         continue;
       }
       if (m.marketplace !== "tiktok") {
-        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "skipped", reason: `${m.marketplace} belum didukung` });
+        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "skipped", reason: `${m.marketplace} belum didukung`, url });
         await this.tandaiMapping(m.id, "skipped", `${m.marketplace} belum didukung`);
         continue;
       }
@@ -667,14 +670,26 @@ export class MasterPostingsService {
             throw e;
           }
         }
+        // BUKTI: baca ulang judul listing langsung dari TikTok setelah edit,
+        // supaya seller melihat perubahan benar-benar mendarat (bukan sekadar
+        // "sukses dikirim"). Best-effort — sukses partial_edit sudah dikonfirmasi.
+        let verifiedTitle: string | null = null;
+        try {
+          const fresh = await clientOf(shop).get(`/product/202309/products/${m.productId}`);
+          const t = (fresh as { title?: unknown })?.title;
+          if (typeof t === "string") verifiedTitle = t;
+        } catch {
+          /* abaikan; edit sudah sukses */
+        }
         const applied = ["nama"];
         if (description !== null) applied.push("deskripsi");
         const pending = gambarBelumDidukung ? ["gambar (butuh unggah gambar TikTok)"] : [];
-        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "ok", applied, pending });
-        await this.tandaiMapping(m.id, "ok", `Diterapkan: ${applied.join(", ")}${pending.length ? " · tertunda: " + pending.join(", ") : ""}`);
+        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "ok", applied, pending, url, verifiedTitle });
+        const jejak = `Diterapkan: ${applied.join(", ")}${verifiedTitle ? ` · judul kini: "${verifiedTitle.slice(0, 80)}"` : ""}${url ? " · Cek: " + url : ""}`;
+        await this.tandaiMapping(m.id, "ok", jejak);
       } catch (e) {
         this.logger.warn(`Terapkan master posting ${postingId} → ${m.productId} (${nama}): ${(e as Error).message}`);
-        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "failed", error: (e as Error).message });
+        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "failed", error: (e as Error).message, url });
         await this.tandaiMapping(m.id, "failed", (e as Error).message);
       }
     }
@@ -696,5 +711,12 @@ export class MasterPostingsService {
       .update(masterPostingMappings)
       .set({ lastAppliedAt: new Date(), lastStatus: status, lastMessage: message.slice(0, 500), updatedAt: new Date() })
       .where(eq(masterPostingMappings.id, mappingId));
+  }
+
+  /** Link publik listing marketplace untuk seller cek perubahan (bukti). */
+  private listingUrl(marketplace: string, productId: string): string | null {
+    if (!productId) return null;
+    if (marketplace === "tiktok") return `https://shop.tiktok.com/view/product/${productId}`;
+    return null;
   }
 }
