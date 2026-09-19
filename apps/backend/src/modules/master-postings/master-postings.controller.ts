@@ -43,6 +43,16 @@ export class MasterPostingsController {
     return { success: true, data: await this.svc.create(uid(req), dto) };
   }
 
+
+  /** Impor listing marketplace jadi master posting (prefill otomatis). */
+  @Post("import")
+  async importListing(
+    @Req() req: FastifyRequest,
+    @Body() body: { shopId: string; productId: string },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.importFromListing(uid(req), body.shopId, body.productId) };
+  }
+
   /** Master produk AutoToko untuk dropdown pemetaan SKU. */
   @Get("master-products")
   async masterProducts(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {

@@ -121,6 +121,7 @@ export function MasterPostingan() {
   const [items, setItems] = useState<ListItem[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const toast = useToast();
@@ -171,9 +172,14 @@ export function MasterPostingan() {
         title="Master Postingan"
         subtitle="Template listing yang diikuti semua toko. Ubah master → terapkan sekali ke semua listing marketplace yang termapping."
         actions={
-          <Button variant="filled" icon="plus" onClick={() => setCreating(true)}>
-            Buat Master Postingan
-          </Button>
+          <>
+            <Button variant="outline" icon="download" onClick={() => setImporting(true)}>
+              Impor dari Marketplace
+            </Button>
+            <Button variant="filled" icon="plus" onClick={() => setCreating(true)}>
+              Buat Master Postingan
+            </Button>
+          </>
         }
       />
 
@@ -186,11 +192,16 @@ export function MasterPostingan() {
           <EmptyState
             icon="package"
             title="Belum ada master postingan"
-            description="Buat satu template, susun varian & SKU-nya, petakan ke listing di tiap toko, lalu terapkan sekali untuk semuanya."
+            description="Impor dari listing marketplace yang sudah ada (paling cepat), atau buat manual: susun varian & SKU, petakan ke listing di tiap toko, lalu terapkan sekali untuk semuanya."
             action={
-              <Button variant="filled" icon="plus" onClick={() => setCreating(true)}>
-                Buat Master Postingan
-              </Button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button variant="filled" icon="download" onClick={() => setImporting(true)}>
+                  Impor dari Marketplace
+                </Button>
+                <Button variant="outline" icon="plus" onClick={() => setCreating(true)}>
+                  Buat manual
+                </Button>
+              </div>
             }
           />
         </Card>
@@ -245,7 +256,116 @@ export function MasterPostingan() {
           />
         </Field>
       </Modal>
+
+      <ImportModal
+        open={importing}
+        onClose={() => setImporting(false)}
+        onImported={(newId) => {
+          setImporting(false);
+          void load();
+          setOpenId(newId);
+        }}
+      />
     </Layout>
+  );
+}
+
+function ImportModal({
+  open,
+  onClose,
+  onImported,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onImported: (id: string) => void;
+}) {
+  const [shops, setShops] = useState<ShopOpt[]>([]);
+  const [shopId, setShopId] = useState("");
+  const [products, setProducts] = useState<ShopProduct[]>([]);
+  const [productId, setProductId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => {
+    if (!open) return;
+    api.get<ShopOpt[]>("/marketplace-sync/shops").then(setShops).catch(() => {});
+  }, [open]);
+
+  useEffect(() => {
+    if (!shopId) {
+      setProducts([]);
+      setProductId("");
+      return;
+    }
+    setLoading(true);
+    api
+      .get<ShopProduct[]>(`/master-postings/shop-products?shopId=${shopId}`)
+      .then(setProducts)
+      .catch((e) => toast((e as Error).message || "Gagal memuat produk toko", "danger"))
+      .finally(() => setLoading(false));
+  }, [shopId, toast]);
+
+  async function doImport() {
+    if (!shopId || !productId) return;
+    setBusy(true);
+    try {
+      const d = await api.post<Detail>("/master-postings/import", { shopId, productId });
+      toast("Template dibuat dari listing", "success");
+      setShopId("");
+      setProductId("");
+      onImported(d.id);
+    } catch (e) {
+      toast((e as Error).message || "Gagal mengimpor", "danger");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Impor dari Marketplace"
+      width="max-w-lg"
+      footer={
+        <>
+          <Button variant="text" onClick={onClose}>
+            Batal
+          </Button>
+          <Button variant="filled" icon="download" loading={busy} disabled={!shopId || !productId} onClick={doImport}>
+            Impor jadi Master
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-ink-2">
+          Pilih listing yang sudah ada — sistem mengambil nama, deskripsi, gambar, dan varian/SKU-nya sebagai template induk.
+          SKU yang kodenya cocok dengan master produk AutoToko langsung dipetakan, dan listing ini otomatis jadi salah satu tujuan Terapkan.
+        </p>
+        <Field label="Toko">
+          <Select value={shopId} onChange={(e) => setShopId(e.target.value)}>
+            <option value="">Pilih toko…</option>
+            {shops.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.shopName ?? s.id.slice(0, 8)} ({s.marketplace})
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Listing marketplace">
+          <Select value={productId} onChange={(e) => setProductId(e.target.value)} disabled={!shopId || loading}>
+            <option value="">{loading ? "Memuat…" : "Pilih listing…"}</option>
+            {products.map((p) => (
+              <option key={p.productId} value={p.productId}>
+                {(p.title ?? "(tanpa judul)").slice(0, 70)} · {p.productId}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+    </Modal>
   );
 }
 

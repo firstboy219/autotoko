@@ -7,6 +7,7 @@ import {
   masterPostingMappings,
   masterProducts,
   marketplaceProducts,
+  marketplaceSkus,
   shops,
 } from "../../database/schema/index.js";
 import { CryptoService } from "../../common/crypto/crypto.service.js";
@@ -303,6 +304,201 @@ export class MasterPostingsService {
       .where(eq(masterProducts.userId, userId))
       .orderBy(masterProducts.name);
   }
+
+  // ---------------------------------------------------------------- impor dari listing
+
+  /**
+   * Impor sebuah listing marketplace menjadi master posting (template induk),
+   * agar seller tak perlu mengisi semua field manual di awal.
+   *
+   * Membaca DETAIL produk (read-only ke TikTok; fallback ke baris tersimpan),
+   * lalu prefill: nama, deskripsi, gambar, grup varian, dan SKU (kode seller_sku,
+   * harga, stok). SKU yang seller_sku-nya cocok dengan master produk AutoToko
+   * langsung dipetakan. Listing sumbernya sekalian dipetakan (siap di-Terapkan).
+   * TIDAK menulis apa pun ke marketplace.
+   */
+  async importFromListing(userId: string, shopId: string, productId: string) {
+    const [shop] = await this.db
+      .select()
+      .from(shops)
+      .where(and(eq(shops.id, shopId), eq(shops.userId, userId)))
+      .limit(1);
+    if (!shop) throw new BadRequestException("Toko tidak ditemukan untuk pengguna ini");
+    const marketplace = shop.marketplace ?? "tiktok";
+
+    // Ambil detail produk (READ). TikTok: coba API detail; kalau gagal, pakai raw tersimpan.
+    let raw: Record<string, unknown> | null = null;
+    if (marketplace === "tiktok" && shop.accessToken && shop.shopCipher) {
+      const { appKey, appSecret } = await this.tiktok.credentials();
+      const buat = (sh: typeof shops.$inferSelect) =>
+        new TikTokClient(appKey, appSecret, this.crypto.decrypt(sh.accessToken!), sh.shopCipher);
+      let klien = buat(shop);
+      let segar = false;
+      for (;;) {
+        try {
+          raw = await klien.get(`/product/202309/products/${productId}`);
+          break;
+        } catch (e) {
+          if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) {
+            segar = true;
+            await this.shops.refreshOne(userId, shop.id);
+            const [fresh] = await this.db.select().from(shops).where(eq(shops.id, shop.id)).limit(1);
+            if (fresh) klien = buat(fresh);
+            continue;
+          }
+          this.logger.warn(`Impor detail ${productId}: ${(e as Error).message}`);
+          break;
+        }
+      }
+    }
+    if (!raw) {
+      const [mp] = await this.db
+        .select({ raw: marketplaceProducts.raw, title: marketplaceProducts.title })
+        .from(marketplaceProducts)
+        .where(and(eq(marketplaceProducts.userId, userId), eq(marketplaceProducts.productId, productId)))
+        .limit(1);
+      raw = (mp?.raw as Record<string, unknown>) ?? (mp ? { id: productId, title: mp.title } : null);
+    }
+    if (!raw) throw new NotFoundException("Produk marketplace tidak ditemukan / belum tersinkron");
+
+    const parsed = this.parseListing(raw);
+
+    // Fallback SKU: kalau raw tak memuat skus (mis. hasil search ringkas), pakai marketplace_skus tersimpan.
+    if (!parsed.skus.length) {
+      const rows = await this.db
+        .select()
+        .from(marketplaceSkus)
+        .where(and(eq(marketplaceSkus.userId, userId), eq(marketplaceSkus.productId, productId)));
+      if (rows.length > 1) {
+        const seen = new Set<string>();
+        const values: string[] = [];
+        for (const r of rows) {
+          const label = (r.skuName || r.sellerSku || r.skuId).toString();
+          if (!seen.has(label)) { seen.add(label); values.push(label); }
+        }
+        parsed.groups = [{ name: "Varian", values }];
+        parsed.skus = rows.map((r) => ({
+          combo: { Varian: (r.skuName || r.sellerSku || r.skuId).toString() },
+          sellerSku: r.sellerSku ?? null,
+          price: r.price ?? null,
+          stock: r.stock ?? null,
+        }));
+      } else if (rows.length === 1) {
+        parsed.skus = [{ combo: {}, sellerSku: rows[0]!.sellerSku ?? null, price: rows[0]!.price ?? null, stock: rows[0]!.stock ?? null }];
+      }
+    }
+
+    const [row] = await this.db
+      .insert(masterPostings)
+      .values({
+        userId,
+        name: (parsed.name || "Impor dari marketplace").slice(0, 255),
+        description: parsed.description,
+        categoryId: parsed.categoryId,
+        brand: parsed.brand,
+        images: parsed.images,
+        variantGroups: parsed.groups,
+        attributes: parsed.attributes,
+        autoApply: false,
+        status: "draft",
+      })
+      .returning();
+    const postingId = row!.id;
+
+    // Auto-peta seller_sku -> master produk AutoToko (bila kode cocok).
+    const sellerSkus = [...new Set(parsed.skus.map((x) => x.sellerSku).filter((x): x is string => !!x))];
+    const mastersBySku = new Map<string, string>();
+    if (sellerSkus.length) {
+      const ms = await this.db
+        .select({ id: masterProducts.id, sku: masterProducts.sku })
+        .from(masterProducts)
+        .where(and(eq(masterProducts.userId, userId), inArray(masterProducts.sku, sellerSkus)));
+      for (const m of ms) mastersBySku.set(m.sku, m.id);
+    }
+
+    // Insert SKU dari sumber (dedup by comboKey untuk jaga unique index).
+    const seen = new Set<string>();
+    const skuRows = parsed.skus
+      .map((x) => {
+        const comboKey = parsed.groups.map((g) => x.combo[g.name] ?? "").join("|");
+        return {
+          userId,
+          masterPostingId: postingId,
+          combo: x.combo,
+          comboKey,
+          sku: x.sellerSku ?? null,
+          masterProductId: (x.sellerSku && mastersBySku.get(x.sellerSku)) || null,
+          price: x.price ?? null,
+          stock: x.stock ?? null,
+        };
+      })
+      .filter((r) => (seen.has(r.comboKey) ? false : (seen.add(r.comboKey), true)));
+    if (skuRows.length) await this.db.insert(masterPostingSkus).values(skuRows);
+    else await this.db.insert(masterPostingSkus).values([{ userId, masterPostingId: postingId, combo: {}, comboKey: "" }]);
+
+    // Peta listing sumber (siap di-Terapkan).
+    await this.db
+      .insert(masterPostingMappings)
+      .values({ userId, masterPostingId: postingId, shopId, marketplace, productId, status: "mapped" })
+      .onConflictDoNothing();
+
+    return this.get(userId, postingId);
+  }
+
+  /** Bedah payload produk TikTok menjadi field master posting + varian + SKU. */
+  private parseListing(p: Record<string, any>): {
+    name: string | null;
+    description: string | null;
+    categoryId: number | null;
+    brand: string | null;
+    images: string[];
+    groups: VariantGroup[];
+    attributes: Record<string, unknown>;
+    skus: { combo: Record<string, string>; sellerSku: string | null; price: string | null; stock: number | null }[];
+  } {
+    const name = typeof p.title === "string" ? p.title : null;
+    const description = typeof p.description === "string" ? p.description : null;
+    const images: string[] = [];
+    for (const im of Array.isArray(p.main_images) ? p.main_images : []) {
+      const u = Array.isArray(im?.urls) && im.urls.length ? im.urls[0] : typeof im?.url === "string" ? im.url : null;
+      if (typeof u === "string" && u) images.push(u);
+    }
+    let categoryId: number | null = null;
+    if (typeof p.category_id === "string" || typeof p.category_id === "number") categoryId = Number(p.category_id) || null;
+    else if (Array.isArray(p.category_chains) && p.category_chains.length) {
+      const leaf = p.category_chains[p.category_chains.length - 1];
+      categoryId = Number(leaf?.id) || null;
+    }
+    const brand = typeof p.brand?.name === "string" ? p.brand.name : null;
+
+    const order: string[] = [];
+    const vals = new Map<string, string[]>();
+    const skus: { combo: Record<string, string>; sellerSku: string | null; price: string | null; stock: number | null }[] = [];
+    for (const s of Array.isArray(p.skus) ? p.skus : []) {
+      const combo: Record<string, string> = {};
+      for (const a of Array.isArray(s.sales_attributes) ? s.sales_attributes : []) {
+        const an = typeof a?.name === "string" ? a.name : null;
+        const av = typeof a?.value_name === "string" ? a.value_name : null;
+        if (!an || !av) continue;
+        combo[an] = av;
+        if (!vals.has(an)) { vals.set(an, []); order.push(an); }
+        const arr = vals.get(an)!;
+        if (!arr.includes(av)) arr.push(av);
+      }
+      const price = s.price?.sale_price ?? s.price?.tax_exclusive_price ?? null;
+      const stock = Array.isArray(s.inventory)
+        ? s.inventory.reduce((acc: number, i: any) => acc + (Number(i?.quantity) || 0), 0)
+        : null;
+      skus.push({ combo, sellerSku: s.seller_sku || null, price: price == null ? null : String(price), stock });
+    }
+    const groups: VariantGroup[] = order.map((n) => ({ name: n, values: vals.get(n)! }));
+    const attributes: Record<string, unknown> = {};
+    if (p.package_weight) attributes.package_weight = p.package_weight;
+    if (p.package_dimensions) attributes.package_dimensions = p.package_dimensions;
+    if (p.category_chains) attributes.category_chains = p.category_chains;
+    return { name, description, categoryId, brand, images, groups, attributes, skus };
+  }
+
 
   // ---------------------------------------------------------------- listing mapping
 
