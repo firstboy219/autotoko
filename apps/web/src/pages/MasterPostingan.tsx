@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Layout } from "../components/Layout";
 import { api } from "../lib/api";
 import { Icon } from "../components/Icon";
+import { rupiah } from "../lib/fmt";
+import { RichText } from "../components/RichText";
 import {
   PageHeader,
   Card,
@@ -11,7 +13,6 @@ import {
   Field,
   Input,
   Select,
-  Textarea,
   Table,
   TableWrap,
   THead,
@@ -74,6 +75,10 @@ interface ListItem {
   name: string;
   brand: string | null;
   status: string;
+  images: string[];
+  description: string | null;
+  priceMin: number | null;
+  priceMax: number | null;
   imageCount: number;
   skuCount: number;
   skuMappedCount: number;
@@ -135,15 +140,26 @@ function htmlToText(html: string): string {
     .replace(/&#39;/gi, "'");
   return t.replace(/\n{3,}/g, "\n\n").replace(/[ \t]+\n/g, "\n").trim();
 }
-/** Teks rapi → HTML ringkas untuk disimpan & dikirim ke marketplace. */
-function textToHtml(text: string): string {
-  const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return (text || "")
-    .split(/\n{2,}/)
-    .map((par) => par.trim())
-    .filter(Boolean)
-    .map((par) => `<p>${esc(par).replace(/\n/g, "<br>")}</p>`)
-    .join("");
+function priceLabel(min: number | null, max: number | null): string {
+  if (min == null && max == null) return "Harga belum diisi";
+  if (min != null && max != null && min !== max) return `${rupiah(min)} – ${rupiah(max)}`;
+  return rupiah(min ?? max ?? 0);
+}
+
+function ExpandableDesc({ html }: { html: string }) {
+  const [open, setOpen] = useState(false);
+  const text = htmlToText(html);
+  if (!text) return null;
+  return (
+    <div className="text-[11px] text-ink-2">
+      <div className={open ? "" : "line-clamp-2"}>{text}</div>
+      {text.length > 70 && (
+        <button className="text-brand-ink hover:underline mt-0.5" onClick={() => setOpen((o) => !o)}>
+          {open ? "Tutup" : "Selengkapnya"}
+        </button>
+      )}
+    </div>
+  );
 }
 
 const STATUS_TONE: Record<string, "success" | "neutral" | "warning" | "danger" | "info"> = {
@@ -242,17 +258,44 @@ export function MasterPostingan() {
           />
         </Card>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
           {items.map((it) => (
-            <Card key={it.id} className="cursor-pointer hover:shadow-e2 transition" >
-              <button className="text-left w-full" onClick={() => setOpenId(it.id)}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="font-medium text-ink">{it.name}</div>
-                  <Badge tone={it.status === "active" ? "success" : "warning"}>{it.status}</Badge>
+            <div
+              key={it.id}
+              className="rounded-xl border border-line bg-white overflow-hidden flex flex-col hover:shadow-e2 transition"
+            >
+              <button className="block text-left" onClick={() => setOpenId(it.id)}>
+                <div className="aspect-square bg-canvas relative">
+                  {it.images?.[0] ? (
+                    <img
+                      src={it.images[0]}
+                      alt={it.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-ink-3">
+                      <Icon name="image" size={28} />
+                    </div>
+                  )}
+                  <span className="absolute top-1.5 left-1.5">
+                    <Badge tone={it.status === "active" ? "success" : "warning"}>{it.status}</Badge>
+                  </span>
                 </div>
-                {it.brand && <div className="text-xs text-ink-2 mt-0.5">{it.brand}</div>}
-                <div className="flex flex-wrap gap-1.5 mt-3">
-                  <Badge tone="neutral" icon="image">{it.imageCount} gambar</Badge>
+              </button>
+              <div className="p-2.5 flex flex-col gap-1 flex-1">
+                <button
+                  onClick={() => setOpenId(it.id)}
+                  className="text-left text-sm font-medium text-ink leading-snug line-clamp-2 hover:text-brand-ink"
+                >
+                  {it.name}
+                </button>
+                <div className="text-[15px] font-semibold text-ink">{priceLabel(it.priceMin, it.priceMax)}</div>
+                {it.brand && <div className="text-[11px] text-ink-3 truncate">{it.brand}</div>}
+                {it.description && <ExpandableDesc html={it.description} />}
+                <div className="mt-auto flex flex-wrap gap-1 pt-1.5">
                   <Badge tone="neutral" icon="tag">{it.skuCount} SKU</Badge>
                   <Badge tone={it.skuMappedCount === it.skuCount && it.skuCount > 0 ? "success" : "neutral"}>
                     {it.skuMappedCount}/{it.skuCount} terpeta
@@ -261,8 +304,8 @@ export function MasterPostingan() {
                     {it.mappingCount} toko
                   </Badge>
                 </div>
-              </button>
-            </Card>
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -431,7 +474,7 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
     const detail = await api.get<Detail>(`/master-postings/${id}`);
     setD(detail);
     setName(detail.name);
-    setDescription(htmlToText(detail.description ?? ""));
+    setDescription(detail.description ?? "");
     setBrand(detail.brand ?? "");
     setAutoApply(detail.autoApply);
     setImages(detail.images ?? []);
@@ -449,7 +492,7 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
     try {
       await api.patch(`/master-postings/${id}`, {
         name: name.trim(),
-        description: textToHtml(description),
+        description,
         brand,
         images,
         variantGroups: groups
@@ -607,17 +650,21 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
             <Field label="Nama postingan / produk" required>
               <Input value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
-            <Field label="Deskripsi" hint="Teks biasa — baris baru & paragraf dipertahankan. Kode HTML dari marketplace sudah dirapikan otomatis.">
-              <Textarea rows={6} value={description} onChange={(e) => setDescription(e.target.value)} />
-              {description.trim() && (
-                <div className="mt-2 rounded-lg border border-line bg-canvas px-3 py-2">
-                  <div className="text-[10px] uppercase tracking-wide text-ink-3 mb-1">Pratinjau</div>
-                  <div
-                    className="text-sm text-ink-2 [&_p]:mb-1.5 last:[&_p]:mb-0"
-                    dangerouslySetInnerHTML={{ __html: textToHtml(description) }}
-                  />
+            <Field label="Deskripsi" hint="Format dengan toolbar; tampilannya sama seperti di halaman produk marketplace.">
+              <RichText value={description} onChange={setDescription} placeholder="Tulis deskripsi produk…" />
+              <div className="mt-3">
+                <div className="text-[10px] uppercase tracking-wide text-ink-3 mb-1">Pratinjau (tampilan pembeli)</div>
+                <div className="rounded-lg border border-line bg-white p-3">
+                  {description.trim() ? (
+                    <div
+                      className="text-sm text-ink leading-relaxed [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:mb-2"
+                      dangerouslySetInnerHTML={{ __html: description }}
+                    />
+                  ) : (
+                    <div className="text-sm text-ink-3">—</div>
+                  )}
                 </div>
-              )}
+              </div>
             </Field>
             <Field label="Brand / merek">
               <Input value={brand} onChange={(e) => setBrand(e.target.value)} />
@@ -780,7 +827,8 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
           ) : (
             <div className="space-y-2">
               {d.mappings.map((m) => (
-                <div key={m.id} className="flex items-center gap-2 rounded-lg border border-line px-3 py-2">
+                <div key={m.id} className="rounded-lg border border-line px-3 py-2">
+                  <div className="flex items-center gap-2">
                   <Badge tone="neutral" icon="store">{m.shopName ?? m.shopId.slice(0, 8)}</Badge>
                   <Badge tone={m.status === "create" ? "warning" : "info"}>
                     {m.status === "create" ? "Posting baru" : "Update listing"}
@@ -814,6 +862,10 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
                       <Icon name="trash" size={15} />
                     </button>
                   </div>
+                  </div>
+                  {m.status !== "create" && m.productId && (
+                    <MappingPromos shopId={m.shopId} productId={m.productId} />
+                  )}
                 </div>
               ))}
             </div>
@@ -947,6 +999,78 @@ function SkuRowEditor({
         </Button>
       </TD>
     </TR>
+  );
+}
+
+interface Promo {
+  activityId: string;
+  title: string;
+  type: string | null;
+  status: string | null;
+  beginTime: number | null;
+  endTime: number | null;
+  discount: string | null;
+}
+
+function MappingPromos({ shopId, productId }: { shopId: string; productId: string }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [promos, setPromos] = useState<Promo[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function toggle() {
+    setOpen((o) => !o);
+    if (loaded || loading) return;
+    setLoading(true);
+    try {
+      const d = await api.get<{ promotions: Promo[]; error?: string }>(
+        `/master-postings/promotions?shopId=${shopId}&productId=${productId}`,
+      );
+      setPromos(d.promotions || []);
+      if (d.error) setErr(d.error);
+      setLoaded(true);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const fmt = (s: number | null) =>
+    s ? new Date(s * 1000).toLocaleDateString("id-ID", { day: "2-digit", month: "short" }) : "";
+
+  return (
+    <div className="mt-1.5 border-t border-line pt-1.5">
+      <button onClick={toggle} className="inline-flex items-center gap-1 text-xs text-brand-ink hover:underline">
+        <Icon name="tag" size={13} /> Promosi terkait{loaded ? ` (${promos.length})` : ""}
+        <Icon name="chevronDown" size={12} className={open ? "rotate-180" : ""} />
+      </button>
+      {open && (
+        <div className="mt-1.5">
+          {loading && <div className="text-xs text-ink-3">Memuat promosi dari TikTok…</div>}
+          {err && <div className="text-xs text-red-600">{err}</div>}
+          {loaded && !err && promos.length === 0 && (
+            <div className="text-xs text-ink-3">Tidak ada promosi yang mengikutkan produk ini.</div>
+          )}
+          <div className="space-y-1">
+            {promos.map((p) => (
+              <div key={p.activityId} className="flex flex-wrap items-center gap-1.5 text-xs">
+                <Badge tone="info">{p.type ?? "promo"}</Badge>
+                <span className="text-ink">{p.title}</span>
+                {p.status && <span className="text-ink-3">· {p.status}</span>}
+                {(p.beginTime || p.endTime) && (
+                  <span className="text-ink-3">
+                    · {fmt(p.beginTime)}–{fmt(p.endTime)}
+                  </span>
+                )}
+                {p.discount && <span className="text-ink-2">· diskon {p.discount}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

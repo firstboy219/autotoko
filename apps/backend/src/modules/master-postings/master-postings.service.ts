@@ -13,6 +13,7 @@ import {
 import { CryptoService } from "../../common/crypto/crypto.service.js";
 import { TikTokAdapter } from "../../marketplace/adapters/tiktok.adapter.js";
 import { ShopsService } from "../shops/shops.service.js";
+import { MarketplaceSyncService } from "../marketplace-sync/marketplace-sync.service.js";
 import { TikTokApiError, TikTokClient } from "../marketplace-sync/tiktok-client.js";
 import type {
   AddMappingDto,
@@ -41,6 +42,7 @@ export class MasterPostingsService {
     private readonly crypto: CryptoService,
     private readonly tiktok: TikTokAdapter,
     private readonly shops: ShopsService,
+    private readonly sync: MarketplaceSyncService,
   ) {}
 
   // ---------------------------------------------------------------- varian → SKU
@@ -158,7 +160,7 @@ export class MasterPostingsService {
     if (!rows.length) return [];
     const ids = rows.map((r) => r.id);
     const skus = await this.db
-      .select({ postingId: masterPostingSkus.masterPostingId, mapped: masterPostingSkus.masterProductId })
+      .select({ postingId: masterPostingSkus.masterPostingId, mapped: masterPostingSkus.masterProductId, price: masterPostingSkus.price })
       .from(masterPostingSkus)
       .where(inArray(masterPostingSkus.masterPostingId, ids));
     const maps = await this.db
@@ -167,9 +169,16 @@ export class MasterPostingsService {
       .where(inArray(masterPostingMappings.masterPostingId, ids));
     const skuCount = new Map<string, number>();
     const mappedCount = new Map<string, number>();
+    const priceMin = new Map<string, number>();
+    const priceMax = new Map<string, number>();
     for (const s of skus) {
       skuCount.set(s.postingId, (skuCount.get(s.postingId) ?? 0) + 1);
       if (s.mapped) mappedCount.set(s.postingId, (mappedCount.get(s.postingId) ?? 0) + 1);
+      const p = s.price == null ? null : Number(s.price);
+      if (p != null && !Number.isNaN(p)) {
+        priceMin.set(s.postingId, Math.min(priceMin.get(s.postingId) ?? Infinity, p));
+        priceMax.set(s.postingId, Math.max(priceMax.get(s.postingId) ?? -Infinity, p));
+      }
     }
     const mapCount = new Map<string, number>();
     for (const m of maps) mapCount.set(m.postingId, (mapCount.get(m.postingId) ?? 0) + 1);
@@ -179,6 +188,8 @@ export class MasterPostingsService {
       skuCount: skuCount.get(r.id) ?? 0,
       skuMappedCount: mappedCount.get(r.id) ?? 0,
       mappingCount: mapCount.get(r.id) ?? 0,
+      priceMin: priceMin.has(r.id) ? priceMin.get(r.id)! : null,
+      priceMax: priceMax.has(r.id) ? priceMax.get(r.id)! : null,
     }));
   }
 
@@ -303,6 +314,17 @@ export class MasterPostingsService {
       .from(masterProducts)
       .where(eq(masterProducts.userId, userId))
       .orderBy(masterProducts.name);
+  }
+
+  /** Promosi marketplace yang terkait sebuah listing termapping (read-only). */
+  async productPromotions(userId: string, shopId: string, productId: string) {
+    const [shop] = await this.db
+      .select({ id: shops.id })
+      .from(shops)
+      .where(and(eq(shops.id, shopId), eq(shops.userId, userId)))
+      .limit(1);
+    if (!shop) throw new NotFoundException("Toko tidak ditemukan");
+    return this.sync.promotionsForProduct(userId, shopId, productId);
   }
 
   // ---------------------------------------------------------------- impor dari listing

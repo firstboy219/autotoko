@@ -1790,6 +1790,55 @@ export class MarketplaceSyncService {
     const t = await this.tokoTikTok(userId, shopId);
     return this.panggilTikTok(t, (c) => c.promoGetActivity(activityId));
   }
+
+  /**
+   * Promosi/aktivitas yang mengikutkan sebuah produk (untuk halaman produk).
+   * Arah TikTok hanya activity->produk, jadi kita list aktivitas toko lalu
+   * cek detail tiap aktivitas apakah productId ikut. Dibatasi 30 aktivitas.
+   */
+  async promotionsForProduct(userId: string, shopId: string, productId: string) {
+    const t = await this.tokoTikTok(userId, shopId);
+    if (t.marketplace !== "tiktok") return { productId, shopId, total: 0, promotions: [], note: `${t.marketplace} belum didukung` };
+    let resp: any;
+    try {
+      resp = await this.panggilTikTok(t, (c) => c.promoSearchActivities({ page_size: 50 }));
+    } catch (e) {
+      return { productId, shopId, total: 0, promotions: [], error: (e as Error).message };
+    }
+    const acts = ((resp as any)?.activities ?? (resp as any)?.activity_list ?? []) as any[];
+    const promos: any[] = [];
+    for (const a of acts.slice(0, 30)) {
+      const aid = a?.id ?? a?.activity_id;
+      if (!aid) continue;
+      let detail: any;
+      try {
+        detail = await this.panggilTikTok(t, (c) => c.promoGetActivity(String(aid)));
+      } catch {
+        continue;
+      }
+      const prods = ((detail?.product_list ?? detail?.products ?? []) as any[]);
+      const match = prods.find((p) => String(p?.id ?? p?.product_id) === String(productId));
+      if (!match) continue;
+      let discount: string | null = null;
+      const disc = match.discount ?? match.activity_price_amount ?? null;
+      if (disc != null) discount = String(disc);
+      else if (Array.isArray(match.skus) && match.skus[0]) {
+        const s0 = match.skus[0];
+        const d = s0.discount ?? s0.activity_price?.amount ?? s0.deal_price ?? null;
+        if (d != null) discount = String(d);
+      }
+      promos.push({
+        activityId: String(aid),
+        title: a?.title ?? detail?.title ?? "(tanpa judul)",
+        type: a?.activity_type ?? detail?.activity_type ?? null,
+        status: a?.status ?? detail?.status ?? null,
+        beginTime: a?.begin_time ?? detail?.begin_time ?? null,
+        endTime: a?.end_time ?? detail?.end_time ?? null,
+        discount,
+      });
+    }
+    return { productId, shopId, total: promos.length, promotions: promos };
+  }
   async promoAddProducts(userId: string, shopId: string, activityId: string, products: Array<Record<string, unknown>>) {
     const t = await this.tokoTikTok(userId, shopId);
     return this.panggilTikTok(t, (c) => c.promoUpdateProducts(activityId, products));
