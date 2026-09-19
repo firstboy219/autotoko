@@ -59,6 +59,16 @@ export class MasterPostingsController {
     return { success: true, data: await this.svc.masterProductOptions(uid(req)) };
   }
 
+  /** Baca detail listing LIVE (verifikasi/diagnosa perubahan). */
+  @Get("live-listing")
+  async liveListing(
+    @Req() req: FastifyRequest,
+    @Query("shopId") shopId: string,
+    @Query("productId") productId: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.liveListing(uid(req), shopId, productId) };
+  }
+
   /** Produk marketplace sebuah toko (untuk memilih listing yang dipetakan). */
   @Get("shop-products")
   async shopProducts(

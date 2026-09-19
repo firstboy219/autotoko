@@ -619,7 +619,9 @@ export class MasterPostingsService {
       reason?: string;
       error?: string;
       url?: string | null;
+      sellerUrl?: string | null;
       verifiedTitle?: string | null;
+      verifiedDescription?: string | null;
     };
     const hasil: Baris[] = [];
 
@@ -674,18 +676,23 @@ export class MasterPostingsService {
         // supaya seller melihat perubahan benar-benar mendarat (bukan sekadar
         // "sukses dikirim"). Best-effort — sukses partial_edit sudah dikonfirmasi.
         let verifiedTitle: string | null = null;
+        let verifiedDescription: string | null = null;
         try {
           const fresh = await clientOf(shop).get(`/product/202309/products/${m.productId}`);
-          const t = (fresh as { title?: unknown })?.title;
+          const t = (fresh as { title?: unknown; description?: unknown })?.title;
+          const de = (fresh as { description?: unknown })?.description;
           if (typeof t === "string") verifiedTitle = t;
+          if (typeof de === "string")
+            verifiedDescription = de.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
         } catch {
           /* abaikan; edit sudah sukses */
         }
+        const sellerUrl = this.sellerCenterUrl(m.marketplace, shop?.sellerRegion ?? null);
         const applied = ["nama"];
         if (description !== null) applied.push("deskripsi");
         const pending = gambarBelumDidukung ? ["gambar (butuh unggah gambar TikTok)"] : [];
-        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "ok", applied, pending, url, verifiedTitle });
-        const jejak = `Diterapkan: ${applied.join(", ")}${verifiedTitle ? ` · judul kini: "${verifiedTitle.slice(0, 80)}"` : ""}${url ? " · Cek: " + url : ""}`;
+        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "ok", applied, pending, url, sellerUrl, verifiedTitle, verifiedDescription });
+        const jejak = `Diterapkan: ${applied.join(", ")}${verifiedTitle ? ` · judul kini: "${verifiedTitle.slice(0, 80)}"` : ""}`;
         await this.tandaiMapping(m.id, "ok", jejak);
       } catch (e) {
         this.logger.warn(`Terapkan master posting ${postingId} → ${m.productId} (${nama}): ${(e as Error).message}`);
@@ -713,10 +720,66 @@ export class MasterPostingsService {
       .where(eq(masterPostingMappings.id, mappingId));
   }
 
+  /** Baca detail listing LIVE dari marketplace (untuk verifikasi/diagnosa). */
+  async liveListing(userId: string, shopId: string, productId: string) {
+    const [shop] = await this.db
+      .select()
+      .from(shops)
+      .where(and(eq(shops.id, shopId), eq(shops.userId, userId)))
+      .limit(1);
+    if (!shop) throw new NotFoundException("Toko tidak ditemukan");
+    if (!shop.accessToken || !shop.shopCipher) throw new BadRequestException("Toko tidak tersambung API");
+    const { appKey, appSecret } = await this.tiktok.credentials();
+    const buat = (sh: typeof shops.$inferSelect) =>
+      new TikTokClient(appKey, appSecret, this.crypto.decrypt(sh.accessToken!), sh.shopCipher);
+    let klien = buat(shop);
+    let segar = false;
+    let raw: Record<string, any> | null = null;
+    for (;;) {
+      try {
+        raw = await klien.get(`/product/202309/products/${productId}`);
+        break;
+      } catch (e) {
+        if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) {
+          segar = true;
+          await this.shops.refreshOne(userId, shop.id);
+          const [f] = await this.db.select().from(shops).where(eq(shops.id, shop.id)).limit(1);
+          if (f) klien = buat(f);
+          continue;
+        }
+        throw e;
+      }
+    }
+    const p = raw || {};
+    return {
+      productId,
+      keys: Object.keys(p),
+      title: p.title ?? null,
+      description: typeof p.description === "string" ? p.description.slice(0, 400) : null,
+      status: p.status ?? null,
+      audit: p.audit ?? null,
+      auditStatus: p.audit_status ?? null,
+      listingQuality: p.listing_quality_tier ?? null,
+      updateTime: p.update_time ?? null,
+      createTime: p.create_time ?? null,
+      isDraft: p.is_draft ?? null,
+      hasDraft: p.has_draft ?? null,
+      productStatus: p.product_status ?? null,
+      mainImages: Array.isArray(p.main_images) ? p.main_images.length : null,
+    };
+  }
+
   /** Link publik listing marketplace untuk seller cek perubahan (bukti). */
   private listingUrl(marketplace: string, productId: string): string | null {
     if (!productId) return null;
     if (marketplace === "tiktok") return `https://shop.tiktok.com/view/product/${productId}`;
     return null;
+  }
+
+  /** Link TikTok Seller Center (kondisi sebenarnya, tak kena cache etalase). */
+  private sellerCenterUrl(marketplace: string, region: string | null): string | null {
+    if (marketplace !== "tiktok") return null;
+    const r = (region || "id").toLowerCase();
+    return `https://seller-${r}.tiktok.com/product/manage`;
   }
 }

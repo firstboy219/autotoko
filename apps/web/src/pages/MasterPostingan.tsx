@@ -107,7 +107,9 @@ interface ApplyResult {
     reason?: string;
     error?: string;
     url?: string | null;
+    sellerUrl?: string | null;
     verifiedTitle?: string | null;
+    verifiedDescription?: string | null;
   }[];
 }
 
@@ -115,6 +117,33 @@ function listingUrl(marketplace: string, productId: string | null): string | nul
   if (!productId) return null;
   if (marketplace === "tiktok") return `https://shop.tiktok.com/view/product/${productId}`;
   return null;
+}
+
+/** HTML deskripsi marketplace → teks rapi untuk diedit (tanpa tampak kode <>). */
+function htmlToText(html: string): string {
+  if (!html) return "";
+  const t = html
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\/\s*(p|div|li|h[1-6])\s*>/gi, "\n")
+    .replace(/<\s*li[^>]*>/gi, "• ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+  return t.replace(/\n{3,}/g, "\n\n").replace(/[ \t]+\n/g, "\n").trim();
+}
+/** Teks rapi → HTML ringkas untuk disimpan & dikirim ke marketplace. */
+function textToHtml(text: string): string {
+  const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return (text || "")
+    .split(/\n{2,}/)
+    .map((par) => par.trim())
+    .filter(Boolean)
+    .map((par) => `<p>${esc(par).replace(/\n/g, "<br>")}</p>`)
+    .join("");
 }
 
 const STATUS_TONE: Record<string, "success" | "neutral" | "warning" | "danger" | "info"> = {
@@ -391,6 +420,7 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
   const [autoApply, setAutoApply] = useState(false);
   const [images, setImages] = useState<string[]>([]);
   const [newImage, setNewImage] = useState("");
+  const [editIndex, setEditIndex] = useState<number | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -401,7 +431,7 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
     const detail = await api.get<Detail>(`/master-postings/${id}`);
     setD(detail);
     setName(detail.name);
-    setDescription(detail.description ?? "");
+    setDescription(htmlToText(detail.description ?? ""));
     setBrand(detail.brand ?? "");
     setAutoApply(detail.autoApply);
     setImages(detail.images ?? []);
@@ -419,7 +449,7 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
     try {
       await api.patch(`/master-postings/${id}`, {
         name: name.trim(),
-        description,
+        description: textToHtml(description),
         brand,
         images,
         variantGroups: groups
@@ -434,6 +464,15 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  function addOrUpdateImage() {
+    const u = newImage.trim();
+    if (!u) return;
+    if (editIndex === null) setImages((a) => [...a, u]);
+    else setImages((a) => a.map((x, j) => (j === editIndex ? u : x)));
+    setNewImage("");
+    setEditIndex(null);
   }
 
   async function doApply() {
@@ -510,29 +549,52 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
           {applyResult.catatan && <div className="mt-1 text-xs text-ink-3">{applyResult.catatan}</div>}
           <div className="mt-3 divide-y divide-line">
             {applyResult.hasil.map((h, i) => (
-              <div key={i} className="flex flex-wrap items-center gap-2 py-2">
-                <Badge tone={h.status === "ok" ? "success" : h.status === "failed" ? "danger" : "warning"}>
-                  {h.status === "ok" ? "Diperbarui" : h.status === "failed" ? "Gagal" : "Distage"}
-                </Badge>
-                <span className="text-sm text-ink">{h.shop ?? h.productId}</span>
+              <div key={i} className="py-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone={h.status === "ok" ? "success" : h.status === "failed" ? "danger" : "warning"}>
+                    {h.status === "ok" ? "Diperbarui" : h.status === "failed" ? "Gagal" : "Distage"}
+                  </Badge>
+                  <span className="text-sm text-ink">{h.shop ?? h.productId}</span>
+                  {h.sellerUrl && (
+                    <a
+                      href={h.sellerUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-brand-ink hover:underline"
+                    >
+                      Cek di Seller Center <Icon name="externalLink" size={13} />
+                    </a>
+                  )}
+                  {h.url && (
+                    <a
+                      href={h.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={`inline-flex items-center gap-1 text-xs text-ink-3 hover:underline ${h.sellerUrl ? "" : "ml-auto"}`}
+                      title="Etalase publik — bisa tertunda karena cache TikTok"
+                    >
+                      Etalase <Icon name="externalLink" size={12} />
+                    </a>
+                  )}
+                </div>
                 {h.verifiedTitle && (
-                  <span className="text-xs text-ink-2 truncate max-w-[360px]" title={h.verifiedTitle}>
-                    judul kini di TikTok: “{h.verifiedTitle}”
-                  </span>
+                  <div className="text-xs text-ink-2 mt-1">
+                    judul kini di TikTok: <span className="text-ink">“{h.verifiedTitle}”</span>
+                  </div>
                 )}
-                {(h.reason || h.error) && <span className="text-xs text-ink-3">{h.reason ?? h.error}</span>}
-                {h.url && (
-                  <a
-                    href={h.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-brand-ink hover:underline"
-                  >
-                    Cek listing <Icon name="externalLink" size={13} />
-                  </a>
+                {h.verifiedDescription && (
+                  <div className="text-xs text-ink-3 mt-0.5 truncate" title={h.verifiedDescription}>
+                    deskripsi kini: {h.verifiedDescription}…
+                  </div>
                 )}
+                {(h.reason || h.error) && <div className="text-xs text-ink-3 mt-1">{h.reason ?? h.error}</div>}
               </div>
             ))}
+          </div>
+          <div className="mt-2 text-[11px] text-ink-3">
+            Judul &amp; deskripsi di atas dibaca langsung dari TikTok setelah update = kondisi sebenarnya. Etalase publik
+            (storefront) bisa perlu beberapa menit menyegarkan karena cache TikTok — buka <b>Seller Center</b> untuk
+            melihat perubahan seketika.
           </div>
         </Card>
       )}
@@ -545,8 +607,17 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
             <Field label="Nama postingan / produk" required>
               <Input value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
-            <Field label="Deskripsi">
-              <Textarea rows={5} value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Field label="Deskripsi" hint="Teks biasa — baris baru & paragraf dipertahankan. Kode HTML dari marketplace sudah dirapikan otomatis.">
+              <Textarea rows={6} value={description} onChange={(e) => setDescription(e.target.value)} />
+              {description.trim() && (
+                <div className="mt-2 rounded-lg border border-line bg-canvas px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wide text-ink-3 mb-1">Pratinjau</div>
+                  <div
+                    className="text-sm text-ink-2 [&_p]:mb-1.5 last:[&_p]:mb-0"
+                    dangerouslySetInnerHTML={{ __html: textToHtml(description) }}
+                  />
+                </div>
+              )}
             </Field>
             <Field label="Brand / merek">
               <Input value={brand} onChange={(e) => setBrand(e.target.value)} />
@@ -561,63 +632,60 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
         {/* Gambar */}
         <Card>
           <div className="text-sm font-medium text-ink mb-3">Daftar Gambar</div>
-          <div className="space-y-2">
-            {images.length === 0 && <div className="text-xs text-ink-3">Belum ada gambar. Tempel URL gambar di bawah.</div>}
+          {images.length === 0 && (
+            <div className="text-xs text-ink-3 mb-2">Belum ada gambar. Tambah lewat URL di bawah.</div>
+          )}
+          <div className="flex flex-wrap gap-2">
             {images.map((url, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <span className="text-xs text-ink-3 w-5">{i + 1}.</span>
-                <div className="flex-1 truncate text-xs text-ink-2" title={url}>
-                  {url}
+              <div key={i} className="relative w-20 h-20 rounded-lg border border-line overflow-hidden bg-canvas group">
+                <img
+                  src={url}
+                  alt={`gambar ${i + 1}`}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = "none";
+                  }}
+                />
+                <span className="absolute top-0.5 left-0.5 text-[10px] leading-none bg-white/85 text-ink rounded px-1 py-0.5">
+                  {i + 1}
+                </span>
+                <div className="absolute inset-x-0 bottom-0 flex justify-center gap-0.5 bg-white/90 py-0.5 opacity-0 group-hover:opacity-100 transition">
+                  <button className="p-0.5 text-ink-2 hover:text-ink disabled:opacity-30" disabled={i === 0} title="Geser kiri" onClick={() => setImages((a) => swap(a, i, i - 1))}>
+                    <Icon name="arrowLeft" size={13} />
+                  </button>
+                  <button className="p-0.5 text-ink-2 hover:text-ink disabled:opacity-30" disabled={i === images.length - 1} title="Geser kanan" onClick={() => setImages((a) => swap(a, i, i + 1))}>
+                    <Icon name="arrowRight" size={13} />
+                  </button>
+                  <button className="p-0.5 text-ink-2 hover:text-ink" title="Ganti URL" onClick={() => { setEditIndex(i); setNewImage(url); }}>
+                    <Icon name="pencil" size={13} />
+                  </button>
+                  <button className="p-0.5 text-red-500 hover:text-red-600" title="Hapus" onClick={() => { setImages((a) => a.filter((_, j) => j !== i)); if (editIndex === i) { setEditIndex(null); setNewImage(""); } }}>
+                    <Icon name="trash" size={13} />
+                  </button>
                 </div>
-                <button
-                  className="text-ink-3 hover:text-ink disabled:opacity-30"
-                  disabled={i === 0}
-                  onClick={() => setImages((a) => swap(a, i, i - 1))}
-                  title="Naik"
-                >
-                  <Icon name="chevronDown" size={15} className="rotate-180" />
-                </button>
-                <button
-                  className="text-ink-3 hover:text-ink disabled:opacity-30"
-                  disabled={i === images.length - 1}
-                  onClick={() => setImages((a) => swap(a, i, i + 1))}
-                  title="Turun"
-                >
-                  <Icon name="chevronDown" size={15} />
-                </button>
-                <button className="text-red-500 hover:text-red-600" onClick={() => setImages((a) => a.filter((_, j) => j !== i))} title="Hapus">
-                  <Icon name="trash" size={15} />
-                </button>
               </div>
             ))}
-            <div className="flex gap-2 pt-1">
-              <Input
-                value={newImage}
-                onChange={(e) => setNewImage(e.target.value)}
-                placeholder="https://…/gambar.jpg"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && newImage.trim()) {
-                    setImages((a) => [...a, newImage.trim()]);
-                    setNewImage("");
-                  }
-                }}
-              />
-              <Button
-                variant="outline"
-                icon="plus"
-                onClick={() => {
-                  if (newImage.trim()) {
-                    setImages((a) => [...a, newImage.trim()]);
-                    setNewImage("");
-                  }
-                }}
-              >
-                Tambah
+          </div>
+          <div className="flex gap-2 pt-2">
+            <Input
+              value={newImage}
+              onChange={(e) => setNewImage(e.target.value)}
+              placeholder={editIndex === null ? "https://…/gambar.jpg" : `Ganti URL gambar ke-${editIndex + 1}`}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addOrUpdateImage();
+              }}
+            />
+            <Button variant="outline" icon={editIndex === null ? "plus" : "check"} onClick={addOrUpdateImage}>
+              {editIndex === null ? "Tambah" : "Simpan"}
+            </Button>
+            {editIndex !== null && (
+              <Button variant="text" onClick={() => { setEditIndex(null); setNewImage(""); }}>
+                Batal
               </Button>
-            </div>
-            <div className="text-[11px] text-ink-3">
-              Propagasi gambar ke marketplace menunggu endpoint unggah gambar TikTok (tahap berikutnya). Nama & deskripsi sudah diterapkan sekarang.
-            </div>
+            )}
+          </div>
+          <div className="text-[11px] text-ink-3 mt-2">
+            Kelola gambar di sini (tambah/ganti/hapus/urutkan). Propagasi daftar gambar ke marketplace menunggu unggah gambar TikTok (tahap berikutnya); nama &amp; deskripsi sudah diterapkan saat Terapkan.
           </div>
         </Card>
       </div>
@@ -726,9 +794,10 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
                         href={listingUrl(m.marketplace, m.productId)!}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-brand-ink hover:underline"
+                        className="inline-flex items-center gap-1 text-xs text-ink-3 hover:underline"
+                        title="Etalase publik — bisa tertunda karena cache TikTok"
                       >
-                        Cek <Icon name="externalLink" size={13} />
+                        Etalase <Icon name="externalLink" size={13} />
                       </a>
                     )}
                     <Button variant="outline" size="sm" icon="upload" loading={applying} onClick={() => setConfirmTarget(m.id)}>
