@@ -121,4 +121,14 @@ export class MasterPostingsController {
   async apply(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.svc.apply(uid(req), id) };
   }
+
+  /** Terapkan SATU toko sesuai modenya di tabel (update = perbarui; create = distage). */
+  @Post(":id/mappings/:mappingId/apply")
+  async applyOne(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Param("mappingId") mappingId: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.apply(uid(req), id, mappingId) };
+  }
 }

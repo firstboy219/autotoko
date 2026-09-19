@@ -387,7 +387,7 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [confirmApply, setConfirmApply] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<null | "all" | string>(null);
   const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
 
   const refetch = useCallback(async () => {
@@ -407,7 +407,7 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
     void api.get<ShopOpt[]>("/marketplace-sync/shops").then(setShops).catch(() => {});
   }, [refetch, toast]);
 
-  async function saveInfo(alsoApply: boolean) {
+  async function saveInfo() {
     setSaving(true);
     try {
       await api.patch(`/master-postings/${id}`, {
@@ -422,7 +422,6 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
       });
       await refetch();
       toast("Master postingan tersimpan", "success");
-      if (alsoApply) await doApply();
     } catch (e) {
       toast((e as Error).message || "Gagal menyimpan", "danger");
     } finally {
@@ -431,13 +430,19 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
   }
 
   async function doApply() {
+    const target = confirmTarget;
+    if (!target) return;
     setApplying(true);
-    setConfirmApply(false);
+    setConfirmTarget(null);
     try {
-      const r = await api.post<ApplyResult>(`/master-postings/${id}/apply`, {});
+      const url =
+        target === "all"
+          ? `/master-postings/${id}/apply`
+          : `/master-postings/${id}/mappings/${target}/apply`;
+      const r = await api.post<ApplyResult>(url, {});
       setApplyResult(r);
       await refetch();
-      toast(`Terapkan selesai: ${r.ok} berhasil, ${r.gagal} gagal, ${r.dilewati} dilewati`, r.gagal ? "warning" : "success");
+      toast(`Terapkan: ${r.ok} berhasil · ${r.gagal} gagal · ${r.dilewati} dilewati`, r.gagal ? "warning" : "success");
     } catch (e) {
       toast((e as Error).message || "Gagal menerapkan", "danger");
     } finally {
@@ -470,17 +475,17 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
         }
         actions={
           <>
-            <Button variant="outline" loading={saving} onClick={() => saveInfo(false)}>
+            <Button variant="outline" loading={saving} onClick={() => saveInfo()}>
               Simpan
             </Button>
             <Button
               variant="filled"
               icon="upload"
               loading={applying}
-              onClick={() => setConfirmApply(true)}
+              onClick={() => setConfirmTarget("all")}
               disabled={d.mappings.length === 0}
             >
-              Terapkan ke semua toko
+              Jalankan Semua Baris
             </Button>
           </>
         }
@@ -674,8 +679,8 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
       {/* Mapping ke toko */}
       <Card className="mt-4" padded={false}>
         <CardHeader
-          title="Listing Marketplace Termapping"
-          subtitle="Listing di tiap toko yang akan mengikuti master ini saat Terapkan."
+          title="Listing per Toko (instruksi penerapan)"
+          subtitle='Tiap baris punya modenya sendiri: "Update listing" memperbarui listing yang tayang; "Posting baru" distage. Terapkan per toko lewat tombol di barisnya, atau semua sekaligus lewat "Jalankan Semua Baris".'
         />
         <div className="p-5 space-y-3">
           <MappingAdder postingId={id} shops={shops} onAdded={refetch} />
@@ -691,17 +696,22 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
                   </Badge>
                   <span className="text-xs text-ink-2 font-mono">{m.productId || "(akan dibuat)"}</span>
                   {m.lastStatus && <Badge tone={STATUS_TONE[m.lastStatus] ?? "neutral"}>{m.lastStatus}</Badge>}
-                  {m.lastMessage && <span className="text-[11px] text-ink-3 truncate max-w-[280px]" title={m.lastMessage}>{m.lastMessage}</span>}
-                  <button
-                    className="text-red-500 hover:text-red-600 ml-auto"
-                    onClick={async () => {
-                      await api.del(`/master-postings/${id}/mappings/${m.id}`);
-                      await refetch();
-                    }}
-                    title="Lepas"
-                  >
-                    <Icon name="trash" size={15} />
-                  </button>
+                  {m.lastMessage && <span className="text-[11px] text-ink-3 truncate max-w-[220px]" title={m.lastMessage}>{m.lastMessage}</span>}
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <Button variant="outline" size="sm" icon="upload" loading={applying} onClick={() => setConfirmTarget(m.id)}>
+                      Terapkan
+                    </Button>
+                    <button
+                      className="text-red-500 hover:text-red-600"
+                      onClick={async () => {
+                        await api.del(`/master-postings/${id}/mappings/${m.id}`);
+                        await refetch();
+                      }}
+                      title="Lepas"
+                    >
+                      <Icon name="trash" size={15} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -710,16 +720,22 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
       </Card>
 
       <ConfirmModal
-        open={confirmApply}
-        onClose={() => setConfirmApply(false)}
+        open={confirmTarget !== null}
+        onClose={() => setConfirmTarget(null)}
         onConfirm={doApply}
-        title="Terapkan ke semua toko?"
+        title={confirmTarget === "all" ? "Jalankan semua baris di tabel?" : "Terapkan ke toko ini?"}
         confirmLabel="Ya, terapkan"
         loading={applying}
         description={(() => {
-          const upd = d.mappings.filter((m) => m.status !== "create").length;
-          const cre = d.mappings.length - upd;
-          return `Ini menulis ke marketplace: nama & deskripsi diperbarui pada ${upd} listing (mode update) yang sedang tayang — tindakan nyata.${cre ? ` ${cre} toko bermode "posting baru" distage (pembuatan listing baru menyusul, belum difire).` : ""}`;
+          if (confirmTarget === "all") {
+            const upd = d.mappings.filter((m) => m.status !== "create").length;
+            const cre = d.mappings.length - upd;
+            return `Menjalankan tiap baris sesuai modenya: ${upd} toko "update" → nama & deskripsi listing yang tayang diperbarui (tindakan nyata di marketplace)${cre ? `; ${cre} toko "posting baru" distage (belum difire).` : "."}`;
+          }
+          const m = d.mappings.find((x) => x.id === confirmTarget);
+          if (m && m.status === "create")
+            return `Toko ${m.shopName ?? "ini"} bermode "posting baru" — akan distage; pembuatan listing baru belum difire (menunggu unggah gambar TikTok).`;
+          return `Nama & deskripsi listing di ${m?.shopName ?? "toko ini"} akan diperbarui mengikuti master. Tindakan nyata pada listing yang sedang tayang.`;
         })()}
       />
     </Layout>

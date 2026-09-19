@@ -582,14 +582,21 @@ export class MasterPostingsService {
    * Gambar & atribut disiapkan tetapi butuh endpoint unggah gambar TikTok yang
    * belum terpasang → dilaporkan "belum didukung" per-mapping, tidak gagal diam.
    */
-  async apply(userId: string, postingId: string) {
+  async apply(userId: string, postingId: string, mappingId?: string) {
     const posting = await this.requirePosting(userId, postingId);
-    const mappings = await this.db
-      .select()
-      .from(masterPostingMappings)
-      .where(and(eq(masterPostingMappings.userId, userId), eq(masterPostingMappings.masterPostingId, postingId)));
+    const kond = [eq(masterPostingMappings.userId, userId), eq(masterPostingMappings.masterPostingId, postingId)];
+    if (mappingId) kond.push(eq(masterPostingMappings.id, mappingId));
+    const mappings = await this.db.select().from(masterPostingMappings).where(and(...kond));
     if (!mappings.length) {
-      return { postingId, total: 0, ok: 0, gagal: 0, dilewati: 0, hasil: [], catatan: "Belum ada listing termapping." };
+      return {
+        postingId,
+        total: 0,
+        ok: 0,
+        gagal: 0,
+        dilewati: 0,
+        hasil: [],
+        catatan: mappingId ? "Mapping tidak ditemukan." : "Belum ada listing termapping.",
+      };
     }
     const title = (posting.name ?? "").trim().slice(0, 255);
     const description = posting.description ?? null;
