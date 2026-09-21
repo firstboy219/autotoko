@@ -213,21 +213,39 @@ public class OrdersActivity extends AppCompatActivity {
 
         // Pencarian
         search = new EditText(this);
-        search.setHint("Cari nomor pesanan / pembeli…");
+        search.setHint("Cari resi / nomor pesanan / pembeli…");
         search.setSingleLine(true);
         search.setTextSize(14);
         search.setBackground(pill(getColor(R.color.surface), getColor(R.color.line)));
         search.setPadding(dp(14), dp(12), dp(14), dp(12));
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        sp.setMargins(dp(12), dp(12), dp(12), dp(8));
-        search.setLayoutParams(sp);
         search.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int c, int n) {}
             public void onTextChanged(CharSequence s, int a, int c, int n) {}
             public void afterTextChanged(Editable e) { q = e.toString().trim().toLowerCase(Locale.ROOT); render(); }
         });
-        rootCol.addView(search);
+        // Baris pencarian + tombol Batch (Daftar Batch) di kanan, samping kolom cari.
+        LinearLayout searchRow = new LinearLayout(this);
+        searchRow.setOrientation(LinearLayout.HORIZONTAL);
+        searchRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams srp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        srp.setMargins(dp(12), dp(12), dp(12), dp(8));
+        searchRow.setLayoutParams(srp);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        searchRow.addView(search, slp);
+        MaterialButton batchBtn = new MaterialButton(this, null,
+                com.google.android.material.R.attr.materialButtonOutlinedStyle);
+        batchBtn.setText("Batch");
+        batchBtn.setAllCaps(false);
+        batchBtn.setTextSize(13);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.setMargins(dp(8), 0, 0, 0);
+        batchBtn.setLayoutParams(blp);
+        batchBtn.setOnClickListener(v -> showBatches());
+        searchRow.addView(batchBtn);
+        rootCol.addView(searchRow);
 
         // Kartu ringkas (poin 2): kirim hari ini / urgent / aging terlama & terbaru.
         HorizontalScrollView statsWrap = new HorizontalScrollView(this);
@@ -381,7 +399,7 @@ public class OrdersActivity extends AppCompatActivity {
             if (o == null) continue;
             if (!filter.isEmpty() && !filter.equals(o.optString("fulfillmentStatus"))) continue;
             if (!q.isEmpty()) {
-                String hay = (o.optString("marketplaceOrderId") + " " + o.optString("buyerName")).toLowerCase(Locale.ROOT);
+                String hay = (o.optString("marketplaceOrderId") + " " + o.optString("buyerName") + " " + o.optString("trackingNumber")).toLowerCase(Locale.ROOT);
                 if (!hay.contains(q)) continue;
             }
             list.addView(card(o));
