@@ -17,8 +17,6 @@ export const NAV: NavItem[] = [
   { to: "/master-postingan", label: "Master Postingan", icon: "tag" },
   { to: "/katalog", label: "Kesehatan Katalog", icon: "activity" },
   { to: "/orders", label: "Orders", icon: "cart" },
-  { to: "/kesehatan-pesanan", label: "Kesehatan Pesanan", icon: "activity" },
-  { to: "/retur", label: "Retur & Refund", icon: "cart" },
   { to: "/produksi-packing", label: "Produksi & Packing", icon: "package" },
   { to: "/autopilot", label: "Autopilot", icon: "bot" },
   { to: "/chat", label: "Chat Pelanggan", icon: "users" },
@@ -34,7 +32,6 @@ export const NAV: NavItem[] = [
   { to: "/laporan-bagian", label: "Laporan Bagian", icon: "trending" },
   { to: "/pending", label: "Data Belum Lengkap", icon: "warning" },
   { to: "/aplikasi", label: "Versi Aplikasi", icon: "download" },
-  { to: "/rekonsiliasi", label: "Rekonsiliasi", icon: "activity" },
   { to: "/audit-pesanan", label: "Audit Pesanan", icon: "warning" },
   { to: "/karyawan", label: "Akun Karyawan", icon: "users" },
 ];
@@ -55,8 +52,6 @@ const NAV_PERM: Record<string, string> = {
   "/master-postingan": "produk",
   "/katalog": "produk",
   "/orders": "order",
-  "/kesehatan-pesanan": "order",
-  "/retur": "order",
   "/chat": "order",
   "/produksi-packing": "scan",
   "/request-stok": "bom",
@@ -70,7 +65,6 @@ const NAV_PERM: Record<string, string> = {
   "/wallet": "wallet",
   "/pencairan": "pencairan",
   "/laporan-bagian": "pencairan",
-  "/rekonsiliasi": "pencairan",
   "/audit-pesanan": "pencairan",
   "/pending": "dashboard",
   "/aplikasi": "scan",
@@ -177,7 +171,7 @@ function NotifBell() {
  */
 const DEFAULT_SECTIONS: { id: string; label: string; paths: string[] }[] = [
   { id: "kendali", label: "Pusat Kendali", paths: ["/", "/autopilot"] },
-  { id: "pesanan", label: "Penjualan & Pesanan", paths: ["/orders", "/kesehatan-pesanan", "/retur", "/produksi-packing", "/rekonsiliasi", "/audit-pesanan"] },
+  { id: "pesanan", label: "Penjualan & Pesanan", paths: ["/orders", "/produksi-packing", "/audit-pesanan"] },
   { id: "produk", label: "Produk & Katalog", paths: ["/produk", "/master-postingan", "/katalog", "/hpp", "/toko"] },
   { id: "gudang", label: "Gudang & Stok", paths: ["/bom", "/pembelian", "/request-stok"] },
   { id: "keuangan", label: "Keuangan", paths: ["/pencairan", "/laporan-bagian", "/wallet", "/laporan"] },

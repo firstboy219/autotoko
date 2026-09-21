@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SectionTabs } from "../components/SectionTabs";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import {
@@ -125,6 +126,7 @@ export function KesehatanPesanan() {
 
   return (
     <Layout title="Kesehatan Pesanan">
+      <SectionTabs tabs={[{ to: "/audit-pesanan", label: "Audit Pesanan" }, { to: "/kesehatan-pesanan", label: "Kesehatan Pesanan" }]} />
       <p className="text-sm text-ink-2 mb-4 max-w-2xl">
         Satu tempat untuk melihat di mana dua sumber data — API marketplace &amp; scan manual gudang —
         belum cocok. Halaman ini hanya membaca; tidak mengubah pesanan apa pun.

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
+import { SectionTabs } from "../components/SectionTabs";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
@@ -215,6 +216,7 @@ export default function AuditPesanan() {
 
   return (
     <Layout title="Audit Pesanan">
+      <SectionTabs tabs={[{ to: "/audit-pesanan", label: "Audit Pesanan" }, { to: "/kesehatan-pesanan", label: "Kesehatan Pesanan" }]} />
       <PageHeader
         title="Audit Pesanan"
         subtitle="Yang sudah diserahkan ke kurir, lawan yang sudah dibayar marketplace."

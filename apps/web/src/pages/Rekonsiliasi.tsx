@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SectionTabs } from "../components/SectionTabs";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { api } from "../lib/api";
@@ -152,6 +153,7 @@ export default function Rekonsiliasi() {
 
   return (
     <Layout title="Rekonsiliasi">
+      <SectionTabs tabs={[{ to: "/pencairan", label: "Pencairan" }, { to: "/rekonsiliasi", label: "Rekonsiliasi" }]} />
       <PageHeader
         title="Rekonsiliasi Manual vs Marketplace"
         subtitle="Adu catatan yang direkam sendiri dengan laporan resmi marketplace."

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { SectionTabs } from "../components/SectionTabs";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { useRealtime } from "../lib/realtime";
@@ -357,6 +358,7 @@ export function Orders() {
 
   return (
     <Layout title="Orders">
+      <SectionTabs tabs={[{ to: "/orders", label: "Pesanan" }, { to: "/retur", label: "Retur & Refund" }]} />
       <PageHeader
         title="Orders"
         subtitle="Pantau dan proses pesanan dari semua marketplace."

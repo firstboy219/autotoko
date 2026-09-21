@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
+import { SectionTabs } from "../components/SectionTabs";
 import { Link, useNavigate } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
@@ -337,6 +338,7 @@ export function Pencairan() {
 
   return (
     <Layout title="Pencairan Dana">
+      <SectionTabs tabs={[{ to: "/pencairan", label: "Pencairan" }, { to: "/rekonsiliasi", label: "Rekonsiliasi" }]} />
       <PageHeader
         title="Pencairan Dana"
         subtitle="Rekam pencairan tiap toko, lalu distribusikan ke sedekah dan sub-seller."

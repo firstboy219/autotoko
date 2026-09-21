@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SectionTabs } from "../components/SectionTabs";
 import { Layout } from "../components/Layout";
 import { api } from "../lib/api";
 import {
@@ -65,6 +66,7 @@ export function Retur() {
 
   return (
     <Layout title="Retur & Refund">
+      <SectionTabs tabs={[{ to: "/orders", label: "Pesanan" }, { to: "/retur", label: "Retur & Refund" }]} />
       <div className="flex items-center justify-between gap-2 mb-3">
         <p className="text-sm text-ink-2 max-w-2xl">
           Daftar permintaan retur/refund dari marketplace. Setujui/tolak akan menyusul sebagai aksi manual
