@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SectionTabs } from "../components/SectionTabs";
 import { Layout } from "../components/Layout";
 import { FileUpload } from "../components/FileUpload";
 import { PurchaseEditor } from "../components/PurchaseEditor";
@@ -173,6 +174,7 @@ export function Pembelian() {
 
   return (
     <Layout title="Pembelian Stok">
+      <SectionTabs tabs={[{ to: "/bom", label: "Bahan Baku" }, { to: "/pembelian", label: "Rekam pembelian" }, { to: "/request-stok", label: "Minta ke pemasok" }]} />
       <PageHeader
         title="Pembelian Stok Bahan Baku"
         subtitle="Unggah screenshot order, periksa hasil bacanya, lalu simpan — stok dan harga rata-rata ikut diperbarui."

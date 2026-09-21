@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { SectionTabs } from "../components/SectionTabs";
 import { Layout } from "../components/Layout";
 import { FileUpload } from "../components/FileUpload";
 import { api } from "../lib/api";
@@ -250,6 +251,7 @@ export function RequestStok() {
 
   return (
     <Layout title="Request Pembelian Stok">
+      <SectionTabs tabs={[{ to: "/bom", label: "Bahan Baku" }, { to: "/pembelian", label: "Rekam pembelian" }, { to: "/request-stok", label: "Minta ke pemasok" }]} />
       <PageHeader
         title="Request Pembelian Stok"
         subtitle="Unggah tangkapan layar marketplace, petakan ke master bahan baku, lalu kirim ke pemasok lewat WhatsApp. Pembayaran transfer (non-COD)."

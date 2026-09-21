@@ -1,4 +1,5 @@
 import { Layout } from "../components/Layout";
+import { SectionTabs } from "../components/SectionTabs";
 import { MaterialsCatalogCard } from "../components/MaterialsCatalog";
 import { InlineAlert } from "../components/ui";
 
@@ -19,6 +20,7 @@ import { InlineAlert } from "../components/ui";
 export function Bom() {
   return (
     <Layout title="BOM / Bahan Baku">
+      <SectionTabs tabs={[{ to: "/bom", label: "Bahan Baku" }, { to: "/pembelian", label: "Rekam pembelian" }, { to: "/request-stok", label: "Minta ke pemasok" }]} />
       <MaterialsCatalogCard />
 
       <InlineAlert tone="info">

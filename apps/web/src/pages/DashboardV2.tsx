@@ -753,7 +753,7 @@ export default function DashboardV2() {
             {/* ── siapa yang menopang ─────────────────────────────────── */}
             <div className="mt-3 grid gap-3 lg:grid-cols-2">
               <Card padded={false}>
-                <CardHeader title="Kontribusi tiap toko" subtitle="Uang yang cair pada periode ini" />
+                <CardHeader title="Kontribusi tiap toko" subtitle="Uang yang cair pada periode ini" action={<Link to="/laporan-bagian" className="text-xs text-brand-ink hover:underline whitespace-nowrap">Laba & komisi per bagian →</Link>} />
                 <Batang
                   baris={data.toko.map((s) => ({
                     id: s.id,
