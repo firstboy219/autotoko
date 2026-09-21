@@ -16,6 +16,7 @@ public final class Session {
     private static final String K_REMIND = "remind_stock";
     private static final String K_REMIND_HOUR = "remind_stock_hour";
     private static final String K_ACCOUNTS = "accounts";
+    private static final String K_LOGIN_AT = "login_at";
 
     public static final String DEFAULT_BASE = "https://viewtoko.cosger.online";
 
@@ -29,11 +30,18 @@ public final class Session {
     public String token() { return p.getString(K_TOKEN, null); }
     public String email() { return p.getString(K_EMAIL, ""); }
 
+    /** Kapan sesi ini mulai (epoch ms). Lazy-init untuk sesi lama. */
+    public long loginAt() {
+        long t = p.getLong(K_LOGIN_AT, 0L);
+        if (t == 0L) { t = System.currentTimeMillis(); p.edit().putLong(K_LOGIN_AT, t).apply(); }
+        return t;
+    }
+
     /** Free-text so a warehouse can tell "Meja 1" from "Meja 2" in the history. */
     public String device() { return p.getString(K_DEVICE, android.os.Build.MODEL); }
 
     public void save(String baseUrl, String token, String email) {
-        p.edit().putString(K_BASE, baseUrl).putString(K_TOKEN, token).putString(K_EMAIL, email).apply();
+        p.edit().putString(K_BASE, baseUrl).putString(K_TOKEN, token).putString(K_EMAIL, email).putLong(K_LOGIN_AT, System.currentTimeMillis()).apply();
         upsertAccount(baseUrl, token, email);
     }
 

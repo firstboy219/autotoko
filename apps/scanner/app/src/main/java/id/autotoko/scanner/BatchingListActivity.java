@@ -186,6 +186,7 @@ public class BatchingListActivity extends AppCompatActivity {
         }
 
         if (!resiUrl.isEmpty()) root.addView(tombol("Unduh Resi", true, v -> bukaUrl(session.baseUrl() + resiUrl)));
+        if (!resiUrl.isEmpty()) root.addView(tombol("Print Resi", false, v -> printPdf(session.baseUrl() + resiUrl, "Resi")));
         if (!packUrl.isEmpty()) root.addView(tombol("Unduh Packing List", false, v -> bukaUrl(session.baseUrl() + packUrl)));
         if (resiUrl.isEmpty() && packUrl.isEmpty() && !"error".equals(st)) {
             TextView t = new TextView(this);
@@ -335,6 +336,59 @@ public class BatchingListActivity extends AppCompatActivity {
     private void bukaUrl(String url) {
         try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); }
         catch (Exception e) { Toast.makeText(this, "Tidak bisa membuka PDF.", Toast.LENGTH_SHORT).show(); }
+    }
+
+    /** Cetak PDF resi lewat kerangka cetak Android (unduh dulu ke cache lalu print). */
+    private void printPdf(String url, String jobName) {
+        Toast.makeText(this, "Menyiapkan cetak…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            java.io.File out;
+            try {
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                c.setConnectTimeout(15000); c.setReadTimeout(30000); c.connect();
+                java.io.InputStream in = c.getInputStream();
+                out = new java.io.File(getCacheDir(), "print-" + System.currentTimeMillis() + ".pdf");
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(out);
+                byte[] buf = new byte[16384]; int n;
+                while ((n = in.read(buf)) > 0) fos.write(buf, 0, n);
+                fos.close(); in.close(); c.disconnect();
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(this, "Gagal mengambil PDF untuk cetak.", Toast.LENGTH_SHORT).show());
+                return;
+            }
+            final java.io.File file = out;
+            runOnUiThread(() -> {
+                try {
+                    android.print.PrintManager pm = (android.print.PrintManager) getSystemService(PRINT_SERVICE);
+                    pm.print(jobName, new PdfPrintAdapter(file, jobName), null);
+                } catch (Exception e) {
+                    Toast.makeText(this, "Cetak tidak didukung di perangkat ini.", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }).start();
+    }
+
+    private static class PdfPrintAdapter extends android.print.PrintDocumentAdapter {
+        private final java.io.File file; private final String name;
+        PdfPrintAdapter(java.io.File f, String n) { file = f; name = n; }
+        @Override public void onLayout(android.print.PrintAttributes oldA, android.print.PrintAttributes newA,
+                android.os.CancellationSignal cancel, LayoutResultCallback cb, android.os.Bundle extras) {
+            if (cancel != null && cancel.isCanceled()) { cb.onLayoutCancelled(); return; }
+            android.print.PrintDocumentInfo info = new android.print.PrintDocumentInfo.Builder(name + ".pdf")
+                    .setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).build();
+            cb.onLayoutFinished(info, true);
+        }
+        @Override public void onWrite(android.print.PageRange[] pages, android.os.ParcelFileDescriptor dest,
+                android.os.CancellationSignal cancel, WriteResultCallback cb) {
+            try (java.io.InputStream in = new java.io.FileInputStream(file);
+                 java.io.OutputStream out = new java.io.FileOutputStream(dest.getFileDescriptor())) {
+                byte[] buf = new byte[16384]; int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                cb.onWriteFinished(new android.print.PageRange[]{android.print.PageRange.ALL_PAGES});
+            } catch (Exception e) {
+                cb.onWriteFailed(e.getMessage());
+            }
+        }
     }
 
     private int dp(int v) { return (int) (v * d); }

@@ -268,6 +268,19 @@ public class ScanActivity extends AppCompatActivity {
     private volatile int frameHeight = 0;
     private volatile boolean analysing = false;
     private volatile boolean busy = false;
+    private static final long WATCHDOG_MS = 30000;
+    /** Pengaman: bila satu paket macet (dialog gagal tampil / balasan server tak
+     *  datang), scanner tak boleh terkunci selamanya — auto pulih ke Siap. */
+    private final Runnable watchdog = () -> {
+        if (!busy) return;
+        showBanner(false, "", "Scan tersendat — siap lagi. Silakan scan ulang.");
+        idle();
+    };
+    /** Multi-upload: pilih beberapa foto resi dari galeri untuk discan (task galeri). */
+    private final androidx.activity.result.ActivityResultLauncher<String> pilihGaleri =
+            registerForActivityResult(
+                    new androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents(),
+                    this::scanFromGallery);
     /** Latest reading, 0-100. Written on the camera thread, read on main. */
     private volatile int clarity = 0;
     private volatile long clarityAt = 0;
@@ -835,6 +848,7 @@ public class ScanActivity extends AppCompatActivity {
      */
     private void focusThenCapture(String resi, String raw, String format) {
         busy = true;
+        armWatchdog();
         status.setText(resi);
         status.setTextColor(Color.parseColor("#1B1D1F"));
         detail.setVisibility(View.GONE);
@@ -1615,6 +1629,7 @@ public class ScanActivity extends AppCompatActivity {
     /** The sheet shown when the phone will not guess on its own. */
     private void ask(String resi, String raw, String format, String photoBase64,
                      List<Candidate> candidates) {
+        armWatchdog(180000);
         float d = getResources().getDisplayMetrics().density;
         int pad = (int) (16 * d);
 
@@ -2081,6 +2096,7 @@ public class ScanActivity extends AppCompatActivity {
     private void submit(String resi, String raw, String format, String photoBase64,
                         JSONObject reading) {
         hint.setText("Menyimpan...");
+        armWatchdog();
         api.scan(resi, raw, "barcode", format, photoBase64, reading, r -> {
             // NOT released here.
             //
@@ -2593,7 +2609,7 @@ public class ScanActivity extends AppCompatActivity {
 
         TextView account = sheet.findViewById(R.id.menuAccount);
         String who = session.email();
-        account.setText(who == null || who.isEmpty() ? "Keluar dari aplikasi" : who);
+        account.setText((who == null || who.isEmpty() ? "Keluar dari aplikasi" : who) + "  ·  sesi " + durasiSesi());
         account.setOnClickListener(v -> { dialog.dismiss(); AccountSwitcher.show(this, session); });
 
         sheet.findViewById(R.id.menuPesanan).setOnClickListener(v -> {
@@ -2615,6 +2631,10 @@ public class ScanActivity extends AppCompatActivity {
         sheet.findViewById(R.id.menuTextScan).setOnClickListener(v -> {
             dialog.dismiss();
             startActivity(new Intent(this, TextScanActivity.class));
+        });
+        sheet.findViewById(R.id.menuGaleri).setOnClickListener(v -> {
+            dialog.dismiss();
+            pilihGaleri.launch("image/*");
         });
         sheet.findViewById(R.id.menuHistory).setOnClickListener(v -> {
             dialog.dismiss();
@@ -2725,9 +2745,79 @@ public class ScanActivity extends AppCompatActivity {
         dialog.show();
     }
 
+    private void armWatchdog() { armWatchdog(WATCHDOG_MS); }
+    private void armWatchdog(long ms) { main.removeCallbacks(watchdog); main.postDelayed(watchdog, ms); }
+
+    /* ─────────────────────────── Scan dari Galeri (multi upload) ─────────────────────────── */
+    private void scanFromGallery(java.util.List<android.net.Uri> uris) {
+        if (uris == null || uris.isEmpty()) return;
+        Toast.makeText(this, "Memproses " + uris.size() + " gambar…", Toast.LENGTH_SHORT).show();
+        prosesGaleri(uris, 0, new int[]{0}, new int[]{0});
+    }
+    private void prosesGaleri(java.util.List<android.net.Uri> uris, int i, int[] ok, int[] gagal) {
+        if (i >= uris.size()) {
+            String msg = "Selesai. " + ok[0] + " resi tersimpan, " + gagal[0] + " gagal dibaca.";
+            hint.setText(msg);
+            new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Scan dari Galeri").setMessage(msg)
+                    .setPositiveButton("OK", null).show();
+            refreshCounter();
+            return;
+        }
+        hint.setText("Galeri: gambar " + (i + 1) + "/" + uris.size() + "…");
+        final android.graphics.Bitmap bmp = decodeUri(uris.get(i));
+        if (bmp == null) { gagal[0]++; prosesGaleri(uris, i + 1, ok, gagal); return; }
+        scanner.process(InputImage.fromBitmap(bmp, 0))
+                .addOnSuccessListener(codes -> {
+                    String resi = resiDariBarcodes(codes);
+                    if (resi == null) { bmp.recycle(); gagal[0]++; prosesGaleri(uris, i + 1, ok, gagal); return; }
+                    String b64 = bmpKeBase64(bmp); bmp.recycle();
+                    api.scan(resi, resi, "upload", "gallery", b64, new JSONObject(), r -> {
+                        boolean sukses = r != null && r.ok();
+                        boolean dup = r != null && r.code == 409;
+                        if (sukses || dup) ok[0]++; else gagal[0]++;
+                        prosesGaleri(uris, i + 1, ok, gagal);
+                    });
+                })
+                .addOnFailureListener(e -> { bmp.recycle(); gagal[0]++; prosesGaleri(uris, i + 1, ok, gagal); });
+    }
+    private String resiDariBarcodes(java.util.List<Barcode> codes) {
+        if (codes == null) return null;
+        for (Barcode c : codes) {
+            String raw = c.getRawValue();
+            if (raw == null) continue;
+            String resi = ResiExtractor.normalize(raw);
+            if (resi.length() < 8 || resi.length() > 32) continue;
+            if (bentukNomorPesanan(resi)) continue;
+            return resi;
+        }
+        return null;
+    }
+    private android.graphics.Bitmap decodeUri(android.net.Uri uri) {
+        try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+            android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+            o.inSampleSize = 2;
+            return android.graphics.BitmapFactory.decodeStream(in, null, o);
+        } catch (Exception e) { return null; }
+    }
+    private String bmpKeBase64(android.graphics.Bitmap bmp) {
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, baos);
+        return android.util.Base64.encodeToString(baos.toByteArray(), android.util.Base64.NO_WRAP);
+    }
+    /** Durasi sesi berjalan, untuk ditampilkan di menu (task waktu session). */
+    private String durasiSesi() {
+        long ms = System.currentTimeMillis() - session.loginAt();
+        if (ms < 0) ms = 0;
+        long m = ms / 60000, h = m / 60;
+        m = m % 60;
+        return h > 0 ? (h + "j " + m + "m") : (m + "m");
+    }
+
     private void idle() {
         // The single place a parcel is let go of. Every path ends here, which
         // is what makes it safe for busy to be released only here.
+        main.removeCallbacks(watchdog);
         busy = false;
         // Jam menganggur dimulai di sini: sesudah beberapa detik tanpa
         // barcode, tulisannya ikut dibaca.

@@ -174,27 +174,11 @@ export class PayoutBatchService {
       );
     }
 
+    // Validasi "bukti/nominal sama tidak boleh dipakai dua kali" DIHILANGKAN atas
+    // permintaan: fee admin batch boleh diunggah dengan nominal/bukti yang sama.
+    // Hash tetap dihitung & disimpan untuk jejak audit. Validasi OCR sub-seller
+    // (disbursements.service.uploadProof) TIDAK diubah.
     const hash = await this.uploads.hashOfUrl(proofUrl);
-    if (hash) {
-      const bentrok = await this.db
-        .select({ id: payoutBatches.id, code: payoutBatches.code })
-        .from(payoutBatches)
-        .where(
-          and(
-            eq(payoutBatches.userId, userId),
-            eq(payoutBatches.adminFeeProofHash, hash),
-          ),
-        );
-      const lain = bentrok.filter((r) => r.id !== id);
-      if (lain.length) {
-        throw new ConflictException({
-          code: "DUPLICATE_FEE_PROOF",
-          message:
-            `Bukti ini sudah dipakai untuk fee batch #${lain[0]!.code ?? ""}. ` +
-            "Satu bukti hanya untuk satu batch — unggah bukti transfer batch ini.",
-        });
-      }
-    }
 
     const [row] = await this.db
       .update(payoutBatches)

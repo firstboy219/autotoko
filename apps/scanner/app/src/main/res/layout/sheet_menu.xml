@@ -92,6 +92,18 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/menuGaleri"
+        style="@style/SheetRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <TextView style="@style/Text.Body" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Scan dari Galeri (banyak)" />
+        <TextView style="@style/Text.Caption" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Pilih beberapa foto resi sekaligus untuk discan otomatis" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/menuHistory"
         style="@style/SheetRow"
         android:layout_width="match_parent"
