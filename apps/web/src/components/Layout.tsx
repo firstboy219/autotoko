@@ -12,12 +12,10 @@ import { NavSettingsModal, type NavItem, type NavPrefs } from "./NavSettings";
 
 export const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: "dashboard", end: true },
-  { to: "/dashboard-ringkas", label: "Dashboard Ringkas", icon: "activity" },
   { to: "/toko", label: "Toko Saya", icon: "store" },
   { to: "/produk", label: "Master Produk", icon: "package" },
   { to: "/master-postingan", label: "Master Postingan", icon: "tag" },
   { to: "/katalog", label: "Kesehatan Katalog", icon: "activity" },
-  { to: "/stok-omnichannel", label: "Stok Omnichannel", icon: "package" },
   { to: "/orders", label: "Orders", icon: "cart" },
   { to: "/kesehatan-pesanan", label: "Kesehatan Pesanan", icon: "activity" },
   { to: "/retur", label: "Retur & Refund", icon: "cart" },
@@ -34,7 +32,6 @@ export const NAV: NavItem[] = [
   { to: "/wallet", label: "Wallet", icon: "wallet" },
   { to: "/pencairan", label: "Pencairan Dana", icon: "banknote" },
   { to: "/laporan-bagian", label: "Laporan Bagian", icon: "trending" },
-  { to: "/notifikasi", label: "Notifikasi", icon: "bell" },
   { to: "/pending", label: "Data Belum Lengkap", icon: "warning" },
   { to: "/aplikasi", label: "Versi Aplikasi", icon: "download" },
   { to: "/rekonsiliasi", label: "Rekonsiliasi", icon: "activity" },
@@ -53,12 +50,10 @@ export const NAV: NavItem[] = [
 const NAV_PERM: Record<string, string> = {
   "/": "dashboard",
   "/dashboard-v2": "dashboard",
-  "/dashboard-ringkas": "dashboard",
   "/toko": "toko",
   "/produk": "produk",
   "/master-postingan": "produk",
   "/katalog": "produk",
-  "/stok-omnichannel": "produk",
   "/orders": "order",
   "/kesehatan-pesanan": "order",
   "/retur": "order",
@@ -84,6 +79,96 @@ const NAV_PERM: Record<string, string> = {
 
 const EMPTY_PREFS: NavPrefs = { groups: [], counts: {}, collapsed: [] };
 
+interface NotifRow {
+  id: string;
+  type: string | null;
+  title: string | null;
+  message: string | null;
+  createdAt: string;
+}
+const NOTIF_EMO: Record<string, string> = {
+  low_stock: "⚠️", daily_report: "📊", weekly_report: "📈", autopilot: "🤖",
+  topup: "💳", token_expiry: "🔑", order: "🛒",
+};
+
+/** Lonceng notifikasi di header (menggantikan menu Notifikasi di sidebar). */
+function NotifBell() {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<NotifRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const load = useCallback(() => {
+    api
+      .get<NotifRow[]>("/account/notifications")
+      .then((d) => { setRows(d ?? []); setLoaded(true); })
+      .catch(() => setLoaded(true));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const count = rows.length;
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => { setOpen((o) => !o); if (!loaded) load(); }}
+        aria-label="Notifikasi"
+        className="relative p-2 rounded-full text-ink-2 hover:bg-canvas"
+      >
+        <Icon name="bell" size={19} />
+        {count > 0 && (
+          <span className="absolute top-1 right-1 min-w-[15px] h-[15px] px-1 rounded-full bg-brand text-onbrand text-[10px] font-semibold leading-[15px] text-center">
+            {count > 9 ? "9+" : count}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-24px)] bg-white border border-line rounded-xl shadow-e2 z-50 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-line">
+            <span className="text-sm font-medium text-ink">Notifikasi</span>
+            <button
+              className="text-xs text-brand-ink hover:underline"
+              onClick={() => { setOpen(false); navigate("/notifikasi"); }}
+            >
+              Lihat semua
+            </button>
+          </div>
+          <div className="max-h-96 overflow-y-auto">
+            {!loaded && <div className="px-4 py-6 text-center text-sm text-ink-3">Memuat…</div>}
+            {loaded && rows.length === 0 && (
+              <div className="px-4 py-6 text-center text-sm text-ink-3">Belum ada notifikasi.</div>
+            )}
+            {rows.slice(0, 10).map((n) => (
+              <button
+                key={n.id}
+                onClick={() => { setOpen(false); navigate("/notifikasi"); }}
+                className="w-full text-left flex gap-2.5 px-4 py-2.5 hover:bg-canvas border-b border-line last:border-0"
+              >
+                <span className="text-lg leading-none mt-0.5">{NOTIF_EMO[n.type ?? ""] ?? "🔔"}</span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm font-medium text-ink truncate">{n.title ?? n.type ?? "Notifikasi"}</span>
+                  {n.message && <span className="block text-xs text-ink-2 line-clamp-2">{n.message}</span>}
+                  <span className="block text-[11px] text-ink-3 mt-0.5">
+                    {new Date(n.createdAt).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" })}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Pengelompokan bawaan 6+1 domain (cetak biru ekosistem). Dipakai HANYA saat
  * pemiliknya belum pernah menyusun menunya sendiri (prefs.groups kosong) —
@@ -91,10 +176,10 @@ const EMPTY_PREFS: NavPrefs = { groups: [], counts: {}, collapsed: [] };
  * jatuh ke "Lainnya", jadi menu baru tak pernah hilang.
  */
 const DEFAULT_SECTIONS: { id: string; label: string; paths: string[] }[] = [
-  { id: "kendali", label: "Pusat Kendali", paths: ["/", "/dashboard-ringkas", "/notifikasi", "/autopilot"] },
+  { id: "kendali", label: "Pusat Kendali", paths: ["/", "/autopilot"] },
   { id: "pesanan", label: "Penjualan & Pesanan", paths: ["/orders", "/kesehatan-pesanan", "/retur", "/produksi-packing", "/rekonsiliasi", "/audit-pesanan"] },
   { id: "produk", label: "Produk & Katalog", paths: ["/produk", "/master-postingan", "/katalog", "/hpp", "/toko"] },
-  { id: "gudang", label: "Gudang & Stok", paths: ["/bom", "/pembelian", "/request-stok", "/stok-omnichannel"] },
+  { id: "gudang", label: "Gudang & Stok", paths: ["/bom", "/pembelian", "/request-stok"] },
   { id: "keuangan", label: "Keuangan", paths: ["/pencairan", "/laporan-bagian", "/wallet", "/laporan"] },
   { id: "pertumbuhan", label: "Pertumbuhan", paths: ["/chat", "/affiliate", "/promo"] },
   { id: "pengaturan", label: "Pengaturan & Akses", paths: ["/karyawan", "/aplikasi", "/pending"] },
@@ -409,6 +494,7 @@ export function Layout({
                 />
                 {connected ? "Live" : "Offline"}
               </span>
+              <NotifBell />
             </div>
           </header>
 
