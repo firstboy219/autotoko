@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   masterPostings,
@@ -151,6 +151,33 @@ export class MasterPostingsService {
     return this.get(userId, row!.id);
   }
 
+  /** Unit & omzet 30 hari per (shop, productId) dari orders.items. */
+  private async aggSalesByPair(userId: string, shopIds: string[], pids: string[]): Promise<Map<string, { units: number; revenue: number; orders: number }>> {
+    const out = new Map<string, { units: number; revenue: number; orders: number }>();
+    if (!shopIds.length || !pids.length) return out;
+    const res = (await this.db.execute(sql`
+      SELECT o.shop_id AS shop_id, it->>'productId' AS pid,
+             COALESCE(SUM((it->>'qty')::int), 0) AS units,
+             COALESCE(SUM((it->>'subtotal')::numeric), 0) AS revenue,
+             COUNT(DISTINCT o.id) AS orders
+      FROM orders o, jsonb_array_elements(COALESCE(o.items, '[]'::jsonb)) it
+      WHERE o.user_id = ${userId}::uuid
+        AND o.shop_id IN (${sql.join(shopIds.map((x) => sql`${x}::uuid`), sql`, `)})
+        AND it->>'productId' IN (${sql.join(pids.map((x) => sql`${x}`), sql`, `)})
+        AND COALESCE(o.created_at_marketplace, o.created_at) >= now() - interval '30 days'
+      GROUP BY o.shop_id, it->>'productId'
+    `)) as unknown;
+    const arr: Array<Record<string, unknown>> = Array.isArray(res) ? (res as any) : ((res as any)?.rows ?? []);
+    for (const r of arr) {
+      out.set(`${String(r.shop_id)}:${String(r.pid)}`, {
+        units: Number(r.units) || 0,
+        revenue: Number(r.revenue) || 0,
+        orders: Number(r.orders) || 0,
+      });
+    }
+    return out;
+  }
+
   async list(userId: string) {
     const rows = await this.db
       .select()
@@ -164,7 +191,12 @@ export class MasterPostingsService {
       .from(masterPostingSkus)
       .where(inArray(masterPostingSkus.masterPostingId, ids));
     const maps = await this.db
-      .select({ postingId: masterPostingMappings.masterPostingId })
+      .select({
+        postingId: masterPostingMappings.masterPostingId,
+        shopId: masterPostingMappings.shopId,
+        productId: masterPostingMappings.productId,
+        status: masterPostingMappings.status,
+      })
       .from(masterPostingMappings)
       .where(inArray(masterPostingMappings.masterPostingId, ids));
     const skuCount = new Map<string, number>();
@@ -182,6 +214,22 @@ export class MasterPostingsService {
     }
     const mapCount = new Map<string, number>();
     for (const m of maps) mapCount.set(m.postingId, (mapCount.get(m.postingId) ?? 0) + 1);
+
+    // Penjualan 30 hari, roll-up per posting dari listing termapping (mode update).
+    const pairMaps = maps.filter((m) => m.status !== "create" && m.productId);
+    const salesByPair = await this.aggSalesByPair(
+      userId,
+      [...new Set(pairMaps.map((m) => m.shopId))],
+      [...new Set(pairMaps.map((m) => m.productId as string))],
+    );
+    const sales30d = new Map<string, number>();
+    const revenue30d = new Map<string, number>();
+    for (const m of pairMaps) {
+      const v = salesByPair.get(`${m.shopId}:${m.productId}`);
+      if (!v) continue;
+      sales30d.set(m.postingId, (sales30d.get(m.postingId) ?? 0) + v.units);
+      revenue30d.set(m.postingId, (revenue30d.get(m.postingId) ?? 0) + v.revenue);
+    }
     return rows.map((r) => ({
       ...r,
       imageCount: r.images?.length ?? 0,
@@ -190,6 +238,8 @@ export class MasterPostingsService {
       mappingCount: mapCount.get(r.id) ?? 0,
       priceMin: priceMin.has(r.id) ? priceMin.get(r.id)! : null,
       priceMax: priceMax.has(r.id) ? priceMax.get(r.id)! : null,
+      sales30d: sales30d.get(r.id) ?? 0,
+      revenue30d: revenue30d.get(r.id) ?? 0,
     }));
   }
 
@@ -314,6 +364,47 @@ export class MasterPostingsService {
       .from(masterProducts)
       .where(eq(masterProducts.userId, userId))
       .orderBy(masterProducts.name);
+  }
+
+  /** Penjualan 30 hari per listing termapping (rata-rata per minggu). */
+  async salesForPosting(userId: string, postingId: string) {
+    await this.requirePosting(userId, postingId);
+    const maps = await this.db
+      .select({
+        shopId: masterPostingMappings.shopId,
+        productId: masterPostingMappings.productId,
+        status: masterPostingMappings.status,
+      })
+      .from(masterPostingMappings)
+      .where(and(eq(masterPostingMappings.userId, userId), eq(masterPostingMappings.masterPostingId, postingId)));
+    const pairs = maps.filter((m) => m.status !== "create" && m.productId);
+    const byPair = await this.aggSalesByPair(
+      userId,
+      [...new Set(pairs.map((m) => m.shopId))],
+      [...new Set(pairs.map((m) => m.productId as string))],
+    );
+    const shopIds = [...new Set(pairs.map((m) => m.shopId))];
+    const shopRows = shopIds.length
+      ? await this.db.select({ id: shops.id, shopName: shops.shopName }).from(shops).where(inArray(shops.id, shopIds))
+      : [];
+    const nameById = new Map(shopRows.map((x) => [x.id, x.shopName] as const));
+    let totalUnits = 0;
+    let totalRevenue = 0;
+    const rows = pairs.map((m) => {
+      const v = byPair.get(`${m.shopId}:${m.productId}`) ?? { units: 0, revenue: 0, orders: 0 };
+      totalUnits += v.units;
+      totalRevenue += v.revenue;
+      return {
+        shopId: m.shopId,
+        shopName: nameById.get(m.shopId) ?? null,
+        productId: m.productId,
+        units30d: v.units,
+        revenue30d: v.revenue,
+        orders30d: v.orders,
+        avgUnitsPerWeek: Math.round((v.units * 7) / 30),
+      };
+    });
+    return { windowDays: 30, totalUnits, totalRevenue, avgUnitsPerWeek: Math.round((totalUnits * 7) / 30), rows };
   }
 
   /** Promosi marketplace yang terkait sebuah listing termapping (read-only). */

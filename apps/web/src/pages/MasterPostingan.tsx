@@ -83,7 +83,26 @@ interface ListItem {
   skuCount: number;
   skuMappedCount: number;
   mappingCount: number;
+  sales30d: number;
+  revenue30d: number;
   updatedAt: string;
+}
+
+interface SalesRow {
+  shopId: string;
+  shopName: string | null;
+  productId: string;
+  units30d: number;
+  revenue30d: number;
+  orders30d: number;
+  avgUnitsPerWeek: number;
+}
+interface SalesResp {
+  windowDays: number;
+  totalUnits: number;
+  totalRevenue: number;
+  avgUnitsPerWeek: number;
+  rows: SalesRow[];
 }
 interface ShopOpt {
   id: string;
@@ -293,6 +312,13 @@ export function MasterPostingan() {
                   {it.name}
                 </button>
                 <div className="text-[15px] font-semibold text-ink">{priceLabel(it.priceMin, it.priceMax)}</div>
+                {it.sales30d > 0 ? (
+                  <div className="text-[11px] text-ink-2">
+                    Terjual 30h: <span className="font-medium text-ink">{it.sales30d}</span> · {rupiah(it.revenue30d)}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-ink-3">Belum ada penjualan 30h</div>
+                )}
                 {it.brand && <div className="text-[11px] text-ink-3 truncate">{it.brand}</div>}
                 {it.description && <ExpandableDesc html={it.description} />}
                 <div className="mt-auto flex flex-wrap gap-1 pt-1.5">
@@ -469,6 +495,7 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
   const [applying, setApplying] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<null | "all" | string>(null);
   const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
+  const [sales, setSales] = useState<SalesResp | null>(null);
 
   const refetch = useCallback(async () => {
     const detail = await api.get<Detail>(`/master-postings/${id}`);
@@ -479,6 +506,7 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
     setAutoApply(detail.autoApply);
     setImages(detail.images ?? []);
     setGroups(detail.variantGroups ?? []);
+    api.get<SalesResp>(`/master-postings/${id}/sales`).then(setSales).catch(() => {});
   }, [id]);
 
   useEffect(() => {
@@ -551,6 +579,8 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
       </Layout>
     );
   }
+
+  const salesByKey = new Map((sales?.rows ?? []).map((r) => [`${r.shopId}:${r.productId}`, r] as const));
 
   return (
     <Layout title="Master Postingan">
@@ -821,6 +851,12 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
           subtitle='Tiap baris punya modenya sendiri: "Update listing" memperbarui listing yang tayang; "Posting baru" distage. Terapkan per toko lewat tombol di barisnya, atau semua sekaligus lewat "Jalankan Semua Baris".'
         />
         <div className="p-5 space-y-3">
+          {sales && sales.totalUnits > 0 && (
+            <div className="rounded-lg bg-canvas border border-line px-3 py-2 text-xs text-ink-2">
+              Penjualan 30 hari (toko termapping): <b className="text-ink">{sales.totalUnits}</b> unit ·{" "}
+              {rupiah(sales.totalRevenue)} · rata-rata ~{sales.avgUnitsPerWeek}/minggu
+            </div>
+          )}
           <MappingAdder postingId={id} shops={shops} onAdded={refetch} />
           {d.mappings.length === 0 ? (
             <div className="text-sm text-ink-2">Belum ada listing termapping.</div>
@@ -834,6 +870,14 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
                     {m.status === "create" ? "Posting baru" : "Update listing"}
                   </Badge>
                   <span className="text-xs text-ink-2 font-mono">{m.productId || "(akan dibuat)"}</span>
+                  {(() => {
+                    const sv = salesByKey.get(`${m.shopId}:${m.productId}`);
+                    return sv && sv.units30d > 0 ? (
+                      <span className="text-[11px] text-ink-2">
+                        · {sv.units30d} terjual/30h (~{sv.avgUnitsPerWeek}/mgg)
+                      </span>
+                    ) : null;
+                  })()}
                   {m.lastStatus && <Badge tone={STATUS_TONE[m.lastStatus] ?? "neutral"}>{m.lastStatus}</Badge>}
                   {m.lastMessage && <span className="text-[11px] text-ink-3 truncate max-w-[220px]" title={m.lastMessage}>{m.lastMessage}</span>}
                   <div className="ml-auto flex items-center gap-1.5">

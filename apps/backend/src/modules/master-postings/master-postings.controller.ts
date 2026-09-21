@@ -59,6 +59,12 @@ export class MasterPostingsController {
     return { success: true, data: await this.svc.masterProductOptions(uid(req)) };
   }
 
+  /** Penjualan 30 hari per toko termapping. */
+  @Get(":id/sales")
+  async sales(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.salesForPosting(uid(req), id) };
+  }
+
   /** Promosi terkait sebuah listing (by shopId + productId). */
   @Get("promotions")
   async promotions(
