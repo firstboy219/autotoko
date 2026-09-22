@@ -270,6 +270,11 @@ export const payoutBatches = pgTable(
     /** Sidik jari isi buktinya, supaya satu bukti tidak dipakai dua batch. */
     adminFeeProofHash: text("admin_fee_proof_hash"),
     adminFeePaidAt: timestamp("admin_fee_paid_at", { withTimezone: true }),
+    // Bukti transfer BAGIAN SELLER ke penjual (opsional, satu per batch).
+    // Nullable: batch lama sebelum fitur ini dibiarkan tanpa bukti.
+    sellerTransferProofUrl: text("seller_transfer_proof_url"),
+    sellerTransferProofHash: text("seller_transfer_proof_hash"),
+    sellerTransferPaidAt: timestamp("seller_transfer_paid_at", { withTimezone: true }),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     // v1-only, unused by v2 — see note above.
     totalTransferToAdmin: numeric("total_transfer_to_admin", { precision: 15, scale: 2 })

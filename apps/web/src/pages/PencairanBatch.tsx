@@ -91,6 +91,8 @@ interface BatchDetail {
   adminFeeAmount: string | null;
   adminFeeProofUrl: string | null;
   adminFeePaidAt: string | null;
+  sellerTransferProofUrl: string | null;
+  sellerTransferPaidAt: string | null;
   mutations: Mutation[];
   disbursements: Disbursement[];
   carryovers?: {
@@ -102,6 +104,9 @@ interface BatchDetail {
 }
 
 const cents = (rupiahVal: number) => Math.round(rupiahVal * 100);
+// Bukti transfer ke seller hanya diminta untuk batch sejak fitur ini rilis;
+// batch lama sebelum tanggal ini dibiarkan tanpa bukti.
+const SELLER_PROOF_SINCE = new Date("2026-09-22T00:00:00+07:00");
 const READY: ValidationStatus[] = ["cocok_otomatis", "override_manual"];
 
 // Upload URLs are stored/returned as a same-origin relative path
@@ -163,6 +168,10 @@ export function PencairanBatch() {
           {batch.adminFeeAmount != null && (
             <AdminFeeCard batch={batch} onDone={reload} />
           )}
+          {batch.status !== "berjalan" &&
+            new Date(batch.createdAt) >= SELLER_PROOF_SINCE && (
+              <SellerTransferCard batch={batch} onDone={reload} />
+            )}
           {batch.status === "berjalan" && shops && settings && (
             <>
               <AutoImportCard batchId={batch.id} shops={shops} onDone={reload} />
@@ -194,6 +203,117 @@ export function PencairanBatch() {
  * mencampurnya ke setiap penjumlahan dan rekonsiliasi yang sudah ada, dan
  * mengubah arti angka yang sudah dipakai orang.
  */
+function SellerTransferCard({ batch, onDone }: { batch: BatchDetail; onDone: () => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const sudah = batch.sellerTransferPaidAt != null;
+  const sellerTotal = batch.mutations.reduce(
+    (a, m) => a + (Number((m as { sellerAmount?: string }).sellerAmount) || 0),
+    0,
+  );
+
+  async function unggah(file: File) {
+    setBusy(true);
+    setErr(null);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onerror = () => reject(new Error("Gambar tidak terbaca."));
+        r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+        r.readAsDataURL(file);
+      });
+      const up = await api.post<{ url: string }>("/uploads", {
+        base64,
+        ext: (file.name.split(".").pop() ?? "jpg").toLowerCase(),
+      });
+      await api.post(`/payout/batches/${batch.id}/seller-proof`, { proofUrl: up.url });
+      toast("Bukti transfer seller tersimpan", "success");
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function lepas() {
+    setBusy(true);
+    try {
+      await api.del(`/payout/batches/${batch.id}/seller-proof`);
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-xs text-ink-3">Transfer bagian seller</div>
+          <div className="mt-1 text-lg font-semibold tabular-nums text-ink">
+            {rupiah(sellerTotal)}
+          </div>
+          <div className="mt-0.5 text-[11px] text-ink-3">
+            Bukti transfer uang bagian seller ke penjual (opsional).
+          </div>
+        </div>
+        <div className="text-right">
+          <Badge tone={sudah ? "success" : "neutral"}>
+            {sudah ? "sudah ditransfer" : "belum ada bukti"}
+          </Badge>
+          {sudah && (
+            <div className="mt-1 text-[11px] text-ink-3">
+              {dateShort(batch.sellerTransferPaidAt!)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <label className="cursor-pointer text-xs text-brand hover:underline">
+          {busy ? "Mengunggah…" : sudah ? "Ganti bukti" : "Unggah bukti transfer seller"}
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            disabled={busy}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) void unggah(f);
+            }}
+          />
+        </label>
+        {batch.sellerTransferProofUrl && (
+          <a
+            href={batch.sellerTransferProofUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-ink-2 hover:underline"
+          >
+            lihat bukti
+          </a>
+        )}
+        {sudah && (
+          <button type="button" className="text-xs text-danger hover:underline" onClick={lepas}>
+            lepas bukti
+          </button>
+        )}
+      </div>
+
+      {err && (
+        <div className="mt-2">
+          <InlineAlert tone="danger">{err}</InlineAlert>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function AdminFeeCard({ batch, onDone }: { batch: BatchDetail; onDone: () => void }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);

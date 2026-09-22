@@ -42,6 +42,9 @@ public class PayoutBatchActivity extends AppCompatActivity {
     private static final int REQ_BUKTI_CAIR = 8101;
     private static final int REQ_BUKTI_TRANSFER = 8102;
     private static final int REQ_BUKTI_FEE = 8103;
+    private static final int REQ_BUKTI_SELLER = 8104;
+    /** Bukti transfer seller hanya untuk batch sejak tanggal ini (ISO). */
+    private static final String SELLER_PROOF_SINCE = "2026-09-22";
     private static final int FOTO_MAX_EDGE = 1600;
     private static final int FOTO_QUALITY = 82;
 
@@ -158,6 +161,7 @@ public class PayoutBatchActivity extends AppCompatActivity {
         if ("berjalan".equals(st)) {
             gambarTahap1(mutations, d);
         } else {
+            kartuSeller(seller);
             gambarTahap2(disbursements, st, d);
         }
     }
@@ -268,6 +272,42 @@ public class PayoutBatchActivity extends AppCompatActivity {
             lepas.setText("Lepas bukti fee");
             lepas.setAllCaps(false);
             lepas.setOnClickListener(v -> api.payoutClearFeeProof(batchId, r -> {
+                Toast.makeText(this, r.ok() ? "Bukti dilepas"
+                        : r.message("Gagal melepas bukti."), Toast.LENGTH_LONG).show();
+                muat();
+            }));
+            box.addView(lepas, lebar());
+        }
+        root.addView(box);
+    }
+
+    /**
+     * Bukti transfer BAGIAN SELLER (opsional). Hanya untuk batch mulai
+     * SELLER_PROOF_SINCE ke atas; batch lama dibiarkan tanpa bukti.
+     */
+    private void kartuSeller(double sellerTotal) {
+        String created = batch.optString("createdAt", "");
+        if (created.length() >= 10 && created.substring(0, 10).compareTo(SELLER_PROOF_SINCE) < 0) return;
+        boolean sudah = !batch.isNull("sellerTransferPaidAt");
+        LinearLayout box = kotak("Transfer bagian seller",
+                rp(sellerTotal)
+                        + "\n" + (sudah ? "Sudah ditransfer" : "Belum ada bukti")
+                        + "\nBukti transfer uang bagian seller ke penjual (opsional).");
+        MaterialButton unggah = new MaterialButton(this, null,
+                com.google.android.material.R.attr.materialButtonOutlinedStyle);
+        unggah.setText(sudah ? "Ganti bukti seller" : "Unggah bukti transfer seller");
+        unggah.setAllCaps(false);
+        unggah.setOnClickListener(v -> {
+            tombolMenunggu = unggah;
+            pilihGambar(REQ_BUKTI_SELLER);
+        });
+        box.addView(unggah, lebar());
+        if (sudah) {
+            MaterialButton lepas = new MaterialButton(this, null,
+                    com.google.android.material.R.attr.materialButtonOutlinedStyle);
+            lepas.setText("Lepas bukti seller");
+            lepas.setAllCaps(false);
+            lepas.setOnClickListener(v -> api.payoutClearSellerProof(batchId, r -> {
                 Toast.makeText(this, r.ok() ? "Bukti dilepas"
                         : r.message("Gagal melepas bukti."), Toast.LENGTH_LONG).show();
                 muat();
@@ -575,7 +615,8 @@ public class PayoutBatchActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int req, int result, Intent data) {
         super.onActivityResult(req, result, data);
-        if (req != REQ_BUKTI_CAIR && req != REQ_BUKTI_TRANSFER && req != REQ_BUKTI_FEE) return;
+        if (req != REQ_BUKTI_CAIR && req != REQ_BUKTI_TRANSFER && req != REQ_BUKTI_FEE
+                && req != REQ_BUKTI_SELLER) return;
         if (result != RESULT_OK || data == null || data.getData() == null) return;
 
         final String base64;
@@ -613,6 +654,14 @@ public class PayoutBatchActivity extends AppCompatActivity {
                         return;
                     }
                     Toast.makeText(this, "Bukti fee tersimpan", Toast.LENGTH_LONG).show();
+                    muat();
+                });
+                return;
+            }
+            if (reqFinal == REQ_BUKTI_SELLER) {
+                api.payoutSellerProof(batchId, url, rr -> {
+                    Toast.makeText(this, rr.ok() ? "Bukti transfer seller tersimpan"
+                            : rr.message("Gagal menyimpan bukti."), Toast.LENGTH_LONG).show();
                     muat();
                 });
                 return;

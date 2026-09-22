@@ -23,6 +23,7 @@ import { PayoutProfitService } from "./profit.service.js";
 import { WithdrawalReconcileService } from "./withdrawal-reconcile.service.js";
 import {
   AdminFeeProofDto,
+  SellerProofDto,
   CreateSubSellerDto,
   UpdateSubSellerDto,
   CreateSubSubSellerDto,
@@ -249,6 +250,24 @@ export class PayoutController {
     @Param("id") id: string,
   ): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.batches.clearAdminFeeProof(uid(req), id) };
+  }
+
+  /** Bukti transfer bagian seller sebuah batch. Satu batch satu bukti. Opsional. */
+  @Post("batches/:id/seller-proof")
+  async sellerProof(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() dto: SellerProofDto,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.batches.setSellerTransferProof(uid(req), id, dto.proofUrl) };
+  }
+
+  @Delete("batches/:id/seller-proof")
+  async clearSellerProof(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.batches.clearSellerTransferProof(uid(req), id) };
   }
 
   @Post("batches/:id/close-input")

@@ -702,6 +702,17 @@ public final class Api {
                 session.token(), null, cb);
     }
 
+    public void payoutSellerProof(String batchId, String proofUrl, Cb cb) {
+        JSONObject b = new JSONObject();
+        try { b.put("proofUrl", proofUrl); } catch (Exception ignored) {}
+        call("POST", session.baseUrl() + "/api/payout/batches/" + batchId + "/seller-proof",
+                session.token(), b, cb);
+    }
+    public void payoutClearSellerProof(String batchId, Cb cb) {
+        call("DELETE", session.baseUrl() + "/api/payout/batches/" + batchId + "/seller-proof",
+                session.token(), null, cb);
+    }
+
     public void payoutDeleteBatch(String id, Cb cb) {
         call("DELETE", session.baseUrl() + "/api/payout/batches/" + id, session.token(), null, cb);
     }

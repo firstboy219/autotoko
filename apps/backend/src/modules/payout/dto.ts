@@ -87,6 +87,10 @@ export class AdminFeeProofDto {
   @IsString() @MaxLength(1024) proofUrl!: string;
 }
 
+export class SellerProofDto {
+  @IsString() @MaxLength(1024) proofUrl!: string;
+}
+
 // --- Mutation (Tahap 1 — one record per shop's pencairan) ---
 
 export class CreateMutationDto {

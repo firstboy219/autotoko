@@ -210,6 +210,43 @@ export class PayoutBatchService {
   }
 
   /**
+   * Catat bukti transfer BAGIAN SELLER batch ini (satu batch satu bukti;
+   * unggah ulang menimpa). Beda dari fee admin & disbursement penerima lain:
+   * ini bukti uang bagian seller sendiri yang ditransfer ke penjual. OPSIONAL.
+   */
+  async setSellerTransferProof(userId: string, id: string, proofUrl: string) {
+    await this.getOrThrow(userId, id);
+    const hash = await this.uploads.hashOfUrl(proofUrl);
+    const [row] = await this.db
+      .update(payoutBatches)
+      .set({
+        sellerTransferProofUrl: proofUrl,
+        sellerTransferProofHash: hash,
+        sellerTransferPaidAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(payoutBatches.id, id), eq(payoutBatches.userId, userId)))
+      .returning();
+    return row;
+  }
+
+  /** Lepas bukti transfer seller — untuk gambar yang salah unggah. */
+  async clearSellerTransferProof(userId: string, id: string) {
+    await this.getOrThrow(userId, id);
+    const [row] = await this.db
+      .update(payoutBatches)
+      .set({
+        sellerTransferProofUrl: null,
+        sellerTransferProofHash: null,
+        sellerTransferPaidAt: null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(payoutBatches.id, id), eq(payoutBatches.userId, userId)))
+      .returning();
+    return row;
+  }
+
+  /**
    * Money this batch held back, and money it brought forward.
    *
    * Without this the page cannot explain itself. The header adds up what was
