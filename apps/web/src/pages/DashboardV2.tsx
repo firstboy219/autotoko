@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { api } from "../lib/api";
 import { rupiah } from "../lib/fmt";
-import { Icon } from "../components/Icon";
+import { Icon, type IconName } from "../components/Icon";
 import { Button, Card, CardHeader, InlineAlert, PageHeader, Skeleton } from "../components/ui";
 
 import { SaranAi } from "../components/SaranAi";
@@ -430,11 +430,34 @@ export default function DashboardV2() {
   const totalKomposisi = komposisi.reduce((a, b) => a + b.nilai, 0) || 1;
 
   return (
-    <Layout title="Dashboard v2">
+    <Layout title="Dashboard">
       <PageHeader
-        title="Dashboard v2"
+        title="Dashboard"
         subtitle="Uang yang masuk, ke mana perginya, dan seberapa boleh angkanya dipercaya."
       />
+
+      {/* Akses cepat: pintasan ke tugas yang paling sering dibuka dari dashboard. */}
+      <div className="mb-4">
+        <div className="text-xs font-medium text-ink-3 mb-1.5">Akses cepat</div>
+        <div className="flex flex-wrap gap-2">
+          {([
+            { to: "/orders", label: "Proses order", icon: "cart" },
+            { to: "/master-postingan", label: "Master Postingan", icon: "package" },
+            { to: "/promo", label: "Promosi", icon: "tag" },
+            { to: "/pencairan", label: "Pencairan", icon: "banknote" },
+            { to: "/wallet", label: "Isi saldo", icon: "wallet" },
+          ] as { to: string; label: string; icon: IconName }[]).map((q) => (
+            <Link
+              key={q.to}
+              to={q.to}
+              className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-3.5 h-9 text-sm font-medium text-ink-2 hover:bg-canvas hover:text-ink transition"
+            >
+              <Icon name={q.icon} size={16} />
+              {q.label}
+            </Link>
+          ))}
+        </div>
+      </div>
 
       {/* Satu baris filter di atas segalanya yang dicakupnya. */}
       <div className="flex flex-wrap items-center gap-2">

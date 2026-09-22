@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import { SectionTabs } from "../components/SectionTabs";
+import { MoreMenu } from "../components/MoreMenu";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
 import { useRealtime } from "../lib/realtime";
@@ -384,18 +385,16 @@ export function Orders() {
             <Button variant="filled" icon="package" onClick={() => setBatchOpen(true)}>
               Mulai Batch Packing
             </Button>
-            <Button variant="outline" onClick={() => setJemputOpen(true)}>
-              Jadwalkan Jemput
-            </Button>
             <Button variant="outline" icon="fileText" onClick={() => setBatchesOpen(true)}>
               Daftar Batch
             </Button>
-            <Button variant="outline" onClick={() => setOtomasiOpen(true)}>
-              Otomasi Order
-            </Button>
-            <Button variant="outline" icon="activity" onClick={() => setPetaOpen(true)}>
-              Pemetaan Status
-            </Button>
+            <MoreMenu
+              items={[
+                { label: "Jadwalkan Jemput", icon: "cart", onClick: () => setJemputOpen(true) },
+                { label: "Otomasi Order", icon: "bot", onClick: () => setOtomasiOpen(true) },
+                { label: "Pemetaan Status", icon: "activity", onClick: () => setPetaOpen(true) },
+              ]}
+            />
             <Button variant="outline" icon="refresh" loading={loading} onClick={() => reload()}>
               Segarkan
             </Button>
