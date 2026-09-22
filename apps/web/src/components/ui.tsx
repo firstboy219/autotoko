@@ -45,7 +45,7 @@ export function Card({
 }) {
   return (
     <div
-      className={`bg-white border border-line rounded-lg ${padded ? "p-5" : ""} ${className}`}
+      className={`bg-white border border-line rounded-lg shadow-e1 ${padded ? "p-5" : ""} ${className}`}
     >
       {children}
     </div>
@@ -108,7 +108,7 @@ export function Button({
     <button
       {...rest}
       disabled={disabled || loading}
-      className={`inline-flex items-center justify-center rounded-full font-medium transition
+      className={`inline-flex items-center justify-center rounded-full font-medium transition active:scale-[.98]
         disabled:opacity-50 disabled:pointer-events-none
         focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40
         ${pad} ${BTN[variant]} ${className}`}

@@ -69,3 +69,21 @@ body {
 .bg-brand {
   color: rgb(var(--c-onbrand));
 }
+
+/* ── Polish sistem desain (aman, tak mengubah tata letak) ─────────────── */
+/* Cincin fokus keyboard untuk link & elemen fokusable custom (tombol & input
+   sudah punya ring sendiri, jadi tidak digandakan di sini). */
+a:focus-visible,
+[tabindex]:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid rgb(var(--c-brand-ink) / 0.55);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+::selection {
+  background: rgb(var(--c-brand) / 0.35);
+  color: rgb(var(--c-ink));
+}
+html {
+  scroll-behavior: smooth;
+}
