@@ -36,6 +36,16 @@
             android:textSize="13sp"
             android:layout_marginBottom="20dp" />
 
+        <TextView android:id="@+id/savedHeader"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Akun tersimpan (ketuk untuk masuk)"
+            android:textColor="@color/ink2" android:textSize="12sp"
+            android:layout_marginBottom="8dp" android:visibility="gone" />
+        <LinearLayout android:id="@+id/accounts"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="12dp" android:visibility="gone" />
+
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="Alamat Server" android:textColor="@color/ink2" android:textSize="12sp" />
         <EditText android:id="@+id/server"

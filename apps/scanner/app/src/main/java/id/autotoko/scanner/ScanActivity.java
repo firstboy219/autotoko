@@ -442,15 +442,9 @@ public class ScanActivity extends AppCompatActivity {
         // and enqueueUniqueWork with REPLACE makes doing it again harmless.
         // Registered once, from the screen that owns the session. Any request
         // on any screen that comes back unauthorised lands here.
-        Api.onUnauthorised(() -> {
-            if (isFinishing() || isDestroyed()) return;
-            Toast.makeText(this, "Sesi berakhir. Silakan masuk lagi.", Toast.LENGTH_LONG).show();
-            session.clear();
-            Intent i = new Intent(this, LoginActivity.class);
-            i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-            startActivity(i);
-            finish();
-        });
+        // Penanganan sesi-habis (401) kini terpusat di App (Application),
+        // supaya berlaku dari layar mana pun dan tidak ikut mati saat Activity
+        // ini selesai. Lihat App.onCreate().
 
         StockReminder.ensureChannel(this);
         StockReminder.schedule(this);
