@@ -7,6 +7,7 @@ import { DashboardV2Service } from "./dashboard-v2.service.js";
 import { PendingTasksService } from "./pending-tasks.service.js";
 import { ShopInsightsService } from "./shop-insights.service.js";
 import { SaranService } from "../ai/saran.service.js";
+import { CacheService } from "../../common/cache/cache.service.js";
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
@@ -21,6 +22,7 @@ export class DashboardController {
     private readonly insights: ShopInsightsService,
     private readonly v2Service: DashboardV2Service,
     private readonly saran: SaranService,
+    private readonly cache: CacheService,
   ) {}
 
   /**
@@ -129,7 +131,11 @@ export class DashboardController {
       new Date(new Date(akhir + "T00:00:00Z").getTime() - 29 * 86400000)
         .toISOString()
         .slice(0, 10);
-    return { success: true, data: await this.v2Service.overview(uid(req), awal, akhir) };
+    const u = uid(req);
+    return {
+      success: true,
+      data: await this.cache.wrap(`dashv2:${u}:${awal}:${akhir}`, 45000, () => this.v2Service.overview(u, awal, akhir)),
+    };
   }
 
   @Get("summary")

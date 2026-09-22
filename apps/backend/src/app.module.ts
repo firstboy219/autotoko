@@ -6,6 +6,7 @@ import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 import { DatabaseModule } from "./database/database.module.js";
 import { TenantInterceptor } from "./common/tenant/tenant.interceptor.js";
 import { CryptoModule } from "./common/crypto/crypto.module.js";
+import { CacheModule } from "./common/cache/cache.module.js";
 import { MailModule } from "./common/mail/mail.module.js";
 import { EventsModule } from "./modules/events/events.module.js";
 import { AuthModule } from "./modules/auth/auth.module.js";
@@ -52,6 +53,7 @@ import { MasterPostingsModule } from "./modules/master-postings/master-postings.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 600 }]),
     DatabaseModule,
     CryptoModule,
+    CacheModule,
     MailModule,
     EventsModule,
     AuthModule,
