@@ -10,7 +10,8 @@ import { JwtService } from "@nestjs/jwt";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { users, wallets, waLoginSessions } from "../../database/schema/index.js";
+import { users, wallets, waLoginSessions, adminSettings } from "../../database/schema/index.js";
+import { CryptoService } from "../../common/crypto/crypto.service.js";
 import type { JwtPayload } from "./jwt-auth.guard.js";
 
 // Shared WA workflow uses uppercase prefixes (xtracker = "XTRACKER-"); AutoToko
@@ -26,15 +27,57 @@ const DEMO_EMAIL = "demo@autotoko.id";
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  // Durasi sesi login (JWT) di-cache 60 dtk supaya tak baca DB tiap login.
+  private static ttlCache: string | number | null = null;
+  private static ttlCacheExp = 0;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly crypto: CryptoService,
   ) {}
 
-  private sign(payload: JwtPayload): string {
-    return this.jwt.sign(payload);
+  private async sign(payload: JwtPayload): Promise<string> {
+    return this.jwt.sign(payload, { expiresIn: await this.sessionTtl() });
+  }
+
+  /**
+   * Durasi sesi login APK & web. Bisa diatur admin lewat setting `session_ttl`
+   * (mis. "7d", "168h", "30d", atau angka detik). Fallback: env JWT_EXPIRES_IN,
+   * lalu "7d". Perubahan berlaku <=60 dtk (cache).
+   */
+  private async sessionTtl(): Promise<string | number> {
+    const now = Date.now();
+    if (AuthService.ttlCache !== null && now < AuthService.ttlCacheExp) {
+      return AuthService.ttlCache;
+    }
+    let ttl: string | number = this.config.get<string>("JWT_EXPIRES_IN", "7d");
+    try {
+      const [row] = await this.db
+        .select()
+        .from(adminSettings)
+        .where(eq(adminSettings.key, "session_ttl"))
+        .limit(1);
+      if (row?.value) {
+        const norm = AuthService.normalizeTtl(this.crypto.decrypt(row.value).trim());
+        if (norm !== null) ttl = norm;
+      }
+    } catch {
+      /* pakai fallback bila setting tak terbaca */
+    }
+    AuthService.ttlCache = ttl;
+    AuthService.ttlCacheExp = now + 60_000;
+    return ttl;
+  }
+
+  /** Terima "7d"/"168h"/"30m"/"2w"/"1y" atau angka detik; selain itu null. */
+  private static normalizeTtl(raw: string): string | number | null {
+    if (/^\d+$/.test(raw)) {
+      const n = Number(raw);
+      return n > 0 ? n : null;
+    }
+    return /^\d+\s*(s|m|h|d|w|y)$/i.test(raw) ? raw.replace(/\s+/g, "").toLowerCase() : null;
   }
 
   /** Constant-time string compare that tolerates length differences. */
@@ -58,7 +101,7 @@ export class AuthService {
     const adminPass = this.config.get<string>("ADMIN_PASSWORD", "");
     if (adminUser && adminPass && this.safeEqual(username, adminUser) && this.safeEqual(password, adminPass)) {
       await this.ensureDummyUser();
-      return { accessToken: this.sign({ sub: DUMMY_USER_ID, role: "admin" }) };
+      return { accessToken: await this.sign({ sub: DUMMY_USER_ID, role: "admin" }) };
     }
 
     const devEnabled = this.config.get<string>("DEV_LOGIN_ENABLED", "false") === "true";
@@ -69,7 +112,7 @@ export class AuthService {
       if (username === u && password === p) {
         await this.ensureDummyUser();
         // Dev user gets admin role so the Admin CMS is reachable during development.
-        return { accessToken: this.sign({ sub: DUMMY_USER_ID, role: "admin" }) };
+        return { accessToken: await this.sign({ sub: DUMMY_USER_ID, role: "admin" }) };
       }
     }
 
@@ -106,7 +149,7 @@ export class AuthService {
       throw new UnauthorizedException("Demo login disabled");
     }
     await this.ensureDemoUser();
-    return { accessToken: this.sign({ sub: DEMO_USER_ID, role: "user" }) };
+    return { accessToken: await this.sign({ sub: DEMO_USER_ID, role: "user" }) };
   }
 
   /** Ensure the demo seller + wallet exist (idempotent). */
@@ -213,7 +256,7 @@ export class AuthService {
       .limit(1);
 
     if (!user) throw new BadRequestException("User not found for verified session");
-    const accessToken = this.sign({ sub: user.id, role: "user", wa: user.whatsapp ?? undefined });
+    const accessToken = await this.sign({ sub: user.id, role: "user", wa: user.whatsapp ?? undefined });
     return { status: "verified" as const, accessToken };
   }
 

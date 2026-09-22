@@ -68,6 +68,9 @@ interface Shop {
   sellerRegion: string | null;
   shopStatus: string;
   accessTokenExpireAt: string | null;
+  refreshTokenExpireAt: string | null;
+  /** Token toko diperpanjang otomatis (tak perlu hubungkan ulang). */
+  autoRenew?: boolean;
   connectedAt: string | null;
 }
 
@@ -500,8 +503,8 @@ export function Toko() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {group.shops.map((s) => {
             const isPlaceholder = !s.connectedAt;
-            const dte = daysToExpiry(s.accessTokenExpireAt);
-            const expiring = dte !== null && dte < 7;
+            const autoRenew = s.autoRenew ?? s.shopStatus === "active";
+            const rte = daysToExpiry(s.refreshTokenExpireAt ?? null);
             return (
               <div
                 key={s.id}
@@ -543,13 +546,20 @@ export function Toko() {
                     <div className="text-xs text-ink-2">
                       Terhubung: {dateShort(s.connectedAt)}
                     </div>
-                    <div className="flex items-center gap-1.5 text-xs text-ink-2">
-                      <span>Token expire: {dateShort(s.accessTokenExpireAt)}</span>
-                      {dte !== null && (
-                        <Badge tone={expiring ? "danger" : "neutral"}>
-                          {dte < 0 ? "kedaluwarsa" : `${dte} hari`}
-                        </Badge>
-                      )}
+                    {autoRenew ? (
+                      <div className="flex items-center gap-1.5 text-xs text-ink-2">
+                        <Badge tone="success">Diperpanjang otomatis</Badge>
+                        <span className="text-ink-3">tak perlu hubungkan ulang</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 text-xs text-ink-2">
+                        <span>Koneksi terputus</span>
+                        <Badge tone="danger">hubungkan ulang</Badge>
+                      </div>
+                    )}
+                    <div className="text-[11px] text-ink-3">
+                      Akses token TikTok berumur &plusmn;7 hari &amp; diperbarui otomatis tiap jam
+                      {rte !== null ? ` \u00b7 izin aktif s/d ${dateShort(s.refreshTokenExpireAt)}` : ""}
                     </div>
                   </div>
                 )}

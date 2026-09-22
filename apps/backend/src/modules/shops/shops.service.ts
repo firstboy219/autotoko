@@ -328,6 +328,10 @@ export class ShopsService {
       sellerRegion: s.sellerRegion,
       shopStatus: s.shopStatus,
       accessTokenExpireAt: s.accessTokenExpireAt,
+      refreshTokenExpireAt: s.refreshTokenExpireAt,
+      // Token toko aktif diperpanjang otomatis (cron tiap jam) selama refresh
+      // token masih ada -> koneksi praktis tak putus kecuali di-disconnect.
+      autoRenew: s.shopStatus === "active" && Boolean(s.refreshToken),
       connectedAt: s.connectedAt,
       lastSyncAt: s.lastSyncAt,
       categoryId: s.categoryId,

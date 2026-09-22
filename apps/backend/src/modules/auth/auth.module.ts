@@ -15,7 +15,7 @@ import { JwtAuthGuard } from "./jwt-auth.guard.js";
       useFactory: (config: ConfigService) => ({
         secret: config.get<string>("JWT_SECRET", "dev-insecure-jwt-secret"),
         // Longer session so active sellers aren't logged out mid-use.
-        signOptions: { expiresIn: config.get<string>("JWT_EXPIRES_IN", "12h") },
+        signOptions: { expiresIn: config.get<string>("JWT_EXPIRES_IN", "7d") },
       }),
     }),
   ],

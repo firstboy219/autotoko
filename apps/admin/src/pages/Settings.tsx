@@ -45,6 +45,12 @@ const GROUPS: { title: string; keys: { key: string; label: string }[] }[] = [
     ],
   },
   {
+    title: "Sesi & Keamanan",
+    keys: [
+      { key: "session_ttl", label: "Durasi sesi login APK & web (mis. 7d, 168h, 30d, atau detik). Kosong = 7 hari" },
+    ],
+  },
+  {
     title: "Email (SendGrid) & lainnya",
     keys: [
       { key: "sendgrid_api_key", label: "SendGrid API Key" },
