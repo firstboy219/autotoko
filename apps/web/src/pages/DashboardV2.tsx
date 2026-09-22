@@ -106,6 +106,7 @@ interface Data {
     tinggi: number;
     tugas: { key: string; title: string; count: number; severity: string; href: string }[];
   };
+  penjualanHariIni: { pesanan: number; nominal: number };
 }
 
 const RENTANG = [
@@ -435,6 +436,26 @@ export default function DashboardV2() {
         title="Dashboard"
         subtitle="Uang yang masuk, ke mana perginya, dan seberapa boleh angkanya dipercaya."
       />
+
+      {data && (
+        <Card className="mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-xs text-ink-3">Penjualan hari ini</div>
+              <div className="mt-1 text-2xl font-semibold tabular-nums text-ink">
+                {rupiah(data.penjualanHariIni.nominal)}
+              </div>
+              <div className="mt-0.5 text-[11px] text-ink-3">
+                {data.penjualanHariIni.pesanan} pesanan masuk hari ini
+                <span> · dari toko yang tersinkron order</span>
+              </div>
+            </div>
+            <Link to="/orders" className="text-xs text-brand-ink hover:underline whitespace-nowrap">
+              Lihat pesanan →
+            </Link>
+          </div>
+        </Card>
+      )}
 
       {/* Akses cepat: pintasan ke tugas yang paling sering dibuka dari dashboard. */}
       <div className="mb-4">

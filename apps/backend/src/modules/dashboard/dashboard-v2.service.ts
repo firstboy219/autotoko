@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
+import { orders } from "../../database/schema/index.js";
 import { PendingTasksService } from "./pending-tasks.service.js";
 
 /**
@@ -28,6 +29,31 @@ export class DashboardV2Service {
     private readonly pending: PendingTasksService,
   ) {}
 
+  /** UTC instant of today's 00:00 in Asia/Jakarta (UTC+7, no DST). */
+  private jakartaStartOfDay(): Date {
+    const jak = new Date(Date.now() + 7 * 3600 * 1000);
+    return new Date(
+      Date.UTC(jak.getUTCFullYear(), jak.getUTCMonth(), jak.getUTCDate()) - 7 * 3600 * 1000,
+    );
+  }
+
+  /**
+   * Penjualan HARI INI (waktu Jakarta): jumlah pesanan + total nominal dari
+   * tabel orders. Toko yang tidak menyinkronkan order tidak menyumbang di
+   * sini -- angkanya bisa 0 walau pencairan tetap berjalan.
+   */
+  private async penjualanHariIni(userId: string) {
+    const start = this.jakartaStartOfDay();
+    const [row] = await this.db
+      .select({
+        pesanan: sql<number>`count(*)::int`,
+        nominal: sql<string>`coalesce(sum(${orders.totalAmount}), 0)`,
+      })
+      .from(orders)
+      .where(and(eq(orders.userId, userId), gte(orders.createdAt, start)));
+    return { pesanan: row?.pesanan ?? 0, nominal: Number(row?.nominal ?? 0) };
+  }
+
   async overview(userId: string, from: string, to: string) {
     const hari = Math.max(
       1,
@@ -48,7 +74,7 @@ export class DashboardV2Service {
       .slice(0, 10);
 
     const [uang, uangSebelum, volume, volumeSebelum, seri, toko, produk, keandalan,
-           tugas, biaya, belumCair, stokMenipis, peringatan] =
+           tugas, biaya, belumCair, stokMenipis, peringatan, hariIni] =
       await Promise.all([
         this.uang(userId, from, to),
         this.uang(userId, sebelumFrom, sebelumTo),
@@ -63,6 +89,7 @@ export class DashboardV2Service {
         this.belumCair(userId),
         this.stokMenipis(userId),
         this.peringatan(userId),
+        this.penjualanHariIni(userId),
       ]);
 
     const kredit = uang.kredit;
@@ -102,6 +129,7 @@ export class DashboardV2Service {
         // Sisa di tangan dari tiap rupiah yang cair, sesudah semuanya.
         rateBersih: kredit > 0 ? labaBersih / kredit : 0,
       },
+      penjualanHariIni: hariIni,
       belumCair,
       stokMenipis,
       peringatan,
