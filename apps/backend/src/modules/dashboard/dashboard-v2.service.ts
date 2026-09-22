@@ -1,7 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { orders } from "../../database/schema/index.js";
+import { orders, shops } from "../../database/schema/index.js";
 import { PendingTasksService } from "./pending-tasks.service.js";
 
 /**
@@ -44,14 +44,30 @@ export class DashboardV2Service {
    */
   private async penjualanHariIni(userId: string) {
     const start = this.jakartaStartOfDay();
-    const [row] = await this.db
+    const rows = await this.db
       .select({
+        shopId: orders.shopId,
+        nama: sql<string>`coalesce(${shops.displayName}, ${shops.shopName}, '(tanpa toko)')`,
         pesanan: sql<number>`count(*)::int`,
         nominal: sql<string>`coalesce(sum(${orders.totalAmount}), 0)`,
       })
       .from(orders)
-      .where(and(eq(orders.userId, userId), gte(orders.createdAt, start)));
-    return { pesanan: row?.pesanan ?? 0, nominal: Number(row?.nominal ?? 0) };
+      .leftJoin(shops, eq(shops.id, orders.shopId))
+      .where(and(eq(orders.userId, userId), gte(orders.createdAt, start)))
+      .groupBy(orders.shopId, shops.displayName, shops.shopName);
+
+    let pesanan = 0;
+    let nominal = 0;
+    const perToko = rows
+      .map((r) => {
+        const p = Number(r.pesanan) || 0;
+        const n = Number(r.nominal) || 0;
+        pesanan += p;
+        nominal += n;
+        return { shopId: r.shopId, nama: r.nama, pesanan: p, nominal: n };
+      })
+      .sort((a, b) => b.nominal - a.nominal);
+    return { pesanan, nominal, perToko };
   }
 
   async overview(userId: string, from: string, to: string) {

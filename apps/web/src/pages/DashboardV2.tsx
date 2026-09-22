@@ -106,7 +106,11 @@ interface Data {
     tinggi: number;
     tugas: { key: string; title: string; count: number; severity: string; href: string }[];
   };
-  penjualanHariIni: { pesanan: number; nominal: number };
+  penjualanHariIni: {
+    pesanan: number;
+    nominal: number;
+    perToko: { shopId: string | null; nama: string; pesanan: number; nominal: number }[];
+  };
 }
 
 const RENTANG = [
@@ -454,6 +458,22 @@ export default function DashboardV2() {
               Lihat pesanan →
             </Link>
           </div>
+          {data.penjualanHariIni.perToko.length > 0 && (
+            <div className="mt-3 border-t border-line pt-3 space-y-1.5">
+              <div className="text-[11px] font-medium text-ink-3">Komposisi per toko</div>
+              {data.penjualanHariIni.perToko.map((t) => (
+                <div
+                  key={t.shopId ?? t.nama}
+                  className="flex items-center justify-between gap-3 text-xs"
+                >
+                  <span className="truncate text-ink-2">{t.nama}</span>
+                  <span className="whitespace-nowrap tabular-nums text-ink">
+                    {t.pesanan} pesanan · {rupiah(t.nominal)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       )}
 
