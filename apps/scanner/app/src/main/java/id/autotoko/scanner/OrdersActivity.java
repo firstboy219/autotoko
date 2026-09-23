@@ -1077,61 +1077,7 @@ public class OrdersActivity extends AppCompatActivity {
 
     // ---- Batch Packing ----
     private void showBatch() {
-        final List<JSONObject> kandidat = new ArrayList<>();
-        for (int i = 0; i < all.length(); i++) {
-            JSONObject o = all.optJSONObject(i);
-            if (o != null && !"dikirim".equals(o.optString("fulfillmentStatus"))) kandidat.add(o);
-        }
-        if (kandidat.isEmpty()) { toast("Tidak ada order untuk dikirim."); return; }
-        final Map<String, String> takeout = new LinkedHashMap<>();
-
-        LinearLayout col = new LinearLayout(this); col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(dp(16), dp(8), dp(16), dp(8));
-        final TextView head = new TextView(this); head.setTextSize(13); head.setTextColor(getColor(R.color.ink2));
-        col.addView(head);
-        final Runnable upd = () -> head.setText((kandidat.size() - takeout.size()) + " akan diproses · " + takeout.size() + " di-takeout");
-
-        for (JSONObject o : kandidat) {
-            final String id = o.optString("id");
-            LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.VERTICAL);
-            row.setPadding(0, dp(8), 0, dp(8));
-            LinearLayout top = new LinearLayout(this); top.setOrientation(LinearLayout.HORIZONTAL); top.setGravity(Gravity.CENTER_VERTICAL);
-            CheckBox cb = new CheckBox(this); cb.setChecked(true); top.addView(cb);
-            TextView t = new TextView(this);
-            t.setText(o.optString("marketplaceOrderId", "-") + "  ·  " + o.optString("buyerName", ""));
-            t.setTextSize(13); t.setTextColor(getColor(R.color.ink));
-            top.addView(t, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            row.addView(top);
-            final EditText rsn = new EditText(this); rsn.setHint("Alasan takeout…"); rsn.setSingleLine(true); rsn.setTextSize(13);
-            rsn.setVisibility(View.GONE); rsn.setPadding(dp(36), 0, 0, 0); row.addView(rsn);
-            cb.setOnCheckedChangeListener((bv, checked) -> {
-                if (checked) { takeout.remove(id); rsn.setVisibility(View.GONE); }
-                else { takeout.put(id, ""); rsn.setVisibility(View.VISIBLE); }
-                upd.run();
-            });
-            rsn.addTextChangedListener(new TextWatcher() {
-                public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
-                public void onTextChanged(CharSequence s, int a, int b, int c) {}
-                public void afterTextChanged(Editable e) { if (takeout.containsKey(id)) takeout.put(id, e.toString().trim()); }
-            });
-            col.addView(row);
-        }
-        upd.run();
-        ScrollView sv = new ScrollView(this); sv.addView(col);
-        new MaterialAlertDialogBuilder(this)
-                .setTitle("Batch Packing").setView(sv)
-                .setNegativeButton("Batal", null)
-                .setPositiveButton("Proses", (di, w) -> {
-                    JSONArray ids = new JSONArray(), tk = new JSONArray();
-                    for (JSONObject o : kandidat) {
-                        String id = o.optString("id");
-                        if (takeout.containsKey(id)) {
-                            try { JSONObject t = new JSONObject(); t.put("orderId", id); t.put("reason", takeout.get(id)); tk.put(t); } catch (Exception ig) {}
-                        } else ids.put(id);
-                    }
-                    if (ids.length() == 0) { toast("Semua order di-takeout."); return; }
-                    konfirmBatch(ids, tk);
-                }).show();
+        startActivity(new Intent(this, BatchPackingActivity.class));
     }
 
     private void konfirmBatch(JSONArray ids, JSONArray takeouts) {

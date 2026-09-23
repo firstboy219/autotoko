@@ -180,5 +180,6 @@
             android:exported="false"
             android:label="Batching List"
             android:screenOrientation="portrait" />
+        <activity android:name=".BatchPackingActivity" android:exported="false" />
     </application>
 </manifest>

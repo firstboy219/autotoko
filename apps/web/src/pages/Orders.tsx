@@ -912,30 +912,70 @@ function JadwalJemputModal({ onClose, onDone }: { onClose: () => void; onDone: (
 function BatchPackingModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const { data, loading } = useFetch<Order[]>("/orders?active=1");
-  const kandidat = (data ?? []).filter((o) => (o.sumber ?? "api") === "api" && o.fulfillmentStatus !== "dikirim");
+  const kandidat = useMemo(
+    () => (data ?? []).filter((o) => (o.sumber ?? "api") === "api" && o.fulfillmentStatus !== "dikirim"),
+    [data],
+  );
+
+  const [q, setQ] = useState("");
+  const [shopFilter, setShopFilter] = useState("");
+  const [onlyUnscanned, setOnlyUnscanned] = useState(false);
+  const [sortBy, setSortBy] = useState<"urgent" | "lama" | "baru">("urgent");
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [taken, setTaken] = useState<Map<string, string>>(new Map());
   const [busy, setBusy] = useState(false);
   const [hasil, setHasil] = useState<{ total: number; ok: number; ditahan: number; gagal: number } | null>(null);
 
+  const isScanned = (o: Order) => o.scanned === true || o.terscan === true;
+
+  const shops = useMemo(() => {
+    const s = new Set<string>();
+    kandidat.forEach((o) => { if (o.shopName) s.add(o.shopName); });
+    return [...s].sort();
+  }, [kandidat]);
+
+  const visible = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    const arr = kandidat.filter((o) => {
+      if (onlyUnscanned && isScanned(o)) return false;
+      if (shopFilter && (o.shopName ?? "") !== shopFilter) return false;
+      if (term) {
+        const hay = `${o.marketplaceOrderId} ${o.buyerName ?? ""} ${o.trackingNumber ?? ""}`.toLowerCase();
+        if (!hay.includes(term)) return false;
+      }
+      return true;
+    });
+    const urg = (o: Order) => (o.shipDeadlineMs && o.shipDeadlineMs > 0 ? o.shipDeadlineMs : Number.MAX_SAFE_INTEGER);
+    const created = (o: Order) => new Date(o.createdAtMarketplace ?? o.createdAt).getTime() || 0;
+    return [...arr].sort((a, b) =>
+      sortBy === "urgent" ? urg(a) - urg(b) : sortBy === "lama" ? created(a) - created(b) : created(b) - created(a),
+    );
+  }, [kandidat, q, shopFilter, onlyUnscanned, sortBy]);
+
+  const includedIds = visible.filter((o) => !excluded.has(o.id) && !taken.has(o.id)).map((o) => o.id);
+
+  const toggleExcl = (id: string) =>
+    setExcluded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const toggleTakeout = (id: string) =>
     setTaken((m) => { const n = new Map(m); if (n.has(id)) n.delete(id); else n.set(id, ""); return n; });
   const setReason = (id: string, r: string) =>
     setTaken((m) => { const n = new Map(m); if (n.has(id)) n.set(id, r); return n; });
-
-  const includedIds = kandidat.filter((o) => !taken.has(o.id)).map((o) => o.id);
+  const pilihSemua = (on: boolean) => setExcluded(on ? new Set() : new Set(visible.map((o) => o.id)));
 
   async function proses() {
-    if (!includedIds.length) { toast("Tidak ada order untuk diproses", "warning"); return; }
+    if (!includedIds.length) { toast("Tidak ada order terpilih untuk diproses", "warning"); return; }
     if (
       !window.confirm(
         `Proses ${includedIds.length} order: RTS (kirim) ke marketplace, buat AWB, unduh PDF packing list + resi. ` +
-          `${taken.size} order di-takeout (ditahan). Tindakan nyata — lanjutkan?`,
+          `${taken.size ? `${taken.size} order di-takeout (ditahan). ` : ""}Tindakan nyata â lanjutkan?`,
       )
     )
       return;
     setBusy(true);
     try {
-      const takeouts = [...taken.entries()].map(([orderId, reason]) => ({ orderId, reason }));
+      const takeouts = [...taken.entries()]
+        .filter(([id]) => !excluded.has(id))
+        .map(([orderId, reason]) => ({ orderId, reason }));
       const r = await api.post<BatchResp>(
         "/marketplace-sync/orders/batch-packing",
         { orderIds: includedIds, takeouts, handoverMethod: "DROP_OFF" },
@@ -958,7 +998,7 @@ function BatchPackingModal({ onClose, onDone }: { onClose: () => void; onDone: (
       {hasil ? (
         <div className="space-y-3">
           <InlineAlert tone={hasil.gagal ? "warning" : "success"}>
-            Selesai: {hasil.ok} order diproses → Packing, {hasil.ditahan} ditahan
+            Selesai: {hasil.ok} order diproses â Packing, {hasil.ditahan} ditahan
             {hasil.gagal ? `, ${hasil.gagal} gagal` : ""}. PDF packing list &amp; resi sudah terunduh.
           </InlineAlert>
           <div className="flex justify-end"><Button variant="filled" onClick={onClose}>Tutup</Button></div>
@@ -969,47 +1009,103 @@ function BatchPackingModal({ onClose, onDone }: { onClose: () => void; onDone: (
         <EmptyState icon="cart" title="Tidak ada order untuk dikirim" description="Semua order aktif sudah diproses atau belum ada yang perlu dikirim." />
       ) : (
         <div className="space-y-3">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-ink-2">{kandidat.length} order perlu dikirim</span>
-            <span className="font-medium text-ink tabular-nums">{includedIds.length} akan diproses · {taken.size} di-takeout</span>
+          {/* Filter: pilih apa yang mau diproses tanpa harus proses semuanya. */}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Input
+              className="col-span-2"
+              placeholder="Cari resi / order / pembeliâ¦"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <Select value={shopFilter} onChange={(e) => setShopFilter(e.target.value)}>
+              <option value="">Semua toko</option>
+              {shops.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </Select>
+            <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as "urgent" | "lama" | "baru")}>
+              <option value="urgent">Paling urgent</option>
+              <option value="lama">Terlama</option>
+              <option value="baru">Terbaru</option>
+            </Select>
           </div>
-          <div className="max-h-[52vh] overflow-y-auto border border-line rounded-lg divide-y divide-line">
-            {kandidat.map((o) => {
-              const out = taken.has(o.id);
-              return (
-                <div key={o.id} className={`px-3 py-2.5 ${out ? "bg-canvas" : ""}`}>
-                  <div className="flex items-center gap-3">
-                    <div className={out ? "opacity-50" : ""}>
-                      <ProductThumbs order={o} size={38} max={2} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className={`text-sm truncate ${out ? "text-ink-3 line-through" : "text-ink"}`}>
-                        <span className="font-mono text-xs">{o.marketplaceOrderId}</span> · {o.buyerName ?? "-"}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="inline-flex items-center gap-2 text-sm text-ink-2">
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-brand"
+                checked={onlyUnscanned}
+                onChange={(e) => setOnlyUnscanned(e.target.checked)}
+              />
+              Hanya yang belum discan
+            </label>
+            <div className="flex items-center gap-2 text-xs">
+              <button type="button" className="text-brand-ink hover:underline" onClick={() => pilihSemua(true)}>Pilih semua</button>
+              <span className="text-ink-3">Â·</span>
+              <button type="button" className="text-brand-ink hover:underline" onClick={() => pilihSemua(false)}>Kosongkan</button>
+            </div>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-ink-2">{visible.length} order tampil</span>
+            <span className="font-medium text-ink tabular-nums">
+              {includedIds.length} akan diproses{taken.size ? ` Â· ${taken.size} di-takeout` : ""}
+            </span>
+          </div>
+          <div className="max-h-[44vh] overflow-y-auto border border-line rounded-lg divide-y divide-line">
+            {visible.length === 0 ? (
+              <div className="px-3 py-6 text-center text-sm text-ink-3">Tak ada order yang cocok dengan filter.</div>
+            ) : (
+              visible.map((o) => {
+                const excl = excluded.has(o.id);
+                const out = taken.has(o.id);
+                const scanned = isScanned(o);
+                const dl = o.shipDeadlineMs ?? 0;
+                const urgent = dl > 0 && dl < Date.now() + 3 * 3600000;
+                return (
+                  <div key={o.id} className={`px-3 py-2.5 ${excl || out ? "bg-canvas" : ""}`}>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 accent-brand shrink-0"
+                        checked={!excl}
+                        onChange={() => toggleExcl(o.id)}
+                      />
+                      <div className={excl ? "opacity-40" : out ? "opacity-60" : ""}>
+                        <ProductThumbs order={o} size={38} max={2} />
                       </div>
-                      <div className="text-[11px] text-ink-3 truncate">
-                        {firstItemName(o) ? `${firstItemName(o)} · ` : ""}{o.items?.length ?? 0} item · {FS_LABEL[o.fulfillmentStatus] ?? o.fulfillmentStatus}
+                      <div className="min-w-0 flex-1">
+                        <div className={`text-sm truncate ${excl || out ? "text-ink-3 line-through" : "text-ink"}`}>
+                          <span className="font-mono text-xs">{o.marketplaceOrderId}</span> Â· {o.buyerName ?? "-"}
+                        </div>
+                        <div className="text-[11px] text-ink-3 truncate flex items-center gap-1.5">
+                          {o.shopName ? <span className="truncate">{o.shopName}</span> : null}
+                          {urgent ? <Badge tone="danger">urgent</Badge> : null}
+                          <Badge tone={scanned ? "success" : "neutral"}>{scanned ? "sudah discan" : "belum discan"}</Badge>
+                        </div>
                       </div>
+                      {!excl && (
+                        <Button size="sm" variant={out ? "tonal" : "outline"} onClick={() => toggleTakeout(o.id)}>
+                          {out ? "Batalkan" : "Take out"}
+                        </Button>
+                      )}
                     </div>
-                    <Button size="sm" variant={out ? "tonal" : "outline"} onClick={() => toggleTakeout(o.id)}>
-                      {out ? "Batalkan" : "Take out"}
-                    </Button>
+                    {out && !excl && (
+                      <Input
+                        className="mt-2"
+                        placeholder="Alasan takeout (mis. stok habis, alamat bermasalah)â¦"
+                        value={taken.get(o.id) ?? ""}
+                        onChange={(e) => setReason(o.id, e.target.value)}
+                      />
+                    )}
                   </div>
-                  {out && (
-                    <Input
-                      className="mt-2"
-                      placeholder="Alasan takeout (mis. stok habis, alamat bermasalah)…"
-                      value={taken.get(o.id) ?? ""}
-                      onChange={(e) => setReason(o.id, e.target.value)}
-                    />
-                  )}
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="text" onClick={onClose} disabled={busy}>Batal</Button>
             <Button variant="filled" icon="package" loading={busy} disabled={!includedIds.length} onClick={proses}>
-              Proses {includedIds.length} order →
+              Proses {includedIds.length} order â
             </Button>
           </div>
         </div>
