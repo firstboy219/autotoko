@@ -8,6 +8,8 @@ import { AdminSettingsModule } from "../admin-settings/admin-settings.module.js"
 import { MarketplaceSyncService } from "./marketplace-sync.service.js";
 import { MarketplaceSyncTask } from "./marketplace-sync.task.js";
 import { MarketplaceSyncController } from "./marketplace-sync.controller.js";
+import { CommsSyncTask } from "./comms-sync.task.js";
+import { AccountModule } from "../account/account.module.js";
 
 /**
  * Modul sendiri, bukan bagian dari ShopsModule atau MarketplaceModule:
@@ -15,9 +17,9 @@ import { MarketplaceSyncController } from "./marketplace-sync.controller.js";
  * keduanya. Menaruhnya di salah satu membuat impor melingkar.
  */
 @Module({
-  imports: [AuthModule, ShopsModule, MarketplaceModule, UploadsModule, AdminSettingsModule, BillingModule],
+  imports: [AuthModule, ShopsModule, MarketplaceModule, UploadsModule, AdminSettingsModule, BillingModule, AccountModule],
   controllers: [MarketplaceSyncController],
-  providers: [MarketplaceSyncService, MarketplaceSyncTask],
+  providers: [MarketplaceSyncService, MarketplaceSyncTask, CommsSyncTask],
   exports: [MarketplaceSyncService],
 })
 export class MarketplaceSyncModule {}
