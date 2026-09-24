@@ -52,6 +52,7 @@ const PencairanProfit = lazy(() => import("./pages/PencairanProfit").then((m) =>
 const RequestStok = lazy(() => import("./pages/RequestStok").then((m) => ({ default: m.RequestStok })));
 const KesehatanPesanan = lazy(() => import("./pages/KesehatanPesanan").then((m) => ({ default: m.KesehatanPesanan })));
 const Chat = lazy(() => import("./pages/Chat").then((m) => ({ default: m.Chat })));
+const Kb = lazy(() => import("./pages/Kb").then((m) => ({ default: m.Kb })));
 const Promotion = lazy(() => import("./pages/Promotion").then((m) => ({ default: m.Promotion })));
 const Retur = lazy(() => import("./pages/Retur").then((m) => ({ default: m.Retur })));
 const StokOmnichannel = lazy(() => import("./pages/StokOmnichannel").then((m) => ({ default: m.StokOmnichannel })));
@@ -140,6 +141,7 @@ export function App() {
           <Route path="/orders" element={<Protected><Orders /></Protected>} />
           <Route path="/kesehatan-pesanan" element={<Protected><KesehatanPesanan /></Protected>} />
           <Route path="/chat" element={<Protected><Chat /></Protected>} />
+          <Route path="/kb" element={<Protected><Kb /></Protected>} />
           <Route path="/retur" element={<Protected><Retur /></Protected>} />
           <Route path="/produksi-packing" element={<Protected><ProduksiPacking /></Protected>} />
           <Route path="/bom" element={<Protected><Bom /></Protected>} />

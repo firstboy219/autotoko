@@ -20,6 +20,7 @@ export const NAV: NavItem[] = [
   { to: "/produksi-packing", label: "Produksi & Packing", icon: "package" },
   { to: "/autopilot", label: "Autopilot", icon: "bot" },
   { to: "/chat", label: "Chat Pelanggan", icon: "users" },
+  { to: "/kb", label: "Balasan Otomatis", icon: "bot" },
   { to: "/affiliate", label: "Affiliate", icon: "users" },
   { to: "/promo", label: "Promosi", icon: "tag" },
   { to: "/laporan", label: "Laporan", icon: "trending" },
@@ -171,7 +172,7 @@ const DEFAULT_SECTIONS: { id: string; label: string; paths: string[] }[] = [
   { id: "produk", label: "Produk & Katalog", paths: ["/produk", "/master-postingan", "/katalog", "/hpp", "/toko"] },
   { id: "gudang", label: "Gudang & Stok", paths: ["/bom"] },
   { id: "keuangan", label: "Keuangan", paths: ["/pencairan", "/laporan-bagian", "/wallet", "/laporan"] },
-  { id: "pertumbuhan", label: "Pertumbuhan", paths: ["/chat", "/affiliate", "/promo"] },
+  { id: "pertumbuhan", label: "Pertumbuhan", paths: ["/chat", "/kb", "/affiliate", "/promo"] },
   { id: "pengaturan", label: "Pengaturan & Akses", paths: ["/karyawan", "/aplikasi", "/pending"] },
 ];
 

@@ -40,6 +40,7 @@ import { ResiModule } from "./modules/resi/resi.module.js";
 import { StockRequestsModule } from "./modules/stock-requests/stock-requests.module.js";
 import { PromotionModule } from "./modules/promotion/promotion.module.js";
 import { MasterPostingsModule } from "./modules/master-postings/master-postings.module.js";
+import { KbModule } from "./modules/kb/kb.module.js";
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -85,6 +86,7 @@ import { MasterPostingsModule } from "./modules/master-postings/master-postings.
     StockRequestsModule,
     PromotionModule,
     MasterPostingsModule,
+    KbModule,
     ResiModule,
   ],
   providers: [

@@ -39,6 +39,7 @@ export function Chat() {
   const [teks, setTeks] = useState("");
   const [kirim, setKirim] = useState(false);
   const [sinkron, setSinkron] = useState(false);
+  const [saran, setSaran] = useState(false);
 
   function muatConvs() {
     api.get<Conv[]>("/chat/conversations").then(setConvs).catch(() => setConvs([]));
@@ -66,6 +67,20 @@ export function Chat() {
     setMsgs(null);
     api.get<Msg[]>(`/chat/conversations/${sel.id}/messages`).then(setMsgs).catch(() => setMsgs([]));
   }, [sel]);
+
+  async function saranKb() {
+    if (!sel) return;
+    const lastIn = [...(msgs ?? [])].reverse().find((m) => m.direction === "in");
+    const src = lastIn?.text ?? teks;
+    if (!src.trim()) { toast("Tak ada pesan pembeli untuk dasar saran.", "warning"); return; }
+    setSaran(true);
+    try {
+      const r = await api.post<{ matched: boolean; reply: string }>("/kb/draft", { text: src, kind: "chat" });
+      if (r?.matched && r.reply) { setTeks(r.reply); toast("Draf dari KB terisi \u2014 periksa lalu kirim.", "success"); }
+      else toast("Tak ada saran cocok dari KB. Tambah entri di menu Balasan Otomatis.", "warning");
+    } catch (e) { toast((e as Error).message, "danger"); }
+    finally { setSaran(false); }
+  }
 
   async function balas() {
     if (!sel || !teks.trim()) return;
@@ -174,6 +189,7 @@ export function Chat() {
                   placeholder="Tulis balasan…"
                   className="flex-1 rounded-lg border border-line px-3 py-2 text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-brand/40"
                 />
+                <Button variant="outline" loading={saran} onClick={saranKb} title="Saran balasan dari Knowledge Base">Saran (KB)</Button>
                 <Button variant="filled" loading={kirim} onClick={balas} disabled={!teks.trim()}>Kirim</Button>
               </div>
             </>
