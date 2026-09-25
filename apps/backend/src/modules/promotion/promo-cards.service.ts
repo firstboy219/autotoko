@@ -353,15 +353,22 @@ export class PromoCardsService {
     const buat: Obj = {
       activity_type: String(src.activity_type ?? "DIRECT_DISCOUNT"),
       // Judul wajib unik per toko -> akhiran waktu buat (MMDDHHmm).
-      title: String(src.title ?? "Promo").replace(/( \d{8})+$/, "").slice(0, 38)
-        + ` ${new Date(now * 1000).toISOString().slice(5, 16).replace(/[-T:]/g, "")}`,
+      title: PromoCardsService.judulUnik(src.title, now),
       product_level: String(src.product_level ?? "PRODUCT"), duration_type: durationType,
     };
     if (durationType === "NORMAL") { buat.begin_time = b; buat.end_time = e; }
     if (src.discount?.bmsm_discount) buat.discount = { bmsm_discount: src.discount.bmsm_discount };
     if (src.participation_limit) buat.participation_limit = src.participation_limit;
     if (src.target_user_info) buat.target_user_info = src.target_user_info;
-    const created = (await this.sync.promoCreate(userId, tid, buat)) as Obj;
+    let created: Obj;
+    try {
+      created = (await this.sync.promoCreate(userId, tid, buat)) as Obj;
+    } catch (err) {
+      // 17029004: judul sudah dipakai (mis. dua klik pada detik yang sama) -> akhiran acak, coba sekali lagi.
+      if ((err as { code?: number }).code !== 17029004) throw err;
+      buat.title = PromoCardsService.judulUnik(src.title, now, String(Math.floor(Math.random() * 90) + 10));
+      created = (await this.sync.promoCreate(userId, tid, buat)) as Obj;
+    }
     const newId = String(created?.activity_id ?? created?.id ?? "");
     if (!newId) throw new Error("TikTok tidak mengembalikan ID promo baru");
     // Produk yang sudah terikat "smart promotion plan" (promo otomatis TikTok)
@@ -400,6 +407,13 @@ export class PromoCardsService {
       statusBaru = cek?.status ?? null;
     } catch { /* verifikasi gagal dibaca != pembuatan gagal */ }
     return { activityId: newId, title: buat.title, cocok: kirim.length, terverifikasi, statusBaru, ditolakSmart };
+  }
+
+  /** Judul wajib unik per toko (maks 50): judul asli tanpa akhiran lama + MMDDHHmmss (+ekstra). */
+  private static judulUnik(asli: unknown, now: number, ekstra = ""): string {
+    const dasar = String(asli ?? "Promo").replace(/( \d{8,12})+$/, "");
+    const akhir = ` ${new Date(now * 1000).toISOString().slice(5, 19).replace(/[-T:]/g, "")}${ekstra}`;
+    return dasar.slice(0, 50 - akhir.length) + akhir;
   }
 
   /** Produk sumber -> payload UpdateActivityProduct apa adanya (toko yang sama). */
@@ -458,6 +472,29 @@ export class PromoCardsService {
     const baru = await this.buatDanIsi(userId, shopId, src, payload, b, e);
     this.logger.log(`reactivate ${activityId} -> ${baru.activityId} (${payload.length} produk)`);
     return { ...ringkas, dryRun: false, baru };
+  }
+
+  /**
+   * Nonaktifkan promo berjalan / akan datang (DeactivateActivity), lalu baca
+   * ULANG status dari TikTok. Tidak bisa dibatalkan -- yang bisa hanya
+   * "Aktifkan kembali" (membuat promo baru dgn produk & potongan sama).
+   */
+  async deactivate(userId: string, shopId: string, activityId: string) {
+    const src = (await this.sync.promoActivityDetail(userId, shopId, activityId)) as Obj; // segar
+    const st = String(src.status ?? "").toUpperCase();
+    if (st !== "ONGOING" && st !== "NOT_START") {
+      throw new BadRequestException("Promo ini sudah tidak aktif — tidak ada yang perlu dinonaktifkan.");
+    }
+    await this.sync.promoDeactivate(userId, shopId, activityId);
+    this.cacheDetail.delete(`${userId}:${shopId}:${activityId}`);
+    let statusTerbaca: string | null = null;
+    try {
+      const cek = (await this.sync.promoActivityDetail(userId, shopId, activityId)) as Obj;
+      statusTerbaca = cek?.status ?? null;
+    } catch { /* abaikan */ }
+    this.logger.log(`deactivate ${activityId}: ${st} -> ${statusTerbaca}`);
+    return { shopId, activityId, title: src.title, statusLama: st, statusTerbaca,
+      terverifikasi: String(statusTerbaca ?? "").toUpperCase() === "DEACTIVATED" };
   }
 
   /**

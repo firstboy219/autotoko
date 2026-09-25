@@ -166,6 +166,11 @@ public final class Api {
         call("GET", session.baseUrl() + "/api/promotion/cards" + (status == null || status.isEmpty() ? "" : "?status=" + status),
                 session.token(), null, cb);
     }
+    /** Nonaktifkan promo berjalan/akan datang (aksi ke TikTok, tak bisa dibatalkan). */
+    public void promoDeactivate(String shopId, String activityId, Cb cb) {
+        call("POST", session.baseUrl() + "/api/promotion/activities/" + shopId + "/" + activityId + "/nonaktifkan",
+                session.token(), new JSONObject(), cb);
+    }
     /** Perpanjang promo berjalan/akan datang +days hari (aksi ke TikTok). */
     public void promoExtend(String shopId, String activityId, int days, Cb cb) {
         JSONObject b = new JSONObject();

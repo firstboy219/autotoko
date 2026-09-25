@@ -240,6 +240,26 @@ public class PromotionActivity extends AppCompatActivity {
             rep.setOnClickListener(v -> pilihTujuan(c));
             aksi.addView(rep, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             box.addView(aksi, al);
+            if (berjalan) {
+                MaterialButton non = new MaterialButton(this, null,
+                        com.google.android.material.R.attr.materialButtonOutlinedStyle);
+                non.setText("Nonaktifkan promo");
+                non.setAllCaps(false);
+                non.setTextSize(13);
+                non.setTextColor(getColor(R.color.warn));
+                non.setStrokeColor(android.content.res.ColorStateList.valueOf(getColor(R.color.warn)));
+                non.setOnClickListener(v -> nonaktifkan(c));
+                box.addView(non, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            }
+        } else if (berjalan) {
+            MaterialButton non = new MaterialButton(this, null,
+                    com.google.android.material.R.attr.materialButtonOutlinedStyle);
+            non.setText("Nonaktifkan promo");
+            non.setAllCaps(false);
+            non.setTextColor(getColor(R.color.warn));
+            non.setOnClickListener(v -> nonaktifkan(c));
+            box.addView(non);
         } else if (!berjalan) {
             box.addView(teks("Tidak bisa diaktifkan kembali: TikTok sudah mengosongkan daftar produknya.", 11, false, R.color.ink3));
         }
@@ -349,8 +369,37 @@ public class PromotionActivity extends AppCompatActivity {
         });
     }
 
+    /** Nonaktifkan: konfirmasi eksplisit, lalu status dibaca ulang dari TikTok. */
+    private void nonaktifkan(JSONObject c) {
+        new AlertDialog.Builder(this)
+                .setTitle("Nonaktifkan promo?")
+                .setMessage(c.optString("title") + "\n" + c.optString("shopName")
+                        + "\n\nHarga produk kembali normal di TikTok. Tidak bisa dibatalkan — "
+                        + "setelah ini hanya bisa \"Aktifkan kembali\" (membuat promo baru).")
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Nonaktifkan di TikTok", (dlg, w) -> {
+                    Toast.makeText(this, "Mengirim ke TikTok…", Toast.LENGTH_SHORT).show();
+                    api.promoDeactivate(c.optString("shopId"), c.optString("activityId"), r -> {
+                        if (r == null || !r.ok() || r.data() == null) {
+                            pesan("Gagal menonaktifkan", r == null ? "Gagal." : r.message("TikTok menolak."));
+                            return;
+                        }
+                        JSONObject d = r.data();
+                        String isi = c.optString("title");
+                        if (d.optBoolean("terverifikasi", false)) isi += "\n✓ Terverifikasi di TikTok: Dinonaktifkan.";
+                        else if (!d.isNull("statusTerbaca")) isi += "\n⚠ Status terbaca di TikTok: "
+                                + labelStatus(d.optString("statusTerbaca")) + " — cek Seller Center.";
+                        else isi += "\nTerkirim; verifikasi belum terbaca.";
+                        pesan("Promo dinonaktifkan", isi);
+                    });
+                })
+                .show();
+    }
+
     private void pesan(String judul, String isi) {
-        new AlertDialog.Builder(this).setTitle(judul).setMessage(isi)
+        // Daftar promo TikTok (search) terlambat ±1 menit dari perubahan (terukur).
+        new AlertDialog.Builder(this).setTitle(judul)
+                .setMessage(isi + "\n\nDaftar di halaman ini bisa terlambat ±1 menit dari TikTok — tarik ke bawah untuk muat ulang.")
                 .setPositiveButton("OK", (dlg, w) -> muat()).show();
     }
 

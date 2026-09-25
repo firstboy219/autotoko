@@ -98,6 +98,12 @@ export class PromotionController {
     return ok(await this.cardsSvc.reactivate(uid(req), shopId, activityId, dto));
   }
 
+  /** Nonaktifkan promo + verifikasi status dari TikTok (aksi outward). */
+  @Post("activities/:shopId/:activityId/nonaktifkan")
+  async nonaktifkan(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("activityId") activityId: string) {
+    return ok(await this.cardsSvc.deactivate(uid(req), shopId, activityId));
+  }
+
   /** Perpanjang promo berjalan/akan datang (aksi outward). */
   @Post("activities/:shopId/:activityId/extend")
   async extend(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("activityId") activityId: string, @Body() dto: ExtendDto) {
