@@ -321,6 +321,20 @@ export class TikTokClient {
     return this.get<{ orders?: Record<string, unknown>[] }>("/order/202309/orders", { ids: ids.join(",") });
   }
 
+  /**
+   * Batalkan order (seller) via Cancellation API 202309.
+   * CATATAN: kontrak persis (reason_key/line items) perlu diverifikasi saat
+   * scope Return/Refund aktif; sebelum itu panggilan ditolak & ditangani
+   * graceful oleh pemanggil (order tetap ditandai batal di AutoToko).
+   */
+  async cancelOrder(orderId: string, reason: string) {
+    return this.post("/return_refund/202309/cancellations", {}, {
+      order_id: orderId,
+      cancel_reason: reason,
+      cancel_user: "SELLER",
+    });
+  }
+
   /** Get Tracking 202309: linimasa pengiriman sebuah order. */
   async orderTracking(orderId: string) {
     return this.get<{ tracking?: Array<Record<string, unknown>> }>(

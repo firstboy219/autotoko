@@ -1607,6 +1607,50 @@ export class MarketplaceSyncService {
     return { hasil };
   }
 
+  /**
+   * Batalkan order: coba batalkan di marketplace (TikTok Cancellation API,
+   * graceful/dorman sampai scope Return/Refund aktif) LALU tandai dibatalkan
+   * di AutoToko berikut alasannya. Order yang sudah terminal ditolak.
+   */
+  async cancelOrder(userId: string, orderId: string, reason: string) {
+    const [o] = await this.bypass(() => this.db.select().from(orders).where(and(eq(orders.id, orderId), eq(orders.userId, userId))).limit(1));
+    if (!o) throw new NotFoundException("Order tidak ditemukan");
+    const fs = o.fulfillmentStatus as string;
+    if (["dibatalkan", "selesai", "dikirim"].includes(fs)) {
+      throw new BadRequestException(`Order sudah ${fs} — tidak bisa dibatalkan.`);
+    }
+    let marketplaceCancelled = false;
+    let marketplaceError: string | undefined;
+    if (o.marketplace === "tiktok" && o.shopId) {
+      const [t] = await this.bypass(() => this.db.select().from(shops).where(eq(shops.id, o.shopId as string)).limit(1));
+      if (t && t.accessToken && t.shopCipher) {
+        try {
+          let klien = await this.klien(t); let segar = false;
+          const call = async <T>(fn: (c: TikTokClient) => Promise<T>): Promise<T> => {
+            for (;;) { try { return await fn(klien); } catch (e) { if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(t); continue; } throw e; } }
+          };
+          await call((c) => c.cancelOrder(o.marketplaceOrderId as string, reason));
+          marketplaceCancelled = true;
+        } catch (e) {
+          marketplaceError = (e as Error).message;
+          this.logger.warn(`Cancel TikTok ${o.marketplaceOrderId} gagal (mungkin scope belum aktif): ${marketplaceError}`);
+        }
+      } else {
+        marketplaceError = "Toko tidak tersambung API";
+      }
+    } else {
+      marketplaceError = "Bukan order TikTok API";
+    }
+    await this.bypass(() => this.db.update(orders).set({
+      fulfillmentStatus: "dibatalkan",
+      holdReason: `Batal: ${reason}`.slice(0, 500),
+      status: marketplaceCancelled ? "CANCELLED" : o.status,
+      updatedAt: new Date(),
+    }).where(and(eq(orders.id, orderId), eq(orders.userId, userId))));
+    this.logger.log(`Order ${o.marketplaceOrderId} dibatalkan (marketplace=${marketplaceCancelled}); alasan: ${reason}`);
+    return { ok: true, marketplaceCancelled, marketplaceError, fulfillmentStatus: "dibatalkan" };
+  }
+
   async refreshOrderTiktok(userId: string, orderId: string) {
     const [o] = await this.bypass(() => this.db.select().from(orders)
       .where(and(eq(orders.id, orderId), eq(orders.userId, userId))).limit(1));

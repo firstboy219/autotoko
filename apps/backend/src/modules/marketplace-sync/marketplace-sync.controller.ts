@@ -215,6 +215,12 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.checkOrderStatus(uid(req), body?.orderIds ?? []) };
   }
 
+  /** Batalkan order (coba di marketplace + tandai dibatalkan di AutoToko). */
+  @Post("orders/:id/cancel")
+  async cancelOrder(@Req() req: FastifyRequest, @Param("id") id: string, @Body() body: { reason?: string }): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.cancelOrder(uid(req), id, (body?.reason ?? "").trim() || "Dibatalkan oleh seller") };
+  }
+
   /** Ambil URL label AWB order dari marketplace (read-only). */
   @Get("orders/:id/label")
   async labelOrder(

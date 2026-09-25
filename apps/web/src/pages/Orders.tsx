@@ -1826,6 +1826,34 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
     }
   }
 
+  async function batalkanOrder() {
+    const alasan = window.prompt(
+      "Alasan pembatalan order ini?\n\nOrder akan ditandai DIBATALKAN di AutoToko (keluar dari antrean packing). Jika scope Return/Refund TikTok aktif, sekaligus dibatalkan di marketplace (pembeli di-refund).",
+    );
+    if (alasan == null) return;
+    if (!alasan.trim()) { toast("Alasan wajib diisi.", "warning"); return; }
+    setBusy(true); setErr(null);
+    try {
+      const r = await api.post<{ marketplaceCancelled: boolean; marketplaceError?: string; fulfillmentStatus: string }>(
+        `/marketplace-sync/orders/${order.id}/cancel`,
+        { reason: alasan.trim() },
+      );
+      if (r.marketplaceCancelled) {
+        toast("Order dibatalkan (termasuk di TikTok).", "success");
+      } else {
+        toast(
+          `Order ditandai DIBATALKAN di AutoToko.${r.marketplaceError ? ` Marketplace: ${r.marketplaceError}` : " (pembatalan TikTok belum aktif — perlu scope Return/Refund)"}`,
+          "warning",
+        );
+      }
+      onChanged({ ...order, fulfillmentStatus: "dibatalkan" });
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function setStatus(status: string) {
     // Irreversible-feeling transitions get an explicit confirmation.
     if (status === "dibatalkan" || status === "retur") {
@@ -2046,6 +2074,14 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
             </div>
           )}
 
+          {!["dikirim", "selesai", "dibatalkan"].includes(order.fulfillmentStatus) && (
+            <div className="mb-3">
+              <Button size="sm" variant="danger" icon="xCircle" loading={busy} onClick={batalkanOrder}>
+                Batalkan Order
+              </Button>
+              <p className="text-[11px] text-ink-3 mt-1">Menandai DIBATALKAN + (jika scope aktif) batal di TikTok.</p>
+            </div>
+          )}
           <label className="block text-xs text-ink-2 mb-1.5">Ubah manual ke status apa pun</label>
           <Select
             value={order.fulfillmentStatus}
