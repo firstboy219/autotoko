@@ -182,5 +182,6 @@
             android:screenOrientation="portrait" />
         <activity android:name=".BatchPackingActivity" android:exported="false" />
         <activity android:name=".CekResiActivity" android:exported="false" />
+        <activity android:name=".SaldoActivity" android:exported="false" />
     </application>
 </manifest>

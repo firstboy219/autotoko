@@ -891,6 +891,7 @@ public class DashboardActivity extends AppCompatActivity {
                 {"📥", "Bahan Baku", "#14B8A6", "D"},
                 {"💰", "HPP", "#F59E0B", "H"},
                 {"🏦", "Pencairan", "#8B5CF6", "P"},
+                {"💳", "Cek Saldo", "#16A34A", "C"},
                 {"📊", "Stok", "#EF4444", "K"},
                 {"🕒", "Riwayat", "#64748B", "R"},
                 {"🔤", "Scan Teks", "#0EA5E9", "T"},
@@ -948,6 +949,7 @@ public class DashboardActivity extends AppCompatActivity {
             case "D": i = new Intent(this, DeliveryActivity.class); break;
             case "H": i = new Intent(this, HppActivity.class); break;
             case "P": i = new Intent(this, PayoutActivity.class); break;
+            case "C": i = new Intent(this, SaldoActivity.class); break;
             case "K": i = new Intent(this, StockActivity.class); break;
             case "R": i = new Intent(this, HistoryActivity.class); break;
             case "T": i = new Intent(this, TextScanActivity.class); break;

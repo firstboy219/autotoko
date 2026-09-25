@@ -141,6 +141,10 @@ public final class Api {
         String enc; try { enc = java.net.URLEncoder.encode(resi, "UTF-8"); } catch (Exception e) { enc = resi; }
         call("GET", session.baseUrl() + "/api/orders/lookup?resi=" + enc, session.token(), null, cb);
     }
+    /** Saldo bisa ditarik per toko TikTok (sama dgn kartu di Pencairan web). live=true hitung ulang dari API. */
+    public void saldoTiktok(boolean live, Cb cb) {
+        call("GET", session.baseUrl() + "/api/marketplace-sync/saldo-tiktok" + (live ? "?live=1" : ""), session.token(), null, cb);
+    }
     public void orderShip(String id, String handover, Cb cb) {
         JSONObject p = new JSONObject();
         try { if (handover != null) p.put("handoverMethod", handover); } catch (Exception ignored) {}
