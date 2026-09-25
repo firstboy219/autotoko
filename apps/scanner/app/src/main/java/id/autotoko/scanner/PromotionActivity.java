@@ -3,29 +3,42 @@ package id.autotoko.scanner;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.material.button.MaterialButton;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
 
 /**
- * Promotion: daftar activity promo TikTok per toko (GET /promotion/activities).
+ * Promotion: kartu per promo yang berfokus ke PRODUK -- nama toko,
+ * marketplace, lalu tiap produk dengan potongannya dan rentang tanggalnya.
+ * Sumber: GET /promotion/cards (backend menggabungkan list + detail activity
+ * TikTok + nama produk dari data sinkron).
  *
- * Hanya MEMBACA. Membuat/mengubah promo adalah aksi ke marketplace yang
- * dampaknya ke harga jual, jadi tetap dilakukan dari web yang menampilkan
- * produk & harganya lengkap.
+ * Replikasi ke toko lain = aksi ke TikTok (membuat promo & mengubah harga),
+ * jadi selalu dua langkah: rencana dulu (dryRun, tidak menyentuh TikTok --
+ * produk mana yang cocok di toko tujuan), baru dijalankan setelah seller
+ * menekan "Jalankan".
+ *
+ * Promo otomatis TikTok (SmartAuto_*) tidak bisa dibaca produknya lewat API
+ * (TikTok menolak, 17029028) -- ditampilkan sebagai ringkasan per toko.
  */
 public class PromotionActivity extends AppCompatActivity {
 
@@ -33,13 +46,12 @@ public class PromotionActivity extends AppCompatActivity {
     private LinearLayout list, tabs;
     private TextView status;
     private androidx.swiperefreshlayout.widget.SwipeRefreshLayout srl;
-    private JSONArray data = new JSONArray();
-    private String filter = "ONGOING";
+    private String filter = "";
     private float d;
+    private int muatKe = 0;
 
     private static final String[][] FILTER = {
-            {"ONGOING", "Berlangsung"}, {"NOT_START", "Akan datang"},
-            {"EXPIRED", "Berakhir"}, {"", "Semua"},
+            {"", "Semua"}, {"ONGOING", "Berlangsung"}, {"NOT_START", "Akan datang"}, {"EXPIRED", "Berakhir"},
     };
 
     private int dp(int v) { return (int) (v * d); }
@@ -90,162 +102,379 @@ public class PromotionActivity extends AppCompatActivity {
         for (String[] f : FILTER) {
             boolean on = f[0].equals(filter);
             TextView t = new TextView(this);
-            t.setText(f[1] + (data.length() > 0 ? " " + hitung(f[0]) : ""));
+            t.setText(f[1]);
             t.setTextSize(13);
             t.setTypeface(null, on ? Typeface.BOLD : Typeface.NORMAL);
             t.setTextColor(on ? getColor(R.color.on_brand) : getColor(R.color.ink2));
-            GradientDrawable g = new GradientDrawable();
-            g.setColor(on ? getColor(R.color.brand) : getColor(R.color.surface));
-            g.setStroke(Math.max(1, dp(1)), getColor(R.color.line));
-            g.setCornerRadius(dp(18));
-            t.setBackground(g);
+            t.setBackground(bulat(on ? getColor(R.color.brand) : getColor(R.color.surface), 18, true));
             t.setPadding(dp(14), dp(8), dp(14), dp(8));
             LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             p.setMargins(dp(4), 0, dp(4), 0);
             final String kode = f[0];
-            t.setOnClickListener(v -> { filter = kode; buatTab(); gambar(); });
+            t.setOnClickListener(v -> { if (!kode.equals(filter)) { filter = kode; buatTab(); muat(); } });
             tabs.addView(t, p);
         }
     }
 
-    private int hitung(String st) {
-        int n = 0;
-        for (int i = 0; i < data.length(); i++) {
-            JSONObject s = data.optJSONObject(i);
-            JSONArray acts = s == null ? null : s.optJSONArray("activities");
-            for (int k = 0; acts != null && k < acts.length(); k++) {
-                JSONObject a = acts.optJSONObject(k);
-                if (a != null && cocok(a, st)) n++;
-            }
-        }
-        return n;
-    }
-
-    private static boolean cocok(JSONObject a, String st) {
-        if (st.isEmpty()) return true;
-        String s = a.optString("status", "").toUpperCase(Locale.ROOT);
-        if ("EXPIRED".equals(st)) return s.equals("EXPIRED") || s.equals("DEACTIVATED") || s.equals("NOT_EFFECT");
-        return s.equals(st);
-    }
-
     private void muat() {
-        status.setText("Memuat promo dari TikTok…");
-        api.promoActivities(r -> {
+        final int ke = ++muatKe;
+        status.setText("Memuat promo & produk dari TikTok…");
+        list.removeAllViews();
+        api.promoCards(filter, r -> {
+            if (ke != muatKe) return; // tab sudah diganti
             srl.setRefreshing(false);
-            if (r == null || !r.ok() || r.dataArray() == null) {
+            if (r == null || !r.ok() || r.data() == null) {
                 if (r != null && r.code == 403) status.setText("Promotion hanya untuk pemilik toko.");
                 else status.setText(r == null ? "Gagal memuat." : r.message("Gagal memuat promo."));
                 return;
             }
-            data = r.dataArray();
-            buatTab();
-            gambar();
+            gambar(r.data());
         });
     }
 
-    private void gambar() {
+    private void gambar(JSONObject data) {
         list.removeAllViews();
-        int tampil = 0, gagal = 0;
-        for (int i = 0; i < data.length(); i++) {
-            JSONObject s = data.optJSONObject(i);
-            if (s == null) continue;
-            String toko = s.optString("shopName", "-");
-            String err = s.isNull("error") ? "" : s.optString("error", "");
-            if (!err.isEmpty()) {
-                gagal++;
-                list.addView(kartu(toko, "Gagal memuat: " + err, getColor(R.color.warn)));
-                continue;
-            }
-            JSONArray acts = s.optJSONArray("activities");
-            for (int k = 0; acts != null && k < acts.length(); k++) {
-                JSONObject a = acts.optJSONObject(k);
-                if (a == null || !cocok(a, filter)) continue;
-                list.addView(kartuPromo(toko, a));
-                tampil++;
-            }
+        JSONArray cards = data.optJSONArray("cards");
+        JSONArray oto = data.optJSONArray("otomatis");
+        JSONArray gagal = data.optJSONArray("gagal");
+        int n = cards == null ? 0 : cards.length();
+
+        StringBuilder st = new StringBuilder(n == 0 ? "Tidak ada promo yang bisa dibaca di filter ini." : n + " promo");
+        if (data.optBoolean("dipotong", false)) st.append(" (").append(data.optInt("total")).append(" total, tampil terbaru)");
+        status.setText(st);
+
+        for (int i = 0; gagal != null && i < gagal.length(); i++) {
+            JSONObject g = gagal.optJSONObject(i);
+            if (g != null) list.addView(catatan(g.optString("shopName") + ": gagal memuat — " + g.optString("error"), true));
         }
-        status.setText(tampil == 0 ? "Tidak ada promo di filter ini." : tampil + " promo"
-                + (gagal > 0 ? " · " + gagal + " toko gagal dimuat" : "")
-                + " · kelola/buat promo dari web");
+        if (oto != null && oto.length() > 0) {
+            StringBuilder s = new StringBuilder();
+            for (int i = 0; i < oto.length(); i++) {
+                JSONObject o = oto.optJSONObject(i);
+                if (o == null) continue;
+                if (s.length() > 0) s.append("\n");
+                s.append("• ").append(o.optString("shopName")).append(": ").append(o.optInt("count")).append(" promo");
+            }
+            LinearLayout k = kotak();
+            k.addView(teks("Promo otomatis TikTok (SmartAuto)", 13, true, R.color.attention));
+            k.addView(teks(s.toString(), 12, false, R.color.ink2));
+            k.addView(teks("Produk & diskonnya tidak dibuka API TikTok (ditolak: izin), jadi tidak bisa ditampilkan "
+                    + "atau direplikasi. Lihat di Seller Center.", 11, false, R.color.ink3));
+            list.addView(k);
+        }
+        for (int i = 0; i < n; i++) {
+            JSONObject c = cards.optJSONObject(i);
+            if (c != null) list.addView(kartu(c));
+        }
     }
 
-    private View kartuPromo(String toko, JSONObject a) {
-        String st = a.optString("status", "");
-        String periode = tgl(a.optLong("begin_time", 0)) + " – " + tgl(a.optLong("end_time", 0));
-        String isi = toko + "\n" + jenis(a.optString("activity_type", "")) + " · " + periode;
-        LinearLayout k = kartu(a.optString("title", "(tanpa judul)"), isi, 0);
-        TextView chip = new TextView(this);
-        chip.setText(labelStatus(st));
-        chip.setTextSize(11);
-        boolean jalan = "ONGOING".equalsIgnoreCase(st);
-        chip.setTextColor(getColor(jalan ? R.color.ok : R.color.ink2));
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(getColor(jalan ? R.color.ok_bg : R.color.canvas));
-        g.setCornerRadius(dp(10));
-        chip.setBackground(g);
-        chip.setPadding(dp(8), dp(2), dp(8), dp(2));
-        LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        cl.topMargin = dp(6);
-        k.addView(chip, cl);
-        return k;
+    /* ------------------------------------------------ kartu promo */
+
+    private View kartu(JSONObject c) {
+        LinearLayout box = kotak();
+        String rentang = tgl(c.optLong("beginTime", 0)) + " – " + tgl(c.optLong("endTime", 0));
+
+        // Kepala: toko + marketplace, lalu judul + chip status/jenis.
+        LinearLayout atas = new LinearLayout(this);
+        atas.setOrientation(LinearLayout.HORIZONTAL);
+        atas.setGravity(Gravity.CENTER_VERTICAL);
+        TextView toko = teks(c.optString("shopName", "-") + "  ·  " + namaMp(c.optString("marketplace")), 13, true, R.color.ink);
+        atas.addView(toko, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        atas.addView(chip(labelStatus(c.optString("status")), "ONGOING".equalsIgnoreCase(c.optString("status"))));
+        box.addView(atas);
+        box.addView(teks(c.optString("title", "-"), 12, false, R.color.ink2));
+        String jenis = jenis(c.optString("type")) + (c.isNull("discountSummary") ? "" : "  ·  " + c.optString("discountSummary"));
+        box.addView(teks(jenis, 12, false, R.color.ink2));
+
+        JSONArray prods = c.optJSONArray("products");
+        int np = prods == null ? 0 : prods.length();
+        if (!c.isNull("error") && !c.optString("error").isEmpty()) {
+            box.addView(teks("Detail tidak terbaca: " + c.optString("error"), 11, false, R.color.warn));
+        } else if (np == 0) {
+            box.addView(teks("Tidak ada produk (promo yang sudah berakhir biasanya dikosongkan TikTok).", 11, false, R.color.ink3));
+        }
+
+        // Daftar produk: nama, potongan, rentang tanggal per item.
+        String bmsm = c.isNull("discountSummary") ? null : c.optString("discountSummary");
+        for (int i = 0; i < np; i++) {
+            JSONObject p = prods.optJSONObject(i);
+            if (p == null) continue;
+            JSONArray skus = p.optJSONArray("skus");
+            if (skus != null && skus.length() > 0) {
+                box.addView(barisProduk(p.optString("name"), null, rentang));
+                for (int k = 0; k < skus.length(); k++) {
+                    JSONObject s = skus.optJSONObject(k);
+                    if (s != null) box.addView(barisProduk("   ↳ " + s.optString("name"), potongan(s, bmsm), null));
+                }
+            } else {
+                box.addView(barisProduk(p.optString("name"), potongan(p, bmsm), rentang));
+            }
+        }
+
+        if (np > 0) {
+            MaterialButton rep = new MaterialButton(this, null,
+                    com.google.android.material.R.attr.materialButtonOutlinedStyle);
+            rep.setText("Replikasi ke toko lain");
+            rep.setAllCaps(false);
+            rep.setOnClickListener(v -> pilihTujuan(c));
+            LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rl.topMargin = dp(8);
+            box.addView(rep, rl);
+        }
+        return box;
+    }
+
+    /** "-15%" / "Rp 39.000 (normal Rp 49.300)" / tier BMSM. */
+    private static String potongan(JSONObject p, String bmsm) {
+        double pct = p.optDouble("discountPct", Double.NaN);
+        double harga = p.optDouble("activityPrice", Double.NaN);
+        double normal = p.optDouble("originalPrice", Double.NaN);
+        if (!Double.isNaN(pct)) {
+            String s = "-" + fmtAngka(pct) + "%";
+            if (!Double.isNaN(normal)) s += "  (" + rp(normal) + " → " + rp(normal * (100 - pct) / 100) + ")";
+            return s;
+        }
+        if (!Double.isNaN(harga)) {
+            String s = "Harga promo " + rp(harga);
+            if (!Double.isNaN(normal) && normal > 0) s += "  (normal " + rp(normal) + ", -" + Math.round((normal - harga) / normal * 100) + "%)";
+            return s;
+        }
+        if (bmsm != null) return "Ikut: " + bmsm + (Double.isNaN(normal) ? "" : "  · normal " + rp(normal));
+        return Double.isNaN(normal) ? "-" : "normal " + rp(normal);
+    }
+
+    private View barisProduk(String nama, String diskon, String rentang) {
+        LinearLayout r = new LinearLayout(this);
+        r.setOrientation(LinearLayout.VERTICAL);
+        r.setPadding(0, dp(6), 0, dp(6));
+        TextView n = teks(nama, 13, false, R.color.ink);
+        n.setMaxLines(2);
+        n.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        r.addView(n);
+        if (diskon != null || rentang != null) {
+            LinearLayout b = new LinearLayout(this);
+            b.setOrientation(LinearLayout.HORIZONTAL);
+            if (diskon != null) {
+                TextView dv = teks(diskon, 12, true, R.color.brand);
+                b.addView(dv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            } else {
+                b.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+            }
+            if (rentang != null) b.addView(teks("📅 " + rentang, 11, false, R.color.ink3));
+            r.addView(b);
+        }
+        View garis = new View(this);
+        garis.setBackgroundColor(getColor(R.color.line));
+        LinearLayout.LayoutParams gl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1) / 2));
+        gl.topMargin = dp(6);
+        r.addView(garis, gl);
+        return r;
+    }
+
+    /* ------------------------------------------------ replikasi */
+
+    private void pilihTujuan(JSONObject c) {
+        final String srcShop = c.optString("shopId");
+        api.shops(r -> {
+            JSONArray a = r == null ? null : r.dataArray();
+            if (a == null) { Toast.makeText(this, "Gagal memuat daftar toko.", Toast.LENGTH_SHORT).show(); return; }
+            final List<String> ids = new ArrayList<>();
+            final List<String> nama = new ArrayList<>();
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject s = a.optJSONObject(i);
+                if (s == null || !"tiktok".equals(s.optString("marketplace")) || !"active".equals(s.optString("shopStatus"))) continue;
+                if (s.isNull("connectedAt") || srcShop.equals(s.optString("id"))) continue;
+                ids.add(s.optString("id"));
+                String dn = s.isNull("displayName") || s.optString("displayName").isEmpty() ? s.optString("shopName") : s.optString("displayName");
+                nama.add(dn);
+            }
+            if (ids.isEmpty()) { Toast.makeText(this, "Tidak ada toko TikTok lain yang terhubung.", Toast.LENGTH_LONG).show(); return; }
+            final boolean[] pilih = new boolean[ids.size()];
+            new AlertDialog.Builder(this)
+                    .setTitle("Replikasi ke toko mana?")
+                    .setMultiChoiceItems(nama.toArray(new String[0]), pilih, (dlg, w, on) -> pilih[w] = on)
+                    .setNegativeButton("Batal", null)
+                    .setPositiveButton("Cek produk cocok", (dlg, w) -> {
+                        JSONArray t = new JSONArray();
+                        for (int i = 0; i < pilih.length; i++) if (pilih[i]) t.put(ids.get(i));
+                        if (t.length() == 0) { Toast.makeText(this, "Pilih minimal satu toko.", Toast.LENGTH_SHORT).show(); return; }
+                        rencana(c, t);
+                    })
+                    .show();
+        });
+    }
+
+    /** Langkah 1: dryRun -- tampilkan pemetaan produk, tidak menyentuh TikTok. */
+    private void rencana(JSONObject c, JSONArray targets) {
+        Toast.makeText(this, "Mencocokkan produk di toko tujuan…", Toast.LENGTH_SHORT).show();
+        api.promoReplicate(c.optString("shopId"), c.optString("activityId"), targets, true, r -> {
+            if (r == null || !r.ok() || r.data() == null) {
+                Toast.makeText(this, r == null ? "Gagal." : r.message("Gagal membuat rencana replikasi."), Toast.LENGTH_LONG).show();
+                return;
+            }
+            JSONObject d = r.data();
+            JSONArray h = d.optJSONArray("hasil");
+            StringBuilder s = new StringBuilder();
+            s.append("Promo: ").append(c.optString("title")).append("\n")
+             .append(jenis(c.optString("type"))).append(" — potongan per produk sama dengan sumber.\n")
+             .append("Jadwal baru: ").append(tgl(d.optLong("beginTime"))).append(" – ").append(tgl(d.optLong("endTime"))).append("\n");
+            int adaCocok = 0;
+            for (int i = 0; h != null && i < h.length(); i++) {
+                JSONObject x = h.optJSONObject(i);
+                if (x == null) continue;
+                s.append("\n■ ").append(x.optString("shopName")).append(": ")
+                 .append(x.optInt("cocok")).append(" dari ").append(x.optInt("total")).append(" produk cocok");
+                if (!x.isNull("error") && !x.optString("error").isEmpty()) s.append("\n   ").append(x.optString("error"));
+                if (x.optInt("cocok") > 0) adaCocok++;
+                JSONArray tak = x.optJSONArray("tidakTerpetakan");
+                for (int k = 0; tak != null && k < Math.min(5, tak.length()); k++) {
+                    JSONObject t = tak.optJSONObject(k);
+                    if (t != null) s.append("\n   ✗ ").append(potong(t.optString("name"), 48));
+                }
+                if (tak != null && tak.length() > 5) s.append("\n   ✗ dan ").append(tak.length() - 5).append(" lagi");
+            }
+            s.append("\n\nProduk ✗ tidak ditemukan padanannya (katalog/master produk/nama) di toko itu dan akan dilewati.");
+            TextView tv = teks(s.toString(), 13, false, R.color.ink);
+            tv.setPadding(dp(20), dp(8), dp(20), dp(8));
+            ScrollView sc = new ScrollView(this);
+            sc.addView(tv);
+            AlertDialog.Builder bld = new AlertDialog.Builder(this)
+                    .setTitle("Rencana replikasi")
+                    .setView(sc)
+                    .setNegativeButton("Batal", null);
+            if (adaCocok > 0) {
+                bld.setPositiveButton("Jalankan di TikTok", (dlg, w) -> jalankan(c, targets));
+            }
+            bld.show();
+        });
+    }
+
+    /** Langkah 2: aksi outward -- membuat promo di tiap toko tujuan. */
+    private void jalankan(JSONObject c, JSONArray targets) {
+        Toast.makeText(this, "Membuat promo di TikTok…", Toast.LENGTH_SHORT).show();
+        api.promoReplicate(c.optString("shopId"), c.optString("activityId"), targets, false, r -> {
+            if (r == null || !r.ok() || r.data() == null) {
+                Toast.makeText(this, r == null ? "Gagal." : r.message("Replikasi gagal."), Toast.LENGTH_LONG).show();
+                return;
+            }
+            JSONArray h = r.data().optJSONArray("hasil");
+            StringBuilder s = new StringBuilder();
+            for (int i = 0; h != null && i < h.length(); i++) {
+                JSONObject x = h.optJSONObject(i);
+                if (x == null) continue;
+                boolean ok = x.isNull("error") || x.optString("error").isEmpty();
+                s.append(ok ? "✓ " : "✗ ").append(x.optString("shopName")).append(": ");
+                if (ok) {
+                    s.append("promo baru dibuat (ID ").append(x.optString("activityId")).append(")");
+                    if (!x.isNull("terverifikasi")) {
+                        int v = x.optInt("terverifikasi");
+                        s.append("\n   terverifikasi di TikTok: ").append(v).append(" dari ")
+                         .append(x.optInt("cocok")).append(" produk");
+                        if (v < x.optInt("cocok")) s.append(" — sebagian ditolak TikTok, cek di Seller Center");
+                    } else {
+                        s.append("\n   ").append(x.optInt("cocok")).append(" produk dikirim (verifikasi belum terbaca)");
+                    }
+                    if (!x.isNull("statusBaru")) s.append("\n   status: ").append(labelStatus(x.optString("statusBaru")));
+                } else s.append(x.optString("error"));
+                s.append("\n");
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle("Hasil replikasi")
+                    .setMessage(s.toString().trim())
+                    .setPositiveButton("OK", (dlg, w) -> muat())
+                    .show();
+        });
+    }
+
+    /* ------------------------------------------------ bantu */
+
+    private static String potong(String s, int n) { return s.length() > n ? s.substring(0, n - 1) + "…" : s; }
+
+    private static String fmtAngka(double v) {
+        return v == Math.rint(v) ? String.valueOf((long) v) : String.valueOf(v);
+    }
+
+    private static String rp(double v) {
+        return "Rp " + String.format(new Locale("id", "ID"), "%,.0f", v);
+    }
+
+    private static String namaMp(String mp) {
+        if ("tiktok".equals(mp)) return "TikTok Shop";
+        if ("shopee".equals(mp)) return "Shopee";
+        return mp == null || mp.isEmpty() ? "-" : mp;
     }
 
     private static String labelStatus(String s) {
-        switch (s.toUpperCase(Locale.ROOT)) {
+        switch (s == null ? "" : s.toUpperCase(Locale.ROOT)) {
             case "ONGOING": return "Berlangsung";
             case "NOT_START": return "Akan datang";
             case "EXPIRED": return "Berakhir";
             case "DEACTIVATED": return "Dinonaktifkan";
             case "NOT_EFFECT": return "Tidak berlaku";
             case "DRAFT": return "Draf";
-            default: return s.isEmpty() ? "-" : s;
+            default: return s == null || s.isEmpty() ? "-" : s;
         }
     }
 
     private static String jenis(String t) {
-        switch (t.toUpperCase(Locale.ROOT)) {
+        switch (t == null ? "" : t.toUpperCase(Locale.ROOT)) {
             case "FIXED_PRICE": return "Harga tetap";
             case "DIRECT_DISCOUNT": return "Diskon langsung";
             case "FLASHSALE": return "Flash sale";
             case "BUY_MORE_SAVE_MORE": return "Beli banyak lebih hemat";
-            default: return t.isEmpty() ? "Promo" : t;
+            default: return t == null || t.isEmpty() ? "Promo" : t;
         }
     }
 
     private static String tgl(long detik) {
         if (detik <= 0) return "?";
-        SimpleDateFormat f = new SimpleDateFormat("dd/MM/yy HH:mm", Locale.US);
+        SimpleDateFormat f = new SimpleDateFormat("dd/MM/yy", Locale.US);
         f.setTimeZone(TimeZone.getTimeZone("Asia/Jakarta"));
         return f.format(new Date(detik * 1000L));
     }
 
-    private LinearLayout kartu(String judul, String isi, int warnaIsi) {
+    private GradientDrawable bulat(int warna, int radius, boolean garis) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(warna);
+        g.setCornerRadius(dp(radius));
+        if (garis) g.setStroke(Math.max(1, dp(1)), getColor(R.color.line));
+        return g;
+    }
+
+    private LinearLayout kotak() {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(12), dp(10), dp(12), dp(10));
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(getColor(R.color.surface));
-        g.setCornerRadius(dp(12));
-        g.setStroke(Math.max(1, dp(1)), getColor(R.color.line));
-        box.setBackground(g);
+        box.setPadding(dp(12), dp(10), dp(12), dp(8));
+        box.setBackground(bulat(getColor(R.color.surface), 12, true));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(6);
+        lp.topMargin = dp(8);
         box.setLayoutParams(lp);
-        TextView t = new TextView(this);
-        t.setTextSize(14);
-        t.setTypeface(null, Typeface.BOLD);
-        t.setTextColor(getColor(R.color.ink));
-        t.setText(judul);
-        box.addView(t);
-        TextView s = new TextView(this);
-        s.setTextSize(12);
-        s.setTextColor(warnaIsi != 0 ? warnaIsi : getColor(R.color.ink2));
-        s.setPadding(0, dp(3), 0, 0);
-        s.setText(isi);
-        box.addView(s);
         return box;
+    }
+
+    private TextView teks(String s, int size, boolean tebal, int warnaRes) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(size);
+        t.setTextColor(getColor(warnaRes));
+        if (tebal) t.setTypeface(null, Typeface.BOLD);
+        t.setPadding(0, dp(2), 0, 0);
+        return t;
+    }
+
+    private TextView catatan(String s, boolean peringatan) {
+        TextView t = teks(s, 12, false, peringatan ? R.color.warn : R.color.ink2);
+        t.setPadding(dp(4), dp(8), dp(4), 0);
+        return t;
+    }
+
+    private TextView chip(String s, boolean hijau) {
+        TextView c = teks(s, 11, false, hijau ? R.color.ok : R.color.ink2);
+        c.setBackground(bulat(getColor(hijau ? R.color.ok_bg : R.color.canvas), 10, false));
+        c.setPadding(dp(8), dp(2), dp(8), dp(2));
+        return c;
     }
 }

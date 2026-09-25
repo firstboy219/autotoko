@@ -161,6 +161,18 @@ public final class Api {
     public void promoActivities(Cb cb) {
         call("GET", session.baseUrl() + "/api/promotion/activities", session.token(), null, cb);
     }
+    /** Kartu promo berfokus produk: produk + potongan + rentang tanggal. status "" = semua. */
+    public void promoCards(String status, Cb cb) {
+        call("GET", session.baseUrl() + "/api/promotion/cards" + (status == null || status.isEmpty() ? "" : "?status=" + status),
+                session.token(), null, cb);
+    }
+    /** Replikasi promo (produk & potongan sama). dryRun=true = rencana saja, tanpa menyentuh TikTok. */
+    public void promoReplicate(String shopId, String activityId, JSONArray targetShopIds, boolean dryRun, Cb cb) {
+        JSONObject b = new JSONObject();
+        try { b.put("targetShopIds", targetShopIds); b.put("dryRun", dryRun); } catch (Exception ignore) {}
+        call("POST", session.baseUrl() + "/api/promotion/activities/" + shopId + "/" + activityId + "/replicate-produk",
+                session.token(), b, cb);
+    }
     public void orderShip(String id, String handover, Cb cb) {
         JSONObject p = new JSONObject();
         try { if (handover != null) p.put("handoverMethod", handover); } catch (Exception ignored) {}

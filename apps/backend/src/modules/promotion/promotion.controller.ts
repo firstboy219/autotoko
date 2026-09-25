@@ -5,6 +5,7 @@ import type { ApiResponse } from "@autotoko/shared";
 import { JwtAuthGuard, TenantOwnerOnly, type JwtPayload } from "../auth/jwt-auth.guard.js";
 import { MarketplaceSyncService } from "../marketplace-sync/marketplace-sync.service.js";
 import { PromotionAutomationService } from "./promotion-automation.service.js";
+import { PromoCardsService } from "./promo-cards.service.js";
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
@@ -46,6 +47,12 @@ class AutomationDto {
   @IsOptional() @IsBoolean() autoReplicate?: boolean;
   @IsOptional() @IsNumber() @Min(0) @Max(99) replicateDiscountPct?: number;
 }
+class ReplicateProdukDto {
+  @IsArray() @IsString({ each: true }) targetShopIds!: string[];
+  @IsOptional() @IsBoolean() dryRun?: boolean;
+  @IsOptional() @IsNumber() beginTime?: number;
+  @IsOptional() @IsNumber() endTime?: number;
+}
 class RunDto {
   @IsOptional() @IsBoolean() dryRun?: boolean;
 }
@@ -62,7 +69,23 @@ export class PromotionController {
   constructor(
     private readonly sync: MarketplaceSyncService,
     private readonly auto: PromotionAutomationService,
+    private readonly cardsSvc: PromoCardsService,
   ) {}
+
+  /** Kartu promo berfokus produk (APK): produk, potongan, rentang tanggal. */
+  @Get("cards")
+  async cards(@Req() req: FastifyRequest, @Query("status") status?: string) {
+    return ok(await this.cardsSvc.cards(uid(req), status ?? ""));
+  }
+
+  /**
+   * Replikasi promo dengan produk & potongan yang SAMA ke toko lain.
+   * dryRun=true -> rencana pemetaan saja; false -> aksi outward (klik seller).
+   */
+  @Post("activities/:shopId/:activityId/replicate-produk")
+  async replicateProduk(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("activityId") activityId: string, @Body() dto: ReplicateProdukDto) {
+    return ok(await this.cardsSvc.replicate(uid(req), shopId, activityId, dto));
+  }
 
   @Get("activities")
   async activities(@Req() req: FastifyRequest, @Query("status") status?: string, @Query("type") type?: string, @Query("title") title?: string) {
