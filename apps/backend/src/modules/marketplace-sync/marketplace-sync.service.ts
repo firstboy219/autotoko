@@ -1612,6 +1612,46 @@ export class MarketplaceSyncService {
    * graceful/dorman sampai scope Return/Refund aktif) LALU tandai dibatalkan
    * di AutoToko berikut alasannya. Order yang sudah terminal ditolak.
    */
+  /**
+   * Alasan pembatalan yang TERBUKTI pernah diterima TikTok di toko-toko user
+   * ini (90 hari terakhir) — dipakai mengisi dropdown "Batalkan Order" tanpa
+   * menebak. Read-only, aman dipanggil kapan saja.
+   */
+  async learnCancelReasons(userId: string) {
+    const toko = await this.tokoSiap(userId);
+    const seen = new Map<string, { key: string; text: string | null; count: number }>();
+    for (const t of toko) {
+      try {
+        let klien = await this.klien(t); let segar = false;
+        const call = async <T>(fn: (c: TikTokClient) => Promise<T>): Promise<T> => {
+          for (;;) { try { return await fn(klien); } catch (e) { if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(t); continue; } throw e; } }
+        };
+        const since = Math.floor((Date.now() - 90 * 86400000) / 1000);
+        const resp = await call((c) => c.searchCancellations(since));
+        // Nama field array balik belum terverifikasi via dok (SPA tak terbaca) —
+        // coba beberapa kemungkinan umum TikTok, defensif.
+        const arr =
+          (resp?.cancellations as unknown[]) ??
+          (resp?.cancel_orders as unknown[]) ??
+          (resp?.cancels as unknown[]) ??
+          [];
+        for (const raw of arr) {
+          const c = raw as Record<string, unknown>;
+          const role = String(c.role ?? c.cancel_user ?? "").toUpperCase();
+          const key = String(c.cancel_reason ?? "");
+          if (!key) continue;
+          if (role && role !== "SELLER") continue; // fokus alasan seller-initiated
+          const text = c.cancel_reason_text != null ? String(c.cancel_reason_text) : null;
+          const prev = seen.get(key);
+          seen.set(key, { key, text: text ?? prev?.text ?? null, count: (prev?.count ?? 0) + 1 });
+        }
+      } catch {
+        /* toko ini gagal ditanya — lanjut ke toko lain, jangan gagalkan semua */
+      }
+    }
+    return [...seen.values()].sort((a, b) => b.count - a.count);
+  }
+
   async cancelOrder(userId: string, orderId: string, reasonKey: string, note?: string) {
     const [o] = await this.bypass(() => this.db.select().from(orders).where(and(eq(orders.id, orderId), eq(orders.userId, userId))).limit(1));
     if (!o) throw new NotFoundException("Order tidak ditemukan");

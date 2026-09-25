@@ -95,15 +95,11 @@ type BatchResp = { total: number; ok: number; ditahan: number; labelsPdf?: strin
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
 
-// Alasan pembatalan resmi TikTok (cancel_reason enum). Label ID -> kunci API.
-const CANCEL_REASONS: { key: string; label: string }[] = [
-  { key: "out_of_stock", label: "Stok habis" },
-  { key: "customer_requested", label: "Pembeli minta batal" },
-  { key: "pricing_error", label: "Kesalahan harga" },
-  { key: "address_issue", label: "Alamat/kontak bermasalah" },
-  { key: "cannot_fulfill", label: "Tidak bisa memenuhi pesanan" },
-  { key: "other", label: "Lainnya" },
-];
+// Fallback SATU-SATUNYA saat toko belum punya riwayat pembatalan yang bisa
+// dipelajari — BELUM TERVERIFIKASI untuk toko ini (dari riset kode publik,
+// bukan dari tes langsung). Dropdown utama diisi dari /cancel-reasons
+// (alasan yang TERBUKTI pernah diterima TikTok di toko user).
+const FALLBACK_REASON = { key: "seller_cancel_reason_out_of_stock", label: "Stok habis (belum terverifikasi untuk toko ini)" };
 
 const MP_LABEL: Record<string, string> = {
   tiktok: "TikTok Shop",
@@ -1837,8 +1833,25 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
   }
 
   const [cancelling, setCancelling] = useState(false);
-  const [cancelReason, setCancelReason] = useState("out_of_stock");
+  const [cancelReason, setCancelReason] = useState(FALLBACK_REASON.key);
   const [cancelNote, setCancelNote] = useState("");
+  const [reasonOpts, setReasonOpts] = useState<{ key: string; text: string | null; count: number }[] | null>(null);
+  const [reasonLoading, setReasonLoading] = useState(false);
+
+  async function bukaPanelBatal() {
+    setCancelling(true);
+    if (reasonOpts !== null) return; // sudah pernah dimuat
+    setReasonLoading(true);
+    try {
+      const r = await api.get<{ key: string; text: string | null; count: number }[]>("/marketplace-sync/orders/cancel-reasons");
+      setReasonOpts(r ?? []);
+      if (r && r.length > 0) setCancelReason(r[0]!.key);
+    } catch {
+      setReasonOpts([]);
+    } finally {
+      setReasonLoading(false);
+    }
+  }
 
   async function doCancel() {
     setBusy(true); setErr(null);
@@ -2087,7 +2100,7 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
           {!["dikirim", "selesai", "dibatalkan"].includes(order.fulfillmentStatus) && (
             <div className="mb-3">
               {!cancelling ? (
-                <Button size="sm" variant="danger" icon="xCircle" disabled={busy} onClick={() => setCancelling(true)}>
+                <Button size="sm" variant="danger" icon="xCircle" disabled={busy} onClick={() => void bukaPanelBatal()}>
                   Batalkan Order
                 </Button>
               ) : (
@@ -2095,9 +2108,25 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
                   <div className="text-sm font-medium text-ink">Batalkan order ini?</div>
                   <div>
                     <label className="block text-xs text-ink-2 mb-1">Alasan (dikirim ke TikTok)</label>
-                    <Select value={cancelReason} onChange={(e) => setCancelReason(e.target.value)}>
-                      {CANCEL_REASONS.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
-                    </Select>
+                    {reasonLoading ? (
+                      <div className="text-xs text-ink-3">Memuat alasan yang pernah diterima toko ini…</div>
+                    ) : reasonOpts && reasonOpts.length > 0 ? (
+                      <>
+                        <Select value={cancelReason} onChange={(e) => setCancelReason(e.target.value)}>
+                          {reasonOpts.map((r) => (
+                            <option key={r.key} value={r.key}>{r.text ?? r.key} ({r.count}x diterima)</option>
+                          ))}
+                        </Select>
+                        <p className="text-[10px] text-emerald-700 mt-1">✓ Terverifikasi — pernah diterima TikTok di toko ini.</p>
+                      </>
+                    ) : (
+                      <>
+                        <Select value={cancelReason} onChange={(e) => setCancelReason(e.target.value)}>
+                          <option value={FALLBACK_REASON.key}>{FALLBACK_REASON.label}</option>
+                        </Select>
+                        <p className="text-[10px] text-amber-700 mt-1">⚠ Toko ini belum punya riwayat pembatalan — alasan BELUM terverifikasi, mungkin masih ditolak TikTok.</p>
+                      </>
+                    )}
                   </div>
                   <Input placeholder="Catatan (opsional)" value={cancelNote} onChange={(e) => setCancelNote(e.target.value)} />
                   <p className="text-[11px] text-ink-3">Order jadi DIBATALKAN di AutoToko; bila scope Return/Refund TikTok aktif, sekaligus batal di TikTok (pembeli di-refund).</p>

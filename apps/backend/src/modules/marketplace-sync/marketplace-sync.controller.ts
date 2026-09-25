@@ -215,6 +215,12 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.checkOrderStatus(uid(req), body?.orderIds ?? []) };
   }
 
+  /** Alasan pembatalan yang terbukti pernah diterima TikTok di toko user ini. */
+  @Get("orders/cancel-reasons")
+  async cancelReasons(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.learnCancelReasons(uid(req)) };
+  }
+
   /** Batalkan order (coba di marketplace + tandai dibatalkan di AutoToko). */
   @Post("orders/:id/cancel")
   async cancelOrder(@Req() req: FastifyRequest, @Param("id") id: string, @Body() body: { reasonKey?: string; note?: string }): Promise<ApiResponse<unknown>> {

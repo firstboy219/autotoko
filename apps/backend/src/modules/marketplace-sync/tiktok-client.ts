@@ -336,6 +336,19 @@ export class TikTokClient {
     });
   }
 
+  /**
+   * Cari riwayat pembatalan (90 hari) — dipakai untuk MEMPELAJARI cancel_reason
+   * yang TERBUKTI diterima TikTok di toko ini (termasuk yang dibatalkan manual
+   * di Seller Center), bukan menebak dari dokumentasi. Read-only.
+   */
+  async searchCancellations(sinceSec: number) {
+    return this.post<Record<string, unknown>>(
+      "/return_refund/202309/cancellations/search",
+      { create_time_ge: sinceSec },
+      { page_size: 50, sort_field: "create_time", sort_order: "DESC" },
+    );
+  }
+
   /** Get Tracking 202309: linimasa pengiriman sebuah order. */
   async orderTracking(orderId: string) {
     return this.get<{ tracking?: Array<Record<string, unknown>> }>(
