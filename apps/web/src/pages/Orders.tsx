@@ -95,6 +95,16 @@ type BatchResp = { total: number; ok: number; ditahan: number; labelsPdf?: strin
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
 
+// Alasan pembatalan resmi TikTok (cancel_reason enum). Label ID -> kunci API.
+const CANCEL_REASONS: { key: string; label: string }[] = [
+  { key: "out_of_stock", label: "Stok habis" },
+  { key: "customer_requested", label: "Pembeli minta batal" },
+  { key: "pricing_error", label: "Kesalahan harga" },
+  { key: "address_issue", label: "Alamat/kontak bermasalah" },
+  { key: "cannot_fulfill", label: "Tidak bisa memenuhi pesanan" },
+  { key: "other", label: "Lainnya" },
+];
+
 const MP_LABEL: Record<string, string> = {
   tiktok: "TikTok Shop",
   shopee: "Shopee",
@@ -1826,26 +1836,26 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
     }
   }
 
-  async function batalkanOrder() {
-    const alasan = window.prompt(
-      "Alasan pembatalan order ini?\n\nOrder akan ditandai DIBATALKAN di AutoToko (keluar dari antrean packing). Jika scope Return/Refund TikTok aktif, sekaligus dibatalkan di marketplace (pembeli di-refund).",
-    );
-    if (alasan == null) return;
-    if (!alasan.trim()) { toast("Alasan wajib diisi.", "warning"); return; }
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelReason, setCancelReason] = useState("out_of_stock");
+  const [cancelNote, setCancelNote] = useState("");
+
+  async function doCancel() {
     setBusy(true); setErr(null);
     try {
       const r = await api.post<{ marketplaceCancelled: boolean; marketplaceError?: string; fulfillmentStatus: string }>(
         `/marketplace-sync/orders/${order.id}/cancel`,
-        { reason: alasan.trim() },
+        { reasonKey: cancelReason, note: cancelNote.trim() || undefined },
       );
       if (r.marketplaceCancelled) {
         toast("Order dibatalkan (termasuk di TikTok).", "success");
       } else {
         toast(
-          `Order ditandai DIBATALKAN di AutoToko.${r.marketplaceError ? ` Marketplace: ${r.marketplaceError}` : " (pembatalan TikTok belum aktif — perlu scope Return/Refund)"}`,
+          `Order ditandai DIBATALKAN di AutoToko.${r.marketplaceError ? ` TikTok: ${r.marketplaceError}` : ""}`,
           "warning",
         );
       }
+      setCancelling(false);
       onChanged({ ...order, fulfillmentStatus: "dibatalkan" });
     } catch (e) {
       setErr((e as Error).message);
@@ -2076,10 +2086,27 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
 
           {!["dikirim", "selesai", "dibatalkan"].includes(order.fulfillmentStatus) && (
             <div className="mb-3">
-              <Button size="sm" variant="danger" icon="xCircle" loading={busy} onClick={batalkanOrder}>
-                Batalkan Order
-              </Button>
-              <p className="text-[11px] text-ink-3 mt-1">Menandai DIBATALKAN + (jika scope aktif) batal di TikTok.</p>
+              {!cancelling ? (
+                <Button size="sm" variant="danger" icon="xCircle" disabled={busy} onClick={() => setCancelling(true)}>
+                  Batalkan Order
+                </Button>
+              ) : (
+                <div className="rounded-lg border border-danger/40 bg-red-50 p-3 space-y-2">
+                  <div className="text-sm font-medium text-ink">Batalkan order ini?</div>
+                  <div>
+                    <label className="block text-xs text-ink-2 mb-1">Alasan (dikirim ke TikTok)</label>
+                    <Select value={cancelReason} onChange={(e) => setCancelReason(e.target.value)}>
+                      {CANCEL_REASONS.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+                    </Select>
+                  </div>
+                  <Input placeholder="Catatan (opsional)" value={cancelNote} onChange={(e) => setCancelNote(e.target.value)} />
+                  <p className="text-[11px] text-ink-3">Order jadi DIBATALKAN di AutoToko; bila scope Return/Refund TikTok aktif, sekaligus batal di TikTok (pembeli di-refund).</p>
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="text" disabled={busy} onClick={() => setCancelling(false)}>Batal</Button>
+                    <Button size="sm" variant="danger" loading={busy} onClick={doCancel}>Konfirmasi Batalkan</Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
           <label className="block text-xs text-ink-2 mb-1.5">Ubah manual ke status apa pun</label>

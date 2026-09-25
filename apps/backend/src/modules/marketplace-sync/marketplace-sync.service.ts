@@ -1612,7 +1612,7 @@ export class MarketplaceSyncService {
    * graceful/dorman sampai scope Return/Refund aktif) LALU tandai dibatalkan
    * di AutoToko berikut alasannya. Order yang sudah terminal ditolak.
    */
-  async cancelOrder(userId: string, orderId: string, reason: string) {
+  async cancelOrder(userId: string, orderId: string, reasonKey: string, note?: string) {
     const [o] = await this.bypass(() => this.db.select().from(orders).where(and(eq(orders.id, orderId), eq(orders.userId, userId))).limit(1));
     if (!o) throw new NotFoundException("Order tidak ditemukan");
     const fs = o.fulfillmentStatus as string;
@@ -1629,7 +1629,7 @@ export class MarketplaceSyncService {
           const call = async <T>(fn: (c: TikTokClient) => Promise<T>): Promise<T> => {
             for (;;) { try { return await fn(klien); } catch (e) { if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(t); continue; } throw e; } }
           };
-          await call((c) => c.cancelOrder(o.marketplaceOrderId as string, reason));
+          await call((c) => c.cancelOrder(o.marketplaceOrderId as string, reasonKey));
           marketplaceCancelled = true;
         } catch (e) {
           marketplaceError = (e as Error).message;
@@ -1643,11 +1643,11 @@ export class MarketplaceSyncService {
     }
     await this.bypass(() => this.db.update(orders).set({
       fulfillmentStatus: "dibatalkan",
-      holdReason: `Batal: ${reason}`.slice(0, 500),
+      holdReason: `Batal: ${(note && note.trim()) || reasonKey}`.slice(0, 500),
       status: marketplaceCancelled ? "CANCELLED" : o.status,
       updatedAt: new Date(),
     }).where(and(eq(orders.id, orderId), eq(orders.userId, userId))));
-    this.logger.log(`Order ${o.marketplaceOrderId} dibatalkan (marketplace=${marketplaceCancelled}); alasan: ${reason}`);
+    this.logger.log(`Order ${o.marketplaceOrderId} dibatalkan (marketplace=${marketplaceCancelled}); alasan: ${reasonKey}${note ? " / " + note : ""}`);
     return { ok: true, marketplaceCancelled, marketplaceError, fulfillmentStatus: "dibatalkan" };
   }
 

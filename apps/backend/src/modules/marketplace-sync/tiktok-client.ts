@@ -327,11 +327,12 @@ export class TikTokClient {
    * scope Return/Refund aktif; sebelum itu panggilan ditolak & ditangani
    * graceful oleh pemanggil (order tetap ditandai batal di AutoToko).
    */
-  async cancelOrder(orderId: string, reason: string) {
+  async cancelOrder(orderId: string, reasonKey: string) {
+    // cancel_reason WAJIB berupa kunci enum resmi TikTok (mis. "out_of_stock"),
+    // bukan teks bebas — teks bebas ditolak [25001014] Unknown reason.
     return this.post("/return_refund/202309/cancellations", {}, {
       order_id: orderId,
-      cancel_reason: reason,
-      cancel_user: "SELLER",
+      cancel_reason: reasonKey,
     });
   }
 
