@@ -387,6 +387,8 @@ public class ScanActivity extends AppCompatActivity {
     /** The pending hide for the banner on screen, so only it gets cancelled. */
     private Runnable hideBanner = null;
     private String mutedResi = null;
+    /** Mode "Cek Resi Batal": scan hanya mengecek status, TIDAK mencatat packing. */
+    private boolean cekMode = false;
     private long mutedUntil = 0;
 
     @Override protected void onCreate(Bundle b) {
@@ -405,6 +407,11 @@ public class ScanActivity extends AppCompatActivity {
         detail = findViewById(R.id.courier);
         counter = findViewById(R.id.counter);
         hint = findViewById(R.id.hint);
+        cekMode = getIntent().getBooleanExtra("cekMode", false);
+        if (cekMode) {
+            setTitle("Cek Resi Batal");
+            hint.setText("MODE CEK BATAL \u2014 arahkan ke barcode resi. Scan TIDAK dicatat sebagai packing.");
+        }
         findViewById(R.id.menu).setOnClickListener(v -> showMenu());
         findViewById(R.id.torch).setOnClickListener(v -> toggleTorch());
         clarityBar = findViewById(R.id.clarityBar);
@@ -841,6 +848,7 @@ public class ScanActivity extends AppCompatActivity {
      * photo is unreadable no matter how many pixels it has.
      */
     private void focusThenCapture(String resi, String raw, String format) {
+        if (cekMode) { cekBatal(resi); return; }
         busy = true;
         armWatchdog();
         status.setText(resi);
@@ -2874,6 +2882,42 @@ public class ScanActivity extends AppCompatActivity {
                 })
                 .setNegativeButton("Batal", null)
                 .show();
+    }
+
+    /**
+     * Mode Cek Resi Batal: cukup tanya status order dari resi, tanpa foto dan
+     * tanpa mencatat scan packing. Peringatan batal di mode packing biasa
+     * tetap berjalan terpisah (lihat submit()).
+     */
+    private void cekBatal(final String resi) {
+        busy = true;
+        armWatchdog();
+        status.setText("Mengecek\u2026");
+        api.lookupResi(resi, r -> {
+            if (r == null || !r.ok() || r.data() == null) {
+                feedback(false);
+                showBanner(false, resi, r == null ? "Gagal cek resi" : r.message("Gagal cek resi"));
+                mute(resi);
+                idle();
+                return;
+            }
+            JSONObject o = r.data();
+            String no = o.optString("marketplaceOrderId", "");
+            if (!o.optBoolean("found", false)) {
+                feedback(false);
+                showBanner(false, resi, "Resi tidak ditemukan di AutoToko");
+            } else if (o.optBoolean("cancelled", false)) {
+                feedback(false);
+                showBanner(false, resi, "PESANAN DIBATALKAN \u2014 JANGAN kirim!" + (no.isEmpty() ? "" : " (order " + no + ")"));
+            } else {
+                feedback(true);
+                String st = o.optString("fulfillmentStatus", "-");
+                showBanner(true, resi, "AMAN \u2014 boleh diproses (" + st + ")"
+                        + (o.optBoolean("labelPrinted", false) ? " \u00b7 resi sudah dicetak" : ""));
+            }
+            mute(resi);
+            idle();
+        });
     }
 
     private void mute(String resi) {

@@ -887,6 +887,7 @@ public class DashboardActivity extends AppCompatActivity {
                 {"📦", "Pesanan", "#3B82F6", "O"},
                 {"🧾", "Batch Packing", "#0E6E55", "B"},
                 {"📷", "Scan Resi", "#6366F1", "S"},
+                {"🚫", "Cek Resi Batal", "#DC2626", "X"},
                 {"📥", "Bahan Baku", "#14B8A6", "D"},
                 {"💰", "HPP", "#F59E0B", "H"},
                 {"🏦", "Pencairan", "#8B5CF6", "P"},
@@ -943,6 +944,7 @@ public class DashboardActivity extends AppCompatActivity {
             case "O": i = new Intent(this, OrdersActivity.class); break;
             case "B": i = new Intent(this, OrdersActivity.class); i.putExtra("openBatch", true); break;
             case "S": i = new Intent(this, ScanActivity.class); break;
+            case "X": i = new Intent(this, ScanActivity.class); i.putExtra("cekMode", true); break;
             case "D": i = new Intent(this, DeliveryActivity.class); break;
             case "H": i = new Intent(this, HppActivity.class); break;
             case "P": i = new Intent(this, PayoutActivity.class); break;
