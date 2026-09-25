@@ -166,6 +166,20 @@ public final class Api {
         call("GET", session.baseUrl() + "/api/promotion/cards" + (status == null || status.isEmpty() ? "" : "?status=" + status),
                 session.token(), null, cb);
     }
+    /** Perpanjang promo berjalan/akan datang +days hari (aksi ke TikTok). */
+    public void promoExtend(String shopId, String activityId, int days, Cb cb) {
+        JSONObject b = new JSONObject();
+        try { b.put("days", days); } catch (Exception ignore) {}
+        call("POST", session.baseUrl() + "/api/promotion/activities/" + shopId + "/" + activityId + "/extend",
+                session.token(), b, cb);
+    }
+    /** Aktifkan kembali promo berakhir = buat ulang (days<=0: durasi asli). dryRun=true = rencana saja. */
+    public void promoReactivate(String shopId, String activityId, int days, boolean dryRun, Cb cb) {
+        JSONObject b = new JSONObject();
+        try { if (days > 0) b.put("days", days); b.put("dryRun", dryRun); } catch (Exception ignore) {}
+        call("POST", session.baseUrl() + "/api/promotion/activities/" + shopId + "/" + activityId + "/reactivate",
+                session.token(), b, cb);
+    }
     /** Replikasi promo (produk & potongan sama). dryRun=true = rencana saja, tanpa menyentuh TikTok. */
     public void promoReplicate(String shopId, String activityId, JSONArray targetShopIds, boolean dryRun, Cb cb) {
         JSONObject b = new JSONObject();

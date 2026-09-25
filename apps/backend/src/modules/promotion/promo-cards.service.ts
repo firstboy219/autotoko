@@ -274,7 +274,6 @@ export class PromoCardsService {
     if (!sProds.length) throw new BadRequestException("Promo sumber tidak punya produk (atau sudah berakhir) — tidak ada yang bisa direplikasi");
     const type = String(src.activity_type ?? "DIRECT_DISCOUNT");
     const level = String(src.product_level ?? "PRODUCT");
-    const durationType = String(src.duration_type ?? "NORMAL");
     const now = Math.floor(Date.now() / 1000);
     let b = Number(body.beginTime) || Number(src.begin_time) || 0;
     let e = Number(body.endTime) || Number(src.end_time) || 0;
@@ -324,41 +323,141 @@ export class PromoCardsService {
       if (body.dryRun) { hasil.push(ringkas); continue; }
       if (!cocok.length) { hasil.push({ ...ringkas, error: "Tidak ada produk yang terpetakan ke toko ini" }); continue; }
       try {
-        const buat: Obj = {
-          activity_type: type,
-          title: `${String(src.title ?? "Promo")}`.slice(0, 38) + ` ${new Date(now * 1000).toISOString().slice(5, 16).replace(/[-T:]/g, "")}`,
-          product_level: level, duration_type: durationType,
-        };
-        if (durationType === "NORMAL") { buat.begin_time = b; buat.end_time = e; }
-        if (src.discount?.bmsm_discount) buat.discount = { bmsm_discount: src.discount.bmsm_discount };
-        if (src.participation_limit) buat.participation_limit = src.participation_limit;
-        if (src.target_user_info) buat.target_user_info = src.target_user_info;
-        const created = (await this.sync.promoCreate(userId, tid, buat)) as Obj;
-        const newId = String(created?.activity_id ?? created?.id ?? "");
-        if (!newId) throw new Error("TikTok tidak mengembalikan ID promo baru");
         const payload = cocok.map(({ __via, __src, ...r }) => r);
-        try {
-          await this.sync.promoAddProducts(userId, tid, newId, payload);
-        } catch (err) {
-          // Jangan tinggalkan promo kosong di TikTok: nonaktifkan lalu laporkan.
-          await this.sync.promoDeactivate(userId, tid, newId).catch(() => {});
-          throw new Error(`Promo dibuat tapi produk ditolak TikTok (promo kosong sudah dinonaktifkan): ${(err as Error).message}`);
-        }
-        // Verifikasi: baca ULANG dari TikTok -- bukti produk benar-benar
-        // terdaftar, bukan sekadar "tidak ada error".
-        let terverifikasi: number | null = null;
-        let statusBaru: string | null = null;
-        try {
-          const cek = (await this.sync.promoActivityDetail(userId, tid, newId)) as Obj;
-          terverifikasi = ((cek?.products ?? []) as Obj[]).length;
-          statusBaru = cek?.status ?? null;
-        } catch { /* verifikasi gagal dibaca != replikasi gagal */ }
-        hasil.push({ ...ringkas, activityId: newId, title: buat.title, terverifikasi, statusBaru });
+        const baru = await this.buatDanIsi(userId, tid, src, payload, b, e);
+        hasil.push({ ...ringkas, ...baru });
       } catch (err) {
         hasil.push({ ...ringkas, error: (err as Error).message });
       }
     }
     this.logger.log(`replicate ${activityId} (${type}/${level}) -> ${targets.length} toko dryRun=${!!body.dryRun}`);
     return { source: { shopId, activityId, title: src.title, type, level, products: sProds.length }, beginTime: b, endTime: e, dryRun: !!body.dryRun, hasil };
+  }
+
+  /**
+   * Buat activity baru berkonfigurasi sama dgn `src` di toko `tid`, isi
+   * produk, lalu BACA ULANG dari TikTok sebagai bukti. Produk ditolak ->
+   * promo kosong dinonaktifkan (tak meninggalkan sampah di Seller Center).
+   */
+  private async buatDanIsi(userId: string, tid: string, src: Obj, payload: Obj[], b: number, e: number) {
+    const now = Math.floor(Date.now() / 1000);
+    const durationType = String(src.duration_type ?? "NORMAL");
+    const buat: Obj = {
+      activity_type: String(src.activity_type ?? "DIRECT_DISCOUNT"),
+      // Judul wajib unik per toko -> akhiran waktu buat (MMDDHHmm).
+      title: `${String(src.title ?? "Promo")}`.slice(0, 38) + ` ${new Date(now * 1000).toISOString().slice(5, 16).replace(/[-T:]/g, "")}`,
+      product_level: String(src.product_level ?? "PRODUCT"), duration_type: durationType,
+    };
+    if (durationType === "NORMAL") { buat.begin_time = b; buat.end_time = e; }
+    if (src.discount?.bmsm_discount) buat.discount = { bmsm_discount: src.discount.bmsm_discount };
+    if (src.participation_limit) buat.participation_limit = src.participation_limit;
+    if (src.target_user_info) buat.target_user_info = src.target_user_info;
+    const created = (await this.sync.promoCreate(userId, tid, buat)) as Obj;
+    const newId = String(created?.activity_id ?? created?.id ?? "");
+    if (!newId) throw new Error("TikTok tidak mengembalikan ID promo baru");
+    try {
+      await this.sync.promoAddProducts(userId, tid, newId, payload);
+    } catch (err) {
+      await this.sync.promoDeactivate(userId, tid, newId).catch(() => {});
+      throw new Error(`Promo dibuat tapi produk ditolak TikTok (promo kosong sudah dinonaktifkan): ${(err as Error).message}`);
+    }
+    let terverifikasi: number | null = null;
+    let statusBaru: string | null = null;
+    try {
+      const cek = (await this.sync.promoActivityDetail(userId, tid, newId)) as Obj;
+      terverifikasi = ((cek?.products ?? []) as Obj[]).length;
+      statusBaru = cek?.status ?? null;
+    } catch { /* verifikasi gagal dibaca != pembuatan gagal */ }
+    return { activityId: newId, title: buat.title, cocok: payload.length, terverifikasi, statusBaru };
+  }
+
+  /** Produk sumber -> payload UpdateActivityProduct apa adanya (toko yang sama). */
+  private static payloadSama(src: Obj): Obj[] {
+    const level = String(src.product_level ?? "PRODUCT");
+    const out: Obj[] = [];
+    for (const p of (src.products ?? []) as Obj[]) {
+      const item: Obj = { id: String(p.id), quantity_limit: p.quantity_limit ?? -1, quantity_per_user: p.quantity_per_user ?? -1 };
+      const salin = (dari: Obj, ke: Obj) => {
+        if (dari.discount != null && dari.discount !== "") ke.discount = String(dari.discount);
+        const ap = dari.activity_price?.amount ?? dari.activity_price_amount;
+        if (ap != null && ap !== "") ke.activity_price_amount = String(ap);
+      };
+      if (level === "VARIATION") {
+        const skus = ((p.skus ?? []) as Obj[]).map((s) => {
+          const x: Obj = { id: String(s.id), quantity_limit: s.quantity_limit ?? -1, quantity_per_user: s.quantity_per_user ?? -1 };
+          salin(s, x);
+          return x;
+        });
+        if (!skus.length) continue;
+        item.skus = skus;
+      } else salin(p, item);
+      out.push(item);
+    }
+    return out;
+  }
+
+  private static selesai(st: unknown) {
+    const s = String(st ?? "").toUpperCase();
+    return s === "EXPIRED" || s === "DEACTIVATED" || s === "NOT_EFFECT";
+  }
+
+  /**
+   * "Aktifkan kembali" promo yang sudah berakhir/nonaktif. TikTok TIDAK punya
+   * API untuk mengaktifkan ulang (hanya deactivate), jadi dibuat promo BARU di
+   * toko yang sama dgn produk & potongan identik + jadwal baru.
+   */
+  async reactivate(userId: string, shopId: string, activityId: string, body: {
+    days?: number; beginTime?: number; endTime?: number; dryRun?: boolean;
+  }) {
+    const src = await this.detail(userId, shopId, activityId);
+    if (!PromoCardsService.selesai(src.status)) {
+      throw new BadRequestException("Promo masih berjalan/akan datang — gunakan Perpanjang, bukan Aktifkan kembali");
+    }
+    const payload = PromoCardsService.payloadSama(src);
+    if (!payload.length) {
+      throw new BadRequestException("TikTok sudah mengosongkan daftar produk promo ini, jadi tidak ada yang bisa diaktifkan kembali. Buat promo baru di Seller Center.");
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const durAsli = Number(src.end_time) > Number(src.begin_time) ? Number(src.end_time) - Number(src.begin_time) : 7 * 86400;
+    let b = Number(body.beginTime) || now + 600;
+    if (b <= now + 300) b = now + 600;
+    const e = Number(body.endTime) > b ? Number(body.endTime) : b + (Number(body.days) > 0 ? Number(body.days) * 86400 : durAsli);
+    const ringkas = { shopId, activityId, title: src.title, type: src.activity_type, level: src.product_level, produk: payload.length, beginTime: b, endTime: e };
+    if (body.dryRun) return { ...ringkas, dryRun: true };
+    const baru = await this.buatDanIsi(userId, shopId, src, payload, b, e);
+    this.logger.log(`reactivate ${activityId} -> ${baru.activityId} (${payload.length} produk)`);
+    return { ...ringkas, dryRun: false, baru };
+  }
+
+  /**
+   * Perpanjang promo yang masih berjalan / akan datang (UpdateActivity:
+   * judul + waktu). Setelah dikirim, end_time dibaca ULANG dari TikTok.
+   */
+  async extend(userId: string, shopId: string, activityId: string, body: { days?: number; endTime?: number }) {
+    const src = (await this.sync.promoActivityDetail(userId, shopId, activityId)) as Obj; // segar, bukan cache
+    const st = String(src.status ?? "").toUpperCase();
+    if (st !== "ONGOING" && st !== "NOT_START") {
+      throw new BadRequestException("Promo sudah berakhir/nonaktif — TikTok tidak mengizinkan mengubahnya. Gunakan Aktifkan kembali.");
+    }
+    const lama = Number(src.end_time) || 0;
+    const baruEnd = Number(body.endTime) || lama + (Number(body.days) > 0 ? Number(body.days) : 7) * 86400;
+    if (baruEnd <= lama) throw new BadRequestException("Tanggal selesai baru harus setelah tanggal selesai sekarang");
+    const judul = String(src.title ?? "Promo").slice(0, 50);
+    try {
+      await this.sync.promoUpdate(userId, shopId, activityId, { title: judul, begin_time: Number(src.begin_time), end_time: baruEnd });
+    } catch (e1) {
+      // Promo berjalan: begin_time lampau bisa ditolak ("harus > sekarang") ->
+      // kirim ulang tanpa begin_time.
+      try { await this.sync.promoUpdate(userId, shopId, activityId, { title: judul, end_time: baruEnd }); }
+      catch { throw e1; }
+    }
+    this.cacheDetail.delete(`${userId}:${shopId}:${activityId}`);
+    let endTerbaca: number | null = null;
+    try {
+      const cek = (await this.sync.promoActivityDetail(userId, shopId, activityId)) as Obj;
+      endTerbaca = Number(cek?.end_time) || null;
+    } catch { /* abaikan */ }
+    this.logger.log(`extend ${activityId}: ${lama} -> ${baruEnd} (terbaca ${endTerbaca})`);
+    return { shopId, activityId, endLama: lama, endBaru: baruEnd, endTerbaca, terverifikasi: endTerbaca === baruEnd };
   }
 }

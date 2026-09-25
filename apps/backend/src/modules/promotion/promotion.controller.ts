@@ -53,6 +53,16 @@ class ReplicateProdukDto {
   @IsOptional() @IsNumber() beginTime?: number;
   @IsOptional() @IsNumber() endTime?: number;
 }
+class ReactivateDto {
+  @IsOptional() @IsNumber() @Min(1) @Max(365) days?: number;
+  @IsOptional() @IsNumber() beginTime?: number;
+  @IsOptional() @IsNumber() endTime?: number;
+  @IsOptional() @IsBoolean() dryRun?: boolean;
+}
+class ExtendDto {
+  @IsOptional() @IsNumber() @Min(1) @Max(365) days?: number;
+  @IsOptional() @IsNumber() endTime?: number;
+}
 class RunDto {
   @IsOptional() @IsBoolean() dryRun?: boolean;
 }
@@ -82,6 +92,18 @@ export class PromotionController {
    * Replikasi promo dengan produk & potongan yang SAMA ke toko lain.
    * dryRun=true -> rencana pemetaan saja; false -> aksi outward (klik seller).
    */
+  /** Aktifkan kembali promo berakhir/nonaktif = buat ulang di toko sama (aksi outward bila dryRun=false). */
+  @Post("activities/:shopId/:activityId/reactivate")
+  async reactivate(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("activityId") activityId: string, @Body() dto: ReactivateDto) {
+    return ok(await this.cardsSvc.reactivate(uid(req), shopId, activityId, dto));
+  }
+
+  /** Perpanjang promo berjalan/akan datang (aksi outward). */
+  @Post("activities/:shopId/:activityId/extend")
+  async extend(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("activityId") activityId: string, @Body() dto: ExtendDto) {
+    return ok(await this.cardsSvc.extend(uid(req), shopId, activityId, dto));
+  }
+
   @Post("activities/:shopId/:activityId/replicate-produk")
   async replicateProduk(@Req() req: FastifyRequest, @Param("shopId") shopId: string, @Param("activityId") activityId: string, @Body() dto: ReplicateProdukDto) {
     return ok(await this.cardsSvc.replicate(uid(req), shopId, activityId, dto));

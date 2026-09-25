@@ -212,18 +212,144 @@ public class PromotionActivity extends AppCompatActivity {
             }
         }
 
+        String stp = c.optString("status", "").toUpperCase(Locale.ROOT);
+        boolean berjalan = stp.equals("ONGOING") || stp.equals("NOT_START");
         if (np > 0) {
+            LinearLayout aksi = new LinearLayout(this);
+            aksi.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams al = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            al.topMargin = dp(8);
+            MaterialButton kedua = new MaterialButton(this);
+            kedua.setAllCaps(false);
+            kedua.setTextSize(13);
+            if (berjalan) {
+                kedua.setText("Perpanjang");
+                kedua.setOnClickListener(v -> perpanjang(c));
+            } else {
+                kedua.setText("Aktifkan kembali");
+                kedua.setOnClickListener(v -> aktifkanKembali(c));
+            }
+            aksi.addView(kedua, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            aksi.addView(new View(this), new LinearLayout.LayoutParams(dp(8), 1));
             MaterialButton rep = new MaterialButton(this, null,
                     com.google.android.material.R.attr.materialButtonOutlinedStyle);
-            rep.setText("Replikasi ke toko lain");
+            rep.setText("Replikasi");
             rep.setAllCaps(false);
+            rep.setTextSize(13);
             rep.setOnClickListener(v -> pilihTujuan(c));
-            LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            rl.topMargin = dp(8);
-            box.addView(rep, rl);
+            aksi.addView(rep, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            box.addView(aksi, al);
+        } else if (!berjalan) {
+            box.addView(teks("Tidak bisa diaktifkan kembali: TikTok sudah mengosongkan daftar produknya.", 11, false, R.color.ink3));
         }
         return box;
+    }
+
+    /* ------------------------------------------------ perpanjang / aktifkan kembali */
+
+    private static final String[] PILIHAN_HARI = {"7 hari", "14 hari", "30 hari"};
+    private static final int[] NILAI_HARI = {7, 14, 30};
+
+    /** Promo berjalan/akan datang: geser tanggal selesai (UpdateActivity). */
+    private void perpanjang(JSONObject c) {
+        final int[] pilih = {0};
+        String selesai = tgl(c.optLong("endTime", 0));
+        new AlertDialog.Builder(this)
+                .setTitle("Perpanjang promo (selesai sekarang " + selesai + ")")
+                .setSingleChoiceItems(PILIHAN_HARI, 0, (dlg, w) -> pilih[0] = w)
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Lanjut", (dlg, w) -> {
+                    int hari = NILAI_HARI[pilih[0]];
+                    long baru = c.optLong("endTime", 0) + hari * 86400L;
+                    new AlertDialog.Builder(this)
+                            .setTitle("Konfirmasi perpanjang")
+                            .setMessage(c.optString("title") + "\n" + c.optString("shopName")
+                                    + "\n\nSelesai: " + selesai + " → " + tgl(baru)
+                                    + "\n\nPerubahan dikirim ke TikTok sekarang.")
+                            .setNegativeButton("Batal", null)
+                            .setPositiveButton("Perpanjang di TikTok", (d2, w2) -> kirimPerpanjang(c, hari))
+                            .show();
+                })
+                .show();
+    }
+
+    private void kirimPerpanjang(JSONObject c, int hari) {
+        Toast.makeText(this, "Mengirim ke TikTok…", Toast.LENGTH_SHORT).show();
+        api.promoExtend(c.optString("shopId"), c.optString("activityId"), hari, r -> {
+            if (r == null || !r.ok() || r.data() == null) {
+                pesan("Gagal memperpanjang", r == null ? "Gagal." : r.message("TikTok menolak perubahan."));
+                return;
+            }
+            JSONObject d = r.data();
+            String isi = "Selesai baru: " + tgl(d.optLong("endBaru"));
+            if (d.optBoolean("terverifikasi", false)) isi += "\n✓ Terverifikasi di TikTok.";
+            else if (!d.isNull("endTerbaca")) isi += "\n⚠ TikTok membaca selesai " + tgl(d.optLong("endTerbaca")) + " — cek Seller Center.";
+            else isi += "\nTerkirim; verifikasi belum terbaca.";
+            pesan("Promo diperpanjang", isi);
+        });
+    }
+
+    /**
+     * Promo berakhir/nonaktif: TikTok tak punya API "aktifkan ulang", jadi
+     * dibuat promo BARU di toko yang sama dengan produk & potongan identik.
+     */
+    private void aktifkanKembali(JSONObject c) {
+        final String[] opsi = {"Durasi sama seperti sebelumnya", "7 hari", "14 hari", "30 hari"};
+        final int[] nilai = {0, 7, 14, 30};
+        final int[] pilih = {0};
+        new AlertDialog.Builder(this)
+                .setTitle("Aktifkan kembali — berapa lama?")
+                .setSingleChoiceItems(opsi, 0, (dlg, w) -> pilih[0] = w)
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Lanjut", (dlg, w) -> rencanaAktif(c, nilai[pilih[0]]))
+                .show();
+    }
+
+    private void rencanaAktif(JSONObject c, int hari) {
+        api.promoReactivate(c.optString("shopId"), c.optString("activityId"), hari, true, r -> {
+            if (r == null || !r.ok() || r.data() == null) {
+                pesan("Tidak bisa diaktifkan kembali", r == null ? "Gagal." : r.message("Gagal."));
+                return;
+            }
+            JSONObject d = r.data();
+            String isi = c.optString("title") + "\n" + c.optString("shopName") + " · " + jenis(c.optString("type"))
+                    + "\n\n" + d.optInt("produk") + " produk dengan potongan yang sama seperti sebelumnya."
+                    + "\nJadwal baru: " + tgl(d.optLong("beginTime")) + " – " + tgl(d.optLong("endTime"))
+                    + "\n\nTikTok tidak bisa menghidupkan promo lama, jadi dibuat promo baru (promo lama tetap tercatat berakhir)."
+                    + " Produk yang sedang ikut promo lain bisa ditolak TikTok.";
+            new AlertDialog.Builder(this)
+                    .setTitle("Konfirmasi aktifkan kembali")
+                    .setMessage(isi)
+                    .setNegativeButton("Batal", null)
+                    .setPositiveButton("Aktifkan di TikTok", (dlg, w) -> jalankanAktif(c, hari))
+                    .show();
+        });
+    }
+
+    private void jalankanAktif(JSONObject c, int hari) {
+        Toast.makeText(this, "Membuat promo di TikTok…", Toast.LENGTH_SHORT).show();
+        api.promoReactivate(c.optString("shopId"), c.optString("activityId"), hari, false, r -> {
+            if (r == null || !r.ok() || r.data() == null) {
+                pesan("Gagal mengaktifkan kembali", r == null ? "Gagal." : r.message("TikTok menolak."));
+                return;
+            }
+            JSONObject b = r.data().optJSONObject("baru");
+            if (b == null) { pesan("Selesai", "Terkirim."); return; }
+            String isi = "Promo baru: " + b.optString("title") + "\nID " + b.optString("activityId");
+            if (!b.isNull("terverifikasi")) {
+                int v = b.optInt("terverifikasi");
+                isi += "\n✓ Terverifikasi di TikTok: " + v + " dari " + b.optInt("cocok") + " produk";
+                if (v < b.optInt("cocok")) isi += " — sebagian ditolak, cek Seller Center";
+            } else isi += "\n" + b.optInt("cocok") + " produk terkirim (verifikasi belum terbaca)";
+            if (!b.isNull("statusBaru")) isi += "\nStatus: " + labelStatus(b.optString("statusBaru"));
+            pesan("Promo aktif kembali", isi);
+        });
+    }
+
+    private void pesan(String judul, String isi) {
+        new AlertDialog.Builder(this).setTitle(judul).setMessage(isi)
+                .setPositiveButton("OK", (dlg, w) -> muat()).show();
     }
 
     /** "-15%" / "Rp 39.000 (normal Rp 49.300)" / tier BMSM. */
