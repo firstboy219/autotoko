@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { kbEntries, orders, shops } from "../../database/schema/index.js";
+import { AutopilotLogService } from "../ai/autopilot-log.service.js";
 
 type KbKind = "chat" | "review";
 const kindOf = (k?: string): KbKind => (k === "review" ? "review" : "chat");
@@ -16,7 +17,10 @@ const kindOf = (k?: string): KbKind => (k === "review" ? "review" : "chat");
 export class KbService {
   private readonly logger = new Logger(KbService.name);
 
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly autopilotLog: AutopilotLogService,
+  ) {}
 
   async list(userId: string, kind?: string) {
     try {
@@ -115,6 +119,21 @@ export class KbService {
   /** Susun draf balasan dari KB, isi placeholder dari order bila ada. */
   async draft(userId: string, input: { text: string; kind?: string; orderId?: string }) {
     const entry = await this.match(userId, input.text, kindOf(input.kind));
+    // Catat ke feed Autopilot (Balasan Otomatis observable di menu Autopilot).
+    const feat = kindOf(input.kind) === "review" ? "review_reply" : "buyer_chat";
+    const cuplik = (input.text || "").slice(0, 80);
+    void this.autopilotLog.record({
+      userId,
+      feature: feat,
+      action: "kb_draft",
+      status: entry ? "done" : "held",
+      provider: "internal-kb",
+      summary: entry
+        ? `Draf balasan disusun dari KB (Balasan Otomatis) untuk: "${cuplik}"`
+        : `Tak ada entri KB yang cocok untuk: "${cuplik}"`,
+      refType: kindOf(input.kind),
+      refId: input.orderId,
+    });
     if (!entry) return { matched: false, reply: "" };
     let reply = entry.answer;
     if (input.orderId && /\{(resi|status|pembeli|toko)\}/i.test(reply)) {

@@ -32,6 +32,9 @@ export function Kb() {
   const [rows, setRows] = useState<KbEntry[] | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
+  const [uji, setUji] = useState("");
+  const [ujiHasil, setUjiHasil] = useState<{ matched: boolean; reply: string } | null>(null);
+  const [ujiBusy, setUjiBusy] = useState(false);
 
   function muat() {
     setRows(null);
@@ -67,6 +70,20 @@ export function Kb() {
     catch (e) { toast((e as Error).message, "danger"); }
   }
 
+  async function coba() {
+    const t = uji.trim();
+    if (!t) return;
+    setUjiBusy(true);
+    try {
+      const r = await api.post<{ matched: boolean; reply: string }>("/kb/draft", { text: t, kind });
+      setUjiHasil(r);
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setUjiBusy(false);
+    }
+  }
+
   return (
     <Layout title="Balasan Otomatis (KB)">
       <PageHeader
@@ -79,6 +96,26 @@ export function Kb() {
         Pakai placeholder <b>{"{resi}"}</b>, <b>{"{status}"}</b>, <b>{"{pembeli}"}</b>, <b>{"{toko}"}</b> — otomatis diisi dari data order.
         Gunakan lewat tombol <b>Saran (KB)</b> di halaman Chat.
       </InlineAlert>
+
+      <Card className="mt-4">
+        <div className="text-sm font-medium text-ink mb-2">Uji balasan <span className="text-xs font-normal text-ink-3">(hasilnya juga tercatat di menu Autopilot)</span></div>
+        <div className="flex gap-2">
+          <Input
+            value={uji}
+            onChange={(e) => setUji(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void coba(); } }}
+            placeholder={kind === "review" ? "Contoh isi review pembeli\u2026" : "Contoh pertanyaan pembeli\u2026"}
+          />
+          <Button variant="filled" loading={ujiBusy} onClick={() => void coba()} disabled={!uji.trim()}>Coba</Button>
+        </div>
+        {ujiHasil && (
+          ujiHasil.matched ? (
+            <div className="mt-2 rounded-lg bg-green-50 ring-1 ring-green-200 p-3 text-sm text-ink whitespace-pre-wrap">{ujiHasil.reply}</div>
+          ) : (
+            <div className="mt-2 text-sm text-ink-3">Tak ada entri KB yang cocok. Tambah/sesuaikan kata kunci di bawah.</div>
+          )
+        )}
+      </Card>
 
       <div className="flex items-center gap-2 mt-4">
         {(["chat", "review"] as const).map((k) => (
