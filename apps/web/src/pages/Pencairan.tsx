@@ -232,7 +232,7 @@ function SaldoTiktokCard() {
                             )}
                             <button type="button" onClick={() => bukaForm(t)} className="ml-1 text-brand hover:underline">ubah</button>
                             {(t.transferSejakCutoff ?? 0) > 0 && (
-                              <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-amber-700" title="Masih ada mutasi Saldo Cepat setelah tanggal cutoff — matikan di Seller Center lalu set ulang cutoff.">Saldo Cepat masih aktif</span>
+                              <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-amber-700" title="Transfer saldo keluar (mis. top-up Saldo Iklan) sejak cutoff — sudah ikut dikurangi dari saldo bisa ditarik.">transfer keluar {rupiah(t.transferSejakCutoff ?? 0)}</span>
                             )}
                           </span>
                         ) : (
@@ -260,7 +260,7 @@ function SaldoTiktokCard() {
                         <td colSpan={3} className="px-3 pb-2">
                           <div className="rounded bg-ink/[0.03] p-2">
                             <div className="mb-1 text-[11px] text-ink-3">
-                              Isi saldo cutoff dari Seller Center (“Nominal yang Bisa Ditarik”) SETELAH Saldo Cepat dimatikan. Saldo berikutnya = cutoff + (penghasilan − penarikan) sejak tanggal ini.
+                              Isi saldo cutoff dari Seller Center (“Nominal yang Bisa Ditarik”) SETELAH Saldo Cepat dimatikan. Saldo berikutnya = cutoff + penghasilan − penarikan − transfer keluar sejak tanggal ini. Isi dengan saldo PER AKHIR tanggal tsb (bukan saldo hari ini bila tanggalnya lampau).
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
                               <input type="date" value={fTanggal} onChange={(e) => setFTanggal(e.target.value)} className="rounded border border-line px-2 py-1 text-xs" />

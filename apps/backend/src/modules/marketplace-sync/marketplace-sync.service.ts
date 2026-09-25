@@ -1376,7 +1376,7 @@ export class MarketplaceSyncService {
    *  - Toko yang PERNAH pakai Saldo Cepat: gerakan advance/pelunasan dilebur jadi
    *    TRANSFER tak berarah di API sehingga all-history tak bisa. SOLUSI: seller
    *    mematikan Saldo Cepat lalu input saldo saat ini (cutoff) + tanggal; saldo =
-   *    cutoff + (SETTLE − WITHDRAW) SEJAK cutoff (setelah itu mutasi normal).
+   *    cutoff + (SETTLE − WITHDRAW − TRANSFER) SEJAK cutoff (TRANSFER = keluar).
    *  - Toko ber-TRANSFER TAPI belum set cutoff: saldo=null, perluCutoff=true.
    * READ-only.
    */
@@ -1451,6 +1451,7 @@ export class MarketplaceSyncService {
         const akum = async (geS: number, ltS: number, incProc: boolean) => {
           let s = 0, w = 0, wp = 0, tr = 0, cnt = 0;
           let cur: string | null = null;
+          const mut: Array<[number, number]> = []; // [create_time, +masuk/-keluar]
           let page: string | null = null, guard = 0;
           do {
             const h = await call((c) => c.daftarWithdrawal({ createTimeGe: geS, createTimeLt: ltS, pageToken: page }));
@@ -1461,15 +1462,29 @@ export class MarketplaceSyncService {
               const tipe = String(rec.type ?? "").toUpperCase();
               const amt = angka(rec.amount);
               if (!cur && rec.currency) cur = String(rec.currency);
-              if (tipe === "SETTLE") { if (st === "SUCCESS") { s += amt; cnt += 1; } }
+              const ct = Number(rec.create_time) || 0;
+              if (tipe === "SETTLE") { if (st === "SUCCESS") { s += amt; cnt += 1; mut.push([ct, amt]); } }
               else if (tipe === "WITHDRAW") {
-                if (st === "SUCCESS") { w += amt; cnt += 1; }
-                else if (incProc && st === "PROCESSING") { wp += amt; cnt += 1; }
-              } else if (tipe === "TRANSFER") { if (st === "SUCCESS") { tr += amt; cnt += 1; } }
+                if (st === "SUCCESS") { w += amt; cnt += 1; mut.push([ct, -amt]); }
+                else if (incProc && st === "PROCESSING") { wp += amt; cnt += 1; mut.push([ct, -amt]); }
+              } else if (tipe === "TRANSFER") { if (st === "SUCCESS") { tr += amt; cnt += 1; mut.push([ct, -amt]); } }
             }
             page = h.nextPageToken;
           } while (page && ++guard < 500);
-          return { s, w, wp, tr, cnt, cur };
+          mut.sort((a, b) => a[0] - b[0] || b[1] - a[1]); // detik sama: masuk dulu
+          return { s, w, wp, tr, cnt, cur, mut };
+        };
+        // Saldo berjalan kronologis dengan LANTAI 0: saldo asli tak mungkin
+        // negatif, jadi bila penarikan > saldo tercatat berarti ada kredit yang
+        // tak muncul di API (kompensasi/penyesuaian kecil; mis. naturestorex &
+        // Reysowner 23/09: tarik 78.320 vs settle 75.350). Selisih dicatat di
+        // `tak` (mutasi tak tercatat) dan saldo diangkat ke 0.
+        const lipat = (run: number, tak: number, mut: Array<[number, number]>) => {
+          for (const [, d] of mut) {
+            run += d;
+            if (run < 0) { tak += -run; run = 0; }
+          }
+          return { run, tak };
         };
         // Incremental (watermark): totals "beku" (status final) utk create_time
         // < upTo disimpan di shops.saldo_frozen; tiap klik cukup hitung ulang
@@ -1477,18 +1492,21 @@ export class MarketplaceSyncService {
         // Klik pertama membangun beku sekali (all-history), berikutnya cepat.
         const TRAILING = 60 * 86400;
         const freezeBoundary = Math.floor(Date.now() / 1000) - TRAILING;
-        type Frozen = { base: number; upTo: number; settle: number; withdraw: number; transfer: number; n: number };
+        type Frozen = { base: number; upTo: number; settle: number; withdraw: number; transfer: number; n: number; run: number; tak: number; awal: number };
+        const awal = punyaCutoff ? Number(t.saldoCutoffAmount) || 0 : 0;
         const rawFrozen = t.saldoFrozen as Frozen | null;
         let frozen: Frozen =
-          rawFrozen && rawFrozen.base === geSec && rawFrozen.upTo >= geSec
+          rawFrozen && rawFrozen.base === geSec && rawFrozen.upTo >= geSec && typeof rawFrozen.run === "number" && rawFrozen.awal === awal
             ? rawFrozen
-            : { base: geSec, upTo: geSec, settle: 0, withdraw: 0, transfer: 0, n: 0 };
+            : { base: geSec, upTo: geSec, settle: 0, withdraw: 0, transfer: 0, n: 0, run: awal, tak: 0, awal };
         if (freezeBoundary > frozen.upTo) {
           const f = await akum(frozen.upTo, freezeBoundary, false);
+          const lf = lipat(frozen.run, frozen.tak, f.mut);
           frozen = {
             base: geSec, upTo: freezeBoundary,
             settle: frozen.settle + f.s, withdraw: frozen.withdraw + f.w,
             transfer: frozen.transfer + f.tr, n: frozen.n + f.cnt,
+            run: lf.run, tak: lf.tak, awal,
           };
           if (f.cur && !currency) currency = f.cur;
           await this.bypass(() => this.db.update(shops)
@@ -1496,6 +1514,7 @@ export class MarketplaceSyncService {
             .where(and(eq(shops.id, t.id), eq(shops.userId, userId)))).catch(() => {});
         }
         const vol = await akum(frozen.upTo, nowSec, true);
+        const lv = lipat(frozen.run, frozen.tak, vol.mut);
         settle = frozen.settle + vol.s;
         withdraw = frozen.withdraw + vol.w;
         withdrawProc = vol.wp;
@@ -1507,9 +1526,12 @@ export class MarketplaceSyncService {
           const cutoffAmt = Number(t.saldoCutoffAmount) || 0;
           obj = {
             shopId: t.id, shopName: t.displayName || t.shopName, currency: currency ?? "IDR",
-            saldo: Math.round(cutoffAmt + settle - withdraw - withdrawProc),
+            // TRANSFER sesudah cutoff = saldo KELUAR (mis. top-up Saldo Iklan).
+            // Terbukti di bulanjacom: tanpa dikurangi, AutoToko 32.482 vs SC 88.
+            saldo: Math.round(lv.run),
+            mutasiTakTercatat: Math.round(lv.tak),
             cutoff: { tanggal: t.saldoCutoffDate, saldo: Math.round(cutoffAmt) },
-            deltaSejakCutoff: Math.round(settle - withdraw - withdrawProc),
+            deltaSejakCutoff: Math.round(settle - withdraw - withdrawProc - transfer),
             penghasilan: Math.round(settle), penarikan: Math.round(withdraw),
             penarikanDiproses: Math.round(withdrawProc),
             transferSejakCutoff: Math.round(transfer), adaTransfer: false, mutasi: n,
@@ -1518,7 +1540,8 @@ export class MarketplaceSyncService {
           const adaTransfer = transfer > 0;
           obj = {
             shopId: t.id, shopName: t.displayName || t.shopName, currency: currency ?? "IDR",
-            saldo: adaTransfer ? null : Math.round(settle - withdraw - withdrawProc),
+            saldo: adaTransfer ? null : Math.round(lv.run),
+            mutasiTakTercatat: adaTransfer ? 0 : Math.round(lv.tak),
             penghasilan: Math.round(settle), penarikan: Math.round(withdraw),
             penarikanDiproses: Math.round(withdrawProc),
             transfer: Math.round(transfer), adaTransfer, perluCutoff: adaTransfer, mutasi: n,
