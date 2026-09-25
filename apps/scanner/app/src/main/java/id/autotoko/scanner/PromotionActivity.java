@@ -343,6 +343,8 @@ public class PromotionActivity extends AppCompatActivity {
                 if (v < b.optInt("cocok")) isi += " — sebagian ditolak, cek Seller Center";
             } else isi += "\n" + b.optInt("cocok") + " produk terkirim (verifikasi belum terbaca)";
             if (!b.isNull("statusBaru")) isi += "\nStatus: " + labelStatus(b.optString("statusBaru"));
+            JSONArray ds = b.optJSONArray("ditolakSmart");
+            if (ds != null && ds.length() > 0) isi += "\n" + ds.length() + " produk dilewati: sedang dipakai Promo Otomatis TikTok";
             pesan("Promo aktif kembali", isi);
         });
     }
@@ -460,6 +462,9 @@ public class PromotionActivity extends AppCompatActivity {
                     if (t != null) s.append("\n   ✗ ").append(potong(t.optString("name"), 48));
                 }
                 if (tak != null && tak.length() > 5) s.append("\n   ✗ dan ").append(tak.length() - 5).append(" lagi");
+                JSONArray kb = x.optJSONArray("kembar");
+                if (kb != null && kb.length() > 0) s.append("\n   ≡ ").append(kb.length())
+                        .append(" produk sumber menunjuk produk yang sama di toko ini — dikirim sekali");
             }
             s.append("\n\nProduk ✗ tidak ditemukan padanannya (katalog/master produk/nama) di toko itu dan akan dilewati.");
             TextView tv = teks(s.toString(), 13, false, R.color.ink);
@@ -503,6 +508,9 @@ public class PromotionActivity extends AppCompatActivity {
                         s.append("\n   ").append(x.optInt("cocok")).append(" produk dikirim (verifikasi belum terbaca)");
                     }
                     if (!x.isNull("statusBaru")) s.append("\n   status: ").append(labelStatus(x.optString("statusBaru")));
+                    JSONArray ds = x.optJSONArray("ditolakSmart");
+                    if (ds != null && ds.length() > 0) s.append("\n   ").append(ds.length())
+                            .append(" produk dilewati: sedang dipakai Promo Otomatis TikTok");
                 } else s.append(x.optString("error"));
                 s.append("\n");
             }

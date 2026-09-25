@@ -292,9 +292,16 @@ export class PromoCardsService {
       const tp = await this.petaToko(userId, tid);
       const cocok: Obj[] = [];
       const tak: string[] = [];
+      const kembar: string[] = [];
+      const sudah = new Set<string>();
       for (const p of sProds) {
         const m = PromoCardsService.petakan(peta, tp, String(p.id));
         if (!m) { tak.push(String(p.id)); continue; }
+        // Dua produk sumber bisa jatuh ke SATU produk target (mis. dua
+        // postingan varian di toko sumber, satu postingan di target). TikTok
+        // menolak ID kembar (17029039) -> kirim sekali, laporkan sisanya.
+        if (sudah.has(m.productId)) { kembar.push(String(p.id)); continue; }
+        sudah.add(m.productId);
         const item: Obj = { id: m.productId, quantity_limit: p.quantity_limit ?? -1, quantity_per_user: p.quantity_per_user ?? -1 };
         if (level === "VARIATION") {
           const skus: Obj[] = [];
@@ -319,6 +326,7 @@ export class PromoCardsService {
       const judul = (pid: string) => peta.ps.find((p) => p.productId === pid)?.title ?? `Produk ${pid}`;
       const ringkas = { shopId: tid, shopName: nama, cocok: cocok.length, total: sProds.length,
         tidakTerpetakan: tak.map((pid) => ({ productId: pid, name: judul(pid) })),
+        kembar: kembar.map((pid) => ({ productId: pid, name: judul(pid) })),
         via: cocok.map((c) => ({ dari: c.__src, ke: c.id, via: c.__via, name: judul(c.__src) })) };
       if (body.dryRun) { hasil.push(ringkas); continue; }
       if (!cocok.length) { hasil.push({ ...ringkas, error: "Tidak ada produk yang terpetakan ke toko ini" }); continue; }
@@ -345,7 +353,8 @@ export class PromoCardsService {
     const buat: Obj = {
       activity_type: String(src.activity_type ?? "DIRECT_DISCOUNT"),
       // Judul wajib unik per toko -> akhiran waktu buat (MMDDHHmm).
-      title: `${String(src.title ?? "Promo")}`.slice(0, 38) + ` ${new Date(now * 1000).toISOString().slice(5, 16).replace(/[-T:]/g, "")}`,
+      title: String(src.title ?? "Promo").replace(/( \d{8})+$/, "").slice(0, 38)
+        + ` ${new Date(now * 1000).toISOString().slice(5, 16).replace(/[-T:]/g, "")}`,
       product_level: String(src.product_level ?? "PRODUCT"), duration_type: durationType,
     };
     if (durationType === "NORMAL") { buat.begin_time = b; buat.end_time = e; }
@@ -355,11 +364,33 @@ export class PromoCardsService {
     const created = (await this.sync.promoCreate(userId, tid, buat)) as Obj;
     const newId = String(created?.activity_id ?? created?.id ?? "");
     if (!newId) throw new Error("TikTok tidak mengembalikan ID promo baru");
-    try {
-      await this.sync.promoAddProducts(userId, tid, newId, payload);
-    } catch (err) {
-      await this.sync.promoDeactivate(userId, tid, newId).catch(() => {});
-      throw new Error(`Promo dibuat tapi produk ditolak TikTok (promo kosong sudah dinonaktifkan): ${(err as Error).message}`);
+    // Produk yang sudah terikat "smart promotion plan" (promo otomatis TikTok)
+    // ditolak 17003213 Resource Conflict -- terbukti di NatureStorex 2026-09-25.
+    // Pesannya menyebut ID produk yang bentrok: buang itu, coba sekali lagi.
+    let kirim = payload;
+    const ditolakSmart: string[] = [];
+    for (let coba = 0; ; coba++) {
+      try {
+        await this.sync.promoAddProducts(userId, tid, newId, kirim);
+        break;
+      } catch (err) {
+        const msg = (err as Error).message ?? "";
+        const kode = (err as { code?: number }).code;
+        const bentrok = kode === 17003213 || /17003213|smart promotion plan/i.test(msg)
+          ? [...msg.matchAll(/"(\d{15,})"\s*:\s*\d+/g)].map((m) => m[1]!) : [];
+        const sisa = kirim.filter((p) => !bentrok.includes(String(p.id)));
+        if (coba === 0 && bentrok.length && sisa.length && sisa.length < kirim.length) {
+          ditolakSmart.push(...kirim.filter((p) => bentrok.includes(String(p.id))).map((p) => String(p.id)));
+          kirim = sisa;
+          continue;
+        }
+        await this.sync.promoDeactivate(userId, tid, newId).catch(() => {});
+        if (bentrok.length && !sisa.length) {
+          throw new Error(`Semua ${kirim.length} produk sedang dipakai Promo Otomatis TikTok (SmartAuto), jadi ditolak TikTok. `
+            + "Keluarkan produknya dari promo otomatis di Seller Center dulu. Promo kosong sudah dinonaktifkan.");
+        }
+        throw new Error(`Promo dibuat tapi produk ditolak TikTok (promo kosong sudah dinonaktifkan): ${msg.slice(0, 300)}`);
+      }
     }
     let terverifikasi: number | null = null;
     let statusBaru: string | null = null;
@@ -368,7 +399,7 @@ export class PromoCardsService {
       terverifikasi = ((cek?.products ?? []) as Obj[]).length;
       statusBaru = cek?.status ?? null;
     } catch { /* verifikasi gagal dibaca != pembuatan gagal */ }
-    return { activityId: newId, title: buat.title, cocok: payload.length, terverifikasi, statusBaru };
+    return { activityId: newId, title: buat.title, cocok: kirim.length, terverifikasi, statusBaru, ditolakSmart };
   }
 
   /** Produk sumber -> payload UpdateActivityProduct apa adanya (toko yang sama). */
