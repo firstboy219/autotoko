@@ -2102,6 +2102,17 @@ public class ScanActivity extends AppCompatActivity {
             // "this parcel is not finished with", and only idle() ends that.
 
             if (r.ok()) {
+                // Menyatu dgn scan packing: bila order yang cocok DIBATALKAN,
+                // peringatkan keras (merah + bunyi error) supaya paket tak dikirim.
+                if (r.data() != null && r.data().optBoolean("cancelled", false)) {
+                    feedback(false);
+                    String noBatal = r.data().optString("matchedOrderNo", "");
+                    showBanner(false, resi, "PESANAN DIBATALKAN \u2014 JANGAN kirim!" + (noBatal.isEmpty() ? "" : " (order " + noBatal + ")"));
+                    refreshCounter();
+                    mute(resi);
+                    done(resi);
+                    return;
+                }
                 feedback(true);
                 String extra = "Tersimpan";
                 if (r.data() != null && r.data().optJSONObject("linkedOrder") != null) {

@@ -102,6 +102,9 @@ export interface ScanResult {
   orderId: string | null;
   /** Set when the scan advanced an order, so the app can say so out loud. */
   linkedOrder: { id: string; marketplaceOrderId: string; from: string; to: string } | null;
+  /** True bila order yang cocok resinya berstatus DIBATALKAN — packer harus tahu utk tidak mengirim. */
+  cancelled: boolean;
+  matchedOrderNo: string | null;
   photoUrl: string | null;
   scannedAt: Date;
   /**
@@ -351,6 +354,8 @@ export class ResiService {
     mapping.confirmed = Boolean((mapping.shopId || mapping.marketplace) && mapping.courier);
 
     let linkedOrder: ScanResult["linkedOrder"] = null;
+    const cancelled = !!match && match.fulfillmentStatus === "dibatalkan";
+    const matchedOrderNo = match?.marketplaceOrderId ?? null;
     if (match) {
       const tujuan = majukanStatus(match.fulfillmentStatus as StatusInternal, PACKED);
       if (tujuan !== match.fulfillmentStatus) {
@@ -579,6 +584,8 @@ export class ResiService {
        */
       stockWarnings,
       linkedOrder,
+      cancelled,
+      matchedOrderNo,
       photoUrl: inserted.photoUrl,
       scannedAt: inserted.scannedAt,
     };
