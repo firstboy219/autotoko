@@ -24,6 +24,9 @@ export class TikTokApiError extends Error {
    * baik menyegarkan sekali percuma daripada gagal karena kode baru.
    */
   get tokenBermasalah(): boolean {
+    // 105005 = scope app belum diberikan. Pesannya menyebut "new access
+    // token" sehingga dulu terbaca sebagai token rusak -> refresh sia-sia.
+    if (this.code === 105005) return false;
     return [105000, 105001, 105002, 36004002, 36004004].includes(this.code)
       || /access[_ ]token|token (is )?(invalid|expired)/i.test(this.message);
   }

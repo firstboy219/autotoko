@@ -2385,7 +2385,9 @@ export class MarketplaceSyncService {
     this.logger.warn(`Token ${toko.shopName} ditolak; menyegarkan sekali.`);
     // refreshOne mengelola konteks tenant-nya sendiri lewat userId; reload
     // toko sesudahnya perlu bypass karena berjalan di latar tanpa sesi.
-    await this.shops.refreshOne(toko.userId, toko.id);
+    // Dipanggil juga dari cron/webhook tanpa sesi user: tanpa bypass,
+    // refreshOne membaca shops (FORCE RLS) = 0 baris -> "Toko tidak ditemukan".
+    await this.bypass(() => this.shops.refreshOne(toko.userId, toko.id));
     const [baru] = await this.bypass(() =>
       this.db.select().from(shops).where(eq(shops.id, toko.id)).limit(1));
     if (!baru?.accessToken) throw new Error("Token tidak bisa disegarkan");

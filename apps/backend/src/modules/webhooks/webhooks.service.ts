@@ -15,6 +15,8 @@ import { BomService } from "../bom/bom.service.js";
 import { AiService } from "../ai/ai.service.js";
 import { AiProviderService } from "../ai/ai-provider.service.js";
 import { AutopilotLogService } from "../ai/autopilot-log.service.js";
+import { TenantService } from "../../database/tenant.service.js";
+import { MarketplaceSyncService } from "../marketplace-sync/marketplace-sync.service.js";
 
 interface OrderEvent {
   marketplace: Marketplace;
@@ -47,6 +49,8 @@ const TIKTOK_EVENT_TYPE_LABELS: Record<number, string> = {
   5: "product",
   6: "seller_deauthorisation",
   7: "auth_expire",
+  13: "cs_new_conversation",
+  14: "cs_new_message",
   11: "cancellation",
   12: "order_return",
   15: "product",
@@ -75,7 +79,21 @@ export class WebhooksService {
     private readonly ai: AiService,
     private readonly aiProvider: AiProviderService,
     private readonly autopilotLog: AutopilotLogService,
+    private readonly tenant: TenantService,
+    private readonly sync: MarketplaceSyncService,
   ) {}
+
+  /** Chat masuk (type 13/14) -> tarik ulang percakapan toko itu, di-debounce per user. */
+  private readonly chatTimer = new Map<string, NodeJS.Timeout>();
+  private jadwalkanSyncChat(userId: string) {
+    if (this.chatTimer.has(userId)) return;
+    this.chatTimer.set(userId, setTimeout(() => {
+      this.chatTimer.delete(userId);
+      this.sync.syncChat(userId)
+        .then((r) => this.logger.log(`webhook chat -> syncChat ${userId}: ${JSON.stringify(r).slice(0, 200)}`))
+        .catch((err) => this.logger.warn(`webhook chat -> syncChat gagal: ${(err as Error).message}`));
+    }, 15_000));
+  }
 
   /**
    * TikTok Shop webhook (PRD Bagian 8.1).
@@ -147,6 +165,14 @@ export class WebhooksService {
   }
 
   private async ingest(e: OrderEvent): Promise<unknown> {
+    // Webhook = konteks sistem tanpa sesi user. Tabel shops/orders ber-FORCE
+    // RLS -> tanpa bypass pencarian toko selalu kosong (terbukti 2026-09-25:
+    // 40/42 event tercatat tanpa shop_id). Semua query di bawah tetap
+    // difilter eksplisit per marketplace + shop_id toko.
+    return this.tenant.runBypass(() => this.ingestInti(e));
+  }
+
+  private async ingestInti(e: OrderEvent): Promise<unknown> {
     const [shop] = await this.db
       .select()
       .from(shops)
@@ -177,6 +203,9 @@ export class WebhooksService {
       if (e.authAction) {
         // Auth-lifecycle side effect runs even when no order is involved.
         result = await this.handleAuthLifecycle(shop, e);
+      } else if (shop && (e.eventType === "cs_new_message" || e.eventType === "cs_new_conversation")) {
+        this.jadwalkanSyncChat(shop.userId);
+        result = { chat: "sync_dijadwalkan", shop: shop.id };
       } else if (!shop) {
         result = { skipped: "shop_not_connected", mpShopId: e.mpShopId };
       } else if (e.orderId) {
