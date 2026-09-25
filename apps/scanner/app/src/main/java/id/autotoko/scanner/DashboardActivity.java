@@ -889,6 +889,7 @@ public class DashboardActivity extends AppCompatActivity {
                 {"🧾", "Batch Packing", "#0E6E55", "B"},
                 {"📷", "Scan Resi", "#6366F1", "S"},
                 {"🚫", "Cek Resi Batal", "#DC2626", "X"},
+                {"💬", "Chat", "#0EA5E9", "M"},
                 {"📥", "Bahan Baku", "#14B8A6", "D"},
                 {"💳", "Cek Saldo", "#16A34A", "C"},
                 {"🕒", "Riwayat", "#64748B", "R"},
@@ -950,6 +951,7 @@ public class DashboardActivity extends AppCompatActivity {
             case "C": i = new Intent(this, SaldoActivity.class); break;
             case "R": i = new Intent(this, HistoryActivity.class); break;
             case "I": i = new Intent(this, IntegrasiTokoActivity.class); break;
+            case "M": i = new Intent(this, ChatActivity.class); break;
             case "U": i = new Intent(this, UpdateActivity.class); break;
             default: return;
         }

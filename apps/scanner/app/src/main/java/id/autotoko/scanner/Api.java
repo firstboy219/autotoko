@@ -145,6 +145,35 @@ public final class Api {
     public void saldoTiktok(boolean live, Cb cb) {
         call("GET", session.baseUrl() + "/api/marketplace-sync/saldo-tiktok" + (live ? "?live=1" : ""), session.token(), null, cb);
     }
+    /* ---- Chat pelanggan (sama dgn menu Chat Pelanggan di web) ---- */
+    public void chatConversations(Cb cb) {
+        call("GET", session.baseUrl() + "/api/chat/conversations", session.token(), null, cb);
+    }
+    public void chatMessages(String convId, Cb cb) {
+        call("GET", session.baseUrl() + "/api/chat/conversations/" + convId + "/messages", session.token(), null, cb);
+    }
+    public void chatReply(String convId, String text, Cb cb) {
+        JSONObject b = new JSONObject();
+        try { b.put("text", text); } catch (Exception ignore) {}
+        call("POST", session.baseUrl() + "/api/chat/conversations/" + convId + "/reply", session.token(), b, cb);
+    }
+    public void chatStatus(Cb cb) {
+        call("GET", session.baseUrl() + "/api/chat/status", session.token(), null, cb);
+    }
+    public void chatRun(Cb cb) {
+        call("POST", session.baseUrl() + "/api/chat/run", session.token(), new JSONObject(), cb);
+    }
+    public void chatSettings(Cb cb) {
+        call("GET", session.baseUrl() + "/api/chat/settings", session.token(), null, cb);
+    }
+    public void chatSaveSettings(JSONObject body, Cb cb) {
+        call("PUT", session.baseUrl() + "/api/chat/settings", session.token(), body, cb);
+    }
+    public void kbDraft(String text, Cb cb) {
+        JSONObject b = new JSONObject();
+        try { b.put("text", text); b.put("kind", "chat"); } catch (Exception ignore) {}
+        call("POST", session.baseUrl() + "/api/kb/draft", session.token(), b, cb);
+    }
     /** Daftar toko terhubung (sama dgn halaman Toko di web). */
     public void shops(Cb cb) {
         call("GET", session.baseUrl() + "/api/shops", session.token(), null, cb);
