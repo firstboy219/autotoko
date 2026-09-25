@@ -183,5 +183,8 @@
         <activity android:name=".BatchPackingActivity" android:exported="false" />
         <activity android:name=".CekResiActivity" android:exported="false" />
         <activity android:name=".SaldoActivity" android:exported="false" />
+        <activity android:name=".PackingListActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".PromotionActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".IntegrasiTokoActivity" android:exported="false" android:screenOrientation="portrait" />
     </application>
 </manifest>

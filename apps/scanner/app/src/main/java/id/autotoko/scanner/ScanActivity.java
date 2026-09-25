@@ -2746,6 +2746,15 @@ public class ScanActivity extends AppCompatActivity {
             }
         }
 
+        // Menu yang dipensiunkan dari APK (5.40): Pesanan pindah ke footer
+        // Dashboard; HPP, Pencairan, Stok, Scan Teks, Akun Staff, dan Data
+        // Belum Lengkap dikelola dari web.
+        for (int id : new int[]{R.id.menuPesanan, R.id.menuHpp, R.id.menuPayout, R.id.menuStock,
+                R.id.menuTextScan, R.id.menuStaff, R.id.menuPending}) {
+            View baris = sheet.findViewById(id);
+            if (baris != null) baris.setVisibility(View.GONE);
+        }
+
         sheet.findViewById(R.id.menuLogout).setOnClickListener(v -> {
             dialog.dismiss();
             session.clear();

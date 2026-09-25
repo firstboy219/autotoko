@@ -64,7 +64,7 @@ public class DashboardActivity extends AppCompatActivity {
 
         ScrollView sv = new ScrollView(this);
         sv.addView(root);
-        setContentView(sv);
+        setContentView(NavBawah.bungkus(this, sv, NavBawah.HOME));
         muat();
     }
 
@@ -883,22 +883,23 @@ public class DashboardActivity extends AppCompatActivity {
         t.setTextColor(Color.parseColor("#20242B"));
         t.setPadding(0, 0, 0, (int) (6 * dp()));
         wrap.addView(t);
-        String[][] tiles = {
-                {"📦", "Pesanan", "#3B82F6", "O"},
+        // 5.40: Pesanan pindah ke footer; HPP, Pencairan, Stok, Scan Teks,
+        // Belum Lengkap, Akun Staff dipensiunkan dari APK (kelola di web).
+        java.util.List<String[]> daftar = new java.util.ArrayList<>(java.util.Arrays.asList(new String[][]{
                 {"🧾", "Batch Packing", "#0E6E55", "B"},
                 {"📷", "Scan Resi", "#6366F1", "S"},
                 {"🚫", "Cek Resi Batal", "#DC2626", "X"},
                 {"📥", "Bahan Baku", "#14B8A6", "D"},
-                {"💰", "HPP", "#F59E0B", "H"},
-                {"🏦", "Pencairan", "#8B5CF6", "P"},
                 {"💳", "Cek Saldo", "#16A34A", "C"},
-                {"📊", "Stok", "#EF4444", "K"},
                 {"🕒", "Riwayat", "#64748B", "R"},
-                {"🔤", "Scan Teks", "#0EA5E9", "T"},
-                {"⚠️", "Belum Lengkap", "#B45309", "N"},
-                {"👥", "Akun Staff", "#7C3AED", "A"},
+                {"🔗", "Integrasi Toko", "#3B82F6", "I"},
                 {"⬇️", "Versi Aplikasi", "#059669", "U"},
-        };
+        }));
+        // Menghubungkan toko hanya untuk pemilik (server juga menolak staf).
+        if (Access.termuat() && !Access.pemilik()) {
+            for (int i = daftar.size() - 1; i >= 0; i--) if ("I".equals(daftar.get(i)[3])) daftar.remove(i);
+        }
+        String[][] tiles = daftar.toArray(new String[0][]);
         LinearLayout row = null;
         for (int i = 0; i < tiles.length; i++) {
             if (i % 4 == 0) {
@@ -942,19 +943,13 @@ public class DashboardActivity extends AppCompatActivity {
     private void bukaMenu(String code) {
         Intent i;
         switch (code) {
-            case "O": i = new Intent(this, OrdersActivity.class); break;
             case "B": i = new Intent(this, OrdersActivity.class); i.putExtra("openBatch", true); break;
             case "S": i = new Intent(this, ScanActivity.class); break;
             case "X": i = new Intent(this, ScanActivity.class); i.putExtra("cekMode", true); break;
             case "D": i = new Intent(this, DeliveryActivity.class); break;
-            case "H": i = new Intent(this, HppActivity.class); break;
-            case "P": i = new Intent(this, PayoutActivity.class); break;
             case "C": i = new Intent(this, SaldoActivity.class); break;
-            case "K": i = new Intent(this, StockActivity.class); break;
             case "R": i = new Intent(this, HistoryActivity.class); break;
-            case "T": i = new Intent(this, TextScanActivity.class); break;
-            case "N": i = new Intent(this, PendingActivity.class); break;
-            case "A": i = new Intent(this, StaffActivity.class); break;
+            case "I": i = new Intent(this, IntegrasiTokoActivity.class); break;
             case "U": i = new Intent(this, UpdateActivity.class); break;
             default: return;
         }

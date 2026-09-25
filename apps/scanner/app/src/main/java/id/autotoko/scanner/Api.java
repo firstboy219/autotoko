@@ -145,6 +145,22 @@ public final class Api {
     public void saldoTiktok(boolean live, Cb cb) {
         call("GET", session.baseUrl() + "/api/marketplace-sync/saldo-tiktok" + (live ? "?live=1" : ""), session.token(), null, cb);
     }
+    /** Daftar toko terhubung (sama dgn halaman Toko di web). */
+    public void shops(Cb cb) {
+        call("GET", session.baseUrl() + "/api/shops", session.token(), null, cb);
+    }
+    /** URL OAuth marketplace; placeholderId menyelesaikan toko "manual dulu". */
+    public void shopConnectUrl(String marketplace, String placeholderId, Cb cb) {
+        String q = placeholderId == null || placeholderId.isEmpty() ? "" : "?placeholderId=" + placeholderId;
+        call("GET", session.baseUrl() + "/api/shops/connect/" + marketplace + q, session.token(), null, cb);
+    }
+    public void shopRefresh(String id, Cb cb) {
+        call("POST", session.baseUrl() + "/api/shops/" + id + "/refresh", session.token(), new JSONObject(), cb);
+    }
+    /** Activity promo per toko TikTok (read-only di APK). */
+    public void promoActivities(Cb cb) {
+        call("GET", session.baseUrl() + "/api/promotion/activities", session.token(), null, cb);
+    }
     public void orderShip(String id, String handover, Cb cb) {
         JSONObject p = new JSONObject();
         try { if (handover != null) p.put("handoverMethod", handover); } catch (Exception ignored) {}

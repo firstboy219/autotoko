@@ -300,7 +300,7 @@ public class OrdersActivity extends AppCompatActivity {
         sv.setOnTouchListener((v, ev) -> { gd.onTouchEvent(ev); return false; });
         rootCol.addView(srl);
 
-        setContentView(rootCol);
+        setContentView(NavBawah.bungkus(this, rootCol, NavBawah.PESANAN));
         muat();
     }
 
