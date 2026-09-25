@@ -109,6 +109,14 @@ export class TikTokAdapter implements MarketplaceAuthPort {
     if (json.code !== 0 || !json.data) {
       throw new BadGatewayException(`TikTok token error: ${json.message ?? json.code}`);
     }
+    // Izin yang BENAR-BENAR dibawa token ini. Scope ditentukan konfigurasi app
+    // di Partner Center (URL otorisasi tak membawa scope) -- log ini bukti
+    // apakah mis. affiliate sudah ikut setelah toko dihubungkan ulang.
+    const gs = (json.data as { granted_scopes?: unknown }).granted_scopes;
+    this.logger.log(
+      `TikTok token ${endpoint} seller=${(json.data as { seller_name?: string }).seller_name ?? "-"} ` +
+      `granted_scopes=${Array.isArray(gs) ? gs.join(",") : JSON.stringify(gs ?? null)}`,
+    );
     return json.data as {
       access_token: string;
       access_token_expire_in: number;
@@ -117,6 +125,7 @@ export class TikTokAdapter implements MarketplaceAuthPort {
       open_id?: string;
       seller_name?: string;
       seller_base_region?: string;
+      granted_scopes?: string[];
     };
   }
 
