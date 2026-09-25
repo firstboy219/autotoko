@@ -251,6 +251,8 @@ export function Orders() {
   const [selected, setSelected] = useState<Order | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [cekBusy, setCekBusy] = useState(false);
+  const [cekResult, setCekResult] = useState<CheckResult[] | null>(null);
   const [otomasiOpen, setOtomasiOpen] = useState(false);
 
   const all = data ?? [];
@@ -334,6 +336,33 @@ export function Orders() {
       reload(); reloadRingkas();
     } catch (e) {
       toast((e as Error).message, "danger");
+    }
+  }
+
+  async function cekStatus(ids: string[]) {
+    if (!ids.length) return;
+    setCekBusy(true);
+    try {
+      const r = await api.post<{ hasil: CheckResult[] }>("/marketplace-sync/orders/check-status", { orderIds: ids });
+      const rows = r.hasil ?? [];
+      const dibatalkan = rows.filter((h) => h.cancelled).length;
+      if (ids.length === 1) {
+        const h = rows[0];
+        toast(
+          h?.cancelled
+            ? `DIBATALKAN — ${h.marketplaceOrderId ?? ""}`
+            : `AMAN — ${h?.marketplaceOrderId ?? "order"}${h?.error ? ` (${h.error})` : ""}`,
+          h?.cancelled ? "danger" : h?.error ? "warning" : "success",
+        );
+      } else {
+        setCekResult(rows);
+        toast(`Cek selesai: ${dibatalkan} dibatalkan dari ${rows.length} order`, dibatalkan ? "warning" : "success");
+      }
+      reload();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setCekBusy(false);
     }
   }
 
@@ -540,6 +569,9 @@ export function Orders() {
           <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-brand bg-brand/5 px-3 py-2">
             <span className="text-sm font-medium text-ink">{sel.size} order dipilih</span>
             <div className="ml-auto flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline" icon="refresh" loading={cekBusy} onClick={() => cekStatus([...sel])}>
+                Cek Status
+              </Button>
               <Button size="sm" variant="outline" icon="check" loading={bulkBusy} onClick={() => bulkStatus("approved")}>
                 Setujui
               </Button>
@@ -687,6 +719,17 @@ export function Orders() {
                         <Badge tone={FS_TONE[o.fulfillmentStatus] ?? "neutral"}>
                           {FS_LABEL[o.fulfillmentStatus] ?? o.fulfillmentStatus}
                         </Badge>
+                        {(o.sumber ?? "api") === "api" && (
+                          <button
+                            type="button"
+                            className="ml-2 text-[11px] text-brand-ink hover:underline align-middle disabled:opacity-50"
+                            title="Cek status pembatalan (live)"
+                            disabled={cekBusy}
+                            onClick={(e) => { e.stopPropagation(); void cekStatus([o.id]); }}
+                          >
+                            Cek
+                          </button>
+                        )}
                       </TD>
                       <TD>
                         {o.status ? (
@@ -789,6 +832,7 @@ export function Orders() {
       {otomasiOpen && <OtomasiOrderModal onClose={() => setOtomasiOpen(false)} />}
       {batchesOpen && <BatchesModal onClose={() => setBatchesOpen(false)} onChanged={() => { reload(); reloadRingkas(); }} />}
       {petaOpen && <PemetaanStatusModal onClose={() => setPetaOpen(false)} />}
+      {cekResult && <CekStatusResultModal rows={cekResult} onClose={() => setCekResult(null)} />}
       {cekOpen && <CekResiModal onClose={() => setCekOpen(false)} />}
       {batchOpen && (
         <BatchPackingModal
@@ -1197,6 +1241,42 @@ function CekResiModal({ onClose }: { onClose: () => void }) {
           )}
         </div>
       )}
+    </Modal>
+  );
+}
+
+type CheckResult = {
+  orderId: string;
+  marketplaceOrderId: string | null;
+  cancelled: boolean;
+  marketplaceStatus: string | null;
+  fulfillmentStatus: string;
+  error?: string;
+};
+
+/** Hasil cek status pembatalan massal. */
+function CekStatusResultModal({ rows, onClose }: { rows: CheckResult[]; onClose: () => void }) {
+  const dibatalkan = rows.filter((r) => r.cancelled);
+  const aman = rows.filter((r) => !r.cancelled);
+  return (
+    <Modal open onClose={onClose} title={`Hasil Cek Status (${rows.length})`} width="max-w-lg">
+      <div className="space-y-3">
+        <InlineAlert tone={dibatalkan.length ? "warning" : "success"}>
+          {dibatalkan.length} order DIBATALKAN, {aman.length} aman.
+        </InlineAlert>
+        <div className="max-h-[52vh] overflow-y-auto rounded-lg border border-line divide-y divide-line text-sm">
+          {rows.map((r) => (
+            <div key={r.orderId} className="flex items-center justify-between gap-3 px-3 py-2">
+              <span className="font-mono text-xs truncate">{r.marketplaceOrderId ?? r.orderId}</span>
+              <div className="flex items-center gap-2 shrink-0">
+                {r.error && <span className="text-[11px] text-ink-3">{r.error}</span>}
+                <Badge tone={r.cancelled ? "danger" : "success"}>{r.cancelled ? "DIBATALKAN" : "AMAN"}</Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end"><Button variant="filled" onClick={onClose}>Tutup</Button></div>
+      </div>
     </Modal>
   );
 }

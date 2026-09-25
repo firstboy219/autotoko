@@ -209,6 +209,12 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.cancelBatch(uid(req), id) };
   }
 
+  /** Cek status pembatalan LIVE utk beberapa order (per-row / bulk). */
+  @Post("orders/check-status")
+  async checkStatus(@Req() req: FastifyRequest, @Body() body: { orderIds?: string[] }): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.checkOrderStatus(uid(req), body?.orderIds ?? []) };
+  }
+
   /** Ambil URL label AWB order dari marketplace (read-only). */
   @Get("orders/:id/label")
   async labelOrder(

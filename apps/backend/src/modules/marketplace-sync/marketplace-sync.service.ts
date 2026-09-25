@@ -1542,6 +1542,71 @@ export class MarketplaceSyncService {
    * disimpan ke orders.price_detail / orders.tracking_last. Dipakai tombol refresh
    * per order & saat buka detail order.
    */
+  /**
+   * Cek status pembatalan beberapa order secara LIVE ke marketplace + perbarui
+   * status tersimpan. Dipakai tombol "Cek Status" per-row / bulk di Orders.
+   * Batal = status marketplace CANCELLED/CANCELED. Graceful per toko.
+   */
+  async checkOrderStatus(userId: string, orderIds: string[]) {
+    const CANCEL = (s?: string | null) => { const u = (s ?? "").toUpperCase(); return u === "CANCELLED" || u === "CANCELED"; };
+    type Hasil = { orderId: string; marketplaceOrderId: string | null; cancelled: boolean; marketplaceStatus: string | null; fulfillmentStatus: string; error?: string };
+    const hasil: Hasil[] = [];
+    if (!orderIds.length) return { hasil };
+    const rows = await this.bypass(() => this.db
+      .select({ id: orders.id, mpId: orders.marketplaceOrderId, shopId: orders.shopId, marketplace: orders.marketplace, fulfillmentStatus: orders.fulfillmentStatus, status: orders.status })
+      .from(orders)
+      .where(and(eq(orders.userId, userId), inArray(orders.id, orderIds))));
+
+    const byShop = new Map<string, typeof rows>();
+    for (const r of rows) {
+      if (r.marketplace !== "tiktok" || !r.shopId) {
+        hasil.push({ orderId: r.id, marketplaceOrderId: r.mpId, cancelled: r.fulfillmentStatus === "dibatalkan" || CANCEL(r.status), marketplaceStatus: r.status, fulfillmentStatus: r.fulfillmentStatus });
+        continue;
+      }
+      const a = byShop.get(r.shopId) ?? []; a.push(r); byShop.set(r.shopId, a);
+    }
+
+    for (const [shopId, list] of byShop) {
+      const [t] = await this.bypass(() => this.db.select().from(shops).where(eq(shops.id, shopId)).limit(1));
+      if (!t || !t.accessToken || !t.shopCipher) {
+        for (const r of list) hasil.push({ orderId: r.id, marketplaceOrderId: r.mpId, cancelled: r.fulfillmentStatus === "dibatalkan", marketplaceStatus: r.status, fulfillmentStatus: r.fulfillmentStatus, error: "Toko tidak tersambung API" });
+        continue;
+      }
+      let klien = await this.klien(t); let segar = false;
+      const call = async <T>(fn: (c: TikTokClient) => Promise<T>): Promise<T> => {
+        for (;;) { try { return await fn(klien); } catch (e) { if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(t); continue; } throw e; } }
+      };
+      const idList = list.map((r) => r.mpId).filter((x): x is string => !!x);
+      const statusByMp = new Map<string, string>();
+      try {
+        for (let i = 0; i < idList.length; i += 50) {
+          const resp = await call((c) => c.ordersByIds(idList.slice(i, i + 50)));
+          for (const od of resp.orders ?? []) {
+            const rec = od as Record<string, unknown>;
+            const mpId = String(rec.id ?? "");
+            const st = String(rec.status ?? rec.order_status ?? "");
+            if (mpId) statusByMp.set(mpId, st);
+          }
+        }
+      } catch (e) {
+        for (const r of list) hasil.push({ orderId: r.id, marketplaceOrderId: r.mpId, cancelled: r.fulfillmentStatus === "dibatalkan", marketplaceStatus: r.status, fulfillmentStatus: r.fulfillmentStatus, error: (e as Error).message });
+        continue;
+      }
+      for (const r of list) {
+        const mpStatus = r.mpId ? statusByMp.get(r.mpId) ?? null : null;
+        const cancelled = CANCEL(mpStatus) || (!mpStatus && r.fulfillmentStatus === "dibatalkan");
+        let fs = r.fulfillmentStatus;
+        if (mpStatus) {
+          const set: Record<string, unknown> = { status: mpStatus, updatedAt: new Date() };
+          if (CANCEL(mpStatus) && fs !== "dibatalkan") { set.fulfillmentStatus = "dibatalkan"; fs = "dibatalkan"; }
+          await this.bypass(() => this.db.update(orders).set(set).where(eq(orders.id, r.id)));
+        }
+        hasil.push({ orderId: r.id, marketplaceOrderId: r.mpId, cancelled, marketplaceStatus: mpStatus ?? r.status, fulfillmentStatus: fs });
+      }
+    }
+    return { hasil };
+  }
+
   async refreshOrderTiktok(userId: string, orderId: string) {
     const [o] = await this.bypass(() => this.db.select().from(orders)
       .where(and(eq(orders.id, orderId), eq(orders.userId, userId))).limit(1));

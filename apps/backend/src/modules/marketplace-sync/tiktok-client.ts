@@ -316,6 +316,11 @@ export class TikTokClient {
     return this.get<Record<string, unknown>>(`/order/202407/orders/${orderId}/price_detail`);
   }
 
+  /** Get Order Detail 202309: status beberapa order sekaligus (maks ~50 id). */
+  async ordersByIds(ids: string[]) {
+    return this.get<{ orders?: Record<string, unknown>[] }>("/order/202309/orders", { ids: ids.join(",") });
+  }
+
   /** Get Tracking 202309: linimasa pengiriman sebuah order. */
   async orderTracking(orderId: string) {
     return this.get<{ tracking?: Array<Record<string, unknown>> }>(
