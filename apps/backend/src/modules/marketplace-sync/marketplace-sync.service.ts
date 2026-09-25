@@ -1141,6 +1141,8 @@ export class MarketplaceSyncService {
         marketplace: orders.marketplace,
         marketplaceOrderId: orders.marketplaceOrderId,
         fulfillmentStatus: orders.fulfillmentStatus,
+        labelPrinted: orders.labelPrinted,
+        awbUrl: orders.awbUrl,
         raw: orders.raw,
       })
       .from(orders)
@@ -1163,8 +1165,13 @@ export class MarketplaceSyncService {
    * membaca URL PDF label yang sudah dibuat marketplace, tidak mengubah apa pun.
    * Label baru tersedia setelah paket di-RTS (arrange shipment).
    */
-  async labelOrder(userId: string, orderId: string) {
+  async labelOrder(userId: string, orderId: string, force = false) {
     const { order, toko } = await this.ambilOrderToko(userId, orderId);
+    // Cegah cetak ULANG otomatis: resi yang sudah pernah dicetak hanya diambil
+    // lagi bila diminta manual (force). Tak menyentuh marketplace saat ditahan.
+    if (order.labelPrinted && !force) {
+      return { alreadyPrinted: true, awbUrl: order.awbUrl ?? null, hasil: [] as { packageId: string; docUrl: string | null; trackingNumber: string | null; error?: string }[] };
+    }
     const ids = this.packageIds(order.raw);
     if (!ids.length) throw new BadRequestException("Order belum punya paket di marketplace");
     let klien = await this.klien(toko);

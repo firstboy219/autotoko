@@ -264,6 +264,7 @@ export class OrdersService {
     return [
       ...dariApi.map((o) => ({
         ...o, sumber: "api" as const,
+        labelPrinted: Boolean((o as Record<string, unknown>).labelPrinted),
         terscan: terscanIds.has(o.id),
         scanned: terscanIds.has(o.id),
         isCod: this.isCodOf(o),
@@ -302,6 +303,52 @@ export class OrdersService {
   }
 
   /** Update the internal fulfillment status (multi-tenant guarded). */
+  /**
+   * Cari order dari nomor resi (scan) → status batal & status cetak.
+   * Melayani fitur fulfillment: cek pembatalan + cek resi sudah dicetak.
+   */
+  async lookupByResi(userId: string, resiInput: string) {
+    const key = this.normResi(resiInput);
+    if (!key) return { found: false as const };
+    const rows = await this.db
+      .select()
+      .from(orders)
+      .where(
+        and(
+          eq(orders.userId, userId),
+          sql`upper(regexp_replace(coalesce(${orders.trackingNumber}, ''), '[^A-Za-z0-9]', '', 'g')) = ${key}`,
+        ),
+      )
+      .orderBy(desc(orders.createdAt))
+      .limit(1);
+    const o = rows[0];
+    if (!o) return { found: false as const, resi: resiInput };
+    const mp = (o.status ?? "").toUpperCase();
+    const cancelled = o.fulfillmentStatus === "dibatalkan" || mp === "CANCELLED" || mp === "CANCELED";
+    let shopName: string | null = null;
+    if (o.shopId) {
+      const [sh] = await this.db
+        .select({ n: sql<string>`coalesce(${shops.displayName}, ${shops.shopName})` })
+        .from(shops)
+        .where(eq(shops.id, o.shopId))
+        .limit(1);
+      shopName = sh?.n ?? null;
+    }
+    return {
+      found: true as const,
+      orderId: o.id,
+      marketplaceOrderId: o.marketplaceOrderId,
+      buyerName: o.buyerName,
+      shopName,
+      trackingNumber: o.trackingNumber,
+      fulfillmentStatus: o.fulfillmentStatus,
+      marketplaceStatus: o.status,
+      cancelled,
+      labelPrinted: o.labelPrinted,
+      itemCount: Array.isArray(o.items) ? o.items.length : null,
+    };
+  }
+
   async updateStatus(userId: string, id: string, status: FulfillmentStatus) {
     const [row] = await this.db
       .update(orders)

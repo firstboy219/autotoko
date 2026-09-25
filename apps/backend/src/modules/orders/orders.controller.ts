@@ -146,6 +146,12 @@ export class OrdersController {
     return { success: true, data: await this.orders.updateStatusBulk(uid(req), dto.ids, dto.status) };
   }
 
+  /** Cari order dari nomor resi (scan) — cek pembatalan & status cetak. */
+  @Get("lookup")
+  async lookup(@Req() req: FastifyRequest, @Query("resi") resi?: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.lookupByResi(uid(req), resi ?? "") };
+  }
+
   @Get(":id")
   async get(
     @Req() req: FastifyRequest,

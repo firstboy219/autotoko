@@ -214,8 +214,9 @@ export class MarketplaceSyncController {
   async labelOrder(
     @Req() req: FastifyRequest,
     @Param("id") id: string,
+    @Query("force") force?: string,
   ): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.sync.labelOrder(uid(req), id) };
+    return { success: true, data: await this.sync.labelOrder(uid(req), id, force === "1" || force === "true") };
   }
 
   /** Slot jadwal jemput (pickup) untuk order sameday/instant. */

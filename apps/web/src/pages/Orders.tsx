@@ -87,6 +87,7 @@ interface Order {
   trackingLast?: Array<Record<string, unknown>> | null;
   /** URL PDF AWB/resi yang sudah di-cache ke server (backend). */
   awbUrl?: string | null;
+  labelPrinted?: boolean;
 }
 
 type BatchRow = { orderId: string; ok: boolean; orderNo: string | null; error?: string };
@@ -356,6 +357,7 @@ export function Orders() {
   const [jemputOpen, setJemputOpen] = useState(false);
   const [batchesOpen, setBatchesOpen] = useState(false);
   const [petaOpen, setPetaOpen] = useState(false);
+  const [cekOpen, setCekOpen] = useState(false);
 
   return (
     <Layout title="Orders">
@@ -390,6 +392,7 @@ export function Orders() {
             </Button>
             <MoreMenu
               items={[
+                { label: "Cek Resi / Pembatalan", icon: "activity", onClick: () => setCekOpen(true) },
                 { label: "Jadwalkan Jemput", icon: "cart", onClick: () => setJemputOpen(true) },
                 { label: "Otomasi Order", icon: "bot", onClick: () => setOtomasiOpen(true) },
                 { label: "Pemetaan Status", icon: "activity", onClick: () => setPetaOpen(true) },
@@ -786,6 +789,7 @@ export function Orders() {
       {otomasiOpen && <OtomasiOrderModal onClose={() => setOtomasiOpen(false)} />}
       {batchesOpen && <BatchesModal onClose={() => setBatchesOpen(false)} onChanged={() => { reload(); reloadRingkas(); }} />}
       {petaOpen && <PemetaanStatusModal onClose={() => setPetaOpen(false)} />}
+      {cekOpen && <CekResiModal onClose={() => setCekOpen(false)} />}
       {batchOpen && (
         <BatchPackingModal
           onClose={() => setBatchOpen(false)}
@@ -1108,6 +1112,89 @@ function BatchPackingModal({ onClose, onDone }: { onClose: () => void; onDone: (
               Proses {includedIds.length} order â
             </Button>
           </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+type LookupResult = {
+  found: boolean;
+  resi?: string;
+  cancelled?: boolean;
+  fulfillmentStatus?: string;
+  marketplaceStatus?: string | null;
+  labelPrinted?: boolean;
+  marketplaceOrderId?: string | null;
+  buyerName?: string | null;
+  shopName?: string | null;
+  trackingNumber?: string | null;
+  itemCount?: number | null;
+};
+
+/**
+ * Cek Resi (fulfillment): scan/tempel nomor resi -> tahu instan apakah pesanan
+ * DIBATALKAN dan apakah resinya sudah pernah dicetak. Cocok dgn scanner-gun
+ * (mengetik resi lalu Enter) maupun ketik manual.
+ */
+function CekResiModal({ onClose }: { onClose: () => void }) {
+  const toast = useToast();
+  const [resi, setResi] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [hasil, setHasil] = useState<LookupResult | null>(null);
+
+  async function cek() {
+    const q = resi.trim();
+    if (!q) return;
+    setBusy(true);
+    try {
+      const r = await api.get<LookupResult>(`/orders/lookup?resi=${encodeURIComponent(q)}`);
+      setHasil({ ...r, resi: q });
+      setResi("");
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const tone = !hasil ? "" : !hasil.found ? "neutral" : hasil.cancelled ? "danger" : "success";
+  const judul = !hasil ? "" : !hasil.found ? "Resi tidak ditemukan" : hasil.cancelled ? "DIBATALKAN — JANGAN dikemas/dikirim" : "AMAN — boleh diproses";
+
+  return (
+    <Modal open onClose={onClose} title="Cek Resi / Pembatalan" width="max-w-lg">
+      <p className="text-sm text-ink-2 mb-3">
+        Scan (pakai alat scan) atau tempel nomor resi, lalu Enter. Sistem cek instan status pembatalan &amp; apakah resi sudah pernah dicetak.
+      </p>
+      <div className="flex gap-2">
+        <Input
+          autoFocus
+          value={resi}
+          onChange={(e) => setResi(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void cek(); } }}
+          placeholder="Nomor resi / AWB…"
+        />
+        <Button variant="filled" loading={busy} onClick={() => void cek()} disabled={!resi.trim()}>Cek</Button>
+      </div>
+
+      {hasil && (
+        <div className="mt-4 space-y-2">
+          <div className={`rounded-lg p-4 text-center ${
+            tone === "danger" ? "bg-red-50 text-red-700 ring-1 ring-red-200"
+            : tone === "success" ? "bg-green-50 text-green-700 ring-1 ring-green-200"
+            : "bg-canvas text-ink-2 ring-1 ring-line"}`}>
+            <div className="text-lg font-bold">{judul}</div>
+            {hasil.resi && <div className="text-xs mt-0.5 font-mono">{hasil.resi}</div>}
+          </div>
+          {hasil.found && (
+            <div className="rounded-lg border border-line divide-y divide-line text-sm">
+              <div className="flex justify-between px-3 py-2"><span className="text-ink-3">Order</span><span className="font-mono text-xs">{hasil.marketplaceOrderId ?? "-"}</span></div>
+              <div className="flex justify-between px-3 py-2"><span className="text-ink-3">Pembeli</span><span>{hasil.buyerName ?? "-"}</span></div>
+              <div className="flex justify-between px-3 py-2"><span className="text-ink-3">Toko</span><span>{hasil.shopName ?? "-"}</span></div>
+              <div className="flex justify-between px-3 py-2"><span className="text-ink-3">Status</span><Badge tone={hasil.cancelled ? "danger" : "neutral"}>{FS_LABEL[hasil.fulfillmentStatus ?? ""] ?? hasil.fulfillmentStatus ?? "-"}</Badge></div>
+              <div className="flex justify-between px-3 py-2"><span className="text-ink-3">Resi dicetak</span><Badge tone={hasil.labelPrinted ? "warning" : "neutral"}>{hasil.labelPrinted ? "sudah dicetak" : "belum"}</Badge></div>
+            </div>
+          )}
         </div>
       )}
     </Modal>
@@ -1596,21 +1683,34 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
     }
   }
 
-  async function cetakAwb() {
+  async function cetakAwb(force = false) {
     setBusy(true); setErr(null);
     try {
-      const r = await api.get<{ hasil: { docUrl: string | null; trackingNumber: string | null; error?: string }[] }>(
-        `/marketplace-sync/orders/${order.id}/label`,
-      );
-      const ada = r.hasil.filter((h) => h.docUrl);
-      if (!ada.length) {
-        const e = r.hasil.find((h) => h.error)?.error;
-        toast(e ? `Label belum tersedia: ${e}` : "Label belum tersedia — order mungkin belum di-RTS.", "warning");
+      type LabelResp = { alreadyPrinted?: boolean; awbUrl?: string | null; hasil: { docUrl: string | null; trackingNumber: string | null; error?: string }[] };
+      const buka = (r: LabelResp) => {
+        const ada = r.hasil.filter((h) => h.docUrl);
+        if (!ada.length) {
+          const e = r.hasil.find((h) => h.error)?.error;
+          toast(e ? `Label belum tersedia: ${e}` : "Label belum tersedia — order mungkin belum di-RTS.", "warning");
+          return;
+        }
+        ada.forEach((h) => window.open(h.docUrl!, "_blank", "noopener"));
+        const resi = ada[0]?.trackingNumber;
+        toast(`Label AWB dibuka (${ada.length} paket)${resi ? ` · resi ${resi}` : ""}`, "success");
+      };
+      const r = await api.get<LabelResp>(`/marketplace-sync/orders/${order.id}/label${force ? "?force=1" : ""}`);
+      if (r.alreadyPrinted) {
+        // Pencegahan cetak ganda: hanya cetak ulang bila diizinkan manual.
+        if (!window.confirm("Resi ini SUDAH pernah dicetak. Cetak ulang? (untuk hindari resi ganda)")) {
+          if (r.awbUrl) window.open(r.awbUrl, "_blank", "noopener");
+          toast("Resi sudah pernah dicetak — tidak dicetak ulang.", "warning");
+          return;
+        }
+        const r2 = await api.get<LabelResp>(`/marketplace-sync/orders/${order.id}/label?force=1`);
+        buka(r2);
         return;
       }
-      ada.forEach((h) => window.open(h.docUrl!, "_blank", "noopener"));
-      const resi = ada[0]?.trackingNumber;
-      toast(`Label AWB dibuka (${ada.length} paket)${resi ? ` · resi ${resi}` : ""}`, "success");
+      buka(r);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -1885,7 +1985,7 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
                   Cetak / Unduh Resi
                 </Button>
               ) : (
-                <Button size="sm" variant="outline" icon="download" loading={busy} onClick={cetakAwb}>
+                <Button size="sm" variant="outline" icon="download" loading={busy} onClick={() => cetakAwb()}>
                   Ambil Resi dari TikTok
                 </Button>
               )
