@@ -2183,6 +2183,13 @@ export class MarketplaceSyncService {
     return t;
   }
 
+  /** Cek ringan izin Customer Service (ambil 1 percakapan). Error TikTok dilempar apa adanya. */
+  async cekIzinChat(userId: string, shopId: string): Promise<boolean> {
+    const t = await this.tokoTikTok(userId, shopId);
+    await this.panggilTikTok(t, (c) => c.get("/customer_service/202309/conversations", { page_size: 1 }));
+    return true;
+  }
+
   /** Kirim pesan TEXT ke pembeli via TikTok IM. Return message_id TikTok. */
   async kirimPesanChat(userId: string, shopId: string, conversationCid: string, text: string): Promise<string> {
     const t = await this.tokoTikTok(userId, shopId);
@@ -2214,7 +2221,7 @@ export class MarketplaceSyncService {
   async syncPesanPercakapan(userId: string, shopId: string, conversationCid: string, ourConvId: string): Promise<number> {
     const t = await this.tokoTikTok(userId, shopId);
     const resp = await this.panggilTikTok(t, (c) => c.get<{ messages?: Record<string, unknown>[] }>(
-      `/customer_service/202309/conversations/${conversationCid}/messages`, { page_size: 50 }));
+      `/customer_service/202309/conversations/${conversationCid}/messages`, { page_size: 10 }));
     const list = resp?.messages ?? [];
     if (!list.length) return 0;
     const existing = await this.bypass(() => this.db

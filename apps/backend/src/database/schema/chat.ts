@@ -1,8 +1,10 @@
 import {
+  boolean,
   index,
   integer,
   jsonb,
   pgTable,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -66,3 +68,17 @@ export const marketplaceMessages = pgTable(
     userIdx: index("marketplace_messages_user_idx").on(t.userId),
   }),
 );
+
+/**
+ * Otomasi chat per seller (migrasi 0081). Default balas otomatis MATI.
+ * `autoReplyShopIds` null = semua toko; isi untuk membatasi (mis. uji 1 toko).
+ */
+export const chatSettings = pgTable("chat_settings", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  autoReply: boolean("auto_reply").notNull().default(false),
+  autoReplyShopIds: jsonb("auto_reply_shop_ids").$type<string[] | null>(),
+  officeStart: smallint("office_start"),
+  officeEnd: smallint("office_end"),
+  fallbackText: text("fallback_text"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

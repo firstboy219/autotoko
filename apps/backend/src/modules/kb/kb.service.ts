@@ -5,6 +5,21 @@ import { kbEntries, orders, shops } from "../../database/schema/index.js";
 import { AutopilotLogService } from "../ai/autopilot-log.service.js";
 
 type KbKind = "chat" | "review";
+
+/** Status internal -> kalimat yang dimengerti pembeli (untuk placeholder {status}). */
+const STATUS_PEMBELI: Record<string, string> = {
+  masuk: "sedang kami proses", approved: "sedang disiapkan", produksi: "sedang disiapkan",
+  packing: "sedang dikemas", siap_kirim: "sudah dikemas dan menunggu diambil kurir",
+  dikirim: "dalam perjalanan", selesai: "sudah diterima", retur: "dalam proses retur", dibatalkan: "dibatalkan",
+};
+
+/** Kata umum chat pembeli yang tak membedakan maksud (diabaikan saat mencocokkan). */
+const KB_STOP = new Set([
+  "ada", "kak", "ka", "kakak", "ya", "yg", "yang", "saya", "aku", "apa", "apakah", "gak", "ga", "nggak", "ngga", "tidak",
+  "ini", "itu", "dan", "di", "ke", "dari", "untuk", "buat", "mau", "bisa", "min", "admin", "gan", "sis", "dong", "deh",
+  "sih", "nya", "kah", "kok", "aja", "ok", "oke", "halo", "hai", "hallo", "selamat", "pagi", "siang", "sore", "malam",
+  "tolong", "mohon", "minta", "terima", "kasih", "makasih", "thanks",
+]);
 const kindOf = (k?: string): KbKind => (k === "review" ? "review" : "chat");
 
 /**
@@ -96,20 +111,23 @@ export class KbService {
         .from(kbEntries)
         .where(and(eq(kbEntries.userId, userId), eq(kbEntries.kind, kind), eq(kbEntries.active, true)));
       if (!entries.length) return null;
-      const words = new Set(this.norm(text));
+      const words = new Set(this.norm(text).filter((w) => !KB_STOP.has(w)));
       let best: { entry: (typeof entries)[number]; score: number } | null = null;
       for (const e of entries) {
-        const kws = this.norm(e.keywords);
+        // Kata kunci = daftar SINONIM (mis. "stok ready ada barang tersedia"),
+        // bukan syarat semua harus muncul. Dulu skornya rasio terhadap SELURUH
+        // daftar -> "barang ready gak?" (2/7) gagal cocok. Sekarang: kata umum
+        // diabaikan; cocok bila >=2 kata kunci kena, atau 1 kata kunci khas
+        // (>=4 huruf). Jumlah kena + priority jadi pemecah seri.
+        const kws = [...new Set(this.norm(e.keywords).filter((k) => !KB_STOP.has(k)))];
         if (!kws.length) continue;
-        let hit = 0;
-        for (const k of kws) if (words.has(k)) hit++;
-        if (hit === 0) continue;
-        // Rasio kata kunci yang cocok + priority sebagai pemecah seri.
-        const score = hit / kws.length + e.priority / 1000;
+        const kena = kws.filter((k) => words.has(k));
+        if (!kena.length) continue;
+        if (kena.length < 2 && !kena.some((k) => k.length >= 4)) continue;
+        const score = Math.min(1, kena.length / Math.min(kws.length, 2)) + kena.length * 0.01 + e.priority / 1000;
         if (!best || score > best.score) best = { entry: e, score };
       }
-      // Ambang: minimal separuh kata kunci entri cocok.
-      return best && best.score >= 0.5 ? best.entry : null;
+      return best ? best.entry : null;
     } catch (e) {
       this.logger.warn(`kb match: ${(e as Error).message}`);
       return null;
@@ -160,7 +178,7 @@ export class KbService {
           }
           reply = reply
             .replace(/\{resi\}/gi, o.resi ?? "-")
-            .replace(/\{status\}/gi, o.status ?? "-")
+            .replace(/\{status\}/gi, STATUS_PEMBELI[o.status ?? ""] ?? o.status ?? "-")
             .replace(/\{pembeli\}/gi, o.pembeli ?? "-")
             .replace(/\{toko\}/gi, toko || "-");
         }

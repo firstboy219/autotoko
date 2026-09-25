@@ -17,6 +17,7 @@ import { AiProviderService } from "../ai/ai-provider.service.js";
 import { AutopilotLogService } from "../ai/autopilot-log.service.js";
 import { TenantService } from "../../database/tenant.service.js";
 import { MarketplaceSyncService } from "../marketplace-sync/marketplace-sync.service.js";
+import { ChatAutomationService } from "../chat/chat-automation.service.js";
 
 interface OrderEvent {
   marketplace: Marketplace;
@@ -81,6 +82,7 @@ export class WebhooksService {
     private readonly autopilotLog: AutopilotLogService,
     private readonly tenant: TenantService,
     private readonly sync: MarketplaceSyncService,
+    private readonly chatAuto: ChatAutomationService,
   ) {}
 
   /** Chat masuk (type 13/14) -> tarik ulang percakapan toko itu, di-debounce per user. */
@@ -204,8 +206,10 @@ export class WebhooksService {
         // Auth-lifecycle side effect runs even when no order is involved.
         result = await this.handleAuthLifecycle(shop, e);
       } else if (shop && (e.eventType === "cs_new_message" || e.eventType === "cs_new_conversation")) {
-        this.jadwalkanSyncChat(shop.userId);
-        result = { chat: "sync_dijadwalkan", shop: shop.id };
+        const pd = (e.payload as { data?: Record<string, unknown> } | undefined)?.data ?? {};
+        const cid = String(pd.conversation_id ?? pd.conversationId ?? "") || null;
+        this.chatAuto.dariWebhook(shop.userId, cid);
+        result = { chat: "otomasi_dijadwalkan", shop: shop.id, conversation: cid };
       } else if (!shop) {
         result = { skipped: "shop_not_connected", mpShopId: e.mpShopId };
       } else if (e.orderId) {
