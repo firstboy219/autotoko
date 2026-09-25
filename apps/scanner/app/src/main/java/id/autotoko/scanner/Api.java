@@ -133,8 +133,13 @@ public final class Api {
         try { p.put("status", status); } catch (Exception ignored) {}
         call("PATCH", session.baseUrl() + "/api/orders/" + id + "/status", session.token(), p, cb);
     }
-    public void orderLabel(String id, Cb cb) {
-        call("GET", session.baseUrl() + "/api/marketplace-sync/orders/" + id + "/label", session.token(), null, cb);
+    public void orderLabel(String id, Cb cb) { orderLabel(id, false, cb); }
+    public void orderLabel(String id, boolean force, Cb cb) {
+        call("GET", session.baseUrl() + "/api/marketplace-sync/orders/" + id + "/label" + (force ? "?force=1" : ""), session.token(), null, cb);
+    }
+    public void lookupResi(String resi, Cb cb) {
+        String enc; try { enc = java.net.URLEncoder.encode(resi, "UTF-8"); } catch (Exception e) { enc = resi; }
+        call("GET", session.baseUrl() + "/api/orders/lookup?resi=" + enc, session.token(), null, cb);
     }
     public void orderShip(String id, String handover, Cb cb) {
         JSONObject p = new JSONObject();

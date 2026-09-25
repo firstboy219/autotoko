@@ -311,12 +311,14 @@ public class OrdersActivity extends AppCompatActivity {
         m.add(0, 1, 0, "Batch Packing").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         m.add(0, 2, 1, "Otomasi Order").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         m.add(0, 3, 2, "Daftar Batch").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        m.add(0, 4, 3, "Cek Resi / Pembatalan").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         return true;
     }
     @Override public boolean onOptionsItemSelected(MenuItem item) {
         if (item.getItemId() == 1) { showBatch(); return true; }
         if (item.getItemId() == 2) { showOtomasi(); return true; }
         if (item.getItemId() == 3) { showBatches(); return true; }
+        if (item.getItemId() == 4) { startActivity(new Intent(this, CekResiActivity.class)); return true; }
         return super.onOptionsItemSelected(item);
     }
 
@@ -930,9 +932,22 @@ public class OrdersActivity extends AppCompatActivity {
         });
     }
 
-    private void cetakAwb(String id) {
+    private void cetakAwb(String id) { cetakAwb(id, false); }
+    private void cetakAwb(String id, boolean force) {
         toast("Mengambil label…");
-        api.orderLabel(id, r -> {
+        api.orderLabel(id, force, r -> {
+            if (r != null && r.ok() && r.data() != null && r.data().optBoolean("alreadyPrinted", false)) {
+                final String awb = r.data().optString("awbUrl", "");
+                new MaterialAlertDialogBuilder(this)
+                        .setTitle("Resi sudah dicetak")
+                        .setMessage("Resi ini SUDAH pernah dicetak. Cetak ulang? (untuk hindari resi ganda)")
+                        .setNegativeButton("Batal", (dd, w) -> {
+                            if (!awb.isEmpty()) { try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(new Session(this).baseUrl() + awb))); } catch (Exception e) {} }
+                        })
+                        .setPositiveButton("Cetak ulang", (dd, w) -> cetakAwb(id, true))
+                        .show();
+                return;
+            }
             if (r == null || !r.ok() || r.data() == null) { toast(r == null ? "Gagal" : r.message("Gagal ambil label")); return; }
             JSONArray hasil = r.data().optJSONArray("hasil");
             String url = null;
