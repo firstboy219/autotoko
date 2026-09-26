@@ -110,6 +110,7 @@ public class OrdersActivity extends AppCompatActivity {
     private boolean autoBatch = false;
 
     private float d;
+    private int packedToday = -1, cancelledToday = -1;
     private int dp(int v) { return (int) (v * d); }
 
     // --- Pemuat gambar ringan (tanpa Coil/Glide, keduanya belum ada di deps) ---
@@ -340,6 +341,14 @@ public class OrdersActivity extends AppCompatActivity {
             }
             if (all.length() > 0) { buildTabs(); render(); }
         });
+        // Ringkasan hari ini (resi discan packing & order batal) dari data marketplace.
+        api.orderBoardSummary(br -> {
+            if (br != null && br.ok() && br.data() != null) {
+                packedToday = br.data().optInt("packedToday", 0);
+                cancelledToday = br.data().optInt("cancelledToday", 0);
+                renderStats();
+            }
+        });
         api.orders(true, r -> {
             if (srl != null) srl.setRefreshing(false);
             if (r == null || !r.ok() || r.dataArray() == null) {
@@ -510,6 +519,8 @@ public class OrdersActivity extends AppCompatActivity {
         stats.addView(statCard("Urgent (≤3 jam/lewat)", String.valueOf(urgent), "#B3261E", () -> showStatList("urgent")));
         stats.addView(statCard("Order terlama", any ? agingFromMs(oldest) : "–", "#B36A00", () -> showStatList("terlama")));
         stats.addView(statCard("Order terbaru", any ? agingFromMs(newest) : "–", "#1B7F4B", () -> showStatList("terbaru")));
+        stats.addView(statCard("Discan packing hari ini", packedToday < 0 ? "…" : String.valueOf(packedToday), "#0E6E55", () -> {}));
+        stats.addView(statCard("Batal hari ini", cancelledToday < 0 ? "…" : String.valueOf(cancelledToday), "#B3261E", () -> {}));
     }
 
     private String judulStat(String kind) {

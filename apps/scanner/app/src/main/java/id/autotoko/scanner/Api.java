@@ -497,6 +497,10 @@ public final class Api {
     public void dashboardSummary(Cb cb) {
         call("GET", session.baseUrl() + "/api/dashboard/summary", session.token(), null, cb);
     }
+    /** Deret harian (order/omzet/packing/batal per hari WIB) untuk grafik dashboard. */
+    public void dashboardDaily(int days, Cb cb) {
+        call("GET", session.baseUrl() + "/api/dashboard/daily-series?days=" + days, session.token(), null, cb);
+    }
 
     /** Komposisi order hari ini: kontribusi tiap toko + produk & qty terbeli. */
     public void todayComposition(Cb cb) {

@@ -40,7 +40,7 @@ public class DashboardActivity extends AppCompatActivity {
     private LinearLayout root;
     private TextView status;
     private int hari = 30;
-    private JSONObject insights, ringkasHariIni, peringatan, tugas, v2;
+    private JSONObject insights, ringkasHariIni, peringatan, tugas, v2, daily, board;
     private String tglDari, tglSampai, gagalInsights;
     private int menunggu = 0;
 
@@ -102,9 +102,9 @@ public class DashboardActivity extends AppCompatActivity {
         tglDari = f.format(new Date(System.currentTimeMillis() - (hari - 1L) * 86400000L));
 
         insights = null; ringkasHariIni = null; peringatan = null; tugas = null;
-        v2 = null;
+        v2 = null; daily = null; board = null;
         gagalInsights = null;
-        menunggu = 5;
+        menunggu = 7;
         api.shopInsights(tglDari, tglSampai, r -> {
             if (r.ok()) insights = r.data();
             else gagalInsights = r.message("Gagal memuat dashboard.");
@@ -114,6 +114,8 @@ public class DashboardActivity extends AppCompatActivity {
         api.dashboardAlerts(r -> { if (r.ok()) peringatan = r.data(); siap(); });
         api.pendingTasks(r -> { if (r.ok()) tugas = r.data(); siap(); });
         api.dashboardV2(tglDari, tglSampai, r -> { if (r.ok()) v2 = r.data(); siap(); });
+        api.dashboardDaily(14, r -> { if (r.ok()) daily = r.data(); siap(); });
+        api.orderBoardSummary(r -> { if (r != null && r.ok()) board = r.data(); siap(); });
     }
 
     private void siap() {
@@ -130,6 +132,7 @@ public class DashboardActivity extends AppCompatActivity {
         root.removeAllViews();
         root.addView(status);
         status.setText("Periode " + hari + " hari terakhir");
+        grafik();                 // GRAFIK diutamakan di paling atas
         root.addView(kartuKpi());
         root.addView(gridNavigasi());
         root.addView(pilihPeriode());
@@ -148,6 +151,120 @@ public class DashboardActivity extends AppCompatActivity {
         produk(d);
         bahanBaku(d);
         kesehatanToko(d);
+    }
+
+    /**
+     * Bagian GRAFIK — didahulukan (permintaan: utamakan grafik, berpikir ala BI).
+     * KPI hari ini + tren 14 hari (order/packing/batal & omzet) + toko teratas.
+     */
+    private void grafik() {
+        // --- KPI hari ini (4 angka utama) ---
+        int ordToday = ringkasHariIni == null ? 0 : ringkasHariIni.optInt("today_orders", 0);
+        double revToday = ringkasHariIni == null ? 0 : ringkasHariIni.optDouble("today_revenue", 0);
+        int packToday = board == null ? 0 : board.optInt("packedToday", 0);
+        int batalToday = board == null ? 0 : board.optInt("cancelledToday", 0);
+        LinearLayout kpi = new LinearLayout(this);
+        kpi.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams kl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        kl.topMargin = (int) (10 * dp());
+        kpi.setLayoutParams(kl);
+        kpi.addView(kpiKecil(String.valueOf(ordToday), "Order hari ini", "#0E6E55"));
+        kpi.addView(kpiKecil(rpRingkas(revToday), "Omzet hari ini", "#0E6E55"));
+        kpi.addView(kpiKecil(String.valueOf(packToday), "Packing hari ini", "#256FB0"));
+        kpi.addView(kpiKecil(String.valueOf(batalToday), "Batal hari ini", "#B3261E"));
+        root.addView(kpi);
+
+        JSONArray s = daily == null ? null : daily.optJSONArray("series");
+        if (s != null && s.length() > 0) {
+            int n = s.length();
+            String[] lbl = new String[n];
+            double[] ord = new double[n], pack = new double[n], batal = new double[n], omzet = new double[n];
+            for (int i = 0; i < n; i++) {
+                JSONObject p = s.optJSONObject(i);
+                lbl[i] = tglPendek(p.optString("date"));
+                ord[i] = p.optInt("orders"); pack[i] = p.optInt("packed");
+                batal[i] = p.optInt("cancelled"); omzet[i] = p.optLong("revenue");
+            }
+            // Grafik 1: order / packing / batal per hari (satu skala jumlah, 3 seri).
+            ChartView c1 = new ChartView(this);
+            c1.setBars(lbl, new String[]{ "Order", "Packing", "Batal" },
+                    new int[]{ 0xFF0E6E55, 0xFF256FB0, 0xFFB3261E },
+                    new double[][]{ ord, pack, batal }, false);
+            root.addView(bungkusGrafik("Order · Packing · Batal per hari (14 hari)", c1));
+            // Grafik 2: omzet per hari (area, skala rupiah sendiri).
+            ChartView c2 = new ChartView(this);
+            c2.setArea(lbl, omzet, 0xFF0E6E55, true);
+            root.addView(bungkusGrafik("Omzet per hari (14 hari)", c2));
+        }
+
+        // Grafik 3: toko teratas per omzet (bar horizontal) dari insights.shops.
+        if (insights != null) {
+            JSONArray shops = insights.optJSONArray("shops");
+            if (shops != null && shops.length() > 0) {
+                java.util.ArrayList<JSONObject> ss = new java.util.ArrayList<>();
+                for (int i = 0; i < shops.length(); i++) { JSONObject o = shops.optJSONObject(i); if (o != null) ss.add(o); }
+                java.util.Collections.sort(ss, (a, b) -> Double.compare(b.optDouble("credit", 0), a.optDouble("credit", 0)));
+                int top = Math.min(5, ss.size());
+                if (top > 0 && ss.get(0).optDouble("credit", 0) > 0) {
+                    String[] lbl = new String[top]; double[] val = new double[top];
+                    for (int i = 0; i < top; i++) { lbl[i] = ss.get(i).optString("name", "-"); val[i] = ss.get(i).optDouble("credit", 0); }
+                    ChartView c3 = new ChartView(this);
+                    c3.setHBars(lbl, val, 0xFF0E6E55, true);
+                    root.addView(bungkusGrafik("Toko teratas — pencairan (" + hari + " hari)", c3));
+                }
+            }
+        }
+    }
+
+    private View bungkusGrafik(String judul, ChartView chart) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int p = (int) (12 * dp());
+        box.setPadding(p, p, p, p);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(Color.parseColor("#FFFFFF"));
+        g.setCornerRadius(14 * dp());
+        g.setStroke((int) Math.max(1, dp()), Color.parseColor("#E7E5DF"));
+        box.setBackground(g);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = (int) (10 * dp());
+        box.setLayoutParams(lp);
+        TextView t = new TextView(this);
+        t.setText(judul); t.setTextSize(13);
+        t.setTypeface(null, android.graphics.Typeface.BOLD);
+        t.setTextColor(Color.parseColor("#20242B"));
+        t.setPadding(0, 0, 0, (int) (6 * dp()));
+        box.addView(t);
+        box.addView(chart, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return box;
+    }
+
+    private View kpiKecil(String angka, String label, String warna) {
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding((int) (4 * dp()), 0, (int) (4 * dp()), 0);
+        col.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView a = new TextView(this);
+        a.setText(angka); a.setTextSize(18);
+        a.setTypeface(null, android.graphics.Typeface.BOLD);
+        a.setTextColor(Color.parseColor(warna));
+        col.addView(a);
+        TextView l = new TextView(this);
+        l.setText(label); l.setTextSize(10); l.setTextColor(abu());
+        col.addView(l);
+        return col;
+    }
+
+    private static String rpRingkas(double v) {
+        if (v >= 1e9) return "Rp" + (Math.round(v / 1e8) / 10.0) + "M";
+        if (v >= 1e6) return "Rp" + (Math.round(v / 1e5) / 10.0) + "jt";
+        if (v >= 1e3) return "Rp" + Math.round(v / 1e3) + "rb";
+        return "Rp" + (long) v;
+    }
+
+    private static String tglPendek(String iso) {
+        if (iso == null || iso.length() < 10) return "";
+        return iso.substring(8, 10) + "/" + iso.substring(5, 7);
     }
 
     private View pilihPeriode() {
