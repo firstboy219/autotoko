@@ -47,6 +47,8 @@ public class PromotionActivity extends AppCompatActivity {
     private TextView status;
     private androidx.swiperefreshlayout.widget.SwipeRefreshLayout srl;
     private String filter = "";
+    private String mode = "promo"; // promo | voucher
+    private LinearLayout modeBar;
     private float d;
     private int muatKe = 0;
 
@@ -66,6 +68,12 @@ public class PromotionActivity extends AppCompatActivity {
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setBackgroundColor(getColor(R.color.canvas));
+
+        // Pemilih mode: Promo (activity) vs Voucher (kupon) — satu layar.
+        modeBar = new LinearLayout(this);
+        modeBar.setOrientation(LinearLayout.HORIZONTAL);
+        modeBar.setPadding(dp(12), dp(10), dp(12), dp(2));
+        col.addView(modeBar);
 
         HorizontalScrollView hs = new HorizontalScrollView(this);
         hs.setHorizontalScrollBarEnabled(false);
@@ -89,12 +97,34 @@ public class PromotionActivity extends AppCompatActivity {
         srl = new androidx.swiperefreshlayout.widget.SwipeRefreshLayout(this);
         srl.addView(sv, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        srl.setOnRefreshListener(this::muat);
+        srl.setOnRefreshListener(() -> { if ("voucher".equals(mode)) muatVoucher(true); else muat(); });
         col.addView(srl, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         setContentView(NavBawah.bungkus(this, col, NavBawah.PROMO));
+        buatModeBar();
         buatTab();
         muat();
+    }
+
+    private void buatModeBar() {
+        modeBar.removeAllViews();
+        String[][] m = { {"promo", "Promo"}, {"voucher", "Voucher"} };
+        for (String[] x : m) {
+            boolean on = x[0].equals(mode);
+            TextView t = new TextView(this);
+            t.setText(x[1]);
+            t.setTextSize(14);
+            t.setGravity(Gravity.CENTER);
+            t.setTypeface(null, on ? Typeface.BOLD : Typeface.NORMAL);
+            t.setTextColor(on ? getColor(R.color.on_brand) : getColor(R.color.ink2));
+            t.setBackground(bulat(on ? getColor(R.color.brand) : getColor(R.color.surface), 20, true));
+            t.setPadding(dp(16), dp(8), dp(16), dp(8));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            lp.setMargins(dp(4), 0, dp(4), 0);
+            final String kode = x[0];
+            t.setOnClickListener(v -> { if (!kode.equals(mode)) { mode = kode; buatModeBar(); tabs.setVisibility(kode.equals("promo") ? View.VISIBLE : View.GONE); muat(); } });
+            modeBar.addView(t, lp);
+        }
     }
 
     private void buatTab() {
@@ -118,6 +148,7 @@ public class PromotionActivity extends AppCompatActivity {
     }
 
     private void muat() {
+        if ("voucher".equals(mode)) { muatVoucher(false); return; }
         final int ke = ++muatKe;
         status.setText("Memuat promo & produk dari TikTok…");
         list.removeAllViews();
@@ -167,6 +198,114 @@ public class PromotionActivity extends AppCompatActivity {
             JSONObject c = cards.optJSONObject(i);
             if (c != null) list.addView(kartu(c));
         }
+    }
+
+    /* ------------------------------------------------ voucher (kupon) */
+
+    private void muatVoucher(boolean sinkronDulu) {
+        final int ke = ++muatKe;
+        status.setText(sinkronDulu ? "Menyinkron voucher dari TikTok…" : "Memuat voucher…");
+        if (!sinkronDulu) list.removeAllViews();
+        if (sinkronDulu) {
+            api.promoCouponSync(r -> {
+                if (ke != muatKe) return;
+                if (r != null && r.ok() && r.data() != null) {
+                    JSONObject x = r.data();
+                    JSONObject sk = x.optJSONObject("sinkron");
+                    Toast.makeText(this, (sk != null ? sk.optInt("total") : 0) + " voucher · "
+                            + x.optInt("berakhir") + " segera berakhir · " + (x.optInt("klaimHampirHabis") + x.optInt("klaimHabis"))
+                            + " kuota menipis · " + x.optInt("nolKlaim") + " nol klaim", Toast.LENGTH_LONG).show();
+                }
+                ambilKartuVoucher(ke);
+            });
+        } else {
+            ambilKartuVoucher(ke);
+        }
+    }
+
+    private void ambilKartuVoucher(int ke) {
+        api.promoCouponCards("", r -> {
+            if (ke != muatKe) return;
+            srl.setRefreshing(false);
+            if (r == null || !r.ok() || r.data() == null) {
+                status.setText(r == null ? "Gagal memuat voucher." : r.message("Gagal memuat voucher."));
+                return;
+            }
+            gambarVoucher(r.data().optJSONArray("cards"));
+        });
+    }
+
+    private void gambarVoucher(JSONArray cards) {
+        list.removeAllViews();
+        int n = cards == null ? 0 : cards.length();
+        int perhatian = 0;
+        for (int i = 0; i < n; i++) {
+            JSONObject c = cards.optJSONObject(i);
+            if (c == null) continue;
+            JSONArray sg = c.optJSONArray("sinyal");
+            for (int j = 0; sg != null && j < sg.length(); j++) if (!"berkinerja".equals(sg.optString(j))) { perhatian++; break; }
+        }
+        status.setText(n == 0 ? "Belum ada voucher — tarik ke bawah untuk sinkron dari TikTok."
+                : n + " voucher" + (perhatian > 0 ? " · " + perhatian + " perlu perhatian" : "") + " · tarik ke bawah untuk sinkron");
+        LinearLayout info = kotak();
+        info.addView(teks("API voucher TikTok hanya baca — voucher dibuat di Seller Center. AutoToko memantau otomatis "
+                + "(segera berakhir / kuota menipis / nol klaim) & mengirim notifikasi.", 11, false, R.color.ink3));
+        list.addView(info);
+        for (int i = 0; i < n; i++) {
+            JSONObject c = cards.optJSONObject(i);
+            if (c != null) list.addView(kartuVoucher(c));
+        }
+    }
+
+    private View kartuVoucher(JSONObject c) {
+        LinearLayout box = kotak();
+        LinearLayout atas = new LinearLayout(this);
+        atas.setOrientation(LinearLayout.HORIZONTAL);
+        atas.setGravity(Gravity.CENTER_VERTICAL);
+        atas.addView(teks(c.optString("shopName", "-"), 13, true, R.color.ink), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        atas.addView(chip(labelStatus(c.optString("status")), "ONGOING".equalsIgnoreCase(c.optString("status"))));
+        box.addView(atas);
+        box.addView(teks(c.optString("title", "-"), 12, false, R.color.ink2));
+        StringBuilder rinci = new StringBuilder();
+        rinci.append(c.optString("diskon", "-"));
+        if (!c.isNull("minSpend")) rinci.append("  · min Rp").append(String.format(new Locale("id", "ID"), "%,.0f", c.optDouble("minSpend", 0)));
+        rinci.append("\nKlaim ").append(c.optInt("claimed"));
+        if (!c.isNull("redemptionLimit")) rinci.append("/").append(c.optInt("redemptionLimit")).append(" (").append(c.optInt("pakaiRasio")).append("%)");
+        rinci.append(" · dipakai ").append(c.optInt("redeemed"));
+        if (!c.isNull("konversi")) rinci.append(" (").append(c.optInt("konversi")).append("%)");
+        if (!c.isNull("claimEnd")) rinci.append("\nBerlaku s/d ").append(tglIso(c.optString("claimEnd")));
+        box.addView(teks(rinci.toString(), 12, false, R.color.ink));
+        JSONArray sg = c.optJSONArray("sinyal");
+        LinearLayout chips = new LinearLayout(this);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        boolean ada = false;
+        for (int j = 0; sg != null && j < sg.length(); j++) {
+            String s = sg.optString(j);
+            String lbl = "segera_berakhir".equals(s) ? "segera berakhir" : "klaim_habis".equals(s) ? "kuota habis"
+                    : "klaim_hampir_habis".equals(s) ? "kuota menipis" : "nol_klaim".equals(s) ? "0 klaim"
+                    : "berkinerja".equals(s) ? "berkinerja" : s;
+            boolean bagus = "berkinerja".equals(s);
+            TextView chip = teks(lbl, 11, false, bagus ? R.color.ok : R.color.warn);
+            chip.setBackground(bulat(getColor(bagus ? R.color.ok_bg : R.color.warn_bg), 10, false));
+            chip.setPadding(dp(8), dp(2), dp(8), dp(2));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(0, dp(6), dp(6), 0);
+            chips.addView(chip, lp);
+            ada = true;
+        }
+        if (ada) box.addView(chips);
+        return box;
+    }
+
+    private static String tglIso(String iso) {
+        if (iso == null || iso.length() < 10) return "?";
+        try {
+            SimpleDateFormat in = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+            in.setTimeZone(TimeZone.getTimeZone("UTC"));
+            Date d = in.parse(iso.substring(0, 10));
+            SimpleDateFormat out = new SimpleDateFormat("dd/MM/yy", Locale.US);
+            return out.format(d);
+        } catch (Exception e) { return iso.substring(0, 10); }
     }
 
     /* ------------------------------------------------ kartu promo */

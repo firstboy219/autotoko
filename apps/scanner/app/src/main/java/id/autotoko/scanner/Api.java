@@ -200,6 +200,15 @@ public final class Api {
         call("POST", session.baseUrl() + "/api/promotion/activities/" + shopId + "/" + activityId + "/nonaktifkan",
                 session.token(), new JSONObject(), cb);
     }
+    /** Kartu voucher/kupon + sinyal otomasi (dari cache). status "" = semua. */
+    public void promoCouponCards(String status, Cb cb) {
+        call("GET", session.baseUrl() + "/api/promotion/coupons/cards" + (status == null || status.isEmpty() ? "" : "?status=" + status),
+                session.token(), null, cb);
+    }
+    /** Sinkron voucher dari TikTok + evaluasi sinyal -> notifikasi (read-only). */
+    public void promoCouponSync(Cb cb) {
+        call("POST", session.baseUrl() + "/api/promotion/coupons/sync", session.token(), new JSONObject(), cb);
+    }
     /** Perpanjang promo berjalan/akan datang +days hari (aksi ke TikTok). */
     public void promoExtend(String shopId, String activityId, int days, Cb cb) {
         JSONObject b = new JSONObject();
