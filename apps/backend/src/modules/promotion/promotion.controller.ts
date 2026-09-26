@@ -6,6 +6,7 @@ import { JwtAuthGuard, TenantOwnerOnly, type JwtPayload } from "../auth/jwt-auth
 import { MarketplaceSyncService } from "../marketplace-sync/marketplace-sync.service.js";
 import { PromotionAutomationService } from "./promotion-automation.service.js";
 import { PromoCardsService } from "./promo-cards.service.js";
+import { CouponService } from "./coupon.service.js";
 
 function uid(req: FastifyRequest): string {
   return (req as FastifyRequest & { user: JwtPayload }).user.sub;
@@ -53,6 +54,15 @@ class ReplicateProdukDto {
   @IsOptional() @IsNumber() beginTime?: number;
   @IsOptional() @IsNumber() endTime?: number;
 }
+class CouponSettingsDto {
+  @IsOptional() @IsBoolean() autoSync?: boolean;
+  @IsOptional() @IsBoolean() alertExpiry?: boolean;
+  @IsOptional() @IsNumber() @Min(1) @Max(30) expiryDays?: number;
+  @IsOptional() @IsBoolean() alertLimit?: boolean;
+  @IsOptional() @IsNumber() @Min(10) @Max(100) limitPct?: number;
+  @IsOptional() @IsBoolean() alertZeroClaim?: boolean;
+  @IsOptional() @IsNumber() @Min(1) @Max(30) zeroClaimDays?: number;
+}
 class ReactivateDto {
   @IsOptional() @IsNumber() @Min(1) @Max(365) days?: number;
   @IsOptional() @IsNumber() beginTime?: number;
@@ -80,6 +90,7 @@ export class PromotionController {
     private readonly sync: MarketplaceSyncService,
     private readonly auto: PromotionAutomationService,
     private readonly cardsSvc: PromoCardsService,
+    private readonly coupon: CouponService,
   ) {}
 
   /** Kartu promo berfokus produk (APK): produk, potongan, rentang tanggal. */
@@ -177,6 +188,34 @@ export class PromotionController {
   @Get("coupons")
   async coupons(@Req() req: FastifyRequest, @Query("status") status?: string) {
     return ok(await this.sync.promoListCoupons(uid(req), { status }));
+  }
+
+  /** Kartu kupon + sinyal otomasi (dari cache sinkron). status "" = semua. */
+  @Get("coupons/cards")
+  async couponCards(@Req() req: FastifyRequest, @Query("status") status?: string) {
+    return ok(await this.coupon.cards(uid(req), status ?? ""));
+  }
+
+  /** Rekap kupon (total/aktif/klaim/redeem) untuk kartu ringkasan Promosi. */
+  @Get("coupons/ringkasan")
+  async couponRingkasan(@Req() req: FastifyRequest) {
+    return ok(await this.coupon.ringkasan(uid(req)));
+  }
+
+  @Get("coupons/settings")
+  async couponGetSettings(@Req() req: FastifyRequest) {
+    return ok(await this.coupon.getSettings(uid(req)));
+  }
+
+  @Put("coupons/settings")
+  async couponSetSettings(@Req() req: FastifyRequest, @Body() dto: CouponSettingsDto) {
+    return ok(await this.coupon.setSettings(uid(req), dto));
+  }
+
+  /** Sinkron kupon dari TikTok + evaluasi sinyal -> notifikasi. Read-only. */
+  @Post("coupons/sync")
+  async couponSync(@Req() req: FastifyRequest) {
+    return ok(await this.coupon.jalankan(uid(req)));
   }
 
   @Get("coupons/:shopId/:couponId")

@@ -18,3 +18,4 @@ export * from "./returns.js";
 export * from "./promotion.js";
 export * from "./master-postings.js";
 export * from "./kb.js";
+export * from "./coupons.js";
