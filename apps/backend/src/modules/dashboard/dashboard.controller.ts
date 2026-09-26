@@ -138,6 +138,11 @@ export class DashboardController {
     };
   }
 
+  @Get("daily-series")
+  async dailySeries(@Req() req: FastifyRequest, @Query("days") days?: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.dashboard.dailySeries(uid(req), Number(days) || 14) };
+  }
+
   @Get("summary")
   async summary(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.dashboard.summary(uid(req)) };

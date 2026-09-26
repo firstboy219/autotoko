@@ -465,7 +465,33 @@ export class OrdersService {
       .select({ n: sql<number>`count(*)::int` })
       .from(resiScans)
       .where(eq(resiScans.userId, userId));
-    return { perStatus, manual: Number(m?.n ?? 0) };
+    // Hari ini (WIB): resi yang discan packing + order yang dibatalkan.
+    // cancel dihitung dari waktu marketplace (raw.cancel_time / update_time),
+    // bukan updated_at kita, supaya "hari ini" = benar-benar dibatalkan hari ini.
+    const start = OrdersService.jakartaStartOfDay();
+    const [pk] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(resiScans)
+      .where(and(eq(resiScans.userId, userId), gte(resiScans.scannedAt, start)));
+    const [cx] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(orders)
+      .where(and(
+        eq(orders.userId, userId),
+        sql`(${orders.fulfillmentStatus} = 'dibatalkan' OR ${orders.status} IN ('CANCELLED','CANCELED'))`,
+        sql`to_timestamp(nullif(coalesce(${orders.raw}->>'cancel_time', ${orders.raw}->>'update_time'), '')::bigint) >= ${start.toISOString()}::timestamptz`,
+      ));
+    return {
+      perStatus, manual: Number(m?.n ?? 0),
+      packedToday: Number(pk?.n ?? 0),
+      cancelledToday: Number(cx?.n ?? 0),
+    };
+  }
+
+  /** Awal hari ini di zona WIB, sebagai Date UTC. */
+  private static jakartaStartOfDay(): Date {
+    const jak = new Date(Date.now() + 7 * 3600 * 1000);
+    return new Date(Date.UTC(jak.getUTCFullYear(), jak.getUTCMonth(), jak.getUTCDate()) - 7 * 3600 * 1000);
   }
 
   /** Ubah status proses banyak order sekaligus (multi-tenant guarded). */

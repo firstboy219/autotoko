@@ -4,6 +4,7 @@ import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   orders,
   shops,
+  resiScans,
   wallets,
   bomItems,
   masterProducts,
@@ -26,6 +27,55 @@ export class DashboardService {
   }
 
   /** Seller dashboard headline numbers (PRD Bagian 12 — dashboard). */
+  /**
+   * Deret harian (WIB) untuk grafik BI dashboard: order & omzet (per tanggal
+   * order dibuat di marketplace), paket dipacking (resi discan), dan order
+   * dibatalkan (per waktu batal marketplace). Sumbu tanggal diisi penuh (hari
+   * kosong = 0) supaya laju tak menyesatkan.
+   */
+  async dailySeries(userId: string, days = 14) {
+    const n = Math.min(60, Math.max(2, Math.floor(days) || 14));
+    const start = this.jakartaStartOfDay();
+    const since = new Date(start.getTime() - (n - 1) * 86400000);
+    const sinceIso = since.toISOString();
+    const rows = async (q: ReturnType<typeof sql>) => {
+      const res = (await this.db.execute(q)) as unknown;
+      if (Array.isArray(res)) return res as Record<string, unknown>[];
+      return ((res as { rows?: Record<string, unknown>[] })?.rows ?? []);
+    };
+
+    const ordRows = await rows(sql`
+      SELECT to_char((COALESCE(created_at_marketplace, created_at) AT TIME ZONE 'Asia/Jakarta')::date,'YYYY-MM-DD') AS d,
+             count(*)::int AS n, COALESCE(sum(total_amount),0)::float AS rev
+      FROM orders WHERE user_id = ${userId} AND COALESCE(created_at_marketplace, created_at) >= ${sinceIso}::timestamptz
+      GROUP BY d`);
+    const canRows = await rows(sql`
+      SELECT to_char((to_timestamp(nullif(coalesce(raw->>'cancel_time', raw->>'update_time'),'')::bigint) AT TIME ZONE 'Asia/Jakarta')::date,'YYYY-MM-DD') AS d,
+             count(*)::int AS n
+      FROM orders WHERE user_id = ${userId}
+        AND (fulfillment_status = 'dibatalkan' OR status IN ('CANCELLED','CANCELED'))
+        AND to_timestamp(nullif(coalesce(raw->>'cancel_time', raw->>'update_time'),'')::bigint) >= ${sinceIso}::timestamptz
+      GROUP BY d`);
+    const packRows = await rows(sql`
+      SELECT to_char((scanned_at AT TIME ZONE 'Asia/Jakarta')::date,'YYYY-MM-DD') AS d, count(*)::int AS n
+      FROM resi_scans WHERE user_id = ${userId} AND scanned_at >= ${sinceIso}::timestamptz GROUP BY d`);
+
+    const mapN = (rs: Record<string, unknown>[], key = 'n') => {
+      const m = new Map<string, number>();
+      for (const r of rs) m.set(String(r.d), Number(r[key] ?? 0));
+      return m;
+    };
+    const mo = mapN(ordRows), mrev = mapN(ordRows, 'rev'), mc = mapN(canRows), mp = mapN(packRows);
+    const series: Array<{ date: string; orders: number; revenue: number; packed: number; cancelled: number }> = [];
+    for (let i = 0; i < n; i++) {
+      const dt = new Date(since.getTime() + i * 86400000 + 7 * 3600000);
+      const key = dt.toISOString().slice(0, 10);
+      series.push({ date: key, orders: mo.get(key) ?? 0, revenue: Math.round(mrev.get(key) ?? 0), packed: mp.get(key) ?? 0, cancelled: mc.get(key) ?? 0 });
+    }
+    const sum = (k: 'orders' | 'revenue' | 'packed' | 'cancelled') => series.reduce((a, x) => a + x[k], 0);
+    return { days: n, tz: 'WIB', series, totals: { orders: sum('orders'), revenue: sum('revenue'), packed: sum('packed'), cancelled: sum('cancelled') } };
+  }
+
   async summary(userId: string) {
     const start = this.jakartaStartOfDay();
 
