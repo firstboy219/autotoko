@@ -11,8 +11,6 @@ interface Activity {
   status?: string; begin_time?: number; end_time?: number; product_level?: string; duration_type?: string;
 }
 interface ShopActivities { shopId: string; shopName: string; activities: Activity[]; error?: string }
-interface Coupon { id?: string; coupon_id?: string; title?: string; status?: string; display_type?: string; promo_code?: string }
-interface ShopCoupons { shopId: string; shopName: string; coupons: Coupon[]; error?: string }
 interface PromoSetting { shopId: string; autoJoin: boolean; activityId: string | null; discountPct: string }
 
 type Row = Activity & { shopId: string; shopName: string };
@@ -34,7 +32,7 @@ const statusTone = (s?: string): "success" | "warning" | "neutral" | "danger" =>
 export function Promotion() {
   const toast = useToast();
   const acts = useFetch<ShopActivities[]>("/promotion/activities");
-  const coups = useFetch<ShopCoupons[]>("/promotion/coupons");
+  const [couponCount, setCouponCount] = useState(0);
   const [fShop, setFShop] = useState("");
   const [fStatus, setFStatus] = useState("");
   const [fType, setFType] = useState("");
@@ -65,10 +63,6 @@ export function Promotion() {
     });
   }, [rows, fShop, fStatus, fType, q]);
 
-  const couponRows = useMemo(
-    () => (coups.data ?? []).flatMap((s) => (s.coupons ?? []).map((c) => ({ ...c, shopId: s.shopId, shopName: s.shopName }))),
-    [coups.data],
-  );
   const statuses = useMemo(() => [...new Set(rows.map((r) => (r.status ?? "").toUpperCase()).filter(Boolean))], [rows]);
   const ongoing = rows.filter((r) => statusTone(r.status) === "success").length;
   const shopErrors = shops.filter((s) => s.error);
@@ -102,7 +96,7 @@ export function Promotion() {
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Tile label="Total activity" value={rows.length} />
         <Tile label="Sedang berjalan" value={ongoing} tone="text-emerald-600" />
-        <Tile label="Coupon" value={couponRows.length} />
+        <Tile label="Voucher" value={couponCount} />
         <Tile label="Toko TikTok" value={shops.length} />
       </div>
 
@@ -134,7 +128,7 @@ export function Promotion() {
             </Select>
           </div>
           <div className="ml-auto flex gap-2">
-            <Button size="sm" variant="outline" icon="refresh" loading={acts.loading} onClick={() => { acts.reload(); coups.reload(); }}>Refresh</Button>
+            <Button size="sm" variant="outline" icon="refresh" loading={acts.loading} onClick={() => acts.reload()}>Refresh</Button>
             <Button size="sm" variant="tonal" icon="settings" onClick={() => setShowAuto(true)}>Auto-ikut</Button>
             <Button size="sm" variant="tonal" onClick={() => setShowAutomation(true)}>Otomasi</Button>
             <Button size="sm" variant="filled" icon="plus" onClick={() => setShowCreate(true)}>Buat Promo</Button>
@@ -192,33 +186,8 @@ export function Promotion() {
         </div>
       </Card>
 
-      {couponRows.length > 0 && (
-        <Card className="mt-4 p-0 overflow-hidden">
-          <div className="px-3 py-2.5 border-b border-line text-sm font-semibold text-ink">Coupon ({couponRows.length})</div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-ink/[0.03] text-left text-[11px] uppercase text-ink-3">
-                  <th className="px-3 py-2">Toko</th><th className="px-3 py-2">Judul</th><th className="px-3 py-2">Kode</th>
-                  <th className="px-3 py-2">Tipe</th><th className="px-3 py-2">Status</th><th className="px-3 py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {couponRows.map((c, i) => (
-                  <tr key={(c.id ?? c.coupon_id ?? "") + i} className="border-t border-line">
-                    <td className="px-3 py-2"><Badge tone="neutral">{c.shopName}</Badge></td>
-                    <td className="px-3 py-2 text-ink">{c.title ?? "-"}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-ink-2">{c.promo_code ?? "-"}</td>
-                    <td className="px-3 py-2 text-ink-2">{c.display_type ?? "-"}</td>
-                    <td className="px-3 py-2"><Badge tone={statusTone(c.status)}>{c.status ?? "-"}</Badge></td>
-                    <td className="px-3 py-2 text-right"><button onClick={() => setManageC({ shopId: c.shopId, couponId: c.id ?? c.coupon_id ?? "", title: c.title ?? "-" })} className="text-brand hover:underline">Detail</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
+      <CouponSection onCount={setCouponCount} onDetail={setManageC} />
+
 
       {showCreate && <CreateActivityModal shops={shops} onClose={() => setShowCreate(false)} onDone={() => { setShowCreate(false); acts.reload(); }} />}
       {showAuto && <AutoJoinModal shops={shops} onClose={() => setShowAuto(false)} />}
@@ -238,6 +207,178 @@ export function Promotion() {
         description={confirmDeact ? `Promo "${actTitle(confirmDeact)}" (${confirmDeact.shopName}) akan dinonaktifkan di TikTok — harga kembali normal.` : ""}
       />
     </Layout>
+  );
+}
+
+/* ------------------------------------------------ Voucher (kupon) + otomasi */
+
+interface CouponCard {
+  id: string; couponId: string; shopId: string | null; shopName: string;
+  title: string | null; status: string | null; diskon: string; minSpend: number | null;
+  productScope: string | null; targetBuyerSegment: string | null;
+  claimStart: string | null; claimEnd: string | null;
+  redemptionLimit: number | null; claimed: number; redeemed: number;
+  sinyal: string[]; konversi: number | null; pakaiRasio: number;
+}
+interface CouponSettings {
+  autoSync: boolean; alertExpiry: boolean; expiryDays: number; alertLimit: boolean; limitPct: number;
+  alertZeroClaim: boolean; zeroClaimDays: number; tersimpan: boolean;
+}
+interface CouponRingkasan { total: number; aktif: number; klaim: number; redeem: number }
+
+const SINYAL_LABEL: Record<string, { t: string; tone: "danger" | "warning" | "success" | "neutral" }> = {
+  segera_berakhir: { t: "segera berakhir", tone: "warning" },
+  klaim_habis: { t: "kuota habis", tone: "danger" },
+  klaim_hampir_habis: { t: "kuota menipis", tone: "warning" },
+  nol_klaim: { t: "0 klaim", tone: "neutral" },
+  berkinerja: { t: "berkinerja", tone: "success" },
+};
+const fmtRp = (n: number | null) => (n == null ? "-" : "Rp " + Math.round(n).toLocaleString("id-ID"));
+const fmtTgl = (s: string | null) => (s ? new Date(s).toLocaleDateString("id-ID", { day: "2-digit", month: "short" }) : "-");
+
+function CouponSection({ onCount, onDetail }: { onCount: (n: number) => void; onDetail: (c: { shopId: string; couponId: string; title: string }) => void }) {
+  const toast = useToast();
+  const [cards, setCards] = useState<CouponCard[] | null>(null);
+  const [rekap, setRekap] = useState<CouponRingkasan | null>(null);
+  const [syncedAt, setSyncedAt] = useState<string | null>(null);
+  const [fStatus, setFStatus] = useState("");
+  const [onlySignal, setOnlySignal] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [setelan, setSetelan] = useState(false);
+
+  function muat() {
+    api.get<{ cards: CouponCard[]; syncedAt: string | null }>("/promotion/coupons/cards")
+      .then((r) => { setCards(r.cards); setSyncedAt(r.syncedAt); onCount(r.cards.length); })
+      .catch(() => setCards([]));
+    api.get<CouponRingkasan>("/promotion/coupons/ringkasan").then(setRekap).catch(() => setRekap(null));
+  }
+  useEffect(() => { muat(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function sinkron() {
+    setSyncing(true);
+    try {
+      const r = await api.post<{ sinkron: { total: number; galat: string[] }; notif: number; berakhir: number; klaimHabis: number; klaimHampirHabis: number; nolKlaim: number }>("/promotion/coupons/sync", {});
+      const g = r.sinkron?.galat ?? [];
+      if (g.length && r.sinkron.total === 0) toast(`Belum tersinkron: ${g[0]}`, "warning");
+      else toast(`${r.sinkron.total} voucher tersinkron · ${r.berakhir} segera berakhir · ${r.klaimHampirHabis + r.klaimHabis} kuota menipis/habis · ${r.nolKlaim} nol klaim · ${r.notif} notifikasi`, "success");
+      muat();
+    } catch (e) { toast((e as Error).message, "danger"); } finally { setSyncing(false); }
+  }
+
+  const list = (cards ?? []).filter((c) => {
+    if (fStatus && (c.status ?? "").toUpperCase() !== fStatus) return false;
+    if (onlySignal && c.sinyal.filter((s) => s !== "berkinerja").length === 0) return false;
+    return true;
+  });
+  const perluPerhatian = (cards ?? []).filter((c) => c.sinyal.some((s) => s !== "berkinerja")).length;
+
+  return (
+    <Card className="mt-4 p-0 overflow-hidden">
+      <div className="px-3 py-2.5 border-b border-line flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold text-ink">Voucher</span>
+        {rekap && (
+          <span className="text-xs text-ink-3">
+            {rekap.total} total · {rekap.aktif} aktif · {rekap.klaim.toLocaleString("id-ID")} klaim · {rekap.redeem.toLocaleString("id-ID")} dipakai
+            {perluPerhatian > 0 && <> · <span className="text-amber-600 font-medium">{perluPerhatian} perlu perhatian</span></>}
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} className="rounded-lg border border-line px-2 py-1 text-xs bg-surface">
+            <option value="">Semua status</option>
+            <option value="ONGOING">Berjalan</option>
+            <option value="NOT_START">Akan datang</option>
+            <option value="EXPIRED">Berakhir</option>
+            <option value="DEACTIVATED">Nonaktif</option>
+          </select>
+          <label className="flex items-center gap-1 text-xs text-ink-2"><input type="checkbox" checked={onlySignal} onChange={(e) => setOnlySignal(e.target.checked)} /> perlu perhatian</label>
+          <Button size="sm" variant="outline" icon="settings" onClick={() => setSetelan(true)}>Otomasi voucher</Button>
+          <Button size="sm" variant="tonal" icon="refresh" loading={syncing} onClick={sinkron}>Sinkron</Button>
+        </div>
+      </div>
+
+      <InlineAlert tone="info">
+        API TikTok untuk voucher hanya baca — voucher dibuat di Seller Center. AutoToko memantau otomatis: sinkron berkala,
+        lalu memberi tahu bila voucher <b>segera berakhir</b>, <b>kuotanya menipis/habis</b>, atau <b>belum diklaim siapa pun</b>.
+      </InlineAlert>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-ink/[0.03] text-left text-[11px] uppercase text-ink-3">
+              <th className="px-3 py-2">Toko</th><th className="px-3 py-2">Voucher</th><th className="px-3 py-2">Diskon</th>
+              <th className="px-3 py-2">Min. belanja</th><th className="px-3 py-2">Klaim / kuota</th><th className="px-3 py-2">Dipakai</th>
+              <th className="px-3 py-2">Berlaku s/d</th><th className="px-3 py-2">Sinyal</th><th className="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {cards === null ? (
+              <tr><td colSpan={9} className="px-3 py-8 text-center text-ink-3">Memuat…</td></tr>
+            ) : !list.length ? (
+              <tr><td colSpan={9} className="px-3 py-8 text-center text-ink-3">{cards.length ? "Tidak ada voucher yang cocok filter." : "Belum ada voucher tersinkron — klik Sinkron."}</td></tr>
+            ) : (
+              list.map((c) => (
+                <tr key={c.id} className="border-t border-line">
+                  <td className="px-3 py-2"><Badge tone="neutral">{c.shopName}</Badge></td>
+                  <td className="px-3 py-2 text-ink max-w-[220px] truncate" title={c.title ?? ""}>{c.title ?? "-"}</td>
+                  <td className="px-3 py-2 font-medium text-ink whitespace-nowrap">{c.diskon}</td>
+                  <td className="px-3 py-2 text-ink-2 whitespace-nowrap">{c.minSpend ? fmtRp(c.minSpend) : "—"}</td>
+                  <td className="px-3 py-2 text-ink-2 tabular-nums whitespace-nowrap">{c.claimed}{c.redemptionLimit ? ` / ${c.redemptionLimit}` : ""}{c.redemptionLimit ? ` (${c.pakaiRasio}%)` : ""}</td>
+                  <td className="px-3 py-2 text-ink-2 tabular-nums">{c.redeemed}{c.konversi != null ? ` · ${c.konversi}%` : ""}</td>
+                  <td className="px-3 py-2 text-ink-2 whitespace-nowrap">{fmtTgl(c.claimEnd)}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-1">
+                      {c.sinyal.length === 0 ? <span className="text-ink-3 text-xs">—</span> :
+                        c.sinyal.map((s) => <Badge key={s} tone={SINYAL_LABEL[s]?.tone ?? "neutral"}>{SINYAL_LABEL[s]?.t ?? s}</Badge>)}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {c.shopId && <button onClick={() => onDetail({ shopId: c.shopId!, couponId: c.couponId, title: c.title ?? "-" })} className="text-brand hover:underline">Detail</button>}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      {syncedAt && <div className="px-3 py-1.5 text-[11px] text-ink-3 border-t border-line">Tersinkron: {new Date(syncedAt).toLocaleString("id-ID")}</div>}
+      {setelan && <CouponAutomationModal onClose={() => setSetelan(false)} onSaved={muat} />}
+    </Card>
+  );
+}
+
+function CouponAutomationModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [s, setS] = useState<CouponSettings | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.get<CouponSettings>("/promotion/coupons/settings").then(setS).catch(() => setS(null)); }, []);
+
+  async function save() {
+    if (!s) return;
+    setBusy(true);
+    try { await api.put("/promotion/coupons/settings", s); toast("Pengaturan otomasi voucher tersimpan.", "success"); onSaved(); onClose(); }
+    catch (e) { toast((e as Error).message, "danger"); } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Otomasi Voucher">
+      {!s ? <Skeleton className="h-40 w-full" /> : (
+        <div className="space-y-3 text-sm">
+          <p className="text-ink-3 text-xs">Pantauan read-only — tidak mengubah apa pun di TikTok, hanya memberi tahu Anda. Notifikasi muncul di lonceng APK &amp; menu Notifikasi web.</p>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={s.autoSync} onChange={(e) => setS({ ...s, autoSync: e.target.checked })} /> <span>Sinkron voucher otomatis tiap 6 jam</span></label>
+          <hr className="border-line" />
+          <label className="flex items-center gap-2"><input type="checkbox" checked={s.alertExpiry} onChange={(e) => setS({ ...s, alertExpiry: e.target.checked })} /> <span>Ingatkan voucher segera berakhir</span></label>
+          <div className="flex items-center gap-2 pl-6 text-xs text-ink-2">ambang <Input type="number" value={String(s.expiryDays)} onChange={(e) => setS({ ...s, expiryDays: Number(e.target.value) || 3 })} className="w-16 tabular-nums" /> hari sebelum berakhir</div>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={s.alertLimit} onChange={(e) => setS({ ...s, alertLimit: e.target.checked })} /> <span>Ingatkan kuota klaim menipis/habis</span></label>
+          <div className="flex items-center gap-2 pl-6 text-xs text-ink-2">saat klaim ≥ <Input type="number" value={String(s.limitPct)} onChange={(e) => setS({ ...s, limitPct: Number(e.target.value) || 80 })} className="w-16 tabular-nums" /> % dari kuota</div>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={s.alertZeroClaim} onChange={(e) => setS({ ...s, alertZeroClaim: e.target.checked })} /> <span>Ingatkan voucher tanpa klaim</span></label>
+          <div className="flex items-center gap-2 pl-6 text-xs text-ink-2">berjalan &gt; <Input type="number" value={String(s.zeroClaimDays)} onChange={(e) => setS({ ...s, zeroClaimDays: Number(e.target.value) || 3 })} className="w-16 tabular-nums" /> hari tapi 0 klaim</div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={onClose}>Batal</Button>
+            <Button variant="filled" loading={busy} onClick={save}>Simpan</Button>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 
