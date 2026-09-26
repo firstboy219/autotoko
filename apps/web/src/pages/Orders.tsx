@@ -236,7 +236,7 @@ export function Orders() {
   const [aktifSaja, setAktifSaja] = useState(true);
   const { data, loading, reload } = useFetch<Order[]>(aktifSaja ? "/orders?active=1" : "/orders");
   const { data: ringkas, reload: reloadRingkas } =
-    useFetch<{ perStatus: Record<string, number>; manual: number }>("/orders/board-summary");
+    useFetch<{ perStatus: Record<string, number>; manual: number; packedToday: number; cancelledToday: number }>("/orders/board-summary");
   const toast = useToast();
   useRealtime(useCallback(() => { reload(); reloadRingkas(); }, [reload, reloadRingkas]));
   // Label status internal bisa di-rename dari Admin CMS -> hidrasi FS_LABEL saat
@@ -440,7 +440,7 @@ export function Orders() {
         }
       />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
         <button type="button"
           onClick={() => { setStatFilter(statFilter === "kirim_hari_ini" ? "" : "kirim_hari_ini"); setAktifSaja(true); setView("tabel"); setPage(0); }}
           className={`rounded-lg border px-3 py-2 text-left transition ${statFilter === "kirim_hari_ini" ? "border-brand bg-brand/10" : "border-line bg-white hover:bg-canvas"}`}>
@@ -460,6 +460,14 @@ export function Orders() {
         <div className="rounded-lg border border-line bg-white px-3 py-2">
           <div className="text-xl font-bold tabular-nums text-ink">{stats.any ? fmtAge(stats.newest) : "\u2013"}</div>
           <div className="text-xs text-ink-2">Order terbaru</div>
+        </div>
+        <div className="rounded-lg border border-line bg-white px-3 py-2" title="Jumlah resi yang discan saat packing hari ini (WIB)">
+          <div className="text-xl font-bold tabular-nums" style={{ color: "#0E6E55" }}>{ringkas?.packedToday ?? 0}</div>
+          <div className="text-xs text-ink-2">Discan packing hari ini</div>
+        </div>
+        <div className="rounded-lg border border-line bg-white px-3 py-2" title="Order dibatalkan hari ini menurut data TikTok (waktu batal marketplace)">
+          <div className="text-xl font-bold tabular-nums" style={{ color: "#B3261E" }}>{ringkas?.cancelledToday ?? 0}</div>
+          <div className="text-xs text-ink-2">Batal hari ini</div>
         </div>
       </div>
 
