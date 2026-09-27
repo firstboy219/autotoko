@@ -128,7 +128,7 @@ interface PencairanInfoToko {
   nextEligibleAt: string | null; sisaDetik: number; bisaTarikSekarang: boolean;
   cairHariIni: number; outstandingQty: number; sehat: boolean;
 }
-interface PencairanInfoResp { toko: PencairanInfoToko[]; total: { cairHariIni: number; outstandingQty: number; sehat: boolean }; diperbaruiPada: string }
+interface PencairanInfoResp { toko: PencairanInfoToko[]; total: { cairHariIni: number; outstandingQty: number; sehat: boolean }; total7d: { cair: number; outstanding: number; sehat: boolean }; diperbaruiPada: string }
 
 const fmtWaktu = (s: string | null) =>
   s ? new Date(s).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "-";
@@ -183,6 +183,13 @@ function PencairanInfoCard() {
               {" — "}<b className={totalCair >= totalOut ? "text-emerald-600" : "text-amber-600"}>{totalCair >= totalOut ? "Sehat" : "Perlu perhatian"}</b>
               {totalCair >= totalOut ? " (arus cair menutup backlog)" : " (backlog belum dikirim melebihi order yang cair hari ini)"}
             </div>
+            {data?.total7d && (
+              <div className={`mb-3 rounded-lg px-3 py-2 text-sm ${data.total7d.sehat ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>
+                7 hari terakhir (semua toko): <b>{data.total7d.cair}</b> order sudah/bisa dicairkan vs <b>{data.total7d.outstanding}</b> outstanding (belum dikirim, dibuat 7 hari) —{" "}
+                <b>{data.total7d.sehat ? "Sehat" : "Perlu perhatian"}</b>
+                {data.total7d.sehat ? " (kemampuan restock kuat)" : " (backlog melebihi order yang cair 7 hari)"}
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>

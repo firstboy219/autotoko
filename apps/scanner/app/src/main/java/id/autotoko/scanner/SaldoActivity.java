@@ -126,6 +126,16 @@ public class SaldoActivity extends AppCompatActivity {
         ring.setTextColor(Color.parseColor(totCair >= totOut ? "#1B7F4B" : "#8A5A00"));
         card.addView(ring);
 
+        JSONObject t7 = data.optJSONObject("total7d");
+        if (t7 != null) {
+            int c7 = t7.optInt("cair", 0), o7 = t7.optInt("outstanding", 0);
+            boolean s7 = t7.optBoolean("sehat", c7 >= o7);
+            TextView r7 = teks("7 hari: " + c7 + " order cair vs " + o7 + " outstanding — " + (s7 ? "Sehat" : "Perlu perhatian"),
+                    12, R.color.ink, true);
+            r7.setTextColor(Color.parseColor(s7 ? "#1B7F4B" : "#8A5A00"));
+            card.addView(r7);
+        }
+
         int n = toko.length();
         String[] lbl = new String[n];
         double[] cair = new double[n], out = new double[n];
