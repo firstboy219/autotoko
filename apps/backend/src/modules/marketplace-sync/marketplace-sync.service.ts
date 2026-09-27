@@ -8,6 +8,7 @@ import {
   marketplaceSkuMap,
   masterProducts,
   orderSettings,
+  payoutSettings,
   marketplaceProducts,
   marketplaceSkus,
   marketplaceSyncRuns,
@@ -1777,19 +1778,36 @@ export class MarketplaceSyncService {
   async restockInfo(userId: string, days = 7) {
     const n = Math.min(90, Math.max(1, Math.floor(days) || 7));
     const since = new Date(Date.now() - n * 86400000).toISOString();
-    const scalar = async (q: ReturnType<typeof sql>) => {
+    // Persentase cadangan bahan baku dari Pengaturan Pencairan (live).
+    const [ps] = await this.bypass(() => this.db
+      .select({ rate: payoutSettings.materialReserveRate })
+      .from(payoutSettings).where(eq(payoutSettings.userId, userId)).limit(1));
+    const rate = Math.min(1, Math.max(0, Number(ps?.rate ?? 0)));
+    const row = async (q: ReturnType<typeof sql>) => {
       const res = (await this.bypass(() => this.db.execute(q))) as unknown;
       const rows = Array.isArray(res) ? res : ((res as { rows?: Record<string, unknown>[] })?.rows ?? []);
-      return Number((rows[0] as Record<string, unknown> | undefined)?.n ?? 0);
+      const r0 = (rows[0] as Record<string, unknown> | undefined) ?? {};
+      return { rev: Number(r0.rev ?? 0), n: Number(r0.n ?? 0) };
     };
-    const cair = await scalar(sql`
-      SELECT count(*)::int AS n FROM orders
+    // Sisi CAIR: order selesai/settle N hari. Sisi MASUK: order dibuat N hari.
+    const cairR = await row(sql`
+      SELECT COALESCE(sum(total_amount),0)::float AS rev, count(*)::int AS n FROM orders
       WHERE user_id = ${userId} AND fulfillment_status = 'selesai'
         AND COALESCE(to_timestamp(nullif(raw->>'update_time','')::bigint), updated_at) >= ${since}::timestamptz`);
-    const created = await scalar(sql`
-      SELECT count(*)::int AS n FROM orders
+    const madeR = await row(sql`
+      SELECT COALESCE(sum(total_amount),0)::float AS rev, count(*)::int AS n FROM orders
       WHERE user_id = ${userId} AND COALESCE(created_at_marketplace, created_at) >= ${since}::timestamptz`);
-    return { days: n, cair, created, sehat: cair >= created };
+    // Hanya PORSI BAHAN BAKU (rate) yang dibandingkan — mengikuti setting terbaru.
+    const cair = Math.round(rate * cairR.rev);
+    const kebutuhan = Math.round(rate * madeR.rev);
+    return {
+      days: n,
+      ratePct: Math.round(rate * 10000) / 100,
+      cair, kebutuhan,
+      cairRev: Math.round(cairR.rev), createdRev: Math.round(madeR.rev),
+      cairOrders: cairR.n, createdOrders: madeR.n,
+      sehat: cair >= kebutuhan,
+    };
   }
 
   /**
