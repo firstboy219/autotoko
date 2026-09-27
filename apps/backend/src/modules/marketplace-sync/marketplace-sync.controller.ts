@@ -148,6 +148,12 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.saldoTiktok(uid(req), shopId ?? null, live === "1" || live === "true") };
   }
 
+  /** Info penarikan terakhir + countdown 24 jam + qty pencairan vs outstanding. */
+  @Get("pencairan-info")
+  async pencairanInfo(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.infoPencairan(uid(req)) };
+  }
+
   /** Set/hapus cutoff Saldo Cepat sebuah toko. */
   @Post("saldo-cutoff")
   async setSaldoCutoff(

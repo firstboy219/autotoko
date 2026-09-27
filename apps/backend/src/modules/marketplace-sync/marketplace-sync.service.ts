@@ -1766,6 +1766,91 @@ export class MarketplaceSyncService {
    * import & verifikasi Pencairan Dana. Hanya type WITHDRAW (uang keluar ke bank).
    * Default status SUCCESS; includeProcessing menambah yang masih diproses.
    */
+
+  /**
+   * Info penarikan per toko untuk halaman Pencairan Dana:
+   *  - penarikan terakhir (waktu presisi dari TikTok) + kelayakan tarik berikutnya
+   *    (aturan TikTok: 24 jam sejak penarikan terakhir).
+   *  - "kemampuan restock": jumlah pesanan yang sudah CAIR (selesai, 30 hari) vs
+   *    pesanan OUTSTANDING (belum dikirim) — dalam QTY order, bukan nominal.
+   */
+  async infoPencairan(userId: string) {
+    const toko = (await this.tokoSiap(userId)).filter((t) => t.marketplace === "tiktok");
+    const nowSec = Math.floor(Date.now() / 1000);
+    const geSec = nowSec - 35 * 86400;
+    const OUT = ["masuk", "approved", "produksi", "packing", "siap_kirim"];
+
+    // Outstanding (belum dikirim) per toko — snapshot saat ini.
+    const grp = await this.bypass(() => this.db
+      .select({ shopId: orders.shopId, fs: orders.fulfillmentStatus, n: sql<number>`count(*)::int` })
+      .from(orders).where(eq(orders.userId, userId)).groupBy(orders.shopId, orders.fulfillmentStatus));
+    const outMap = new Map<string, number>();
+    for (const r of grp) {
+      if (!r.shopId || !OUT.includes(r.fs)) continue;
+      outMap.set(r.shopId, (outMap.get(r.shopId) ?? 0) + Number(r.n));
+    }
+    // Pesanan cair = selesai, dibuat 30 hari terakhir (qty order).
+    const since30 = new Date(Date.now() - 30 * 86400000).toISOString();
+    const set30res = (await this.bypass(() => this.db.execute(sql`
+      SELECT shop_id, count(*)::int AS n FROM orders
+      WHERE user_id = ${userId} AND fulfillment_status = 'selesai'
+        AND COALESCE(created_at_marketplace, created_at) >= ${since30}::timestamptz
+      GROUP BY shop_id`))) as unknown;
+    const set30rows = Array.isArray(set30res) ? set30res : ((set30res as { rows?: Record<string, unknown>[] })?.rows ?? []);
+    const cairMap = new Map<string, number>();
+    for (const r of set30rows as Record<string, unknown>[]) cairMap.set(String(r.shop_id), Number(r.n ?? 0));
+
+    const out: Array<Record<string, unknown>> = [];
+    for (const t of toko) {
+      let lastSec = 0;
+      let lastStatus: string | null = null;
+      try {
+        let klien = await this.klien(t);
+        let segar = false;
+        const call = async <T>(fn: (c: TikTokClient) => Promise<T>): Promise<T> => {
+          for (;;) {
+            try { return await fn(klien); }
+            catch (e) {
+              if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) { segar = true; klien = await this.segarkan(t); continue; }
+              throw e;
+            }
+          }
+        };
+        let page: string | null = null, guard = 0;
+        do {
+          const h = await call((c) => c.daftarWithdrawal({ createTimeGe: geSec, pageToken: page }));
+          for (const w of h.data) {
+            const rec = w as Record<string, unknown>;
+            if (String(rec.type ?? "").toUpperCase() !== "WITHDRAW") continue;
+            const st = String(rec.status ?? "").toUpperCase();
+            if (st !== "SUCCESS" && st !== "PROCESSING") continue;
+            const ct = Number(rec.create_time ?? 0);
+            if (ct > lastSec) { lastSec = ct; lastStatus = st; }
+          }
+          page = h.nextPageToken;
+        } while (page && ++guard < 50);
+      } catch { /* scope/err: biarkan null */ }
+
+      const nextSec = lastSec ? lastSec + 86400 : 0;
+      const sisaDetik = nextSec ? Math.max(0, nextSec - nowSec) : 0;
+      out.push({
+        shopId: t.id, shopName: t.displayName || t.shopName,
+        lastWithdrawAt: lastSec ? new Date(lastSec * 1000).toISOString() : null,
+        lastWithdrawStatus: lastStatus,
+        nextEligibleAt: nextSec ? new Date(nextSec * 1000).toISOString() : null,
+        sisaDetik,
+        bisaTarikSekarang: !lastSec || sisaDetik === 0,
+        pencairanQty: cairMap.get(t.id) ?? 0,
+        outstandingQty: outMap.get(t.id) ?? 0,
+      });
+    }
+    const total = {
+      pencairanQty: out.reduce((a, x) => a + (x.pencairanQty as number), 0),
+      outstandingQty: out.reduce((a, x) => a + (x.outstandingQty as number), 0),
+    };
+    return { toko: out, total, diperbaruiPada: new Date().toISOString() };
+  }
+
   async daftarPenarikanToko(
     userId: string,
     shopId: string,
