@@ -1789,16 +1789,19 @@ export class MarketplaceSyncService {
       if (!r.shopId || !OUT.includes(r.fs)) continue;
       outMap.set(r.shopId, (outMap.get(r.shopId) ?? 0) + Number(r.n));
     }
-    // Pesanan cair = selesai, dibuat 30 hari terakhir (qty order).
-    const since30 = new Date(Date.now() - 30 * 86400000).toISOString();
-    const set30res = (await this.bypass(() => this.db.execute(sql`
+    // "Bisa dicairkan hari ini" (qty order): order yang SELESAI/settle hari ini
+    // (WIB) -> dananya masuk & bisa ditarik. Dibandingkan dgn outstanding
+    // (belum dikirim) sebagai sinyal kemampuan restock.
+    const jak = new Date(Date.now() + 7 * 3600000);
+    const todayIso = new Date(Date.UTC(jak.getUTCFullYear(), jak.getUTCMonth(), jak.getUTCDate()) - 7 * 3600000).toISOString();
+    const cairRes = (await this.bypass(() => this.db.execute(sql`
       SELECT shop_id, count(*)::int AS n FROM orders
       WHERE user_id = ${userId} AND fulfillment_status = 'selesai'
-        AND COALESCE(created_at_marketplace, created_at) >= ${since30}::timestamptz
+        AND COALESCE(to_timestamp(nullif(raw->>'update_time','')::bigint), updated_at) >= ${todayIso}::timestamptz
       GROUP BY shop_id`))) as unknown;
-    const set30rows = Array.isArray(set30res) ? set30res : ((set30res as { rows?: Record<string, unknown>[] })?.rows ?? []);
+    const cairRows = Array.isArray(cairRes) ? cairRes : ((cairRes as { rows?: Record<string, unknown>[] })?.rows ?? []);
     const cairMap = new Map<string, number>();
-    for (const r of set30rows as Record<string, unknown>[]) cairMap.set(String(r.shop_id), Number(r.n ?? 0));
+    for (const r of cairRows as Record<string, unknown>[]) cairMap.set(String(r.shop_id), Number(r.n ?? 0));
 
     const out: Array<Record<string, unknown>> = [];
     for (const t of toko) {
@@ -1840,14 +1843,14 @@ export class MarketplaceSyncService {
         nextEligibleAt: nextSec ? new Date(nextSec * 1000).toISOString() : null,
         sisaDetik,
         bisaTarikSekarang: !lastSec || sisaDetik === 0,
-        pencairanQty: cairMap.get(t.id) ?? 0,
+        cairHariIni: cairMap.get(t.id) ?? 0,
         outstandingQty: outMap.get(t.id) ?? 0,
+        sehat: (cairMap.get(t.id) ?? 0) >= (outMap.get(t.id) ?? 0),
       });
     }
-    const total = {
-      pencairanQty: out.reduce((a, x) => a + (x.pencairanQty as number), 0),
-      outstandingQty: out.reduce((a, x) => a + (x.outstandingQty as number), 0),
-    };
+    const totCair = out.reduce((a, x) => a + (x.cairHariIni as number), 0);
+    const totOut = out.reduce((a, x) => a + (x.outstandingQty as number), 0);
+    const total = { cairHariIni: totCair, outstandingQty: totOut, sehat: totCair >= totOut };
     return { toko: out, total, diperbaruiPada: new Date().toISOString() };
   }
 
