@@ -126,9 +126,9 @@ interface PencairanInfoToko {
   shopId: string; shopName: string;
   lastWithdrawAt: string | null; lastWithdrawStatus: string | null;
   nextEligibleAt: string | null; sisaDetik: number; bisaTarikSekarang: boolean;
-  pencairanQty: number; outstandingQty: number;
+  cairHariIni: number; outstandingQty: number; sehat: boolean;
 }
-interface PencairanInfoResp { toko: PencairanInfoToko[]; total: { pencairanQty: number; outstandingQty: number }; diperbaruiPada: string }
+interface PencairanInfoResp { toko: PencairanInfoToko[]; total: { cairHariIni: number; outstandingQty: number; sehat: boolean }; diperbaruiPada: string }
 
 const fmtWaktu = (s: string | null) =>
   s ? new Date(s).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "-";
@@ -160,8 +160,8 @@ function PencairanInfoCard() {
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
 
   const rows = data?.toko ?? [];
-  const maxQty = Math.max(1, ...rows.flatMap((r) => [r.pencairanQty, r.outstandingQty]));
-  const totalCair = data?.total.pencairanQty ?? 0;
+  const maxQty = Math.max(1, ...rows.flatMap((r) => [r.cairHariIni, r.outstandingQty]));
+  const totalCair = data?.total.cairHariIni ?? 0;
   const totalOut = data?.total.outstandingQty ?? 0;
   const rasio = totalOut > 0 ? (totalCair / totalOut) : null;
 
@@ -169,7 +169,7 @@ function PencairanInfoCard() {
     <Card className="mb-4" padded={false}>
       <CardHeader
         title="Penarikan & kemampuan restock"
-        subtitle="Penarikan terakhir tiap toko + hitung mundur 24 jam (TikTok wajib jeda 24 jam antar penarikan). Grafik membandingkan pesanan yang sudah cair (selesai, 30 hari) vs outstanding (belum dikirim) dalam qty order."
+        subtitle="Penarikan terakhir tiap toko + hitung mundur 24 jam (TikTok wajib jeda 24 jam antar penarikan). Grafik: pesanan yang bisa dicairkan HARI INI (selesai/settle hari ini) vs outstanding (belum dikirim), dalam qty order. Outstanding > cair = perlu perhatian."
         action={<Button size="sm" variant="outline" icon="refresh" loading={loading} onClick={muat}>Muat ulang</Button>}
       />
       <div className="p-4 pt-0">
@@ -178,9 +178,10 @@ function PencairanInfoCard() {
         ) : (
           <>
             <div className="mb-3 rounded-lg bg-brand/5 px-3 py-2 text-sm text-ink-2">
-              Kemampuan restock keseluruhan: <b className="text-ink">{totalCair}</b> pesanan cair (30 hari) vs{" "}
+              Kemampuan restock hari ini: <b className="text-ink">{totalCair}</b> order bisa dicairkan vs{" "}
               <b className="text-ink">{totalOut}</b> outstanding
-              {rasio != null && <> — rasio <b className="text-brand">{rasio.toFixed(1)}×</b> {rasio >= 1 ? "(sehat: arus masuk melebihi backlog)" : "(waspada: backlog melebihi arus masuk)"}</>}
+              {" — "}<b className={totalCair >= totalOut ? "text-emerald-600" : "text-amber-600"}>{totalCair >= totalOut ? "Sehat" : "Perlu perhatian"}</b>
+              {totalCair >= totalOut ? " (arus cair menutup backlog)" : " (backlog belum dikirim melebihi order yang cair hari ini)"}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -189,7 +190,7 @@ function PencairanInfoCard() {
                     <th className="px-2 py-1.5">Toko</th>
                     <th className="px-2 py-1.5">Penarikan terakhir</th>
                     <th className="px-2 py-1.5">Bisa tarik lagi</th>
-                    <th className="px-2 py-1.5 min-w-[180px]">Cair (30h) vs Outstanding</th>
+                    <th className="px-2 py-1.5 min-w-[180px]">Bisa dicair hari ini vs Outstanding</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -212,12 +213,12 @@ function PencairanInfoCard() {
                           <div className="flex items-center gap-2">
                             <div className="flex-1 space-y-1">
                               <div className="flex items-center gap-1">
-                                <div className="h-2.5 rounded-r bg-emerald-500" style={{ width: `${Math.max(4, (r.pencairanQty / maxQty) * 100)}%` }} />
-                                <span className="text-[11px] tabular-nums text-ink-2">{r.pencairanQty} cair</span>
+                                <div className="h-2.5 rounded-r bg-emerald-500" style={{ width: `${Math.max(4, (r.cairHariIni / maxQty) * 100)}%` }} />
+                                <span className="text-[11px] tabular-nums text-ink-2">{r.cairHariIni} cair hari ini</span>
                               </div>
                               <div className="flex items-center gap-1">
                                 <div className="h-2.5 rounded-r bg-amber-500" style={{ width: `${Math.max(4, (r.outstandingQty / maxQty) * 100)}%` }} />
-                                <span className="text-[11px] tabular-nums text-ink-2">{r.outstandingQty} outstanding</span>
+                                <span className="text-[11px] tabular-nums text-ink-2">{r.outstandingQty} outstanding {r.sehat ? "· sehat" : "· perhatian"}</span>
                               </div>
                             </div>
                           </div>

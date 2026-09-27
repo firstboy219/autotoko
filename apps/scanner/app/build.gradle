@@ -16,8 +16,8 @@ android {
         applicationId "id.autotoko.scanner"
         minSdk 21
         targetSdk 34
-        versionCode 89
-        versionName "5.48"
+        versionCode 90
+        versionName "5.49"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 

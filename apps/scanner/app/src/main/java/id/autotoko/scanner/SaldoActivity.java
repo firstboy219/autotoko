@@ -115,7 +115,16 @@ public class SaldoActivity extends AppCompatActivity {
 
         LinearLayout card = kartu("#FFFFFF");
         card.addView(teks("Penarikan & kemampuan restock", 14, R.color.ink, true));
-        card.addView(teks("TikTok wajib jeda 24 jam antar penarikan. Grafik: pesanan cair (selesai, 30 hari) vs outstanding (belum dikirim) — qty order.", 11, R.color.ink3, false));
+        card.addView(teks("TikTok wajib jeda 24 jam antar penarikan. Grafik: order yang bisa dicairkan HARI INI vs outstanding (belum dikirim) — qty order. Outstanding > cair = perlu perhatian.", 11, R.color.ink3, false));
+
+        int totCair = data.optJSONObject("total") != null ? data.optJSONObject("total").optInt("cairHariIni", 0) : 0;
+        int totOut = data.optJSONObject("total") != null ? data.optJSONObject("total").optInt("outstandingQty", 0) : 0;
+        TextView ring = teks(totCair >= totOut
+                ? "Sehat: " + totCair + " order bisa dicair hari ini ≥ " + totOut + " outstanding."
+                : "Perlu perhatian: outstanding " + totOut + " > " + totCair + " order cair hari ini.",
+                12, R.color.ink, true);
+        ring.setTextColor(Color.parseColor(totCair >= totOut ? "#1B7F4B" : "#8A5A00"));
+        card.addView(ring);
 
         int n = toko.length();
         String[] lbl = new String[n];
@@ -125,7 +134,7 @@ public class SaldoActivity extends AppCompatActivity {
             if (t == null) continue;
             String nama = t.optString("shopName", "Toko");
             lbl[i] = nama.replace("Tiktok-", "");
-            cair[i] = t.optInt("pencairanQty", 0);
+            cair[i] = t.optInt("cairHariIni", 0);
             out[i] = t.optInt("outstandingQty", 0);
 
             LinearLayout row = new LinearLayout(this);
@@ -151,10 +160,10 @@ public class SaldoActivity extends AppCompatActivity {
 
         // Grafik grouped bar: cair vs outstanding per toko.
         ChartView chart = new ChartView(this);
-        chart.setBars(lbl, new String[]{ "Cair (30h)", "Outstanding" },
+        chart.setBars(lbl, new String[]{ "Cair hari ini", "Outstanding" },
                 new int[]{ 0xFF1B7F4B, 0xFFB36A00 }, new double[][]{ cair, out }, false);
         LinearLayout cw = kartu("#FFFFFF");
-        cw.addView(teks("Cair vs Outstanding (qty order)", 13, R.color.ink, true));
+        cw.addView(teks("Bisa dicairkan hari ini vs Outstanding (qty order)", 13, R.color.ink, true));
         cw.addView(chart, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(180)));
         infoBox.addView(cw);
 
