@@ -148,6 +148,12 @@ export class MarketplaceSyncController {
     return { success: true, data: await this.sync.saldoTiktok(uid(req), shopId ?? null, live === "1" || live === "true") };
   }
 
+  /** Kemampuan restock N hari (semua toko): order cair vs order dibuat. */
+  @Get("restock")
+  async restock(@Req() req: FastifyRequest, @Query("days") days?: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.sync.restockInfo(uid(req), Number(days) || 7) };
+  }
+
   /** Info penarikan terakhir + countdown 24 jam + qty pencairan vs outstanding. */
   @Get("pencairan-info")
   async pencairanInfo(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
