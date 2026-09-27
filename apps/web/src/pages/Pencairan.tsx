@@ -122,6 +122,119 @@ interface SaldoResp {
  * (Get Withdrawals): SETTLE masuk - WITHDRAW keluar. Dimuat saat diklik
  * (bukan otomatis) karena memanggil API marketplace per toko.
  */
+interface PencairanInfoToko {
+  shopId: string; shopName: string;
+  lastWithdrawAt: string | null; lastWithdrawStatus: string | null;
+  nextEligibleAt: string | null; sisaDetik: number; bisaTarikSekarang: boolean;
+  pencairanQty: number; outstandingQty: number;
+}
+interface PencairanInfoResp { toko: PencairanInfoToko[]; total: { pencairanQty: number; outstandingQty: number }; diperbaruiPada: string }
+
+const fmtWaktu = (s: string | null) =>
+  s ? new Date(s).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "-";
+
+function hitungMundur(nextEligibleAt: string | null, now: number): string {
+  if (!nextEligibleAt) return "";
+  const sisa = Math.max(0, Math.floor((new Date(nextEligibleAt).getTime() - now) / 1000));
+  if (sisa === 0) return "";
+  const h = Math.floor(sisa / 3600), m = Math.floor((sisa % 3600) / 60), d = sisa % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(d).padStart(2, "0")}`;
+}
+
+/**
+ * Info penarikan terakhir + hitung mundur 24 jam (aturan TikTok) & grafik
+ * "kemampuan restock": pesanan CAIR (selesai, 30 hari) vs OUTSTANDING (belum
+ * dikirim) dalam qty order — bukan nominal.
+ */
+function PencairanInfoCard() {
+  const [data, setData] = useState<PencairanInfoResp | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [now, setNow] = useState(Date.now());
+
+  const muat = () => {
+    setLoading(true);
+    api.get<PencairanInfoResp>("/marketplace-sync/pencairan-info")
+      .then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+  };
+  useEffect(() => { muat(); }, []);
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+
+  const rows = data?.toko ?? [];
+  const maxQty = Math.max(1, ...rows.flatMap((r) => [r.pencairanQty, r.outstandingQty]));
+  const totalCair = data?.total.pencairanQty ?? 0;
+  const totalOut = data?.total.outstandingQty ?? 0;
+  const rasio = totalOut > 0 ? (totalCair / totalOut) : null;
+
+  return (
+    <Card className="mb-4" padded={false}>
+      <CardHeader
+        title="Penarikan & kemampuan restock"
+        subtitle="Penarikan terakhir tiap toko + hitung mundur 24 jam (TikTok wajib jeda 24 jam antar penarikan). Grafik membandingkan pesanan yang sudah cair (selesai, 30 hari) vs outstanding (belum dikirim) dalam qty order."
+        action={<Button size="sm" variant="outline" icon="refresh" loading={loading} onClick={muat}>Muat ulang</Button>}
+      />
+      <div className="p-4 pt-0">
+        {rows.length === 0 ? (
+          <div className="text-sm text-ink-3">{loading ? "Memuat…" : "Belum ada data toko TikTok."}</div>
+        ) : (
+          <>
+            <div className="mb-3 rounded-lg bg-brand/5 px-3 py-2 text-sm text-ink-2">
+              Kemampuan restock keseluruhan: <b className="text-ink">{totalCair}</b> pesanan cair (30 hari) vs{" "}
+              <b className="text-ink">{totalOut}</b> outstanding
+              {rasio != null && <> — rasio <b className="text-brand">{rasio.toFixed(1)}×</b> {rasio >= 1 ? "(sehat: arus masuk melebihi backlog)" : "(waspada: backlog melebihi arus masuk)"}</>}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[11px] uppercase text-ink-3">
+                    <th className="px-2 py-1.5">Toko</th>
+                    <th className="px-2 py-1.5">Penarikan terakhir</th>
+                    <th className="px-2 py-1.5">Bisa tarik lagi</th>
+                    <th className="px-2 py-1.5 min-w-[180px]">Cair (30h) vs Outstanding</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => {
+                    const cd = hitungMundur(r.nextEligibleAt, now);
+                    const bisa = r.bisaTarikSekarang || !cd;
+                    return (
+                      <tr key={r.shopId} className="border-t border-line align-middle">
+                        <td className="px-2 py-2 font-medium text-ink">{r.shopName}</td>
+                        <td className="px-2 py-2 text-ink-2 whitespace-nowrap">
+                          {fmtWaktu(r.lastWithdrawAt)}
+                          {r.lastWithdrawStatus === "PROCESSING" && <span className="ml-1 text-amber-600">(diproses)</span>}
+                        </td>
+                        <td className="px-2 py-2 whitespace-nowrap">
+                          {bisa
+                            ? <Badge tone="success">Bisa ditarik</Badge>
+                            : <span className="tabular-nums font-semibold text-amber-600">{cd}</span>}
+                        </td>
+                        <td className="px-2 py-2">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 space-y-1">
+                              <div className="flex items-center gap-1">
+                                <div className="h-2.5 rounded-r bg-emerald-500" style={{ width: `${Math.max(4, (r.pencairanQty / maxQty) * 100)}%` }} />
+                                <span className="text-[11px] tabular-nums text-ink-2">{r.pencairanQty} cair</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <div className="h-2.5 rounded-r bg-amber-500" style={{ width: `${Math.max(4, (r.outstandingQty / maxQty) * 100)}%` }} />
+                                <span className="text-[11px] tabular-nums text-ink-2">{r.outstandingQty} outstanding</span>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function SaldoTiktokCard() {
   const [data, setData] = useState<SaldoResp | null>(null);
   const [loading, setLoading] = useState(false);
@@ -364,6 +477,8 @@ export function Pencairan() {
       />
 
       <SaldoTiktokCard />
+
+      <PencairanInfoCard />
 
       {err && (
         <div className="mb-4">
