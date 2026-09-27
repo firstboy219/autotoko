@@ -151,7 +151,7 @@ function PencairanInfoCard() {
   const [loading, setLoading] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [restockDays, setRestockDays] = useState(7);
-  const [restock, setRestock] = useState<{ days: number; cair: number; created: number; sehat: boolean } | null>(null);
+  const [restock, setRestock] = useState<{ days: number; ratePct: number; cair: number; kebutuhan: number; cairRev: number; createdRev: number; cairOrders: number; createdOrders: number; sehat: boolean } | null>(null);
 
   const muat = () => {
     setLoading(true);
@@ -162,7 +162,7 @@ function PencairanInfoCard() {
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   useEffect(() => {
     setRestock(null);
-    api.get<{ days: number; cair: number; created: number; sehat: boolean }>(`/marketplace-sync/restock?days=${restockDays}`)
+    api.get<{ days: number; ratePct: number; cair: number; kebutuhan: number; cairRev: number; createdRev: number; cairOrders: number; createdOrders: number; sehat: boolean }>(`/marketplace-sync/restock?days=${restockDays}`)
       .then(setRestock).catch(() => setRestock(null));
   }, [restockDays]);
 
@@ -202,9 +202,15 @@ function PencairanInfoCard() {
               </div>
               {restock ? (
                 <>
-                  <b>{restock.cair}</b> order cair/terealisasi vs <b>{restock.created}</b> order masuk ({restock.days} hari) —{" "}
-                  <b>{restock.sehat ? "Sehat" : "Perlu perhatian"}</b>
-                  {restock.sehat ? " (yang terealisasi menutup order masuk)" : " (order masuk melebihi yang terealisasi)"}
+                  <div>
+                    Dana bahan baku dari order cair <b>{rupiah(restock.cair)}</b> vs kebutuhan order masuk <b>{rupiah(restock.kebutuhan)}</b> ({restock.days} hari) —{" "}
+                    <b>{restock.sehat ? "Sehat" : "Perlu perhatian"}</b>
+                    {restock.sehat ? " (dana bahan baku menutup kebutuhan)" : " (kebutuhan melebihi dana bahan baku)"}
+                  </div>
+                  <div className="mt-0.5 text-[11px] opacity-80">
+                    Porsi bahan baku {restock.ratePct}% dari omzet (atur di Pengaturan Pencairan). Cair: {restock.cairOrders} order · {rupiah(restock.cairRev)} omzet — Masuk: {restock.createdOrders} order · {rupiah(restock.createdRev)} omzet.
+                    {restock.ratePct === 0 && " Setel % cadangan bahan baku agar angka ini terisi."}
+                  </div>
                 </>
               ) : "Memuat…"}
             </div>

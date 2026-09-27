@@ -127,7 +127,7 @@ public class SaldoActivity extends AppCompatActivity {
         card.addView(ring);
 
         // Kemampuan restock N hari (semua toko) dengan filter 3/7/14/30 hari.
-        card.addView(teks("Kemampuan restock (semua toko) — order cair vs order dibuat:", 12, R.color.ink2, false));
+        card.addView(teks("Kemampuan restock (semua toko) — dana bahan baku order cair vs kebutuhan order masuk:", 12, R.color.ink2, false));
         final TextView restockLine = teks("Memuat…", 13, R.color.ink, true);
         final int[] hari = { 3, 7, 14, 30 };
         final TextView[] btns = new TextView[hari.length];
@@ -211,9 +211,14 @@ public class SaldoActivity extends AppCompatActivity {
         api.restockInfo(days, r -> {
             if (r == null || !r.ok() || r.data() == null) { line.setText("Gagal memuat restock."); return; }
             JSONObject d = r.data();
-            int cair = d.optInt("cair", 0), created = d.optInt("created", 0);
-            boolean sehat = d.optBoolean("sehat", cair >= created);
-            line.setText(cair + " order cair vs " + created + " order masuk (" + d.optInt("days", days) + " hari) — " + (sehat ? "Sehat" : "Perlu perhatian"));
+            double cair = d.optDouble("cair", 0), kebutuhan = d.optDouble("kebutuhan", 0);
+            boolean sehat = d.optBoolean("sehat", cair >= kebutuhan);
+            double ratePct = d.optDouble("ratePct", 0);
+            String txt = "Bahan baku cair " + rp(cair) + " vs kebutuhan " + rp(kebutuhan)
+                    + " (" + d.optInt("days", days) + " hari, porsi " + (ratePct == Math.rint(ratePct) ? String.valueOf((long) ratePct) : String.valueOf(ratePct)) + "%) — "
+                    + (sehat ? "Sehat" : "Perlu perhatian");
+            if (ratePct == 0) txt += ". Setel % cadangan bahan baku di Pengaturan Pencairan (web).";
+            line.setText(txt);
             line.setTextColor(Color.parseColor(sehat ? "#1B7F4B" : "#8A5A00"));
         });
     }
