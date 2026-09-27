@@ -145,6 +145,10 @@ public final class Api {
     public void saldoTiktok(boolean live, Cb cb) {
         call("GET", session.baseUrl() + "/api/marketplace-sync/saldo-tiktok" + (live ? "?live=1" : ""), session.token(), null, cb);
     }
+    /** Penarikan terakhir + countdown 24 jam + qty pesanan cair vs outstanding. */
+    public void pencairanInfo(Cb cb) {
+        call("GET", session.baseUrl() + "/api/marketplace-sync/pencairan-info", session.token(), null, cb);
+    }
     /* ---- Chat pelanggan (sama dgn menu Chat Pelanggan di web) ---- */
     public void chatConversations(Cb cb) {
         call("GET", session.baseUrl() + "/api/chat/conversations", session.token(), null, cb);

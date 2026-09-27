@@ -36,7 +36,12 @@ public class SaldoActivity extends AppCompatActivity {
     private float d;
     private LinearLayout root;
     private LinearLayout isi;
+    private LinearLayout infoBox;
     private MaterialButton perbarui;
+    private final android.os.Handler tick = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final java.util.List<TextView> countdownViews = new java.util.ArrayList<>();
+    private final java.util.List<Long> countdownAt = new java.util.ArrayList<>(); // next-eligible epoch ms per view
+    private Runnable ticker;
 
     private int dp(int v) { return (int) (v * d); }
 
@@ -77,11 +82,111 @@ public class SaldoActivity extends AppCompatActivity {
         perbarui.setOnClickListener(v -> muat(true));
         root.addView(perbarui, lp(10));
 
+        // Info penarikan terakhir + countdown 24 jam + grafik kemampuan restock.
+        infoBox = new LinearLayout(this);
+        infoBox.setOrientation(LinearLayout.VERTICAL);
+        root.addView(infoBox, lp(8));
+
         isi = new LinearLayout(this);
         isi.setOrientation(LinearLayout.VERTICAL);
         root.addView(isi, lp(8));
 
+        muatInfo();
         muat(false);
+    }
+
+    @Override protected void onDestroy() {
+        super.onDestroy();
+        if (ticker != null) tick.removeCallbacks(ticker);
+    }
+
+    private void muatInfo() {
+        api.pencairanInfo(r -> {
+            if (r == null || !r.ok() || r.data() == null) return;
+            tampilInfo(r.data());
+        });
+    }
+
+    private void tampilInfo(JSONObject data) {
+        infoBox.removeAllViews();
+        countdownViews.clear(); countdownAt.clear();
+        JSONArray toko = data.optJSONArray("toko");
+        if (toko == null || toko.length() == 0) return;
+
+        LinearLayout card = kartu("#FFFFFF");
+        card.addView(teks("Penarikan & kemampuan restock", 14, R.color.ink, true));
+        card.addView(teks("TikTok wajib jeda 24 jam antar penarikan. Grafik: pesanan cair (selesai, 30 hari) vs outstanding (belum dikirim) — qty order.", 11, R.color.ink3, false));
+
+        int n = toko.length();
+        String[] lbl = new String[n];
+        double[] cair = new double[n], out = new double[n];
+        for (int i = 0; i < n; i++) {
+            JSONObject t = toko.optJSONObject(i);
+            if (t == null) continue;
+            String nama = t.optString("shopName", "Toko");
+            lbl[i] = nama.replace("Tiktok-", "");
+            cair[i] = t.optInt("pencairanQty", 0);
+            out[i] = t.optInt("outstandingQty", 0);
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.VERTICAL);
+            row.setPadding(0, dp(8), 0, dp(2));
+            row.addView(teks(nama, 13, R.color.ink, true));
+            String last = t.isNull("lastWithdrawAt") ? "belum ada penarikan (35 hari)" : "Terakhir: " + jam(t.optString("lastWithdrawAt"));
+            if (!t.isNull("lastWithdrawStatus") && "PROCESSING".equals(t.optString("lastWithdrawStatus"))) last += " (diproses)";
+            row.addView(teks(last, 12, R.color.ink2, false));
+
+            TextView cd = teks("", 13, R.color.ink, true);
+            boolean bisa = t.optBoolean("bisaTarikSekarang", false) || t.isNull("nextEligibleAt");
+            if (bisa) { cd.setText("✓ Bisa ditarik sekarang"); cd.setTextColor(Color.parseColor("#1B7F4B")); }
+            else {
+                cd.setTextColor(Color.parseColor("#8A5A00"));
+                long nextMs = parseIso(t.optString("nextEligibleAt"));
+                countdownViews.add(cd); countdownAt.add(nextMs);
+            }
+            row.addView(cd);
+            card.addView(row);
+        }
+        infoBox.addView(card);
+
+        // Grafik grouped bar: cair vs outstanding per toko.
+        ChartView chart = new ChartView(this);
+        chart.setBars(lbl, new String[]{ "Cair (30h)", "Outstanding" },
+                new int[]{ 0xFF1B7F4B, 0xFFB36A00 }, new double[][]{ cair, out }, false);
+        LinearLayout cw = kartu("#FFFFFF");
+        cw.addView(teks("Cair vs Outstanding (qty order)", 13, R.color.ink, true));
+        cw.addView(chart, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(180)));
+        infoBox.addView(cw);
+
+        mulaiTicker();
+    }
+
+    private void mulaiTicker() {
+        if (ticker != null) tick.removeCallbacks(ticker);
+        ticker = new Runnable() {
+            @Override public void run() {
+                long now = System.currentTimeMillis();
+                for (int i = 0; i < countdownViews.size(); i++) {
+                    long sisa = Math.max(0, (countdownAt.get(i) - now) / 1000);
+                    TextView v = countdownViews.get(i);
+                    if (sisa == 0) { v.setText("✓ Bisa ditarik sekarang"); v.setTextColor(Color.parseColor("#1B7F4B")); }
+                    else {
+                        long h = sisa / 3600, m = (sisa % 3600) / 60, s = sisa % 60;
+                        v.setText(String.format(Locale.US, "Bisa tarik lagi dalam %02d:%02d:%02d", h, m, s));
+                    }
+                }
+                tick.postDelayed(this, 1000);
+            }
+        };
+        tick.post(ticker);
+    }
+
+    private static long parseIso(String iso) {
+        try {
+            SimpleDateFormat in = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US);
+            in.setTimeZone(TimeZone.getTimeZone("UTC"));
+            return in.parse(iso.length() >= 19 ? iso.substring(0, 19) : iso).getTime();
+        } catch (Exception e) { return 0; }
     }
 
     private void muat(boolean live) {
