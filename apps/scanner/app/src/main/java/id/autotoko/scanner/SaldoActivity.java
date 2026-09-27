@@ -126,15 +126,31 @@ public class SaldoActivity extends AppCompatActivity {
         ring.setTextColor(Color.parseColor(totCair >= totOut ? "#1B7F4B" : "#8A5A00"));
         card.addView(ring);
 
-        JSONObject t7 = data.optJSONObject("total7d");
-        if (t7 != null) {
-            int c7 = t7.optInt("cair", 0), o7 = t7.optInt("outstanding", 0);
-            boolean s7 = t7.optBoolean("sehat", c7 >= o7);
-            TextView r7 = teks("7 hari: " + c7 + " order cair vs " + o7 + " outstanding — " + (s7 ? "Sehat" : "Perlu perhatian"),
-                    12, R.color.ink, true);
-            r7.setTextColor(Color.parseColor(s7 ? "#1B7F4B" : "#8A5A00"));
-            card.addView(r7);
+        // Kemampuan restock N hari (semua toko) dengan filter 3/7/14/30 hari.
+        card.addView(teks("Kemampuan restock (semua toko) — order cair vs order dibuat:", 12, R.color.ink2, false));
+        final TextView restockLine = teks("Memuat…", 13, R.color.ink, true);
+        final int[] hari = { 3, 7, 14, 30 };
+        final TextView[] btns = new TextView[hari.length];
+        LinearLayout filter = new LinearLayout(this);
+        filter.setOrientation(LinearLayout.HORIZONTAL);
+        filter.setPadding(0, dp(4), 0, dp(2));
+        for (int i = 0; i < hari.length; i++) {
+            final int hh = hari[i];
+            TextView b = teks(hh + "h", 12, R.color.ink2, false);
+            b.setPadding(dp(12), dp(5), dp(12), dp(5));
+            GradientDrawable g = new GradientDrawable();
+            g.setColor(Color.parseColor("#F1F3F5")); g.setCornerRadius(16 * d);
+            b.setBackground(g);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.rightMargin = dp(6);
+            b.setLayoutParams(lp);
+            btns[i] = b;
+            b.setOnClickListener(v -> muatRestock(hh, restockLine, btns, hari));
+            filter.addView(b);
         }
+        card.addView(filter);
+        card.addView(restockLine);
+        muatRestock(7, restockLine, btns, hari);
 
         int n = toko.length();
         String[] lbl = new String[n];
@@ -178,6 +194,28 @@ public class SaldoActivity extends AppCompatActivity {
         infoBox.addView(cw);
 
         mulaiTicker();
+    }
+
+    private void muatRestock(int days, TextView line, TextView[] btns, int[] hari) {
+        for (int i = 0; i < btns.length; i++) {
+            boolean on = hari[i] == days;
+            btns[i].setTypeface(null, on ? Typeface.BOLD : Typeface.NORMAL);
+            GradientDrawable g = new GradientDrawable();
+            g.setColor(Color.parseColor(on ? "#0E6E55" : "#F1F3F5"));
+            g.setCornerRadius(16 * d);
+            btns[i].setBackground(g);
+            btns[i].setTextColor(on ? Color.WHITE : getColor(R.color.ink2));
+        }
+        line.setText("Memuat…");
+        line.setTextColor(getColor(R.color.ink2));
+        api.restockInfo(days, r -> {
+            if (r == null || !r.ok() || r.data() == null) { line.setText("Gagal memuat restock."); return; }
+            JSONObject d = r.data();
+            int cair = d.optInt("cair", 0), created = d.optInt("created", 0);
+            boolean sehat = d.optBoolean("sehat", cair >= created);
+            line.setText(cair + " order cair vs " + created + " order masuk (" + d.optInt("days", days) + " hari) — " + (sehat ? "Sehat" : "Perlu perhatian"));
+            line.setTextColor(Color.parseColor(sehat ? "#1B7F4B" : "#8A5A00"));
+        });
     }
 
     private void mulaiTicker() {

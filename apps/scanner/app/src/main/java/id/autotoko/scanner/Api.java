@@ -149,6 +149,10 @@ public final class Api {
     public void pencairanInfo(Cb cb) {
         call("GET", session.baseUrl() + "/api/marketplace-sync/pencairan-info", session.token(), null, cb);
     }
+    /** Kemampuan restock N hari (semua toko): order cair vs order dibuat. */
+    public void restockInfo(int days, Cb cb) {
+        call("GET", session.baseUrl() + "/api/marketplace-sync/restock?days=" + days, session.token(), null, cb);
+    }
     /* ---- Chat pelanggan (sama dgn menu Chat Pelanggan di web) ---- */
     public void chatConversations(Cb cb) {
         call("GET", session.baseUrl() + "/api/chat/conversations", session.token(), null, cb);

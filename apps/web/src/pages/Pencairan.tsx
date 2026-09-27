@@ -128,7 +128,7 @@ interface PencairanInfoToko {
   nextEligibleAt: string | null; sisaDetik: number; bisaTarikSekarang: boolean;
   cairHariIni: number; outstandingQty: number; sehat: boolean;
 }
-interface PencairanInfoResp { toko: PencairanInfoToko[]; total: { cairHariIni: number; outstandingQty: number; sehat: boolean }; total7d: { cair: number; outstanding: number; sehat: boolean }; diperbaruiPada: string }
+interface PencairanInfoResp { toko: PencairanInfoToko[]; total: { cairHariIni: number; outstandingQty: number; sehat: boolean }; diperbaruiPada: string }
 
 const fmtWaktu = (s: string | null) =>
   s ? new Date(s).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "-";
@@ -150,6 +150,8 @@ function PencairanInfoCard() {
   const [data, setData] = useState<PencairanInfoResp | null>(null);
   const [loading, setLoading] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [restockDays, setRestockDays] = useState(7);
+  const [restock, setRestock] = useState<{ days: number; cair: number; created: number; sehat: boolean } | null>(null);
 
   const muat = () => {
     setLoading(true);
@@ -158,6 +160,11 @@ function PencairanInfoCard() {
   };
   useEffect(() => { muat(); }, []);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    setRestock(null);
+    api.get<{ days: number; cair: number; created: number; sehat: boolean }>(`/marketplace-sync/restock?days=${restockDays}`)
+      .then(setRestock).catch(() => setRestock(null));
+  }, [restockDays]);
 
   const rows = data?.toko ?? [];
   const maxQty = Math.max(1, ...rows.flatMap((r) => [r.cairHariIni, r.outstandingQty]));
@@ -183,13 +190,24 @@ function PencairanInfoCard() {
               {" — "}<b className={totalCair >= totalOut ? "text-emerald-600" : "text-amber-600"}>{totalCair >= totalOut ? "Sehat" : "Perlu perhatian"}</b>
               {totalCair >= totalOut ? " (arus cair menutup backlog)" : " (backlog belum dikirim melebihi order yang cair hari ini)"}
             </div>
-            {data?.total7d && (
-              <div className={`mb-3 rounded-lg px-3 py-2 text-sm ${data.total7d.sehat ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>
-                7 hari terakhir (semua toko): <b>{data.total7d.cair}</b> order sudah/bisa dicairkan vs <b>{data.total7d.outstanding}</b> outstanding (belum dikirim, dibuat 7 hari) —{" "}
-                <b>{data.total7d.sehat ? "Sehat" : "Perlu perhatian"}</b>
-                {data.total7d.sehat ? " (kemampuan restock kuat)" : " (backlog melebihi order yang cair 7 hari)"}
+            <div className={`mb-3 rounded-lg px-3 py-2 text-sm ${restock ? (restock.sehat ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800") : "bg-ink/[0.03] text-ink-2"}`}>
+              <div className="mb-1 flex items-center gap-2">
+                <span className="font-medium">Kemampuan restock (semua toko)</span>
+                <select value={restockDays} onChange={(e) => setRestockDays(Number(e.target.value))} className="rounded border border-line bg-white px-1.5 py-0.5 text-xs">
+                  <option value={3}>3 hari</option>
+                  <option value={7}>7 hari</option>
+                  <option value={14}>14 hari</option>
+                  <option value={30}>30 hari</option>
+                </select>
               </div>
-            )}
+              {restock ? (
+                <>
+                  <b>{restock.cair}</b> order cair/terealisasi vs <b>{restock.created}</b> order masuk ({restock.days} hari) —{" "}
+                  <b>{restock.sehat ? "Sehat" : "Perlu perhatian"}</b>
+                  {restock.sehat ? " (yang terealisasi menutup order masuk)" : " (order masuk melebihi yang terealisasi)"}
+                </>
+              ) : "Memuat…"}
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
