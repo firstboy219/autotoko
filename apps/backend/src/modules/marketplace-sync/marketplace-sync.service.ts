@@ -1851,7 +1851,27 @@ export class MarketplaceSyncService {
     const totCair = out.reduce((a, x) => a + (x.cairHariIni as number), 0);
     const totOut = out.reduce((a, x) => a + (x.outstandingQty as number), 0);
     const total = { cairHariIni: totCair, outstandingQty: totOut, sehat: totCair >= totOut };
-    return { toko: out, total, diperbaruiPada: new Date().toISOString() };
+
+    // Tambahan: total 7 hari (semua toko digabung). Kiri = order yang bisa/sudah
+    // dicairkan 7 hari terakhir (selesai/settle). Kanan = order OUTSTANDING (belum
+    // dikirim) yang dibuat 7 hari terakhir. Outstanding lebih tinggi = perlu perhatian.
+    const since7 = new Date(Date.now() - 7 * 86400000).toISOString();
+    const scalar = async (q: ReturnType<typeof sql>) => {
+      const res = (await this.bypass(() => this.db.execute(q))) as unknown;
+      const rows = Array.isArray(res) ? res : ((res as { rows?: Record<string, unknown>[] })?.rows ?? []);
+      return Number((rows[0] as Record<string, unknown> | undefined)?.n ?? 0);
+    };
+    const cair7 = await scalar(sql`
+      SELECT count(*)::int AS n FROM orders
+      WHERE user_id = ${userId} AND fulfillment_status = 'selesai'
+        AND COALESCE(to_timestamp(nullif(raw->>'update_time','')::bigint), updated_at) >= ${since7}::timestamptz`);
+    const out7 = await scalar(sql`
+      SELECT count(*)::int AS n FROM orders
+      WHERE user_id = ${userId}
+        AND fulfillment_status IN ('masuk','approved','produksi','packing','siap_kirim')
+        AND COALESCE(created_at_marketplace, created_at) >= ${since7}::timestamptz`);
+    const total7d = { cair: cair7, outstanding: out7, sehat: cair7 >= out7 };
+    return { toko: out, total, total7d, diperbaruiPada: new Date().toISOString() };
   }
 
   async daftarPenarikanToko(
