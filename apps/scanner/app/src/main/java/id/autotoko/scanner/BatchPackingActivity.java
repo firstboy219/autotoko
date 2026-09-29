@@ -57,6 +57,7 @@ public class BatchPackingActivity extends AppCompatActivity {
     private String query = "";
     private String shopFilter = "";
     private boolean onlyUnscanned = false;
+    private boolean onlyUnprinted = false;
     private int sortMode = 0; // 0 urgent, 1 terlama, 2 terbaru
 
     private LinearLayout root;
@@ -173,12 +174,20 @@ public class BatchPackingActivity extends AppCompatActivity {
         cbUnscanned.setOnCheckedChangeListener((v, c) -> { onlyUnscanned = c; renderList(); });
         barisAksi.addView(cbUnscanned, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         MaterialButton pilihSemua = flatBtn("Pilih semua");
+        // dilanjut di baris kedua supaya muat
         pilihSemua.setOnClickListener(v -> { excluded.clear(); renderList(); });
         MaterialButton kosong = flatBtn("Kosongkan");
         kosong.setOnClickListener(v -> { for (JSONObject o : visible()) excluded.add(o.optString("id")); renderList(); });
         barisAksi.addView(pilihSemua);
         barisAksi.addView(kosong);
         root.addView(barisAksi, lp());
+
+        // --- filter: hanya yang belum diprint (label/AWB belum dicetak) ---
+        CheckBox cbUnprinted = new CheckBox(this);
+        cbUnprinted.setText("Hanya yang belum diprint (AWB belum dicetak)");
+        cbUnprinted.setTextSize(13);
+        cbUnprinted.setOnCheckedChangeListener((v, c) -> { onlyUnprinted = c; renderList(); });
+        root.addView(cbUnprinted, lp());
 
         countLbl = new TextView(this);
         countLbl.setTextSize(13);
@@ -202,6 +211,7 @@ public class BatchPackingActivity extends AppCompatActivity {
         List<JSONObject> out = new ArrayList<>();
         for (JSONObject o : kandidat) {
             if (onlyUnscanned && isScanned(o)) continue;
+            if (onlyUnprinted && o.optBoolean("labelPrinted", false)) continue;
             if (!shopFilter.isEmpty() && !shopFilter.equals(o.optString("shopName", ""))) continue;
             if (!query.isEmpty()) {
                 String hay = (o.optString("marketplaceOrderId", "") + " " + o.optString("buyerName", "")
@@ -252,6 +262,7 @@ public class BatchPackingActivity extends AppCompatActivity {
             String line2 = o.optString("shopName", "");
             line2 += (urgent ? "  ·  URGENT" : "");
             line2 += isScanned(o) ? "  ·  sudah discan" : "  ·  belum discan";
+            line2 += o.optBoolean("labelPrinted", false) ? "  ·  sudah diprint" : "  ·  belum diprint";
             t.setText(o.optString("marketplaceOrderId", "-") + "  ·  " + o.optString("buyerName", "")
                     + "\n" + line2);
             t.setTextSize(13);
