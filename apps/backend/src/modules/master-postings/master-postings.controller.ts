@@ -113,6 +113,12 @@ export class MasterPostingsController {
     return { success: true, data: await this.svc.remove(uid(req), id) };
   }
 
+  /** HAPUS DI MARKETPLACE SAJA (listing TikTok dihapus; master posting AutoToko tetap). Aksi outward. */
+  @Post(":id/delete-marketplace")
+  async deleteMarketplace(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.deleteMarketplace(uid(req), id) };
+  }
+
   /** Set kode SKU / peta ke master produk / harga / stok / gambar satu varian. */
   @Patch(":id/skus/:skuId")
   async setSku(

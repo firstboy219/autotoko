@@ -495,6 +495,8 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
   const [applying, setApplying] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<null | "all" | string>(null);
   const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
+  const [delMode, setDelMode] = useState<null | "autotoko" | "marketplace">(null);
+  const [deleting, setDeleting] = useState(false);
   const [sales, setSales] = useState<SalesResp | null>(null);
 
   const refetch = useCallback(async () => {
@@ -582,6 +584,34 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
 
   const salesByKey = new Map((sales?.rows ?? []).map((r) => [`${r.shopId}:${r.productId}`, r] as const));
 
+  async function doDelete() {
+    if (!delMode) return;
+    setDeleting(true);
+    try {
+      if (delMode === "autotoko") {
+        await api.del(`/master-postings/${id}`);
+        toast("Master posting dihapus dari AutoToko. Listing di marketplace tetap tayang.", "success");
+        setDelMode(null);
+        onBack();
+        return;
+      }
+      const r = await api.post<{ total: number; ok: number; gagal: number; dilewati: number; catatan?: string }>(
+        `/master-postings/${id}/delete-marketplace`,
+      );
+      if (r.total === 0) toast(r.catatan ?? "Tidak ada listing marketplace untuk dihapus.", "warning");
+      else toast(
+        `Listing dihapus di marketplace: ${r.ok} berhasil${r.gagal ? `, ${r.gagal} gagal` : ""}${r.dilewati ? `, ${r.dilewati} dilewati` : ""}. Master posting tetap di AutoToko.`,
+        r.gagal ? "warning" : "success",
+      );
+      setDelMode(null);
+      await refetch();
+    } catch (e) {
+      toast((e as Error).message, "danger");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <Layout title="Master Postingan">
       <PageHeader
@@ -605,6 +635,12 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
               disabled={d.mappings.length === 0}
             >
               Jalankan Semua Baris
+            </Button>
+            <Button variant="outline" icon="trash" onClick={() => setDelMode("autotoko")}>
+              Hapus di AutoToko
+            </Button>
+            <Button variant="danger" icon="trash" onClick={() => setDelMode("marketplace")} disabled={d.mappings.filter((m) => m.marketplace === "tiktok" && m.status !== "create").length === 0}>
+              Hapus di Marketplace
             </Button>
           </>
         }
@@ -935,6 +971,20 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
             return `Toko ${m.shopName ?? "ini"} bermode "posting baru" — akan distage; pembuatan listing baru belum difire (menunggu unggah gambar TikTok).`;
           return `Nama & deskripsi listing di ${m?.shopName ?? "toko ini"} akan diperbarui mengikuti master. Tindakan nyata pada listing yang sedang tayang.`;
         })()}
+      />
+
+      <ConfirmModal
+        open={delMode !== null}
+        onClose={() => setDelMode(null)}
+        onConfirm={doDelete}
+        loading={deleting}
+        title={delMode === "autotoko" ? "Hapus master posting di AutoToko?" : "Hapus listing di marketplace?"}
+        confirmLabel={delMode === "autotoko" ? "Ya, hapus di AutoToko" : "Ya, hapus di marketplace"}
+        description={
+          delMode === "autotoko"
+            ? "Master posting beserta pemetaan & SKU-nya dihapus dari AutoToko saja. Listing produk di TikTok TETAP TAYANG (tidak disentuh)."
+            : `Menghapus ${d.mappings.filter((m) => m.marketplace === "tiktok" && m.status !== "create").length} listing produk di TikTok — tindakan nyata di marketplace & tidak bisa dibatalkan. Master posting di AutoToko TETAP ADA; pemetaan yang listing-nya terhapus dibersihkan.`
+        }
       />
     </Layout>
   );

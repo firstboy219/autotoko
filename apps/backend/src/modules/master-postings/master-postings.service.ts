@@ -685,6 +685,79 @@ export class MasterPostingsService {
     return { id: mappingId, deleted: true };
   }
 
+
+  /**
+   * HAPUS DI MARKETPLACE SAJA. Menghapus listing produk di TikTok untuk tiap
+   * mapping posting ini (DELETE /product/202309/products, maks 20/panggilan per
+   * toko), lalu membuang baris mapping yang listing-nya sudah mati — TAPI
+   * master posting + SKU-nya di AutoToko TETAP ADA. Aksi OUTWARD destruktif →
+   * dipicu klik eksplisit penjual. Kebalikan dari remove() (hapus di AutoToko
+   * saja, listing marketplace dibiarkan hidup).
+   */
+  async deleteMarketplace(userId: string, postingId: string) {
+    await this.requirePosting(userId, postingId);
+    const mappings = await this.db
+      .select()
+      .from(masterPostingMappings)
+      .where(and(eq(masterPostingMappings.userId, userId), eq(masterPostingMappings.masterPostingId, postingId)));
+    const aktif = mappings.filter((m) => m.marketplace === "tiktok" && m.productId && m.status !== "create");
+    if (!aktif.length) {
+      return { postingId, total: 0, ok: 0, gagal: 0, dilewati: mappings.length, hasil: [] as Record<string, unknown>[],
+        catatan: "Tidak ada listing TikTok termapping untuk dihapus." };
+    }
+    const shopIds = [...new Set(aktif.map((m) => m.shopId))];
+    const shopRows = await this.db.select().from(shops).where(inArray(shops.id, shopIds));
+    const shopById = new Map(shopRows.map((s) => [s.id, s] as const));
+    const { appKey, appSecret } = await this.tiktok.credentials();
+    const clientOf = (shop: typeof shops.$inferSelect) =>
+      new TikTokClient(appKey, appSecret, this.crypto.decrypt(shop.accessToken!), shop.shopCipher);
+
+    const perShop = new Map<string, typeof aktif>();
+    for (const m of aktif) {
+      const arr = perShop.get(m.shopId) ?? [];
+      arr.push(m);
+      perShop.set(m.shopId, arr);
+    }
+    const hasil: Record<string, unknown>[] = [];
+    let ok = 0, gagal = 0, dilewati = 0;
+    for (const [sid, ms] of perShop) {
+      let shop = shopById.get(sid);
+      if (!shop || !shop.accessToken || !shop.shopCipher) {
+        for (const m of ms) { hasil.push({ mappingId: m.id, productId: m.productId, shop: shop?.shopName ?? null, status: "skipped", reason: "toko tidak tersambung API" }); dilewati++; }
+        continue;
+      }
+      for (let i = 0; i < ms.length; i += 20) {
+        const chunk = ms.slice(i, i + 20);
+        const ids = chunk.map((m) => m.productId);
+        try {
+          let segar = false;
+          for (;;) {
+            try { await clientOf(shop).del("/product/202309/products", { product_ids: ids }); break; }
+            catch (e) {
+              if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) {
+                segar = true;
+                await this.shops.refreshOne(userId, shop.id);
+                const [fresh] = await this.db.select().from(shops).where(eq(shops.id, shop!.id)).limit(1);
+                if (fresh) { shop = fresh; shopById.set(sid, fresh); }
+                continue;
+              }
+              throw e;
+            }
+          }
+          for (const m of chunk) {
+            // Listing sudah mati di TikTok → buang mapping (link) saja. Posting + SKU tetap.
+            await this.db.delete(masterPostingMappings).where(eq(masterPostingMappings.id, m.id));
+            hasil.push({ mappingId: m.id, productId: m.productId, shop: shop.shopName ?? null, status: "ok" });
+            ok++;
+          }
+        } catch (e) {
+          for (const m of chunk) { hasil.push({ mappingId: m.id, productId: m.productId, shop: shop?.shopName ?? null, status: "failed", error: (e as Error).message }); gagal++; }
+        }
+      }
+    }
+    return { postingId, total: aktif.length, ok, gagal, dilewati, hasil };
+  }
+
   // ---------------------------------------------------------------- TERAPKAN (push)
 
   /**
