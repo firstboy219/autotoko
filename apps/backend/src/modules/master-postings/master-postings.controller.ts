@@ -90,10 +90,11 @@ export class MasterPostingsController {
   @Get("category-attributes")
   async categoryAttributes(
     @Req() req: FastifyRequest,
-    @Query("categoryId") categoryId: string,
+    @Query("categoryId") categoryId?: string,
     @Query("shopId") shopId?: string,
+    @Query("postingId") postingId?: string,
   ): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.svc.categoryAttributes(uid(req), categoryId, shopId) };
+    return { success: true, data: await this.svc.categoryAttributes(uid(req), categoryId, shopId, postingId) };
   }
 
   @Get("shop-products")

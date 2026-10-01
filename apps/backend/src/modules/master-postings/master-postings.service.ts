@@ -720,15 +720,34 @@ export class MasterPostingsService {
    * create/edit: id, nama, wajib?, boleh custom?, multi?, pilihan nilai. Hanya
    * PRODUCT_PROPERTY (SALES_PROPERTY = varian, ditangani grup varian).
    */
-  async categoryAttributes(userId: string, categoryId: string, shopId?: string) {
-    if (!categoryId) throw new BadRequestException("categoryId wajib");
+  async categoryAttributes(userId: string, categoryId?: string, shopId?: string, postingId?: string) {
+    // Jika diberi postingId: ambil kategori dari posting (bila kosong) & siapkan
+    // NILAI SAAT INI untuk prefill form — dari atribut tersimpan posting, lalu
+    // dilengkapi dari listing yg dipetakan (POOL lintas-toko). User tinggal edit.
+    let posting: Record<string, any> | null = null;
+    let mappings: Array<Record<string, any>> = [];
+    if (postingId) {
+      posting = (await this.requirePosting(userId, postingId)) as Record<string, any>;
+      if (!categoryId && posting.categoryId != null) categoryId = String(posting.categoryId);
+      mappings = await this.db.select().from(masterPostingMappings)
+        .where(and(eq(masterPostingMappings.userId, userId), eq(masterPostingMappings.masterPostingId, postingId)));
+    }
+    if (!categoryId) throw new BadRequestException("Kategori belum terdeteksi untuk posting ini");
+
+    // Pilih toko utk baca definisi atribut: shopId > toko mapping pertama > toko mana pun.
     const kond = [eq(shops.userId, userId), eq(shops.marketplace, "tiktok")];
     if (shopId) kond.push(eq(shops.id, shopId));
-    const shopRows = await this.db.select().from(shops).where(and(...kond));
+    else if (mappings[0]?.shopId) kond.push(eq(shops.id, mappings[0].shopId));
+    let shopRows = await this.db.select().from(shops).where(and(...kond));
+    if (!shopRows.find((x) => x.accessToken && x.shopCipher)) {
+      shopRows = await this.db.select().from(shops).where(and(eq(shops.userId, userId), eq(shops.marketplace, "tiktok")));
+    }
     let shop = shopRows.find((x) => x.accessToken && x.shopCipher);
     if (!shop) throw new BadRequestException("Tidak ada toko TikTok tersambung untuk membaca atribut kategori");
     const { appKey, appSecret } = await this.tiktok.credentials();
-    let client = new TikTokClient(appKey, appSecret, this.crypto.decrypt(shop.accessToken!), shop.shopCipher);
+    const clientOf = (sh: typeof shops.$inferSelect) => new TikTokClient(appKey, appSecret, this.crypto.decrypt(sh.accessToken!), sh.shopCipher);
+
+    let client = clientOf(shop);
     let segar = false;
     const resp = await (async () => {
       for (;;) {
@@ -739,14 +758,14 @@ export class MasterPostingsService {
             segar = true;
             await this.shops.refreshOne(userId, shop!.id);
             const [fr] = await this.db.select().from(shops).where(eq(shops.id, shop!.id)).limit(1);
-            if (fr) { shop = fr; client = new TikTokClient(appKey, appSecret, this.crypto.decrypt(fr.accessToken!), fr.shopCipher); }
+            if (fr) { shop = fr; client = clientOf(fr); }
             continue;
           }
           throw e;
         }
       }
     })();
-    const attrs = (Array.isArray(resp?.attributes) ? resp.attributes : [])
+    const defs = (Array.isArray(resp?.attributes) ? resp.attributes : [])
       .filter((a: any) => a?.type !== "SALES_PROPERTY")
       .map((a: any) => ({
         id: String(a.id),
@@ -756,6 +775,43 @@ export class MasterPostingsService {
         multiple: !!a.is_multiple_selection,
         values: (Array.isArray(a.values) ? a.values : []).map((v: any) => ({ id: String(v.id), name: String(v.name ?? "") })),
       }));
+
+    // Nilai saat ini (prefill): tersimpan di posting dulu, lalu dari listing live.
+    const currentMap = new Map<string, Array<{ id?: string; name: string }>>();
+    const serap = (arr: any) => {
+      for (const a of Array.isArray(arr) ? arr : []) {
+        if (!a?.id) continue;
+        const vals = (Array.isArray(a.values) ? a.values : [])
+          .map((v: any) => ({ ...(v?.id ? { id: String(v.id) } : {}), name: String(v?.name ?? "") }))
+          .filter((v: { name: string }) => v.name !== "");
+        if (vals.length && !currentMap.has(String(a.id))) currentMap.set(String(a.id), vals);
+      }
+    };
+    if (posting) serap((posting.attributes as Record<string, any> | null)?.productAttributes);
+    const defIds = defs.map((d) => d.id);
+    if (posting && !defIds.every((id) => currentMap.has(id))) {
+      const shopById = new Map(shopRows.map((x) => [x.id, x] as const));
+      let dibaca = 0;
+      for (const m of mappings) {
+        if (m.marketplace !== "tiktok" || m.status === "create" || !m.productId) continue;
+        if (defIds.every((id) => currentMap.has(id)) || dibaca >= 8) break;
+        let sh = shopById.get(m.shopId);
+        if (!sh?.accessToken || !sh.shopCipher) {
+          const [one] = await this.db.select().from(shops).where(and(eq(shops.id, m.shopId), eq(shops.userId, userId))).limit(1);
+          if (one?.accessToken && one.shopCipher) { sh = one; shopById.set(m.shopId, one); }
+        }
+        if (!sh?.accessToken || !sh.shopCipher) continue;
+        dibaca++;
+        try {
+          const cur = (await clientOf(sh).get(`/product/202309/products/${m.productId}`)) as Record<string, any>;
+          serap(cur?.product_attributes);
+        } catch { /* lewati listing yg gagal/terhapus */ }
+      }
+    }
+    const attrs = defs.map((d) => {
+      const cur = currentMap.get(d.id) ?? [];
+      return { ...d, current: cur, currentText: cur.map((v) => v.name).join(", ") };
+    });
     return { categoryId: String(categoryId), attributes: attrs };
   }
 

@@ -999,7 +999,7 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
   );
 }
 
-interface CatAttr { id: string; name: string; required: boolean; customizable: boolean; multiple: boolean; values: { id: string; name: string }[] }
+interface CatAttr { id: string; name: string; required: boolean; customizable: boolean; multiple: boolean; values: { id: string; name: string }[]; current?: { id?: string; name: string }[]; currentText?: string }
 
 /**
  * Editor atribut produk kategori marketplace (mis. Nomor Ijin Edar/BPOM 101066).
@@ -1017,20 +1017,25 @@ function AtributKategori({ postingId, categoryId, shopId, attributes, onSaved }:
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!categoryId) { setDefs([]); return; }
     setDefs(null); setErr(null);
-    const q = new URLSearchParams({ categoryId: String(categoryId) });
+    const q = new URLSearchParams({ postingId });
+    if (categoryId) q.set("categoryId", String(categoryId));
     if (shopId) q.set("shopId", shopId);
-    api.get<{ attributes: CatAttr[] }>(`/master-postings/category-attributes?${q.toString()}`)
+    api.get<{ categoryId: string; attributes: CatAttr[] }>(`/master-postings/category-attributes?${q.toString()}`)
       .then((r) => {
         setDefs(r.attributes);
+        // Prefill: nilai tersimpan posting dulu, kalau kosong pakai `current`
+        // (otomatis dari listing yg dipilih sbg master). User tinggal edit.
         const pa = ((attributes?.productAttributes as { id: string; values: { name: string }[] }[]) ?? []);
         const map: Record<string, string> = {};
         for (const a of pa) map[String(a.id)] = (a.values ?? []).map((v) => v.name).join(", ");
+        for (const d of r.attributes) {
+          if (!map[d.id] && d.currentText) map[d.id] = d.currentText;
+        }
         setVals(map);
       })
       .catch((e) => { setDefs([]); setErr((e as Error).message); });
-  }, [categoryId, shopId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [categoryId, shopId, postingId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     if (!defs) return;
@@ -1064,9 +1069,7 @@ function AtributKategori({ postingId, categoryId, shopId, attributes, onSaved }:
         </div>
         <Button size="sm" variant="outline" loading={busy} onClick={save} disabled={!defs || defs.length === 0}>Simpan Atribut</Button>
       </div>
-      {!categoryId ? (
-        <div className="text-xs text-ink-3 mt-2">Kategori belum terdeteksi untuk posting ini — impor dari listing atau set kategori dulu.</div>
-      ) : defs === null ? (
+      {defs === null ? (
         <div className="text-xs text-ink-3 mt-2">Memuat atribut kategori…</div>
       ) : err ? (
         <InlineAlert tone="warning">{err}</InlineAlert>
