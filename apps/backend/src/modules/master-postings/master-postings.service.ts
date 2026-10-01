@@ -387,18 +387,11 @@ export class MasterPostingsService {
     return this.get(userId, postingId);
   }
 
-  /** "Rp 12.345" / number / null -> number rupiah | null (abaikan pemisah ribuan). */
-  private parseRupiah(v: unknown): number | null {
-    if (v == null) return null;
-    if (typeof v === "number") return Number.isFinite(v) ? v : null;
-    const digits = String(v).replace(/[^0-9]/g, "");
-    return digits ? Number(digits) : null;
-  }
-
   /**
    * Daftar ringkas master produk AutoToko untuk dropdown pemetaan SKU.
-   * Dilengkapi harga publish + HPP (dari modul costing) agar baris SKU bisa
-   * auto-isi harga & menampilkan HPP tanpa panggilan tambahan.
+   * Dilengkapi harga publish, HPP, + rate costing (dari modul costing) supaya
+   * baris SKU bisa auto-isi harga, menampilkan HPP, dan mensimulasi margin /
+   * profit bersih LIVE (calculatePublishPricing di web) tanpa panggilan tambahan.
    */
   async masterProductOptions(userId: string) {
     const opts = await this.db
@@ -406,21 +399,41 @@ export class MasterPostingsService {
       .from(masterProducts)
       .where(eq(masterProducts.userId, userId))
       .orderBy(masterProducts.name);
-    let costByProduct = new Map<string, { publishPrice: number | null; hpp: number | null }>();
+    const basisByProduct = new Map<
+      string,
+      {
+        productId: string;
+        hppCents: number;
+        publishPrice: number | null;
+        marketplaceFeeRate: number;
+        eventRate: number;
+        affiliatorRate: number;
+        adsRate: number;
+        adsFixedCents: number;
+        sedekahRate: number;
+        resellerRate: number;
+      }
+    >();
     try {
-      const rows = await this.costing.list(userId);
-      costByProduct = new Map(
-        rows.map((r: { productId: string; publishPrice: number | null; hpp: unknown }) => [
-          String(r.productId),
-          { publishPrice: r.publishPrice ?? null, hpp: this.parseRupiah(r.hpp) },
-        ]),
-      );
+      for (const b of await this.costing.pricingBasis(userId)) basisByProduct.set(b.productId, b);
     } catch {
-      /* costing opsional: kalau gagal, biarkan harga/hpp null */
+      /* costing opsional: kalau gagal, harga/hpp null & rate default */
     }
     return opts.map((o) => {
-      const c = costByProduct.get(o.id);
-      return { ...o, publishPrice: c?.publishPrice ?? null, hpp: c?.hpp ?? null };
+      const b = basisByProduct.get(o.id);
+      return {
+        ...o,
+        publishPrice: b?.publishPrice ?? null,
+        hpp: b ? b.hppCents / 100 : null,
+        hppCents: b?.hppCents ?? 0,
+        marketplaceFeeRate: b?.marketplaceFeeRate ?? 0.15,
+        eventRate: b?.eventRate ?? 0.05,
+        affiliatorRate: b?.affiliatorRate ?? 0.05,
+        adsRate: b?.adsRate ?? 0,
+        adsFixedCents: b?.adsFixedCents ?? 0,
+        sedekahRate: b?.sedekahRate ?? 0.05,
+        resellerRate: b?.resellerRate ?? 0.2,
+      };
     });
   }
 
@@ -1193,12 +1206,35 @@ export class MasterPostingsService {
         await this.tandaiMapping(m.id, "failed", pesan);
       }
     }
+    // Terapkan juga ke internal: samakan harga publish master produk (menu HPP &
+    // harga jual) dengan harga SKU master postingan yang dipetakan, agar simulasi
+    // margin & data costing konsisten dengan harga yang baru diterapkan.
+    let hppDiperbarui = 0;
+    try {
+      const skuRows = await this.db
+        .select({ masterProductId: masterPostingSkus.masterProductId, price: masterPostingSkus.price })
+        .from(masterPostingSkus)
+        .where(and(eq(masterPostingSkus.userId, userId), eq(masterPostingSkus.masterPostingId, postingId)));
+      const byMaster = new Map<string, number>();
+      for (const r of skuRows) {
+        if (!r.masterProductId || r.price == null) continue;
+        const n = Number(r.price);
+        if (Number.isFinite(n) && n > 0) byMaster.set(r.masterProductId, n);
+      }
+      for (const [mid, price] of byMaster) {
+        await this.setMasterPublishPrice(userId, mid, price);
+        hppDiperbarui++;
+      }
+    } catch (e) {
+      this.logger.warn(`Sinkron harga publish master dari apply ${postingId}: ${(e as Error).message}`);
+    }
     return {
       postingId,
       total: mappings.length,
       ok: hasil.filter((h) => h.status === "ok").length,
       gagal: hasil.filter((h) => h.status === "failed").length,
       dilewati: hasil.filter((h) => h.status === "skipped").length,
+      hppDiperbarui,
       catatanGambar: gambarBelumDidukung
         ? "Nama & deskripsi diterapkan. Propagasi daftar gambar menunggu endpoint unggah gambar TikTok (tahap berikutnya)."
         : undefined,

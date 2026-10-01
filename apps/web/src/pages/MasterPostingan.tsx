@@ -3,6 +3,7 @@ import { Layout } from "../components/Layout";
 import { api } from "../lib/api";
 import { Icon } from "../components/Icon";
 import { rupiah } from "../lib/fmt";
+import { calculatePublishPricing } from "@autotoko/shared";
 import { RichText } from "../components/RichText";
 import {
   PageHeader,
@@ -36,6 +37,14 @@ interface MasterOpt {
   name: string;
   publishPrice: number | null;
   hpp: number | null;
+  hppCents: number;
+  marketplaceFeeRate: number;
+  eventRate: number;
+  affiliatorRate: number;
+  adsRate: number;
+  adsFixedCents: number;
+  sedekahRate: number;
+  resellerRate: number;
 }
 interface SkuRow {
   id: string;
@@ -124,6 +133,7 @@ interface ApplyResult {
   ok: number;
   gagal: number;
   dilewati: number;
+  hppDiperbarui?: number;
   catatan?: string;
   catatanGambar?: string;
   hasil: {
@@ -662,6 +672,11 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
               {applyResult.ok} berhasil · {applyResult.gagal} gagal · {applyResult.dilewati} distage
             </div>
           </div>
+          {!!applyResult.hppDiperbarui && (
+            <div className="mt-1 text-xs text-ink-3">
+              Harga publish {applyResult.hppDiperbarui} master produk ikut diperbarui di menu HPP &amp; harga jual.
+            </div>
+          )}
           {applyResult.catatanGambar && <div className="mt-1 text-xs text-ink-3">{applyResult.catatanGambar}</div>}
           {applyResult.catatan && <div className="mt-1 text-xs text-ink-3">{applyResult.catatan}</div>}
           <div className="mt-3 divide-y divide-line">
@@ -883,6 +898,7 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
                   <TH>Master Produk AutoToko</TH>
                   <TH align="right">HPP</TH>
                   <TH align="right">Harga produk</TH>
+                  <TH align="right">Margin / profit bersih</TH>
                   <TH align="right">Marketplace (publish)</TH>
                   <TH align="right">Stok</TH>
                   <TH></TH>
@@ -1165,6 +1181,23 @@ function SkuRowEditor({
   const master = masters.find((m) => m.id === masterId) ?? null;
   const fmtRp = (n: number | null | undefined) =>
     n == null ? "—" : "Rp " + Math.round(n).toLocaleString("id-ID");
+  // Simulasi margin/profit bersih LIVE dari "Harga produk" yg sedang diketik,
+  // pakai HPP + rate costing master (rumus sama dgn menu HPP via @autotoko/shared).
+  const priceNum = Number(price) || 0;
+  const sim =
+    master && priceNum > 0
+      ? calculatePublishPricing({
+          publishPriceCents: Math.round(priceNum * 100),
+          hppCents: master.hppCents,
+          marketplaceFeeRate: master.marketplaceFeeRate,
+          eventRate: master.eventRate,
+          affiliatorRate: master.affiliatorRate,
+          adsRate: master.adsRate,
+          adsFixedCents: master.adsFixedCents,
+          sedekahRate: master.sedekahRate,
+          resellerRate: master.resellerRate,
+        })
+      : null;
 
   // Saat master dipetakan: auto-isi "Harga produk" dari harga publish master
   // bila harga masih kosong (biar tak menimpa harga yang sudah diisi manual).
@@ -1196,8 +1229,7 @@ function SkuRowEditor({
       });
       // Dua-arah: jika dipetakan ke master & harga berubah dari harga publish
       // master, perbarui juga harga publish master produk AutoToko.
-      const priceNum = price.trim() === "" ? null : Number(price.replace(/[^0-9]/g, ""));
-      if (masterId && priceNum != null && Number.isFinite(priceNum) && priceNum !== (master?.publishPrice ?? null)) {
+      if (masterId && priceNum > 0 && priceNum !== (master?.publishPrice ?? null)) {
         try {
           await api.patch(`/master-postings/master-products/${masterId}/publish-price`, { price: priceNum });
           await onMasterPriceSaved();
@@ -1235,6 +1267,22 @@ function SkuRowEditor({
       </TD>
       <TD align="right">
         <Input className="max-w-[120px] text-right" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0" />
+      </TD>
+      <TD align="right">
+        {masterId && sim ? (
+          <div className="leading-tight">
+            <div
+              className={`text-xs font-semibold tabular-nums ${sim.netProfitCents >= 0 ? "text-emerald-600" : "text-red-600"}`}
+            >
+              {rupiah(sim.netProfitCents / 100)}
+            </div>
+            <div className={`text-[11px] tabular-nums ${sim.netProfitCents >= 0 ? "text-emerald-600/80" : "text-red-600/80"}`}>
+              {(sim.netMarginRate * 100).toFixed(1)}% margin
+            </div>
+          </div>
+        ) : (
+          <span className="text-xs text-ink-3">—</span>
+        )}
       </TD>
       <TD align="right">
         <span className="text-xs tabular-nums text-ink-3">

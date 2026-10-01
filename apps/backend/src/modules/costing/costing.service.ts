@@ -261,6 +261,45 @@ export class CostingService {
    * itself, and the seller had to guess which number was real; a third copy
    * for the dashboard would repeat that on a bigger screen.
    */
+  /**
+   * Input mentah simulasi harga publish per master produk. Dipakai menu Master
+   * Postingan untuk menghitung margin/profit bersih LIVE saat harga diubah,
+   * memakai calculatePublishPricing yang SAMA dengan menu HPP (sumber tunggal).
+   * Rate yang belum diatur jatuh ke default skema product_costing.
+   */
+  async pricingBasis(userId: string) {
+    const products = await this.db
+      .select({ id: masterProducts.id })
+      .from(masterProducts)
+      .where(eq(masterProducts.userId, userId));
+    if (!products.length) return [];
+    const ids = products.map((p) => p.id);
+    const { matByProduct, costByProduct, packingFor } = await this.costInputs(userId, ids);
+    const def = (v: string | number | null | undefined, d: number) => (v == null ? d : num(v));
+    return products.map((p) => {
+      const cfg = costByProduct.get(p.id);
+      const hpp = calculateHpp({
+        materials: matByProduct.get(p.id) ?? [],
+        serviceCostPerPcs: num(cfg?.serviceCostPerPcs),
+        packingCostPerOrder: num(cfg?.packingCostPerOrder),
+        packingMaterials: packingFor(p.id),
+        avgUnitsPerOrder: cfg ? num(cfg.avgUnitsPerOrder) : 1,
+      });
+      return {
+        productId: p.id,
+        hppCents: hpp.hppCents,
+        publishPrice: cfg?.publishPrice != null ? num(cfg.publishPrice) : null,
+        marketplaceFeeRate: def(cfg?.marketplaceFeeRate, 0.15),
+        eventRate: def(cfg?.eventRate, 0.05),
+        affiliatorRate: def(cfg?.affiliatorRate, 0.05),
+        adsRate: def(cfg?.adsRate, 0),
+        adsFixedCents: Math.round(def(cfg?.adsFixedPerPcs, 0) * 100),
+        sedekahRate: def(cfg?.sedekahRate, 0.05),
+        resellerRate: def(cfg?.resellerRate, 0.2),
+      };
+    });
+  }
+
   private async costInputs(userId: string, ids: string[]) {
     const [recipe, costings, sharedPacking, overrides] = await Promise.all([
       this.db
