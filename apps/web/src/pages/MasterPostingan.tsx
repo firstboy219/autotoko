@@ -34,6 +34,8 @@ interface MasterOpt {
   id: string;
   sku: string;
   name: string;
+  publishPrice: number | null;
+  hpp: number | null;
 }
 interface SkuRow {
   id: string;
@@ -42,6 +44,7 @@ interface SkuRow {
   sku: string | null;
   masterProductId: string | null;
   price: string | null;
+  marketplacePrice: string | null;
   stock: number | null;
   imageUrl: string | null;
   master: MasterOpt | null;
@@ -500,6 +503,10 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
   const [deleting, setDeleting] = useState(false);
   const [sales, setSales] = useState<SalesResp | null>(null);
 
+  const reloadMasters = useCallback(async () => {
+    await api.get<MasterOpt[]>("/master-postings/master-products").then(setMasters).catch(() => {});
+  }, []);
+
   const refetch = useCallback(async () => {
     const detail = await api.get<Detail>(`/master-postings/${id}`);
     setD(detail);
@@ -514,9 +521,9 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
 
   useEffect(() => {
     void refetch().catch((e) => toast((e as Error).message || "Gagal memuat", "danger"));
-    void api.get<MasterOpt[]>("/master-postings/master-products").then(setMasters).catch(() => {});
+    void reloadMasters();
     void api.get<ShopOpt[]>("/marketplace-sync/shops").then(setShops).catch(() => {});
-  }, [refetch, toast]);
+  }, [refetch, reloadMasters, toast]);
 
   async function saveInfo() {
     setSaving(true);
@@ -874,14 +881,16 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
                   <TH>Kombinasi</TH>
                   <TH>Kode SKU</TH>
                   <TH>Master Produk AutoToko</TH>
-                  <TH align="right">Harga</TH>
+                  <TH align="right">HPP</TH>
+                  <TH align="right">Harga produk</TH>
+                  <TH align="right">Marketplace (publish)</TH>
                   <TH align="right">Stok</TH>
                   <TH></TH>
                 </TR>
               </THead>
               <tbody>
                 {d.skus.map((s) => (
-                  <SkuRowEditor key={s.id} postingId={id} row={s} masters={masters} onSaved={refetch} />
+                  <SkuRowEditor key={s.id} postingId={id} row={s} masters={masters} onSaved={refetch} onMasterPriceSaved={reloadMasters} />
                 ))}
               </tbody>
             </Table>
@@ -1139,11 +1148,13 @@ function SkuRowEditor({
   row,
   masters,
   onSaved,
+  onMasterPriceSaved,
 }: {
   postingId: string;
   row: SkuRow;
   masters: MasterOpt[];
   onSaved: () => Promise<void>;
+  onMasterPriceSaved: () => Promise<void>;
 }) {
   const [sku, setSku] = useState(row.sku ?? "");
   const [masterId, setMasterId] = useState(row.masterProductId ?? "");
@@ -1151,6 +1162,19 @@ function SkuRowEditor({
   const [stock, setStock] = useState(row.stock == null ? "" : String(row.stock));
   const [busy, setBusy] = useState(false);
   const toast = useToast();
+  const master = masters.find((m) => m.id === masterId) ?? null;
+  const fmtRp = (n: number | null | undefined) =>
+    n == null ? "—" : "Rp " + Math.round(n).toLocaleString("id-ID");
+
+  // Saat master dipetakan: auto-isi "Harga produk" dari harga publish master
+  // bila harga masih kosong (biar tak menimpa harga yang sudah diisi manual).
+  useEffect(() => {
+    if (master && master.publishPrice != null && price.trim() === "") {
+      setPrice(String(master.publishPrice));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masterId]);
+
   const dirty =
     sku !== (row.sku ?? "") ||
     masterId !== (row.masterProductId ?? "") ||
@@ -1170,6 +1194,17 @@ function SkuRowEditor({
         price: price || undefined,
         stock: stock === "" ? undefined : Number(stock),
       });
+      // Dua-arah: jika dipetakan ke master & harga berubah dari harga publish
+      // master, perbarui juga harga publish master produk AutoToko.
+      const priceNum = price.trim() === "" ? null : Number(price.replace(/[^0-9]/g, ""));
+      if (masterId && priceNum != null && Number.isFinite(priceNum) && priceNum !== (master?.publishPrice ?? null)) {
+        try {
+          await api.patch(`/master-postings/master-products/${masterId}/publish-price`, { price: priceNum });
+          await onMasterPriceSaved();
+        } catch (e) {
+          toast((e as Error).message || "Harga SKU tersimpan, tapi gagal sinkron ke master", "danger");
+        }
+      }
       await onSaved();
       toast("SKU tersimpan", "success");
     } catch (e) {
@@ -1196,7 +1231,15 @@ function SkuRowEditor({
         </Select>
       </TD>
       <TD align="right">
-        <Input className="max-w-[110px] text-right" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0" />
+        <span className="text-xs tabular-nums text-ink-2">{masterId ? fmtRp(master?.hpp) : "—"}</span>
+      </TD>
+      <TD align="right">
+        <Input className="max-w-[120px] text-right" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0" />
+      </TD>
+      <TD align="right">
+        <span className="text-xs tabular-nums text-ink-3">
+          {row.marketplacePrice ? "Rp " + Math.round(Number(row.marketplacePrice)).toLocaleString("id-ID") : "—"}
+        </span>
       </TD>
       <TD align="right">
         <Input className="max-w-[80px] text-right" value={stock} onChange={(e) => setStock(e.target.value)} placeholder="0" />
@@ -1287,9 +1330,13 @@ function MappingAdder({ postingId, shops, onAdded }: { postingId: string; shops:
   const [mode, setMode] = useState<"update" | "create">("update");
   const [products, setProducts] = useState<ShopProduct[]>([]);
   const [productId, setProductId] = useState("");
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
+  const filtered = search.trim()
+    ? products.filter((p) => (p.title ?? "").toLowerCase().includes(search.trim().toLowerCase()))
+    : products;
 
   useEffect(() => {
     if (!shopId || mode === "create") {
@@ -1343,15 +1390,34 @@ function MappingAdder({ postingId, shops, onAdded }: { postingId: string; shops:
         </Select>
       </Field>
       {mode === "update" && (
-        <Field label="Listing marketplace" className="min-w-[240px] flex-1">
-          <Select value={productId} onChange={(e) => setProductId(e.target.value)} disabled={!shopId || loading}>
-            <option value="">{loading ? "Memuat…" : "Pilih listing…"}</option>
-            {products.map((p) => (
-              <option key={p.productId} value={p.productId}>
-                {(p.title ?? "(tanpa judul)").slice(0, 70)} · {p.productId}
+        <Field label="Listing marketplace" className="min-w-[260px] flex-1">
+          <div className="space-y-1.5">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Cari nama listing…"
+              disabled={!shopId || loading}
+            />
+            <Select value={productId} onChange={(e) => setProductId(e.target.value)} disabled={!shopId || loading}>
+              <option value="">
+                {loading
+                  ? "Memuat…"
+                  : filtered.length === 0
+                    ? search.trim()
+                      ? "Tak ada yang cocok"
+                      : "Tak ada listing aktif yang belum dipetakan"
+                    : `Pilih listing… (${filtered.length})`}
               </option>
-            ))}
-          </Select>
+              {filtered.map((p) => (
+                <option key={p.productId} value={p.productId}>
+                  {(p.title ?? "(tanpa judul)").slice(0, 70)} · {p.productId}
+                </option>
+              ))}
+            </Select>
+            <div className="text-[11px] text-ink-3">
+              Hanya listing berstatus aktif &amp; belum menempel ke master lain yang muncul.
+            </div>
+          </div>
         </Field>
       )}
       <Button variant="outline" icon="link" loading={busy} disabled={!shopId || (mode === "update" && !productId)} onClick={add}>

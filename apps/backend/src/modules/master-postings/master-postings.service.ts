@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   masterPostings,
@@ -8,12 +8,14 @@ import {
   masterProducts,
   marketplaceProducts,
   marketplaceSkus,
+  productCosting,
   shops,
 } from "../../database/schema/index.js";
 import { CryptoService } from "../../common/crypto/crypto.service.js";
 import { TikTokAdapter } from "../../marketplace/adapters/tiktok.adapter.js";
 import { ShopsService } from "../shops/shops.service.js";
 import { MarketplaceSyncService } from "../marketplace-sync/marketplace-sync.service.js";
+import { CostingService } from "../costing/costing.service.js";
 import { TikTokApiError, TikTokClient } from "../marketplace-sync/tiktok-client.js";
 import type {
   AddMappingDto,
@@ -43,6 +45,7 @@ export class MasterPostingsService {
     private readonly tiktok: TikTokAdapter,
     private readonly shops: ShopsService,
     private readonly sync: MarketplaceSyncService,
+    private readonly costing: CostingService,
   ) {}
 
   // ---------------------------------------------------------------- varian → SKU
@@ -279,11 +282,38 @@ export class MasterPostingsService {
       ? await this.db.select({ id: shops.id, shopName: shops.shopName }).from(shops).where(inArray(shops.id, shopIds))
       : [];
     const shopById = new Map(shopRows.map((s) => [s.id, s.shopName] as const));
+    // Harga publish terkini di marketplace per SKU (dari listing yang dipetakan,
+    // dicocokkan via seller_sku; ambil yang paling baru disinkron).
+    const mappedShopIds = [...new Set(mappings.filter((m) => m.status !== "create").map((m) => m.shopId))];
+    const sellerSkus = [...new Set(skus.map((s) => s.sku).filter((x): x is string => !!x))];
+    const mpPriceBySku = new Map<string, string>();
+    if (mappedShopIds.length && sellerSkus.length) {
+      const mpRows = await this.db
+        .select({
+          sellerSku: marketplaceSkus.sellerSku,
+          price: marketplaceSkus.price,
+        })
+        .from(marketplaceSkus)
+        .where(
+          and(
+            eq(marketplaceSkus.userId, userId),
+            inArray(marketplaceSkus.shopId, mappedShopIds),
+            inArray(marketplaceSkus.sellerSku, sellerSkus),
+          ),
+        )
+        .orderBy(desc(marketplaceSkus.syncedAt));
+      for (const r of mpRows) {
+        if (r.sellerSku && r.price != null && !mpPriceBySku.has(r.sellerSku)) {
+          mpPriceBySku.set(r.sellerSku, String(r.price));
+        }
+      }
+    }
     return {
       ...posting,
       skus: skus.map((s) => ({
         ...s,
         master: s.masterProductId ? masterById.get(s.masterProductId) ?? null : null,
+        marketplacePrice: s.sku ? mpPriceBySku.get(s.sku) ?? null : null,
       })),
       mappings: mappings.map((m) => ({ ...m, shopName: shopById.get(m.shopId) ?? null })),
     };
@@ -357,13 +387,63 @@ export class MasterPostingsService {
     return this.get(userId, postingId);
   }
 
-  /** Daftar ringkas master produk AutoToko untuk dropdown pemetaan SKU. */
+  /** "Rp 12.345" / number / null -> number rupiah | null (abaikan pemisah ribuan). */
+  private parseRupiah(v: unknown): number | null {
+    if (v == null) return null;
+    if (typeof v === "number") return Number.isFinite(v) ? v : null;
+    const digits = String(v).replace(/[^0-9]/g, "");
+    return digits ? Number(digits) : null;
+  }
+
+  /**
+   * Daftar ringkas master produk AutoToko untuk dropdown pemetaan SKU.
+   * Dilengkapi harga publish + HPP (dari modul costing) agar baris SKU bisa
+   * auto-isi harga & menampilkan HPP tanpa panggilan tambahan.
+   */
   async masterProductOptions(userId: string) {
-    return this.db
+    const opts = await this.db
       .select({ id: masterProducts.id, sku: masterProducts.sku, name: masterProducts.name })
       .from(masterProducts)
       .where(eq(masterProducts.userId, userId))
       .orderBy(masterProducts.name);
+    let costByProduct = new Map<string, { publishPrice: number | null; hpp: number | null }>();
+    try {
+      const rows = await this.costing.list(userId);
+      costByProduct = new Map(
+        rows.map((r: { productId: string; publishPrice: number | null; hpp: unknown }) => [
+          String(r.productId),
+          { publishPrice: r.publishPrice ?? null, hpp: this.parseRupiah(r.hpp) },
+        ]),
+      );
+    } catch {
+      /* costing opsional: kalau gagal, biarkan harga/hpp null */
+    }
+    return opts.map((o) => {
+      const c = costByProduct.get(o.id);
+      return { ...o, publishPrice: c?.publishPrice ?? null, hpp: c?.hpp ?? null };
+    });
+  }
+
+  /**
+   * Set harga publish master produk (dua-arah dari baris SKU master postingan).
+   * Upsert ke product_costing; tidak menyentuh kolom lain.
+   */
+  async setMasterPublishPrice(userId: string, masterProductId: string, price: number) {
+    const [mp] = await this.db
+      .select({ id: masterProducts.id })
+      .from(masterProducts)
+      .where(and(eq(masterProducts.id, masterProductId), eq(masterProducts.userId, userId)))
+      .limit(1);
+    if (!mp) throw new NotFoundException("Master produk tidak ditemukan");
+    const val = String(Math.max(0, Math.round(Number(price) || 0)));
+    await this.db
+      .insert(productCosting)
+      .values({ userId, masterProductId, publishPrice: val })
+      .onConflictDoUpdate({
+        target: productCosting.masterProductId,
+        set: { publishPrice: val, updatedAt: new Date() },
+      });
+    return { ok: true, masterProductId, publishPrice: Number(val) };
   }
 
   /** Penjualan 30 hari per listing termapping (rata-rata per minggu). */
@@ -635,6 +715,20 @@ export class MasterPostingsService {
       .where(and(eq(shops.id, shopId), eq(shops.userId, userId)))
       .limit(1);
     if (!shop) throw new NotFoundException("Toko tidak ditemukan");
+    // Listing yang sudah dipetakan (mode update) ke master mana pun tak boleh
+    // muncul lagi: tiap listing marketplace menempel pada satu master AutoToko.
+    const mapped = await this.db
+      .select({ productId: masterPostingMappings.productId })
+      .from(masterPostingMappings)
+      .where(and(eq(masterPostingMappings.userId, userId), eq(masterPostingMappings.shopId, shopId)));
+    const taken = [...new Set(mapped.map((m) => m.productId).filter((x): x is string => !!x))];
+    const conds = [
+      eq(marketplaceProducts.userId, userId),
+      eq(marketplaceProducts.shopId, shopId),
+      // Hanya listing yang masih aktif di marketplace.
+      eq(marketplaceProducts.status, "ACTIVATE"),
+    ];
+    if (taken.length) conds.push(notInArray(marketplaceProducts.productId, taken));
     return this.db
       .select({
         productId: marketplaceProducts.productId,
@@ -643,7 +737,7 @@ export class MasterPostingsService {
         marketplace: marketplaceProducts.marketplace,
       })
       .from(marketplaceProducts)
-      .where(and(eq(marketplaceProducts.userId, userId), eq(marketplaceProducts.shopId, shopId)))
+      .where(and(...conds))
       .orderBy(marketplaceProducts.title)
       .limit(500);
   }

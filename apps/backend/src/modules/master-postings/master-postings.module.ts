@@ -3,6 +3,7 @@ import { AuthModule } from "../auth/auth.module.js";
 import { ShopsModule } from "../shops/shops.module.js";
 import { MarketplaceModule } from "../../marketplace/marketplace.module.js";
 import { MarketplaceSyncModule } from "../marketplace-sync/marketplace-sync.module.js";
+import { CostingModule } from "../costing/costing.module.js";
 import { MasterPostingsService } from "./master-postings.service.js";
 import { MasterPostingsController } from "./master-postings.controller.js";
 
@@ -12,7 +13,7 @@ import { MasterPostingsController } from "./master-postings.controller.js";
  * jalur "Terapkan". CryptoService & DRIZZLE bersifat global.
  */
 @Module({
-  imports: [AuthModule, ShopsModule, MarketplaceModule, MarketplaceSyncModule],
+  imports: [AuthModule, ShopsModule, MarketplaceModule, MarketplaceSyncModule, CostingModule],
   controllers: [MasterPostingsController],
   providers: [MasterPostingsService],
   exports: [MasterPostingsService],

@@ -59,6 +59,16 @@ export class MasterPostingsController {
     return { success: true, data: await this.svc.masterProductOptions(uid(req)) };
   }
 
+  /** Set harga publish master produk (sinkron dua-arah dari baris SKU). */
+  @Patch("master-products/:id/publish-price")
+  async setMasterPublishPrice(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body("price") price: number,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.setMasterPublishPrice(uid(req), id, Number(price)) };
+  }
+
   /** Penjualan 30 hari per toko termapping. */
   @Get(":id/sales")
   async sales(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
