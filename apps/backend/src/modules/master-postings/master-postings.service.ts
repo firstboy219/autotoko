@@ -899,6 +899,49 @@ export class MasterPostingsService {
     };
     const hasil: Baris[] = [];
 
+    // Pra-pass: baca atribut listing LIVE tiap mapping + bangun POOL lintas-toko.
+    // Atribut yg hanya terisi di SEBAGIAN toko (mis. Nomor Ijin Edar/BPOM 101066)
+    // dipakai mengisi toko lain yg kekurangan, supaya "Jalankan semua baris"
+    // tak gagal hanya karena satu toko belum punya atribut wajib itu.
+    const liveByMapping = new Map<string, Array<Record<string, any>>>();
+    const poolAttrs = new Map<string, { id: string; values: Array<{ id?: string; name: string }> }>();
+    const statusByMapping = new Map<string, string>();
+    for (const m of mappings) {
+      if (m.marketplace !== "tiktok" || m.status === "create" || !m.productId) continue;
+      let shopP = shopById.get(m.shopId);
+      if (!shopP?.accessToken || !shopP.shopCipher) continue;
+      let segarP = false;
+      let attrs: Array<Record<string, any>> = [];
+      let statusTemp = "";
+      for (;;) {
+        try {
+          const cur = (await clientOf(shopP).get(`/product/202309/products/${m.productId}`)) as Record<string, any>;
+          attrs = Array.isArray(cur?.product_attributes) ? cur.product_attributes : [];
+          statusTemp = String(cur?.status ?? "");
+          break;
+        } catch (e) {
+          if (e instanceof TikTokApiError && e.tokenBermasalah && !segarP) {
+            segarP = true;
+            await this.shops.refreshOne(userId, shopP.id);
+            const [fr] = await this.db.select().from(shops).where(eq(shops.id, shopP!.id)).limit(1);
+            if (fr) { shopP = fr; shopById.set(m.shopId, fr); }
+            continue;
+          }
+          attrs = [];
+          break;
+        }
+      }
+      liveByMapping.set(m.id, attrs);
+      if (statusTemp) statusByMapping.set(m.id, statusTemp);
+      for (const a of attrs) {
+        if (!a?.id) continue;
+        const values = (Array.isArray(a.values) ? a.values : [])
+          .map((v: any) => ({ ...(v?.id ? { id: String(v.id) } : {}), name: String(v?.name ?? "") }))
+          .filter((v: { name: string }) => v.name !== "");
+        if (values.length && !poolAttrs.has(String(a.id))) poolAttrs.set(String(a.id), { id: String(a.id), values });
+      }
+    }
+
     for (const m of mappings) {
       let shop = shopById.get(m.shopId);
       const nama = shop?.shopName ?? null;
@@ -926,31 +969,28 @@ export class MasterPostingsService {
         await this.tandaiMapping(m.id, "skipped", `${m.marketplace} belum didukung`);
         continue;
       }
-      // Atribut WAJIB (mis. 101066 Nomor Ijin Edar/BPOM) harus IKUT saat
-      // partial_edit — TikTok menolak kalau hilang. Ambil atribut listing LIVE,
-      // lalu timpa dgn nilai master posting → atribut wajib tak pernah hilang.
-      let liveAttrs: Array<Record<string, any>> = [];
-      {
-        let segar0 = false;
-        for (;;) {
-          try {
-            const cur = (await clientOf(shop).get(`/product/202309/products/${m.productId}`)) as Record<string, any>;
-            liveAttrs = Array.isArray(cur?.product_attributes) ? cur.product_attributes : [];
-            break;
-          } catch (e) {
-            if (e instanceof TikTokApiError && e.tokenBermasalah && !segar0) {
-              segar0 = true;
-              await this.shops.refreshOne(userId, shop.id);
-              const [fr] = await this.db.select().from(shops).where(eq(shops.id, shop!.id)).limit(1);
-              if (fr) { shop = fr; shopById.set(shop.id, fr); }
-              continue;
-            }
-            liveAttrs = [];
-            break;
-          }
-        }
+      const stListing = statusByMapping.get(m.id) || "";
+      if (stListing && stListing !== "ACTIVATE") {
+        const peta: Record<string, string> = {
+          DELETED: "Listing sudah DIHAPUS di TikTok",
+          FREEZE: "Listing DIBEKUKAN TikTok (freeze)",
+          FROZEN: "Listing dibekukan TikTok",
+          DEACTIVATED: "Listing nonaktif",
+          SELLER_DEACTIVATED: "Listing dinonaktifkan seller",
+          PLATFORM_DEACTIVATED: "Listing dinonaktifkan platform",
+          DRAFT: "Listing masih draf",
+        };
+        const alasan = `${peta[stListing] ?? `Listing status ${stListing}`} — tak bisa diedit via API. Benahi di Seller Center lalu terapkan ulang.`;
+        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "skipped", reason: alasan, url });
+        await this.tandaiMapping(m.id, "skipped", alasan);
+        continue;
       }
+      // Atribut WAJIB (mis. 101066 BPOM) harus IKUT. Prioritas nilai:
+      // master posting > listing toko ini > POOL lintas-toko (isi yg kurang).
+      const liveAttrs = liveByMapping.get(m.id) ?? [];
       const productAttributes = MasterPostingsService.gabungAtribut(liveAttrs, this.postingProductAttributes(posting));
+      const sudahAda = new Set(productAttributes.map((a) => a.id));
+      for (const [id, a] of poolAttrs) if (!sudahAda.has(id)) productAttributes.push(a);
       const body: Record<string, unknown> = { title };
       if (description !== null) body.description = description;
       if (productAttributes.length) body.product_attributes = productAttributes;
@@ -995,9 +1035,12 @@ export class MasterPostingsService {
         const jejak = `Diterapkan: ${applied.join(", ")}${verifiedTitle ? ` · judul kini: "${verifiedTitle.slice(0, 80)}"` : ""}`;
         await this.tandaiMapping(m.id, "ok", jejak);
       } catch (e) {
+        let pesan = (e as Error).message;
+        if (/12052901/.test(pesan)) pesan = "Listing tidak dalam status yang bisa diedit (mis. draf/nonaktif/sedang ditinjau TikTok). Aktifkan/benahi listing di Seller Center lalu terapkan ulang. (" + pesan.slice(0, 80) + "…)";
+        else if (/12052104/.test(pesan)) pesan = "Atribut wajib kategori belum terisi & tak ada di toko lain untuk disalin. Isi di kartu \"Atribut Produk (Marketplace)\" lalu terapkan ulang. (" + pesan.slice(0, 90) + "…)";
         this.logger.warn(`Terapkan master posting ${postingId} → ${m.productId} (${nama}): ${(e as Error).message}`);
-        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "failed", error: (e as Error).message, url });
-        await this.tandaiMapping(m.id, "failed", (e as Error).message);
+        hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "failed", error: pesan, url });
+        await this.tandaiMapping(m.id, "failed", pesan);
       }
     }
     return {
