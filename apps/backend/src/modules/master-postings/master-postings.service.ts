@@ -609,6 +609,18 @@ export class MasterPostingsService {
     if (p.package_weight) attributes.package_weight = p.package_weight;
     if (p.package_dimensions) attributes.package_dimensions = p.package_dimensions;
     if (p.category_chains) attributes.category_chains = p.category_chains;
+    // Atribut produk kategori (mis. 101066 Nomor Ijin Edar / BPOM). Disimpan
+    // apa adanya supaya bisa diedit di form & dikirim ulang saat apply.
+    if (Array.isArray(p.product_attributes) && p.product_attributes.length) {
+      attributes.productAttributes = p.product_attributes
+        .filter((a: any) => a?.id)
+        .map((a: any) => ({
+          id: String(a.id),
+          name: String(a.name ?? ""),
+          values: (Array.isArray(a.values) ? a.values : [])
+            .map((v: any) => ({ ...(v?.id ? { id: String(v.id) } : {}), name: String(v?.name ?? "") })),
+        }));
+    }
     return { name, description, categoryId, brand, images, groups, attributes, skus };
   }
 
@@ -669,6 +681,82 @@ export class MasterPostingsService {
       })
       .returning();
     return row;
+  }
+
+  /** Atribut produk tersimpan di master posting -> bentuk body TikTok. */
+  private postingProductAttributes(posting: Record<string, any>): Array<{ id: string; values: Array<{ id?: string; name: string }> }> {
+    const raw = (posting?.attributes as Record<string, any> | null)?.productAttributes;
+    if (!Array.isArray(raw)) return [];
+    const out: Array<{ id: string; values: Array<{ id?: string; name: string }> }> = [];
+    for (const a of raw) {
+      if (!a?.id) continue;
+      const values = (Array.isArray(a.values) ? a.values : [])
+        .map((v: any) => ({ ...(v?.id ? { id: String(v.id) } : {}), name: String(v?.name ?? "") }))
+        .filter((v: { name: string }) => v.name !== "");
+      if (values.length) out.push({ id: String(a.id), values });
+    }
+    return out;
+  }
+
+  /** Gabung atribut listing LIVE + override master posting (override menang). */
+  private static gabungAtribut(
+    live: Array<Record<string, any>>,
+    override: Array<{ id: string; values: Array<{ id?: string; name: string }> }>,
+  ): Array<{ id: string; values: Array<{ id?: string; name: string }> }> {
+    const map = new Map<string, { id: string; values: Array<{ id?: string; name: string }> }>();
+    for (const a of live) {
+      if (!a?.id) continue;
+      const values = (Array.isArray(a.values) ? a.values : [])
+        .map((v: any) => ({ ...(v?.id ? { id: String(v.id) } : {}), name: String(v?.name ?? "") }))
+        .filter((v: { name: string }) => v.name !== "");
+      if (values.length) map.set(String(a.id), { id: String(a.id), values });
+    }
+    for (const a of override) map.set(String(a.id), a);
+    return [...map.values()];
+  }
+
+  /**
+   * Definisi atribut kategori marketplace (TikTok GetAttributes) untuk form
+   * create/edit: id, nama, wajib?, boleh custom?, multi?, pilihan nilai. Hanya
+   * PRODUCT_PROPERTY (SALES_PROPERTY = varian, ditangani grup varian).
+   */
+  async categoryAttributes(userId: string, categoryId: string, shopId?: string) {
+    if (!categoryId) throw new BadRequestException("categoryId wajib");
+    const kond = [eq(shops.userId, userId), eq(shops.marketplace, "tiktok")];
+    if (shopId) kond.push(eq(shops.id, shopId));
+    const shopRows = await this.db.select().from(shops).where(and(...kond));
+    let shop = shopRows.find((x) => x.accessToken && x.shopCipher);
+    if (!shop) throw new BadRequestException("Tidak ada toko TikTok tersambung untuk membaca atribut kategori");
+    const { appKey, appSecret } = await this.tiktok.credentials();
+    let client = new TikTokClient(appKey, appSecret, this.crypto.decrypt(shop.accessToken!), shop.shopCipher);
+    let segar = false;
+    const resp = await (async () => {
+      for (;;) {
+        try {
+          return (await client.get(`/product/202309/categories/${categoryId}/attributes`, { locale: "id-ID" })) as Record<string, any>;
+        } catch (e) {
+          if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) {
+            segar = true;
+            await this.shops.refreshOne(userId, shop!.id);
+            const [fr] = await this.db.select().from(shops).where(eq(shops.id, shop!.id)).limit(1);
+            if (fr) { shop = fr; client = new TikTokClient(appKey, appSecret, this.crypto.decrypt(fr.accessToken!), fr.shopCipher); }
+            continue;
+          }
+          throw e;
+        }
+      }
+    })();
+    const attrs = (Array.isArray(resp?.attributes) ? resp.attributes : [])
+      .filter((a: any) => a?.type !== "SALES_PROPERTY")
+      .map((a: any) => ({
+        id: String(a.id),
+        name: String(a.name ?? ""),
+        required: !!a.is_requried,
+        customizable: !!a.is_customizable,
+        multiple: !!a.is_multiple_selection,
+        values: (Array.isArray(a.values) ? a.values : []).map((v: any) => ({ id: String(v.id), name: String(v.name ?? "") })),
+      }));
+    return { categoryId: String(categoryId), attributes: attrs };
   }
 
   async removeMapping(userId: string, postingId: string, mappingId: string) {
@@ -838,8 +926,34 @@ export class MasterPostingsService {
         await this.tandaiMapping(m.id, "skipped", `${m.marketplace} belum didukung`);
         continue;
       }
+      // Atribut WAJIB (mis. 101066 Nomor Ijin Edar/BPOM) harus IKUT saat
+      // partial_edit — TikTok menolak kalau hilang. Ambil atribut listing LIVE,
+      // lalu timpa dgn nilai master posting → atribut wajib tak pernah hilang.
+      let liveAttrs: Array<Record<string, any>> = [];
+      {
+        let segar0 = false;
+        for (;;) {
+          try {
+            const cur = (await clientOf(shop).get(`/product/202309/products/${m.productId}`)) as Record<string, any>;
+            liveAttrs = Array.isArray(cur?.product_attributes) ? cur.product_attributes : [];
+            break;
+          } catch (e) {
+            if (e instanceof TikTokApiError && e.tokenBermasalah && !segar0) {
+              segar0 = true;
+              await this.shops.refreshOne(userId, shop.id);
+              const [fr] = await this.db.select().from(shops).where(eq(shops.id, shop!.id)).limit(1);
+              if (fr) { shop = fr; shopById.set(shop.id, fr); }
+              continue;
+            }
+            liveAttrs = [];
+            break;
+          }
+        }
+      }
+      const productAttributes = MasterPostingsService.gabungAtribut(liveAttrs, this.postingProductAttributes(posting));
       const body: Record<string, unknown> = { title };
       if (description !== null) body.description = description;
+      if (productAttributes.length) body.product_attributes = productAttributes;
       const path = `/product/202309/products/${m.productId}/partial_edit`;
       try {
         let segar = false;

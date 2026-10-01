@@ -86,6 +86,16 @@ export class MasterPostingsController {
   }
 
   /** Produk marketplace sebuah toko (untuk memilih listing yang dipetakan). */
+  /** Atribut kategori marketplace utk form create/edit (termasuk wajib, mis. BPOM). */
+  @Get("category-attributes")
+  async categoryAttributes(
+    @Req() req: FastifyRequest,
+    @Query("categoryId") categoryId: string,
+    @Query("shopId") shopId?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.categoryAttributes(uid(req), categoryId, shopId) };
+  }
+
   @Get("shop-products")
   async shopProducts(
     @Req() req: FastifyRequest,

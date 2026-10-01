@@ -22,6 +22,7 @@ import {
   EmptyState,
   Modal,
   ConfirmModal,
+  InlineAlert,
   useToast,
 } from "../components/ui";
 
@@ -803,6 +804,14 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
         </Card>
       </div>
 
+      <AtributKategori
+        postingId={id}
+        categoryId={d.categoryId}
+        shopId={d.mappings[0]?.shopId}
+        attributes={d.attributes}
+        onSaved={refetch}
+      />
+
       {/* Grup varian */}
       <Card className="mt-4">
         <div className="flex items-center justify-between mb-3">
@@ -987,6 +996,108 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
         }
       />
     </Layout>
+  );
+}
+
+interface CatAttr { id: string; name: string; required: boolean; customizable: boolean; multiple: boolean; values: { id: string; name: string }[] }
+
+/**
+ * Editor atribut produk kategori marketplace (mis. Nomor Ijin Edar/BPOM 101066).
+ * Memuat definisi atribut kategori dari TikTok (wajib/pilihan + nilai), diisi
+ * dari atribut tersimpan, lalu disimpan ke master posting → ikut dikirim saat
+ * Terapkan. Tanpa ini, edit listing kategori tertentu ditolak marketplace.
+ */
+function AtributKategori({ postingId, categoryId, shopId, attributes, onSaved }: {
+  postingId: string; categoryId: number | null; shopId?: string; attributes: Record<string, unknown>; onSaved: () => Promise<void> | void;
+}) {
+  const toast = useToast();
+  const [defs, setDefs] = useState<CatAttr[] | null>(null);
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!categoryId) { setDefs([]); return; }
+    setDefs(null); setErr(null);
+    const q = new URLSearchParams({ categoryId: String(categoryId) });
+    if (shopId) q.set("shopId", shopId);
+    api.get<{ attributes: CatAttr[] }>(`/master-postings/category-attributes?${q.toString()}`)
+      .then((r) => {
+        setDefs(r.attributes);
+        const pa = ((attributes?.productAttributes as { id: string; values: { name: string }[] }[]) ?? []);
+        const map: Record<string, string> = {};
+        for (const a of pa) map[String(a.id)] = (a.values ?? []).map((v) => v.name).join(", ");
+        setVals(map);
+      })
+      .catch((e) => { setDefs([]); setErr((e as Error).message); });
+  }, [categoryId, shopId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function save() {
+    if (!defs) return;
+    setBusy(true);
+    try {
+      const productAttributes: { id: string; name: string; values: { id?: string; name: string }[] }[] = [];
+      for (const d of defs) {
+        const raw = (vals[d.id] ?? "").trim();
+        if (!raw) continue;
+        const tokens = d.multiple ? raw.split(",").map((x) => x.trim()).filter(Boolean) : [raw];
+        const values = tokens.map((tok) => {
+          const hit = d.values.find((v) => v.name.toLowerCase() === tok.toLowerCase());
+          return hit ? { id: hit.id, name: hit.name } : { name: tok };
+        });
+        if (values.length) productAttributes.push({ id: d.id, name: d.name, values });
+      }
+      await api.patch(`/master-postings/${postingId}`, { attributes: { ...(attributes || {}), productAttributes } });
+      toast("Atribut produk disimpan — akan ikut saat Terapkan.", "success");
+      await onSaved();
+    } catch (e) { toast((e as Error).message, "danger"); } finally { setBusy(false); }
+  }
+
+  const sorted = (defs ?? []).slice().sort((a, b) => Number(b.required) - Number(a.required));
+
+  return (
+    <Card className="mt-4">
+      <div className="flex items-center justify-between mb-1">
+        <div>
+          <div className="text-sm font-medium text-ink">Atribut Produk (Marketplace)</div>
+          <div className="text-xs text-ink-2">Field kategori dari marketplace. Yang bertanda <b>wajib</b> harus diisi agar Terapkan tidak ditolak (mis. Nomor Ijin Edar / BPOM).</div>
+        </div>
+        <Button size="sm" variant="outline" loading={busy} onClick={save} disabled={!defs || defs.length === 0}>Simpan Atribut</Button>
+      </div>
+      {!categoryId ? (
+        <div className="text-xs text-ink-3 mt-2">Kategori belum terdeteksi untuk posting ini — impor dari listing atau set kategori dulu.</div>
+      ) : defs === null ? (
+        <div className="text-xs text-ink-3 mt-2">Memuat atribut kategori…</div>
+      ) : err ? (
+        <InlineAlert tone="warning">{err}</InlineAlert>
+      ) : defs.length === 0 ? (
+        <div className="text-xs text-ink-3 mt-2">Kategori ini tak punya atribut produk khusus.</div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 mt-2">
+          {sorted.map((d) => (
+            <div key={d.id}>
+              <label className="block text-[11px] mb-1">
+                <span className="text-ink-2">{d.name}</span>
+                {d.required && <span className="ml-1 text-red-600 font-medium">wajib</span>}
+                {d.multiple && <span className="ml-1 text-ink-3">(boleh &gt;1, pisah koma)</span>}
+              </label>
+              <input
+                list={d.values.length ? `attr-${d.id}` : undefined}
+                value={vals[d.id] ?? ""}
+                onChange={(e) => setVals((m) => ({ ...m, [d.id]: e.target.value }))}
+                placeholder={d.values.length ? "pilih / ketik" : "ketik nilai"}
+                className={`w-full rounded-lg border px-3 py-2 text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-brand/40 ${d.required && !(vals[d.id] ?? "").trim() ? "border-red-300" : "border-line"}`}
+              />
+              {d.values.length > 0 && (
+                <datalist id={`attr-${d.id}`}>
+                  {d.values.map((v) => <option key={v.id} value={v.name} />)}
+                </datalist>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 
