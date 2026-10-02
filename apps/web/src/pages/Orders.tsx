@@ -252,6 +252,8 @@ export function Orders() {
   const [mp, setMp] = useState("");
   const [fs, setFs] = useState("");
   const [src, setSrc] = useState<"" | "api" | "manual">("");
+  const [shop, setShop] = useState("");
+  const [tgl, setTgl] = useState<"" | "today">("");
   const [statFilter, setStatFilter] = useState<"" | "kirim_hari_ini" | "urgent">("");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Order | null>(null);
@@ -289,6 +291,10 @@ export function Orders() {
     return id;
   }, [all]);
   const marketplaces = useMemo(() => [...new Set(all.map((o) => o.marketplace))], [all]);
+  const shopNames = useMemo(
+    () => [...new Set(all.map((o) => o.shopName).filter((x): x is string => !!x))].sort(),
+    [all],
+  );
 
   // Shared search + marketplace + source filter for both views. The
   // fulfillment-status dropdown only applies to the table view.
@@ -297,6 +303,13 @@ export function Orders() {
     return all.filter((o) => {
       if (mp && o.marketplace !== mp) return false;
       if (src && (o.sumber ?? "api") !== src) return false;
+      if (shop && (o.shopName ?? "") !== shop) return false;
+      if (tgl === "today") {
+        const d = o.createdAtMarketplace ?? o.createdAt;
+        const ms = d ? new Date(d).getTime() : 0;
+        const start = startTodayJakMs();
+        if (!(ms >= start && ms < start + 86400000)) return false;
+      }
       if (view === "tabel" && fs && o.fulfillmentStatus !== fs) return false;
       if (statFilter) {
         const st = o.fulfillmentStatus;
@@ -312,12 +325,12 @@ export function Orders() {
       }
       return true;
     });
-  }, [all, q, mp, fs, src, view, statFilter]);
+  }, [all, q, mp, fs, src, shop, tgl, view, statFilter]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
   const rows = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
-  const hasFilters = Boolean(q.trim() || mp || fs || src);
+  const hasFilters = Boolean(q.trim() || mp || fs || src || shop || tgl);
 
   // Keep the live modal order in sync with reloaded data so the board reflects moves.
   const liveSelected = selected && (all.find((o) => o.id === selected.id) ?? selected);
@@ -527,6 +540,26 @@ export function Orders() {
               <option key={m} value={m}>{MP_LABEL[m] ?? m}</option>
             ))}
           </Select>
+          {shopNames.length > 1 && (
+            <Select
+              className="w-auto min-w-[160px]"
+              value={shop}
+              onChange={(e) => { setShop(e.target.value); setPage(0); }}
+            >
+              <option value="">Semua toko</option>
+              {shopNames.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </Select>
+          )}
+          <Select
+            className="w-auto min-w-[140px]"
+            value={tgl}
+            onChange={(e) => { setTgl(e.target.value as "" | "today"); setPage(0); }}
+          >
+            <option value="">Semua tanggal</option>
+            <option value="today">Hari ini</option>
+          </Select>
           <Select
             className="w-auto min-w-[150px]"
             value={src}
@@ -562,7 +595,7 @@ export function Orders() {
             <Button
               variant="text"
               icon="close"
-              onClick={() => { setQ(""); setMp(""); setFs(""); setPage(0); }}
+              onClick={() => { setQ(""); setMp(""); setFs(""); setSrc(""); setShop(""); setTgl(""); setPage(0); }}
             >
               Reset
             </Button>
@@ -654,7 +687,7 @@ export function Orders() {
                             <Button
                               variant="tonal"
                               icon="close"
-                              onClick={() => { setQ(""); setMp(""); setFs(""); setPage(0); }}
+                              onClick={() => { setQ(""); setMp(""); setFs(""); setSrc(""); setShop(""); setTgl(""); setPage(0); }}
                             >
                               Reset filter
                             </Button>
