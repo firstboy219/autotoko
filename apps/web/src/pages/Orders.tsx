@@ -663,7 +663,7 @@ export function Orders() {
                   <TH>Pembeli</TH>
                   <TH>Nomor Resi</TH>
                   <TH align="right">Total</TH>
-                  <TH align="right">Est. Pencairan</TH>
+                  <TH align="right">Est. Profit</TH>
                   <TH align="right">Fee</TH>
                   <TH align="right">Waktu</TH>
                 </tr>
@@ -815,7 +815,7 @@ export function Orders() {
                         {o.estPencairan == null ? (
                           <span className="text-ink-3">—</span>
                         ) : (
-                          <span className="text-emerald-700" title="Estimasi NET: harga setelah diskon − estimasi komisi (atur % di Otomasi Order). Komisi asli TikTok tak tersedia di API order.">≈ {rupiah(o.estPencairan)}</span>
+                          <span className={Number(o.estPencairan) < 0 ? "text-red-600" : "text-emerald-700"} title="Estimasi profit bersih (logika menu HPP & Harga Jual) pada harga jual order ini. Negatif = rugi di harga jual itu. Hanya tampil untuk produk yang SKU-nya sudah dimapping ke menu HPP.">≈ {rupiah(o.estPencairan)}</span>
                         )}
                       </TD>
                       <TD align="right" className="tabular-nums whitespace-nowrap">
@@ -1569,9 +1569,9 @@ function OtomasiOrderModal({ onClose }: { onClose: () => void }) {
               className="tabular-nums"
             />
             <p className="text-xs text-ink-3 mt-1">
-              Dipakai untuk kolom <b>Est. Pencairan (net)</b> di menu order: harga setelah diskon dikurangi estimasi
-              komisi + biaya afiliasi/marketplace. Komisi asli TikTok tak tersedia di API order, jadi sesuaikan sendiri
-              (mis. 8). 0 = tidak potong komisi.
+              Catatan: kolom <b>Est. Profit</b> di menu order kini memakai <b>profit bersih</b> dari menu HPP &amp; Harga
+              Jual (HPP + biaya costing tiap produk), bukan persen ini. Setelan % komisi ini hanya disimpan untuk
+              estimasi kasar. 0 = tidak potong komisi.
             </p>
           </div>
 
@@ -1934,9 +1934,9 @@ function OrderDetail({ order, onClose, onChanged }: { order: Order; onClose: () 
     ["Pembeli", order.buyerName ?? "-"],
     ["Total", <span className="tabular-nums">{rupiah(order.totalAmount)}</span>],
     [
-      "Est. pencairan (net)",
+      "Est. profit (net)",
       order.estPencairan != null ? (
-        <span className="tabular-nums text-emerald-700">≈ {rupiah(order.estPencairan)}</span>
+        <span className={`tabular-nums ${Number(order.estPencairan) < 0 ? "text-red-600" : "text-emerald-700"}`}>≈ {rupiah(order.estPencairan)}</span>
       ) : (
         "-"
       ),

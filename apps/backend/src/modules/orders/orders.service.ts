@@ -4,6 +4,8 @@ import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders, orderSettings, resiScans, resiScanCodes, shops, marketplaceSkuMap, masterProducts } from "../../database/schema/index.js";
 import { parseStatusConfig, deriveStatus, MP_STATUS_LABEL } from "../marketplace-sync/status-config.js";
 import { AdminSettingsService } from "../admin-settings/admin-settings.service.js";
+import { CostingService } from "../costing/costing.service.js";
+import { calculatePublishPricing } from "@autotoko/shared";
 
 export interface ListOrdersOpts {
   status?: FulfillmentStatus;
@@ -29,11 +31,25 @@ export const FULFILLMENT_STATUSES = [
 ] as const;
 export type FulfillmentStatus = (typeof FULFILLMENT_STATUSES)[number];
 
+type PricingBasis = {
+  productId: string;
+  hppCents: number;
+  publishPrice: number | null;
+  marketplaceFeeRate: number;
+  eventRate: number;
+  affiliatorRate: number;
+  adsRate: number;
+  adsFixedCents: number;
+  sedekahRate: number;
+  resellerRate: number;
+};
+
 @Injectable()
 export class OrdersService {
   constructor(
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly settings: AdminSettingsService,
+    private readonly costing: CostingService,
   ) {}
 
   /** Normalisasi kunci resi: huruf besar, hanya alfanumerik (samakan dgn resi_scans.resi). */
@@ -58,37 +74,45 @@ export class OrdersService {
     return null;
   }
   /**
-   * Estimasi pencairan marketplace dari DETAIL ORDER (raw.payment): pendapatan
-   * produk seller = sub_total - seller_discount. Belum potong komisi TikTok
-   * (komisi tak tersedia di detail order); fallback ke kolom subtotal/total.
+   * Est. Pencairan = ESTIMASI PROFIT BERSIH per order, memakai logika menu HPP &
+   * Harga Jual: harga jual aktual tiap item (salePrice) dihitung lewat
+   * calculatePublishPricing dengan HPP + rate costing master-nya, lalu x qty.
+   * HANYA item yang SKU-nya sudah dimapping ke master produk ber-costing yang
+   * dihitung; order tanpa satu pun item termapping -> null (kolom kosong).
    */
   private estPencairan(
-    o: { raw?: unknown; priceDetail?: unknown; subtotal?: unknown; totalAmount?: unknown },
-    rate = 0,
+    items: unknown,
+    skuToMasterId: Map<string, string>,
+    basisByMaster: Map<string, PricingBasis>,
   ): string | null {
-    // Basis "harga publish - diskon": utamakan GetPriceDetail (sku_sale_price),
-    // lalu raw.payment (sub_total - seller_discount), lalu kolom subtotal/total.
-    let base: number | null = null;
-    const pd = o.priceDetail && typeof o.priceDetail === "object" ? (o.priceDetail as Record<string, unknown>) : null;
-    if (pd) {
-      const ssp = Number(pd.sku_sale_price ?? pd.subtotal ?? 0);
-      if (Number.isFinite(ssp) && ssp > 0) base = ssp;
+    if (!Array.isArray(items)) return null;
+    let total = 0;
+    let adaMapped = false;
+    for (const it of items) {
+      const o2 = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
+      const skuId = o2.skuId != null ? String(o2.skuId) : "";
+      const mid = skuId ? skuToMasterId.get(skuId) : undefined;
+      if (!mid) continue;
+      const basis = basisByMaster.get(mid);
+      if (!basis) continue;
+      const salePrice = Number(o2.salePrice ?? o2.sale_price ?? 0);
+      const qty = Number(o2.qty ?? o2.quantity ?? 0) || 0;
+      if (!Number.isFinite(salePrice) || salePrice <= 0 || qty <= 0) continue;
+      const pr = calculatePublishPricing({
+        publishPriceCents: Math.round(salePrice * 100),
+        hppCents: basis.hppCents,
+        marketplaceFeeRate: basis.marketplaceFeeRate,
+        eventRate: basis.eventRate,
+        affiliatorRate: basis.affiliatorRate,
+        adsRate: basis.adsRate,
+        adsFixedCents: basis.adsFixedCents,
+        sedekahRate: basis.sedekahRate,
+        resellerRate: basis.resellerRate,
+      });
+      total += (pr.netProfitCents / 100) * qty;
+      adaMapped = true;
     }
-    if (base == null) {
-      const p = this.rawObj(o).payment as Record<string, unknown> | undefined;
-      if (p && typeof p === "object") {
-        const sub = Number(p.sub_total ?? 0);
-        const disc = Number(p.seller_discount ?? 0);
-        if (Number.isFinite(sub) && sub > 0) base = Math.max(0, sub - (Number.isFinite(disc) ? disc : 0));
-      }
-    }
-    if (base == null && o.subtotal != null) base = Number(o.subtotal);
-    if (base == null && o.totalAmount != null) base = Number(o.totalAmount);
-    if (base == null || !Number.isFinite(base)) return null;
-    // Net = basis x (1 - estimasi komisi). TikTok tak beri komisi di API order,
-    // jadi rate ini estimasi (afiliasi + komisi marketplace + biaya lain).
-    const net = base * (1 - (Number.isFinite(rate) ? rate : 0));
-    return String(Math.max(0, Math.round(net)));
+    return adaMapped ? String(Math.round(total)) : null;
   }
 
   private prioOf(o: { raw?: unknown }): number | null {
@@ -178,11 +202,16 @@ export class OrdersService {
     // Peta skuId (varian marketplace) -> nama master produk AutoToko, dari
     // marketplace_sku_map. Dipakai menampilkan nama master di tiap item order.
     const skuMasterRows = await this.db
-      .select({ sku: marketplaceSkuMap.sku, nama: masterProducts.name })
+      .select({ sku: marketplaceSkuMap.sku, nama: masterProducts.name, mid: marketplaceSkuMap.masterProductId })
       .from(marketplaceSkuMap)
       .innerJoin(masterProducts, eq(masterProducts.id, marketplaceSkuMap.masterProductId))
       .where(eq(marketplaceSkuMap.userId, userId));
     const skuMaster = new Map(skuMasterRows.map((r) => [String(r.sku), r.nama]));
+    const skuToMasterId = new Map(skuMasterRows.map((r) => [String(r.sku), r.mid] as const));
+    // Profit bersih per master (logika menu HPP & Harga Jual) utk kolom Est. Pencairan.
+    const basisByMaster = new Map(
+      (await this.costing.pricingBasis(userId)).map((b) => [b.productId, b] as const),
+    );
     const enrichItems = (items: unknown): unknown => {
       if (!Array.isArray(items)) return items;
       return items.map((it) => {
@@ -254,13 +283,6 @@ export class OrdersService {
     const manualTerpilih =
       opts.active || (opts.status && opts.status !== "dikirim") ? [] : barisManual;
 
-    const [osRow] = await this.db
-      .select({ r: orderSettings.estCommissionRate })
-      .from(orderSettings)
-      .where(eq(orderSettings.userId, userId))
-      .limit(1);
-    const rate = Math.min(0.9, Math.max(0, Number(osRow?.r ?? 0.08) || 0));
-
     return [
       ...dariApi.map((o) => ({
         ...o, sumber: "api" as const,
@@ -270,7 +292,7 @@ export class OrdersService {
         isCod: this.isCodOf(o),
         shipDeadlineMs: this.deadlineOf(o),
         priorityLevel: this.prioOf(o),
-        estPencairan: this.estPencairan(o, rate),
+        estPencairan: this.estPencairan(o.items, skuToMasterId, basisByMaster),
         shopName: o.shopId ? namaToko.get(o.shopId) ?? null : null,
         items: enrichItems(o.items),
       })),
