@@ -13,7 +13,6 @@ import { NavSettingsModal, type NavItem, type NavPrefs } from "./NavSettings";
 export const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: "dashboard", end: true },
   { to: "/toko", label: "Toko Saya", icon: "store" },
-  { to: "/produk", label: "Master Produk", icon: "package" },
   { to: "/master-postingan", label: "Master Postingan", icon: "tag" },
   { to: "/katalog", label: "Kesehatan Katalog", icon: "activity" },
   { to: "/orders", label: "Orders", icon: "cart" },
@@ -25,7 +24,7 @@ export const NAV: NavItem[] = [
   { to: "/promo", label: "Promosi", icon: "tag" },
   { to: "/laporan", label: "Laporan", icon: "trending" },
   { to: "/bom", label: "BOM / Bahan", icon: "beaker" },
-  { to: "/hpp", label: "HPP & Harga Jual", icon: "tag" },
+  { to: "/hpp", label: "Master Produk & HPP", icon: "package" },
   { to: "/wallet", label: "Wallet", icon: "wallet" },
   { to: "/pencairan", label: "Pencairan Dana", icon: "banknote" },
   { to: "/laporan-bagian", label: "Laporan Bagian", icon: "trending" },

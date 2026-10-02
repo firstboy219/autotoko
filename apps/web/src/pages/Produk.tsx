@@ -149,7 +149,7 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
   );
 }
 
-export function Produk() {
+export function Produk({ embedded = false }: { embedded?: boolean } = {}) {
   const [sort, setSort] = useState("nama");
   const [days, setDays] = useState("30");
   const { data, loading, reload } = useFetch<Master[]>("/products");
@@ -211,8 +211,8 @@ export function Produk() {
     }
   }
 
-  return (
-    <Layout title="Master Produk">
+  const body = (
+    <>
       <PageHeader
         title="Master Produk"
         subtitle="Satu master produk menaungi seluruh postingan di tiap marketplace."
@@ -421,8 +421,9 @@ export function Produk() {
       <div className="mt-4">
         <SaranAi path="/products/saran" keterangan="Membaca seluruh katalog produk dan membandingkannya dengan tren pasar Indonesia." />
       </div>
-    </Layout>
+    </>
   );
+  return embedded ? body : <Layout title="Master Produk">{body}</Layout>;
 }
 
 function MarketplaceCatalog() {

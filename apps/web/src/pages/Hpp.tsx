@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
@@ -22,6 +22,7 @@ import {
   TableWrap,
 } from "../components/ui";
 import { PackingMaterialsCard } from "../components/PackingMaterials";
+import { Produk } from "./Produk";
 
 import { SaranAi } from "../components/SaranAi";
 interface Row {
@@ -38,7 +39,22 @@ interface Row {
   soldQty?: number;
 }
 
+function HubTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
+        active ? "border-brand text-ink" : "border-transparent text-ink-3 hover:text-ink-2"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function Hpp() {
+  const [tab, setTab] = useState<"hpp" | "produk">("hpp");
   /** "" every brand, "none" the unassigned ones. */
   const [brand, setBrand] = useState("");
   const brands = useFetch<{ id: string; name: string }[]>("/shops/categories");
@@ -52,11 +68,19 @@ export function Hpp() {
   );
 
   return (
-    <Layout title="HPP & Harga Jual">
+    <Layout title="Master Produk & HPP">
       <PageHeader
-        title="HPP & Harga Jual"
-        subtitle="Hitung harga pokok produksi dari bahan baku, lalu susun harga publish beserta seluruh potongannya."
+        title="Master Produk & HPP"
+        subtitle="Kelola master produk, HPP & harga jual, dan pemetaan marketplace di satu tempat."
       />
+      <div className="flex gap-1 border-b border-line mb-4">
+        <HubTab active={tab === "hpp"} onClick={() => setTab("hpp")}>HPP &amp; Harga Jual</HubTab>
+        <HubTab active={tab === "produk"} onClick={() => setTab("produk")}>Kelola Produk &amp; Pemetaan</HubTab>
+      </div>
+      {tab === "produk" ? (
+        <Produk embedded />
+      ) : (
+        <>
 
       <PackingMaterialsCard />
 
@@ -257,6 +281,8 @@ export function Hpp() {
       <div className="mt-4">
         <SaranAi path="/costing/saran" keterangan="Membaca margin tiap produk dan menunjukkan mana yang perlu dibenahi." />
       </div>
+        </>
+      )}
     </Layout>
   );
 }
