@@ -1038,6 +1038,11 @@ export class MasterPostingsService {
     const title = (posting.name ?? "").trim().slice(0, 255);
     const description = posting.description ?? null;
     const gambarBelumDidukung = (posting.images?.length ?? 0) > 0;
+    // Harga per SKU dari Master Postingan = sumber harga yang dikirim ke marketplace.
+    const postingSkus = await this.db
+      .select({ sku: masterPostingSkus.sku, combo: masterPostingSkus.combo, price: masterPostingSkus.price })
+      .from(masterPostingSkus)
+      .where(and(eq(masterPostingSkus.userId, userId), eq(masterPostingSkus.masterPostingId, postingId)));
 
     const shopIds = [...new Set(mappings.map((m) => m.shopId))];
     const shopRows = await this.db.select().from(shops).where(inArray(shops.id, shopIds));
@@ -1180,6 +1185,7 @@ export class MasterPostingsService {
         // "sukses dikirim"). Best-effort — sukses partial_edit sudah dikonfirmasi.
         let verifiedTitle: string | null = null;
         let verifiedDescription: string | null = null;
+        let liveSkus: Array<Record<string, unknown>> = [];
         try {
           const fresh = await clientOf(shop).get(`/product/202309/products/${m.productId}`);
           const t = (fresh as { title?: unknown; description?: unknown })?.title;
@@ -1187,6 +1193,8 @@ export class MasterPostingsService {
           if (typeof t === "string") verifiedTitle = t;
           if (typeof de === "string")
             verifiedDescription = de.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+          const sk = (fresh as { skus?: unknown })?.skus;
+          if (Array.isArray(sk)) liveSkus = sk as Array<Record<string, unknown>>;
         } catch {
           /* abaikan; edit sudah sukses */
         }
@@ -1194,6 +1202,21 @@ export class MasterPostingsService {
         const applied = ["nama"];
         if (description !== null) applied.push("deskripsi");
         const pending = gambarBelumDidukung ? ["gambar (butuh unggah gambar TikTok)"] : [];
+        // Harga: kirim harga SKU Master Postingan ke marketplace (prices/update).
+        // sku_id diresolve dari listing LIVE (by seller_sku, lalu kombinasi varian,
+        // lalu fallback listing 1-SKU). Gagal/ tak cocok dilaporkan, tak diam.
+        try {
+          const { items, unmatched } = this.resolvePriceItems(postingSkus, liveSkus);
+          if (items.length) {
+            await clientOf(shop).post(`/product/202309/products/${m.productId}/prices/update`, { skus: items });
+            applied.push(`harga (${items.length} SKU)`);
+            if (unmatched) pending.push(`harga ${unmatched} SKU (tak cocok dgn listing)`);
+          } else if (postingSkus.some((ps) => ps.price != null && Number(ps.price) > 0)) {
+            pending.push(liveSkus.length ? "harga (SKU tak cocok dgn listing)" : "harga (gagal baca listing)");
+          }
+        } catch (e) {
+          pending.push(`harga GAGAL: ${(e as Error).message.slice(0, 80)}`);
+        }
         hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "ok", applied, pending, url, sellerUrl, verifiedTitle, verifiedDescription });
         const jejak = `Diterapkan: ${applied.join(", ")}${verifiedTitle ? ` · judul kini: "${verifiedTitle.slice(0, 80)}"` : ""}`;
         await this.tandaiMapping(m.id, "ok", jejak);
@@ -1240,6 +1263,53 @@ export class MasterPostingsService {
         : undefined,
       hasil,
     };
+  }
+
+  /**
+   * Cocokkan tiap SKU Master Postingan (yang punya harga) ke sku_id listing LIVE,
+   * lalu bentuk payload prices/update TikTok. Urutan pencocokan: seller_sku ->
+   * kombinasi varian (sales_attributes) -> fallback listing 1-SKU. Amount = harga
+   * SKU dibulatkan (rupiah utuh), currency ikut listing.
+   */
+  private resolvePriceItems(
+    postingSkus: { sku: string | null; combo: unknown; price: string | null }[],
+    liveSkus: Array<Record<string, unknown>>,
+  ): { items: { id: string; price: { amount: string; currency: string } }[]; matched: number; unmatched: number } {
+    const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+    const priced = postingSkus.filter((ps) => ps.price != null && Number(ps.price) > 0);
+    const items: { id: string; price: { amount: string; currency: string } }[] = [];
+    let matched = 0;
+    let unmatched = 0;
+    for (const ps of priced) {
+      let live: Record<string, any> | undefined;
+      if (ps.sku) {
+        const want = norm(ps.sku);
+        live = liveSkus.find((ls) => (ls as any).seller_sku && norm((ls as any).seller_sku) === want);
+      }
+      if (!live) {
+        const combo =
+          ps.combo && typeof ps.combo === "object" ? (ps.combo as Record<string, string>) : {};
+        const vals = Object.values(combo).map(norm).filter(Boolean);
+        if (vals.length) {
+          live = liveSkus.find((ls) => {
+            const sa = Array.isArray((ls as any).sales_attributes) ? (ls as any).sales_attributes : [];
+            const names = sa.map((a: any) => norm(a?.value_name));
+            return vals.every((v) => names.includes(v));
+          });
+        }
+      }
+      if (!live && priced.length === 1 && liveSkus.length === 1) live = liveSkus[0] as Record<string, any>;
+      if (!live || !live.id) {
+        unmatched++;
+        continue;
+      }
+      const currency =
+        live.price && (live.price as any).currency ? String((live.price as any).currency) : "IDR";
+      items.push({ id: String(live.id), price: { amount: String(Math.round(Number(ps.price))), currency } });
+      matched++;
+    }
+    const byId = new Map(items.map((it) => [it.id, it] as const));
+    return { items: [...byId.values()], matched, unmatched };
   }
 
   private async tandaiMapping(mappingId: string, status: string, message: string): Promise<void> {

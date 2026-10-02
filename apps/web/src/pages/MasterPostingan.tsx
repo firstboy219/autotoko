@@ -719,6 +719,12 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
                     deskripsi kini: {h.verifiedDescription}…
                   </div>
                 )}
+                {h.applied && h.applied.length > 0 && (
+                  <div className="text-xs text-emerald-700 mt-1">Terkirim: {h.applied.join(", ")}</div>
+                )}
+                {h.pending && h.pending.length > 0 && (
+                  <div className="text-xs text-amber-700 mt-0.5">Tertunda/dilewati: {h.pending.join(", ")}</div>
+                )}
                 {(h.reason || h.error) && <div className="text-xs text-ink-3 mt-1">{h.reason ?? h.error}</div>}
               </div>
             ))}
