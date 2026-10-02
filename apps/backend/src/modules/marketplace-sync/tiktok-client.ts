@@ -80,6 +80,46 @@ export class TikTokClient {
     return this.kirim<T>("DELETE", path, query, body);
   }
 
+  /**
+   * Unggah gambar ke TikTok (MULTIPART). Beda dari kirim() yang JSON-only:
+   * body multipart TIDAK ikut ditandatangani (TikTok mengecualikan file body
+   * dari tanda tangan), dan content-type + boundary di-set otomatis oleh
+   * FormData. Mengembalikan `uri` untuk dipakai di partial_edit main_images.
+   */
+  async uploadImage(
+    bytes: Uint8Array,
+    filename = "image.jpg",
+    useCase = "MAIN_IMAGE",
+  ): Promise<{ uri: string; url?: string }> {
+    const path = "/product/202309/images/upload";
+    // Endpoint images/upload MENOLAK shop_cipher (error 36009004) -> jangan kirim.
+    const q: Record<string, string | number> = { app_key: this.appKey, timestamp: unixNow() };
+    q.sign = signTikTok({ appSecret: this.appSecret, path, query: q, body: undefined });
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(q).map(([k, v]) => [k, String(v)])),
+    ).toString();
+    const form = new FormData();
+    form.append("data", new Blob([bytes]), filename);
+    if (useCase) form.append("use_case", useCase);
+    const res = await this.fetchImpl(`${BASE}${path}?${qs}`, {
+      method: "POST",
+      headers: { "x-tts-access-token": this.accessToken },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      body: form as any,
+    });
+    const teks = await res.text();
+    let json: { code?: number; message?: string; data?: { uri?: string; url?: string } } = {};
+    try {
+      json = teks ? JSON.parse(teks) : {};
+    } catch {
+      throw new TikTokApiError(-1, `balasan bukan JSON (HTTP ${res.status}): ${teks.slice(0, 120)}`, res.status, path);
+    }
+    if (json.code !== 0) {
+      throw new TikTokApiError(json.code ?? -1, json.message ?? `HTTP ${res.status}`, res.status, path);
+    }
+    return { uri: String(json.data?.uri ?? ""), url: json.data?.url };
+  }
+
   private async kirim<T>(
     method: "GET" | "POST" | "PUT" | "DELETE",
     path: string,

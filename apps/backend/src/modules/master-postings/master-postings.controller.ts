@@ -171,8 +171,12 @@ export class MasterPostingsController {
 
   /** TERAPKAN ke marketplace (tulisan keluar; klik eksplisit penjual). */
   @Post(":id/apply")
-  async apply(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.svc.apply(uid(req), id) };
+  async apply(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body("withImages") withImages?: boolean,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.apply(uid(req), id, undefined, { withImages: !!withImages }) };
   }
 
   /** Terapkan SATU toko sesuai modenya di tabel (update = perbarui; create = distage). */
@@ -181,7 +185,8 @@ export class MasterPostingsController {
     @Req() req: FastifyRequest,
     @Param("id") id: string,
     @Param("mappingId") mappingId: string,
+    @Body("withImages") withImages?: boolean,
   ): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.svc.apply(uid(req), id, mappingId) };
+    return { success: true, data: await this.svc.apply(uid(req), id, mappingId, { withImages: !!withImages }) };
   }
 }

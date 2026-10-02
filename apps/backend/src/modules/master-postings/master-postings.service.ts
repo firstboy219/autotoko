@@ -1019,7 +1019,7 @@ export class MasterPostingsService {
    * Gambar & atribut disiapkan tetapi butuh endpoint unggah gambar TikTok yang
    * belum terpasang → dilaporkan "belum didukung" per-mapping, tidak gagal diam.
    */
-  async apply(userId: string, postingId: string, mappingId?: string) {
+  async apply(userId: string, postingId: string, mappingId?: string, opts: { withImages?: boolean } = {}) {
     const posting = await this.requirePosting(userId, postingId);
     const kond = [eq(masterPostingMappings.userId, userId), eq(masterPostingMappings.masterPostingId, postingId)];
     if (mappingId) kond.push(eq(masterPostingMappings.id, mappingId));
@@ -1038,6 +1038,23 @@ export class MasterPostingsService {
     const title = (posting.name ?? "").trim().slice(0, 255);
     const description = posting.description ?? null;
     const gambarBelumDidukung = (posting.images?.length ?? 0) > 0;
+    const withImages = !!opts.withImages;
+    // Unduh byte gambar sekali (bila opsi gambar dinyalakan); diunggah per toko.
+    const imageBytes: { bytes: Uint8Array; filename: string }[] = [];
+    if (withImages && Array.isArray(posting.images)) {
+      for (const [i, raw] of (posting.images as unknown[]).entries()) {
+        const u = typeof raw === "string" ? raw : "";
+        if (!u) continue;
+        try {
+          const r = await fetch(u);
+          if (!r.ok) continue;
+          const buf = new Uint8Array(await r.arrayBuffer());
+          if (buf.length) imageBytes.push({ bytes: buf, filename: `img-${i + 1}.jpg` });
+        } catch {
+          /* lewati gambar yang gagal diunduh */
+        }
+      }
+    }
     // Harga per SKU dari Master Postingan = sumber harga yang dikirim ke marketplace.
     const postingSkus = await this.db
       .select({ sku: masterPostingSkus.sku, combo: masterPostingSkus.combo, price: masterPostingSkus.price, stock: masterPostingSkus.stock })
@@ -1163,9 +1180,27 @@ export class MasterPostingsService {
       const productAttributes = MasterPostingsService.gabungAtribut(liveAttrs, this.postingProductAttributes(posting));
       const sudahAda = new Set(productAttributes.map((a) => a.id));
       for (const [id, a] of poolAttrs) if (!sudahAda.has(id)) productAttributes.push(a);
+      // Gambar (opt-in): unggah ke TOKO INI -> uri -> main_images (REPLACE set).
+      // Hanya dipasang bila SEMUA gambar berhasil diunggah (hindari set sebagian).
+      let mainImages: { uri: string }[] | null = null;
+      let imgNote = "";
+      if (withImages && imageBytes.length) {
+        try {
+          const uris: { uri: string }[] = [];
+          for (const img of imageBytes) {
+            const up = await clientOf(shop).uploadImage(img.bytes, img.filename, "MAIN_IMAGE");
+            if (up.uri) uris.push({ uri: up.uri });
+          }
+          if (uris.length === imageBytes.length && uris.length) mainImages = uris;
+          else imgNote = "gambar: sebagian gagal diunggah, dilewati";
+        } catch (e) {
+          imgNote = `gambar GAGAL: ${(e as Error).message.slice(0, 60)}`;
+        }
+      }
       const body: Record<string, unknown> = { title };
       if (description !== null) body.description = description;
       if (productAttributes.length) body.product_attributes = productAttributes;
+      if (mainImages) body.main_images = mainImages;
       // Kode SKU (seller_sku): ikut dalam partial_edit yang SAMA (hindari audit ganda).
       const sellerSkuRes = this.resolveSellerSkuItems(postingSkus, liveSkusByMapping.get(m.id) ?? []);
       if (sellerSkuRes.items.length) body.skus = sellerSkuRes.items;
@@ -1209,7 +1244,13 @@ export class MasterPostingsService {
         const applied = ["nama"];
         if (description !== null) applied.push("deskripsi");
         if (sellerSkuRes.items.length) applied.push(`kode SKU (${sellerSkuRes.items.length})`);
-        const pending = gambarBelumDidukung ? ["gambar (butuh unggah gambar TikTok)"] : [];
+        if (mainImages) applied.push(`gambar (${mainImages.length})`);
+        const pending: string[] = [];
+        if (withImages) {
+          if (imgNote) pending.push(imgNote);
+        } else if (gambarBelumDidukung) {
+          pending.push("gambar (centang 'Sertakan gambar' saat Terapkan untuk mengirim)");
+        }
         if (sellerSkuRes.unmatched) pending.push(`kode SKU ${sellerSkuRes.unmatched} (tak cocok)`);
         // Harga: kirim harga SKU Master Postingan ke marketplace (prices/update).
         // sku_id diresolve dari listing LIVE (by seller_sku, lalu kombinasi varian,
@@ -1280,9 +1321,10 @@ export class MasterPostingsService {
       gagal: hasil.filter((h) => h.status === "failed").length,
       dilewati: hasil.filter((h) => h.status === "skipped").length,
       hppDiperbarui,
-      catatanGambar: gambarBelumDidukung
-        ? "Nama & deskripsi diterapkan. Propagasi daftar gambar menunggu endpoint unggah gambar TikTok (tahap berikutnya)."
-        : undefined,
+      catatanGambar:
+        gambarBelumDidukung && !opts.withImages
+          ? "Gambar TIDAK dikirim. Centang 'Sertakan gambar' saat Terapkan untuk mengirim gambar (memicu tinjauan ulang listing)."
+          : undefined,
       hasil,
     };
   }

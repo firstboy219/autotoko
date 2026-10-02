@@ -508,6 +508,7 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<null | "all" | string>(null);
+  const [withImages, setWithImages] = useState(false);
   const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
   const [delMode, setDelMode] = useState<null | "autotoko" | "marketplace">(null);
   const [deleting, setDeleting] = useState(false);
@@ -576,7 +577,7 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
         target === "all"
           ? `/master-postings/${id}/apply`
           : `/master-postings/${id}/mappings/${target}/apply`;
-      const r = await api.post<ApplyResult>(url, {});
+      const r = await api.post<ApplyResult>(url, { withImages });
       setApplyResult(r);
       await refetch();
       toast(`Terapkan: ${r.ok} berhasil · ${r.gagal} gagal · ${r.dilewati} dilewati`, r.gagal ? "warning" : "success");
@@ -645,6 +646,13 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
             <Button variant="outline" loading={saving} onClick={() => saveInfo()}>
               Simpan
             </Button>
+            <label
+              className="flex items-center gap-1.5 text-xs text-ink-2 select-none"
+              title="Gambar memicu TINJAUAN ULANG (audit) listing di TikTok. Biarkan mati bila cuma mau update nama/deskripsi/harga."
+            >
+              <input type="checkbox" checked={withImages} onChange={(e) => setWithImages(e.target.checked)} />
+              Sertakan gambar
+            </label>
             <Button
               variant="filled"
               icon="upload"
