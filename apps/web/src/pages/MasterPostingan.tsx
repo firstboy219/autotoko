@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Layout } from "../components/Layout";
 import { api } from "../lib/api";
 import { Icon } from "../components/Icon";
@@ -467,24 +467,21 @@ function ImportModal({
           SKU yang kodenya cocok dengan master produk AutoToko langsung dipetakan, dan listing ini otomatis jadi salah satu tujuan Terapkan.
         </p>
         <Field label="Toko">
-          <Select value={shopId} onChange={(e) => setShopId(e.target.value)}>
-            <option value="">Pilih toko…</option>
-            {shops.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.shopName ?? s.id.slice(0, 8)} ({s.marketplace})
-              </option>
-            ))}
-          </Select>
+          <SearchSelect
+            value={shopId}
+            onChange={setShopId}
+            placeholder="Pilih toko…"
+            options={shops.map((s) => ({ value: s.id, label: `${s.shopName ?? s.id.slice(0, 8)} (${s.marketplace})` }))}
+          />
         </Field>
         <Field label="Listing marketplace">
-          <Select value={productId} onChange={(e) => setProductId(e.target.value)} disabled={!shopId || loading}>
-            <option value="">{loading ? "Memuat…" : "Pilih listing…"}</option>
-            {products.map((p) => (
-              <option key={p.productId} value={p.productId}>
-                {(p.title ?? "(tanpa judul)").slice(0, 58)} · 30hr: {p.sold30d ?? 0}x · {p.productId}
-              </option>
-            ))}
-          </Select>
+          <SearchSelect
+            value={productId}
+            onChange={setProductId}
+            disabled={!shopId || loading}
+            placeholder={loading ? "Memuat…" : "Pilih listing…"}
+            options={products.map((p) => ({ value: p.productId, label: `${(p.title ?? "(tanpa judul)").slice(0, 58)} · 30hr: ${p.sold30d ?? 0}x` }))}
+          />
         </Field>
       </div>
     </Modal>
@@ -1176,6 +1173,99 @@ function ValueAdder({ onAdd }: { onAdd: (v: string) => void }) {
   );
 }
 
+/** Combobox dengan kotak pencarian untuk daftar panjang (search di tiap combolist). */
+function SearchSelect({
+  value,
+  onChange,
+  options,
+  placeholder,
+  disabled,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const selected = options.find((o) => o.value === value);
+  const needle = q.trim().toLowerCase();
+  const filtered = needle ? options.filter((o) => o.label.toLowerCase().includes(needle)) : options;
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  return (
+    <div ref={ref} className={`relative ${className ?? ""}`}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          if (disabled) return;
+          setQ("");
+          setOpen((o) => !o);
+        }}
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-line bg-white px-3 py-2 text-left text-sm text-ink disabled:bg-canvas disabled:text-ink-3"
+      >
+        <span className={`truncate ${selected ? "" : "text-ink-3"}`}>{selected ? selected.label : placeholder ?? "Pilih…"}</span>
+        <Icon name="chevronDown" size={14} className="shrink-0 text-ink-3" />
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 w-full min-w-[220px] rounded-lg border border-line bg-white shadow-lg">
+          <div className="border-b border-line p-1.5">
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Cari…"
+              className="w-full rounded-md border border-line px-2 py-1 text-sm outline-none focus:border-brand"
+            />
+          </div>
+          <div className="max-h-60 overflow-auto py-1">
+            <button
+              type="button"
+              onClick={() => {
+                onChange("");
+                setOpen(false);
+              }}
+              className="block w-full px-3 py-1.5 text-left text-xs text-ink-3 hover:bg-canvas"
+            >
+              {placeholder ?? "— kosongkan —"}
+            </button>
+            {filtered.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-ink-3">Tak ada yang cocok</div>
+            ) : (
+              filtered.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => {
+                    onChange(o.value);
+                    setOpen(false);
+                  }}
+                  className={`block w-full px-3 py-1.5 text-left text-sm hover:bg-canvas ${
+                    o.value === value ? "bg-canvas font-medium text-ink" : "text-ink-2"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SkuRowEditor({
   postingId,
   row,
@@ -1270,14 +1360,13 @@ function SkuRowEditor({
         <Input className="max-w-[140px]" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="abc123" />
       </TD>
       <TD>
-        <Select className="max-w-[240px]" value={masterId} onChange={(e) => setMasterId(e.target.value)}>
-          <option value="">— belum dipetakan —</option>
-          {masters.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name} ({m.sku})
-            </option>
-          ))}
-        </Select>
+        <SearchSelect
+          className="max-w-[240px]"
+          value={masterId}
+          onChange={setMasterId}
+          placeholder="— belum dipetakan —"
+          options={masters.map((m) => ({ value: m.id, label: `${m.name} (${m.sku})` }))}
+        />
       </TD>
       <TD align="right">
         <span className="text-xs tabular-nums text-ink-2">{masterId ? fmtRp(master?.hpp) : "—"}</span>
@@ -1439,14 +1528,12 @@ function MappingAdder({ postingId, shops, onAdded }: { postingId: string; shops:
   return (
     <div className="flex flex-wrap items-end gap-2">
       <Field label="Toko" className="min-w-[160px]">
-        <Select value={shopId} onChange={(e) => setShopId(e.target.value)}>
-          <option value="">Pilih toko…</option>
-          {shops.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.shopName ?? s.id.slice(0, 8)} ({s.marketplace})
-            </option>
-          ))}
-        </Select>
+        <SearchSelect
+          value={shopId}
+          onChange={setShopId}
+          placeholder="Pilih toko…"
+          options={shops.map((s) => ({ value: s.id, label: `${s.shopName ?? s.id.slice(0, 8)} (${s.marketplace})` }))}
+        />
       </Field>
       <Field label="Mode" className="min-w-[170px]">
         <Select value={mode} onChange={(e) => setMode(e.target.value as "update" | "create")}>
