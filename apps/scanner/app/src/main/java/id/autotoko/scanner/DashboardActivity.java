@@ -926,9 +926,14 @@ public class DashboardActivity extends AppCompatActivity {
         row.setLayoutParams(rl);
         int orders = ringkasHariIni == null ? 0 : ringkasHariIni.optInt("today_orders", 0);
         double rev = ringkasHariIni == null ? 0 : ringkasHariIni.optDouble("today_revenue", 0);
+        String profitStr = (ringkasHariIni == null || ringkasHariIni.isNull("today_net_profit"))
+                ? "—"
+                : rp(ringkasHariIni.optDouble("today_net_profit", 0));
         row.addView(kpiCol(String.valueOf(orders), "Jumlah pesanan"),
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         row.addView(kpiCol(rp(rev), "Omzet (IDR)"),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(kpiCol(profitStr, "Est. profit"),
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         card.addView(row);
         return card;
