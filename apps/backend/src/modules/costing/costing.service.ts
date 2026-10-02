@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, asc, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import {
   calculateHpp,
   calculatePublishPricing,
@@ -15,6 +15,7 @@ import {
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import {
   bomItems,
+  masterPostingSkus,
   masterProducts,
   materials,
   orders,
@@ -166,6 +167,17 @@ export class CostingService {
     const ids = products.map((p) => p.id);
     const { matByProduct, costByProduct, packingFor } = await this.costInputs(userId, ids);
 
+    // Jumlah Master Postingan yg memuat tiap produk (kolom "Postingan").
+    const postingRows = await this.db
+      .select({
+        mid: masterPostingSkus.masterProductId,
+        c: sql<number>`count(distinct ${masterPostingSkus.masterPostingId})::int`,
+      })
+      .from(masterPostingSkus)
+      .where(and(eq(masterPostingSkus.userId, userId), isNotNull(masterPostingSkus.masterProductId)))
+      .groupBy(masterPostingSkus.masterProductId);
+    const postingByProduct = new Map(postingRows.map((r) => [r.mid, Number(r.c) || 0]));
+
     const rows = products.map((p) => {
       const mats = matByProduct.get(p.id) ?? [];
       const cfg = costByProduct.get(p.id);
@@ -193,6 +205,7 @@ export class CostingService {
         // exist but nobody has priced them".
         missingCost: mats.some((m) => m.unitCost <= 0),
         hpp: rupiah(hpp.hppCents),
+        postingCount: postingByProduct.get(p.id) ?? 0,
         publishPrice,
         netProfit: pricing ? rupiah(pricing.netProfitCents) : null,
         netMarginRate: pricing ? pricing.netMarginRate : null,

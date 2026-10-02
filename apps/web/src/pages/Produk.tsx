@@ -153,6 +153,7 @@ export function Produk({ embedded = false }: { embedded?: boolean } = {}) {
   const [sort, setSort] = useState("nama");
   const [days, setDays] = useState("30");
   const { data, loading, reload } = useFetch<Master[]>("/products");
+  const materials = useFetch<{ id: string; name: string; unit: string | null; unitCost: number }[]>("/materials");
   /**
    * Order and figures from the costing service rather than recomputed here.
    * Two implementations of a margin is how they start disagreeing.
@@ -179,6 +180,7 @@ export function Produk({ embedded = false }: { embedded?: boolean } = {}) {
   const [sku, setSku] = useState("");
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
+  const [bom, setBom] = useState<{ materialId: string; qty: string }[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [q, setQ] = useState("");
@@ -201,9 +203,27 @@ export function Produk({ embedded = false }: { embedded?: boolean } = {}) {
     e.preventDefault();
     setSaving(true); setErr(null);
     try {
-      await api.post("/products", { sku, name, basePrice: price || undefined, status: "active" });
-      setOpen(false); setSku(""); setName(""); setPrice(""); reload();
-      toast("Master produk ditambahkan", "success");
+      const created = await api.post<{ id?: string }>("/products", { sku, name, basePrice: price || undefined, status: "active" });
+      const lines = bom.filter((b) => b.materialId && Number(b.qty) > 0);
+      let bomErr = 0;
+      if (created?.id) {
+        for (const b of lines) {
+          try {
+            await api.post(`/costing/${created.id}/materials`, { materialId: b.materialId, quantity: Number(b.qty) });
+          } catch {
+            bomErr++;
+          }
+        }
+      }
+      setOpen(false); setSku(""); setName(""); setPrice(""); setBom([]); reload();
+      toast(
+        bomErr
+          ? `Produk dibuat; ${bomErr} bahan gagal ditambah`
+          : lines.length
+            ? `Master produk + ${lines.length} bahan ditambahkan`
+            : "Master produk ditambahkan",
+        bomErr ? "warning" : "success",
+      );
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -400,6 +420,67 @@ export function Produk({ embedded = false }: { embedded?: boolean } = {}) {
               onChange={(e) => setPrice(e.target.value)}
             />
           </Field>
+          <div className="border-t border-line pt-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <div className="text-sm font-medium text-ink">Bahan Baku (opsional)</div>
+              <Button
+                type="button"
+                size="sm"
+                variant="text"
+                icon="plus"
+                onClick={() => setBom((b) => [...b, { materialId: "", qty: "" }])}
+              >
+                Tambah bahan
+              </Button>
+            </div>
+            {bom.length === 0 ? (
+              <div className="text-xs text-ink-3">Belum ada. Bisa dimasukkan sekarang, atau nanti lewat menu HPP/BOM.</div>
+            ) : (
+              <div className="space-y-2">
+                {bom.map((line, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Select
+                      className="flex-1"
+                      value={line.materialId}
+                      onChange={(e) =>
+                        setBom((b) => b.map((x, j) => (j === i ? { ...x, materialId: e.target.value } : x)))
+                      }
+                    >
+                      <option value="">Pilih bahan…</option>
+                      {(materials.data ?? []).map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                          {m.unit ? ` (${m.unit})` : ""} — {rupiah(m.unitCost)}
+                        </option>
+                      ))}
+                    </Select>
+                    <Input
+                      className="max-w-[92px]"
+                      inputMode="decimal"
+                      placeholder="takaran"
+                      value={line.qty}
+                      onChange={(e) =>
+                        setBom((b) =>
+                          b.map((x, j) => (j === i ? { ...x, qty: e.target.value.replace(/[^\d.]/g, "") } : x)),
+                        )
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="text-ink-3 hover:text-red-500"
+                      onClick={() => setBom((b) => b.filter((_, j) => j !== i))}
+                      aria-label="Hapus bahan"
+                    >
+                      <Icon name="trash" size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-1.5 text-[11px] text-ink-3">
+              Takaran = jumlah bahan untuk 1 pcs produk. Harga mengikuti master data bahan (kelola di menu BOM).
+            </div>
+          </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="text" onClick={closeCreate} disabled={saving}>
               Batal

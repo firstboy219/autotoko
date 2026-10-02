@@ -30,6 +30,7 @@ interface Row {
   sku: string;
   name: string;
   materialCount: number;
+  postingCount?: number;
   missingCost: boolean;
   hpp: number;
   publishPrice: number | null;
@@ -170,6 +171,7 @@ export function Hpp() {
                 </TH>
                 <TH>Produk</TH>
                 <TH>Bahan Baku</TH>
+                <TH align="right">Postingan</TH>
                 <TH align="right">Terjual<div className="text-[10px] font-normal text-ink-3">{days === "30" ? "30 hari" : days === "90" ? "3 bulan" : days === "180" ? "6 bulan" : "1 tahun"}</div></TH>
                 <TH align="right">HPP / pcs</TH>
                 <TH align="right">Harga Publish</TH>
@@ -180,10 +182,10 @@ export function Hpp() {
             </THead>
             <tbody>
               {loading ? (
-                <SkeletonRows n={4} cols={7} />
+                <SkeletonRows n={4} cols={8} />
               ) : !data?.length ? (
                 <TR>
-                  <TD colSpan={9} className="p-0">
+                  <TD colSpan={10} className="p-0">
                     <EmptyState
                       icon="package"
                       title="Belum ada produk"
@@ -219,6 +221,9 @@ export function Hpp() {
                       ) : (
                         <Badge tone="success">{r.materialCount} bahan</Badge>
                       )}
+                    </TD>
+                    <TD align="right" className="tabular-nums text-ink-2" title="Jumlah Master Postingan yang memuat produk ini">
+                      {r.postingCount ?? 0}
                     </TD>
                     {/* From packing scans — the only record of anything
                         leaving, since the marketplace APIs are not connected. */}
