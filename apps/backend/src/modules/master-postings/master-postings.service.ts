@@ -742,7 +742,7 @@ export class MasterPostingsService {
       eq(marketplaceProducts.status, "ACTIVATE"),
     ];
     if (taken.length) conds.push(notInArray(marketplaceProducts.productId, taken));
-    return this.db
+    const rows = await this.db
       .select({
         productId: marketplaceProducts.productId,
         title: marketplaceProducts.title,
@@ -753,6 +753,15 @@ export class MasterPostingsService {
       .where(and(...conds))
       .orderBy(marketplaceProducts.title)
       .limit(500);
+    // Penjualan 30 hari per listing (acuan memilih); urutkan terlaris dulu.
+    const pids = rows.map((r) => r.productId).filter((x): x is string => !!x);
+    const sales = await this.aggSalesByPair(userId, [shopId], pids);
+    return rows
+      .map((r) => {
+        const v = sales.get(`${shopId}:${r.productId}`) ?? { units: 0, revenue: 0, orders: 0 };
+        return { ...r, sold30d: v.units, revenue30d: v.revenue, orders30d: v.orders };
+      })
+      .sort((a, b) => b.sold30d - a.sold30d);
   }
 
   async addMapping(userId: string, postingId: string, dto: AddMappingDto) {

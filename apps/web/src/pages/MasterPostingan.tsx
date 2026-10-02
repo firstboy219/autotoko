@@ -127,6 +127,9 @@ interface ShopProduct {
   title: string | null;
   status: string | null;
   marketplace: string;
+  sold30d?: number;
+  revenue30d?: number;
+  orders30d?: number;
 }
 interface ApplyResult {
   total: number;
@@ -478,7 +481,7 @@ function ImportModal({
             <option value="">{loading ? "Memuat…" : "Pilih listing…"}</option>
             {products.map((p) => (
               <option key={p.productId} value={p.productId}>
-                {(p.title ?? "(tanpa judul)").slice(0, 70)} · {p.productId}
+                {(p.title ?? "(tanpa judul)").slice(0, 58)} · 30hr: {p.sold30d ?? 0}x · {p.productId}
               </option>
             ))}
           </Select>
@@ -1472,7 +1475,7 @@ function MappingAdder({ postingId, shops, onAdded }: { postingId: string; shops:
               </option>
               {filtered.map((p) => (
                 <option key={p.productId} value={p.productId}>
-                  {(p.title ?? "(tanpa judul)").slice(0, 70)} · {p.productId}
+                  {(p.title ?? "(tanpa judul)").slice(0, 58)} · 30hr: {p.sold30d ?? 0}x · {p.productId}
                 </option>
               ))}
             </Select>
