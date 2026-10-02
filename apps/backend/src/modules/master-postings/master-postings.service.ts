@@ -1040,7 +1040,7 @@ export class MasterPostingsService {
     const gambarBelumDidukung = (posting.images?.length ?? 0) > 0;
     // Harga per SKU dari Master Postingan = sumber harga yang dikirim ke marketplace.
     const postingSkus = await this.db
-      .select({ sku: masterPostingSkus.sku, combo: masterPostingSkus.combo, price: masterPostingSkus.price })
+      .select({ sku: masterPostingSkus.sku, combo: masterPostingSkus.combo, price: masterPostingSkus.price, stock: masterPostingSkus.stock })
       .from(masterPostingSkus)
       .where(and(eq(masterPostingSkus.userId, userId), eq(masterPostingSkus.masterPostingId, postingId)));
 
@@ -1072,6 +1072,7 @@ export class MasterPostingsService {
     // dipakai mengisi toko lain yg kekurangan, supaya "Jalankan semua baris"
     // tak gagal hanya karena satu toko belum punya atribut wajib itu.
     const liveByMapping = new Map<string, Array<Record<string, any>>>();
+    const liveSkusByMapping = new Map<string, Array<Record<string, any>>>();
     const poolAttrs = new Map<string, { id: string; values: Array<{ id?: string; name: string }> }>();
     const statusByMapping = new Map<string, string>();
     for (const m of mappings) {
@@ -1081,11 +1082,13 @@ export class MasterPostingsService {
       let segarP = false;
       let attrs: Array<Record<string, any>> = [];
       let statusTemp = "";
+      let liveSkusTemp: Array<Record<string, any>> = [];
       for (;;) {
         try {
           const cur = (await clientOf(shopP).get(`/product/202309/products/${m.productId}`)) as Record<string, any>;
           attrs = Array.isArray(cur?.product_attributes) ? cur.product_attributes : [];
           statusTemp = String(cur?.status ?? "");
+          liveSkusTemp = Array.isArray(cur?.skus) ? (cur.skus as Array<Record<string, any>>) : [];
           break;
         } catch (e) {
           if (e instanceof TikTokApiError && e.tokenBermasalah && !segarP) {
@@ -1100,6 +1103,7 @@ export class MasterPostingsService {
         }
       }
       liveByMapping.set(m.id, attrs);
+      liveSkusByMapping.set(m.id, liveSkusTemp);
       if (statusTemp) statusByMapping.set(m.id, statusTemp);
       for (const a of attrs) {
         if (!a?.id) continue;
@@ -1162,6 +1166,9 @@ export class MasterPostingsService {
       const body: Record<string, unknown> = { title };
       if (description !== null) body.description = description;
       if (productAttributes.length) body.product_attributes = productAttributes;
+      // Kode SKU (seller_sku): ikut dalam partial_edit yang SAMA (hindari audit ganda).
+      const sellerSkuRes = this.resolveSellerSkuItems(postingSkus, liveSkusByMapping.get(m.id) ?? []);
+      if (sellerSkuRes.items.length) body.skus = sellerSkuRes.items;
       const path = `/product/202309/products/${m.productId}/partial_edit`;
       try {
         let segar = false;
@@ -1201,7 +1208,9 @@ export class MasterPostingsService {
         const sellerUrl = this.sellerCenterUrl(m.marketplace, shop?.sellerRegion ?? null);
         const applied = ["nama"];
         if (description !== null) applied.push("deskripsi");
+        if (sellerSkuRes.items.length) applied.push(`kode SKU (${sellerSkuRes.items.length})`);
         const pending = gambarBelumDidukung ? ["gambar (butuh unggah gambar TikTok)"] : [];
+        if (sellerSkuRes.unmatched) pending.push(`kode SKU ${sellerSkuRes.unmatched} (tak cocok)`);
         // Harga: kirim harga SKU Master Postingan ke marketplace (prices/update).
         // sku_id diresolve dari listing LIVE (by seller_sku, lalu kombinasi varian,
         // lalu fallback listing 1-SKU). Gagal/ tak cocok dilaporkan, tak diam.
@@ -1216,6 +1225,19 @@ export class MasterPostingsService {
           }
         } catch (e) {
           pending.push(`harga GAGAL: ${(e as Error).message.slice(0, 80)}`);
+        }
+        // Stok: inventory/update (JSON), warehouse_id diambil dari listing live.
+        try {
+          const { items: stockItems, unmatched: stockUnmatched } = this.resolveStockItems(postingSkus, liveSkus);
+          if (stockItems.length) {
+            await clientOf(shop).post(`/product/202309/products/${m.productId}/inventory/update`, { skus: stockItems });
+            applied.push(`stok (${stockItems.length} SKU)`);
+            if (stockUnmatched) pending.push(`stok ${stockUnmatched} SKU (tak cocok/tanpa warehouse)`);
+          } else if (postingSkus.some((ps) => ps.stock != null)) {
+            pending.push(liveSkus.length ? "stok (SKU tak cocok/tanpa warehouse)" : "stok (gagal baca listing)");
+          }
+        } catch (e) {
+          pending.push(`stok GAGAL: ${(e as Error).message.slice(0, 80)}`);
         }
         hasil.push({ mappingId: m.id, productId: m.productId, shop: nama, status: "ok", applied, pending, url, sellerUrl, verifiedTitle, verifiedDescription });
         const jejak = `Diterapkan: ${applied.join(", ")}${verifiedTitle ? ` · judul kini: "${verifiedTitle.slice(0, 80)}"` : ""}`;
@@ -1263,6 +1285,82 @@ export class MasterPostingsService {
         : undefined,
       hasil,
     };
+  }
+
+  /** Cocokkan satu SKU Master Postingan ke SKU listing LIVE (seller_sku -> varian -> 1-SKU). */
+  private matchLiveSku(
+    ps: { sku: string | null; combo: unknown },
+    liveSkus: Array<Record<string, unknown>>,
+    allowSingle: boolean,
+  ): Record<string, any> | undefined {
+    const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+    if (ps.sku) {
+      const want = norm(ps.sku);
+      const m = liveSkus.find((ls) => (ls as any).seller_sku && norm((ls as any).seller_sku) === want);
+      if (m) return m as Record<string, any>;
+    }
+    const combo = ps.combo && typeof ps.combo === "object" ? (ps.combo as Record<string, string>) : {};
+    const vals = Object.values(combo).map(norm).filter(Boolean);
+    if (vals.length) {
+      const m = liveSkus.find((ls) => {
+        const sa = Array.isArray((ls as any).sales_attributes) ? (ls as any).sales_attributes : [];
+        const names = sa.map((a: any) => norm(a?.value_name));
+        return vals.every((v) => names.includes(v));
+      });
+      if (m) return m as Record<string, any>;
+    }
+    if (allowSingle && liveSkus.length === 1) return liveSkus[0] as Record<string, any>;
+    return undefined;
+  }
+
+  /** Payload partial_edit untuk kode SKU (seller_sku) yang terisi & berubah. */
+  private resolveSellerSkuItems(
+    postingSkus: { sku: string | null; combo: unknown }[],
+    liveSkus: Array<Record<string, unknown>>,
+  ): { items: { id: string; seller_sku: string }[]; unmatched: number } {
+    const withSku = postingSkus.filter((ps) => (ps.sku ?? "").trim() !== "");
+    const items: { id: string; seller_sku: string }[] = [];
+    let unmatched = 0;
+    for (const ps of withSku) {
+      const live = this.matchLiveSku(ps, liveSkus, withSku.length === 1);
+      if (!live || !live.id) {
+        unmatched++;
+        continue;
+      }
+      if (live.seller_sku && String(live.seller_sku) === String(ps.sku)) continue; // sudah sama
+      items.push({ id: String(live.id), seller_sku: String(ps.sku) });
+    }
+    const byId = new Map(items.map((it) => [it.id, it] as const));
+    return { items: [...byId.values()], unmatched };
+  }
+
+  /** Payload inventory/update untuk stok yang terisi (warehouse_id dari listing live). */
+  private resolveStockItems(
+    postingSkus: { sku: string | null; combo: unknown; stock: number | null }[],
+    liveSkus: Array<Record<string, unknown>>,
+  ): { items: { id: string; inventory: { warehouse_id: string; quantity: number }[] }[]; unmatched: number } {
+    const withStock = postingSkus.filter((ps) => ps.stock != null);
+    const items: { id: string; inventory: { warehouse_id: string; quantity: number }[] }[] = [];
+    let unmatched = 0;
+    for (const ps of withStock) {
+      const live = this.matchLiveSku(ps, liveSkus, withStock.length === 1);
+      if (!live || !live.id) {
+        unmatched++;
+        continue;
+      }
+      const inv = Array.isArray(live.inventory) ? live.inventory : [];
+      const wh = inv.map((i: any) => i?.warehouse_id).find((w: any) => !!w);
+      if (!wh) {
+        unmatched++;
+        continue;
+      }
+      items.push({
+        id: String(live.id),
+        inventory: [{ warehouse_id: String(wh), quantity: Math.max(0, Math.round(Number(ps.stock))) }],
+      });
+    }
+    const byId = new Map(items.map((it) => [it.id, it] as const));
+    return { items: [...byId.values()], unmatched };
   }
 
   /**
