@@ -120,6 +120,11 @@ export class OrdersController {
     return { success: true, data: await this.orders.health(uid(req)) };
   }
 
+  @Get("unmapped-products")
+  async unmappedProducts(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.unmappedProducts(uid(req)) };
+  }
+
   @Get("status-meta")
   async statusMeta(): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.orders.statusMeta() };

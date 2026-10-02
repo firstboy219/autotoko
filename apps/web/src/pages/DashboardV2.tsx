@@ -4,7 +4,8 @@ import { Layout } from "../components/Layout";
 import { api } from "../lib/api";
 import { rupiah } from "../lib/fmt";
 import { Icon, type IconName } from "../components/Icon";
-import { Button, Card, CardHeader, InlineAlert, PageHeader, Skeleton } from "../components/ui";
+import { Button, Card, CardHeader, InlineAlert, PageHeader, Select, Skeleton, useToast } from "../components/ui";
+import { useFetch } from "../lib/useFetch";
 
 import { SaranAi } from "../components/SaranAi";
 /* ─────────────────────────────────────────────────────────────────────────
@@ -485,6 +486,8 @@ export default function DashboardV2() {
         </Card>
       )}
 
+      <ProdukBelumDipetakan />
+
       {/* Akses cepat: pintasan ke tugas yang paling sering dibuka dari dashboard. */}
       <div className="mb-4">
         <div className="text-xs font-medium text-ink-3 mb-1.5">Akses cepat</div>
@@ -926,5 +929,94 @@ export default function DashboardV2() {
         <SaranAi path="/dashboard/v2/saran" keterangan="Membaca seluruh angka pada rentang tanggal yang sedang dipilih." />
       </div>
     </Layout>
+  );
+}
+
+
+interface UnmappedResp {
+  total: number;
+  contoh: { skuId: string; nama: string; productId: string | null; count: number }[];
+}
+interface MasterOpt {
+  id: string;
+  sku: string;
+  name: string;
+}
+
+/**
+ * Kartu "Produk belum dipetakan": item pesanan yang belum dikenali ke master
+ * produk (jadi profit/HPP-nya tak terhitung). User bisa langsung memetakan di
+ * sini (POST /products/variants/link) tanpa pindah halaman.
+ */
+function ProdukBelumDipetakan() {
+  const unm = useFetch<UnmappedResp>("/orders/unmapped-products");
+  const masters = useFetch<MasterOpt[]>("/master-postings/master-products");
+  const toast = useToast();
+  const [sel, setSel] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+
+  if (unm.loading || !unm.data || unm.data.total === 0) return null;
+
+  async function petakan(skuId: string) {
+    const mid = sel[skuId];
+    if (!mid) return;
+    setBusy(skuId);
+    try {
+      await api.post("/products/variants/link", { skuId, masterId: mid });
+      toast("Dipetakan — profit & HPP produk ini kini ikut terhitung", "success");
+      await unm.reload();
+    } catch (e) {
+      toast((e as Error).message || "Gagal memetakan", "danger");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <Card className="mb-4">
+      <CardHeader
+        title={`Produk belum dipetakan (${unm.data.total})`}
+        subtitle="Petakan ke master produk agar Est. profit & HPP-nya ikut terhitung (termasuk di dashboard ini)."
+      />
+      <div className="divide-y divide-line">
+        {unm.data.contoh.map((p) => (
+          <div key={p.skuId} className="flex flex-wrap items-center gap-2 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm text-ink" title={p.nama}>{p.nama}</div>
+              <div className="text-[11px] text-ink-3">
+                SKU {p.skuId} · {p.count}× di order
+              </div>
+            </div>
+            <Select
+              className="w-auto min-w-[200px]"
+              value={sel[p.skuId] ?? ""}
+              onChange={(e) => setSel((st) => ({ ...st, [p.skuId]: e.target.value }))}
+            >
+              <option value="">Pilih master…</option>
+              {(masters.data ?? []).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({m.sku})
+                </option>
+              ))}
+            </Select>
+            <Button
+              size="sm"
+              variant="outline"
+              icon="link"
+              loading={busy === p.skuId}
+              disabled={!sel[p.skuId]}
+              onClick={() => petakan(p.skuId)}
+            >
+              Petakan
+            </Button>
+          </div>
+        ))}
+      </div>
+      {unm.data.total > unm.data.contoh.length && (
+        <div className="mt-2 text-[11px] text-ink-3">
+          Menampilkan {unm.data.contoh.length} dari {unm.data.total}. Sisanya bisa dipetakan di menu Master Produk.
+        </div>
+      )}
+    </Card>
   );
 }

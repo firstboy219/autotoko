@@ -338,6 +338,43 @@ export class OrdersService {
    * 3) SKU varian di item order yang belum dipetakan ke master produk,
    * 4) order API tanpa nominal (bukan dibatalkan).
    */
+  /**
+   * Produk pesanan yang BELUM dikenali ke master (OrderProfitService null) dari
+   * order ~45 hari terakhir — supaya bisa dipetakan dari dashboard. Distinct per
+   * skuId, diurut dari yang paling sering muncul.
+   */
+  async unmappedProducts(userId: string) {
+    const ctx = await this.orderProfit.loadContext(userId);
+    const since = new Date(Date.now() - 45 * 86_400_000);
+    const rows = await this.db
+      .select({ items: orders.items })
+      .from(orders)
+      .where(and(eq(orders.userId, userId), gte(orders.createdAt, since)));
+    const seen = new Map<string, { skuId: string; nama: string; productId: string | null; count: number }>();
+    for (const r of rows) {
+      const items = Array.isArray(r.items) ? r.items : [];
+      for (const it of items) {
+        const o2 = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
+        if (this.orderProfit.resolveItemMaster(o2, ctx)) continue; // sudah dikenali
+        const skuId = o2.skuId != null ? String(o2.skuId) : "";
+        if (!skuId) continue;
+        const cur = seen.get(skuId);
+        if (cur) {
+          cur.count += 1;
+          continue;
+        }
+        seen.set(skuId, {
+          skuId,
+          nama: String(o2.name ?? o2.skuName ?? skuId),
+          productId: o2.productId != null ? String(o2.productId) : null,
+          count: 1,
+        });
+      }
+    }
+    const list = [...seen.values()].sort((a, b) => b.count - a.count);
+    return { total: list.length, contoh: list.slice(0, 50) };
+  }
+
   async health(userId: string) {
     const one = async (q: SQL) => (await this.db.execute(q)) as unknown as Record<string, unknown>[];
     const cnt = async (q: SQL) => Number((await one(q))[0]?.n ?? 0);
