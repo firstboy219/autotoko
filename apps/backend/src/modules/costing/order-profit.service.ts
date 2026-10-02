@@ -141,6 +141,29 @@ export class OrderProfitService {
     return n == null ? null : String(Math.round(n));
   }
 
+  /** Profit bersih SATU item pesanan (rupiah) atau null bila tak dikenali/ber-costing. */
+  netProfitForItem(item: Record<string, unknown>, ctx: ProfitContext): number | null {
+    const m = this.resolveItemMaster(item, ctx);
+    if (!m) return null;
+    const basis = ctx.basisByMaster.get(m.mid);
+    if (!basis) return null;
+    const salePrice = Number(item.salePrice ?? item.sale_price ?? 0);
+    const qty = Number(item.qty ?? item.quantity ?? 0) || 0;
+    if (!Number.isFinite(salePrice) || salePrice <= 0 || qty <= 0) return null;
+    const pr = calculatePublishPricing({
+      publishPriceCents: Math.round(salePrice * 100),
+      hppCents: basis.hppCents,
+      marketplaceFeeRate: basis.marketplaceFeeRate,
+      eventRate: basis.eventRate,
+      affiliatorRate: basis.affiliatorRate,
+      adsRate: basis.adsRate,
+      adsFixedCents: basis.adsFixedCents,
+      sedekahRate: basis.sedekahRate,
+      resellerRate: basis.resellerRate,
+    });
+    return (pr.netProfitCents / 100) * qty;
+  }
+
   /** Versi numerik (rupiah) — dipakai dashboard utk menjumlah lintas order. */
   netProfitNumber(items: unknown, ctx: ProfitContext): number | null {
     if (!Array.isArray(items)) return null;

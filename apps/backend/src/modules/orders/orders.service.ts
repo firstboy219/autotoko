@@ -339,6 +339,69 @@ export class OrdersService {
    * 4) order API tanpa nominal (bukan dibatalkan).
    */
   /**
+   * Produk yang TERJUAL HARI INI (waktu Jakarta): tiap produk distinct + qty +
+   * (jika dikenali ke master) profit bersihnya; yang belum dikenali ditandai agar
+   * bisa dipetakan. Dipakai kartu dashboard "Produk terjual hari ini".
+   */
+  async produkHariIni(userId: string) {
+    const ctx = await this.orderProfit.loadContext(userId);
+    const jak = new Date(Date.now() + 7 * 3600 * 1000);
+    const start = new Date(Date.UTC(jak.getUTCFullYear(), jak.getUTCMonth(), jak.getUTCDate()) - 7 * 3600 * 1000);
+    const rows = await this.db
+      .select({ items: orders.items })
+      .from(orders)
+      .where(and(eq(orders.userId, userId), gte(orders.createdAt, start)));
+    const map = new Map<
+      string,
+      { skuId: string; nama: string; productId: string | null; qty: number; mapped: boolean; masterName: string | null; profit: number; profitAda: boolean }
+    >();
+    for (const r of rows) {
+      const items = Array.isArray(r.items) ? r.items : [];
+      for (const it of items) {
+        const o2 = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
+        const skuId = o2.skuId != null ? String(o2.skuId) : "";
+        if (!skuId) continue;
+        const qty = Number(o2.qty ?? o2.quantity ?? 0) || 0;
+        const m = this.orderProfit.resolveItemMaster(o2, ctx);
+        const e =
+          map.get(skuId) ?? {
+            skuId,
+            nama: String(o2.name ?? o2.skuName ?? skuId),
+            productId: o2.productId != null ? String(o2.productId) : null,
+            qty: 0,
+            mapped: false,
+            masterName: null as string | null,
+            profit: 0,
+            profitAda: false,
+          };
+        e.qty += qty;
+        if (m) {
+          e.mapped = true;
+          e.masterName = m.name;
+          const np = this.orderProfit.netProfitForItem(o2, ctx);
+          if (np != null) {
+            e.profit += np;
+            e.profitAda = true;
+          }
+        }
+        map.set(skuId, e);
+      }
+    }
+    const produk = [...map.values()]
+      .sort((a, b) => b.qty - a.qty)
+      .map((e) => ({
+        skuId: e.skuId,
+        nama: e.nama,
+        productId: e.productId,
+        qty: e.qty,
+        mapped: e.mapped,
+        masterName: e.masterName,
+        profitBersih: e.mapped && e.profitAda ? Math.round(e.profit) : null,
+      }));
+    return { total: produk.length, belum: produk.filter((p) => !p.mapped).length, produk };
+  }
+
+  /**
    * Produk pesanan yang BELUM dikenali ke master (OrderProfitService null) dari
    * order ~45 hari terakhir — supaya bisa dipetakan dari dashboard. Distinct per
    * skuId, diurut dari yang paling sering muncul.

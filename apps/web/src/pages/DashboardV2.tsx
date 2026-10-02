@@ -486,7 +486,7 @@ export default function DashboardV2() {
         </Card>
       )}
 
-      <ProdukBelumDipetakan />
+      <ProdukTerjualHariIni />
 
       {/* Akses cepat: pintasan ke tugas yang paling sering dibuka dari dashboard. */}
       <div className="mb-4">
@@ -932,30 +932,39 @@ export default function DashboardV2() {
   );
 }
 
-
-interface UnmappedResp {
-  total: number;
-  contoh: { skuId: string; nama: string; productId: string | null; count: number }[];
-}
 interface MasterOpt {
   id: string;
   sku: string;
   name: string;
 }
+interface TodayProd {
+  skuId: string;
+  nama: string;
+  productId: string | null;
+  qty: number;
+  mapped: boolean;
+  masterName: string | null;
+  profitBersih: number | null;
+}
+interface TodayResp {
+  total: number;
+  belum: number;
+  produk: TodayProd[];
+}
 
 /**
- * Kartu "Produk belum dipetakan": item pesanan yang belum dikenali ke master
- * produk (jadi profit/HPP-nya tak terhitung). User bisa langsung memetakan di
- * sini (POST /products/variants/link) tanpa pindah halaman.
+ * Kartu "Produk terjual hari ini": tiap produk yang laku hari ini. Kalau sudah
+ * dikenali ke master -> tampilkan profit bersihnya; kalau belum -> minta user
+ * memetakannya (dropdown master + Petakan) agar profitnya ikut terhitung.
  */
-function ProdukBelumDipetakan() {
-  const unm = useFetch<UnmappedResp>("/orders/unmapped-products");
+function ProdukTerjualHariIni() {
+  const data = useFetch<TodayResp>("/orders/today-products");
   const masters = useFetch<MasterOpt[]>("/master-postings/master-products");
   const toast = useToast();
   const [sel, setSel] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
 
-  if (unm.loading || !unm.data || unm.data.total === 0) return null;
+  if (data.loading || !data.data || data.data.total === 0) return null;
 
   async function petakan(skuId: string) {
     const mid = sel[skuId];
@@ -963,8 +972,8 @@ function ProdukBelumDipetakan() {
     setBusy(skuId);
     try {
       await api.post("/products/variants/link", { skuId, masterId: mid });
-      toast("Dipetakan — profit & HPP produk ini kini ikut terhitung", "success");
-      await unm.reload();
+      toast("Dipetakan — profit produk ini kini ikut terhitung", "success");
+      await data.reload();
     } catch (e) {
       toast((e as Error).message || "Gagal memetakan", "danger");
     } finally {
@@ -975,48 +984,60 @@ function ProdukBelumDipetakan() {
   return (
     <Card className="mb-4">
       <CardHeader
-        title={`Produk belum dipetakan (${unm.data.total})`}
-        subtitle="Petakan ke master produk agar Est. profit & HPP-nya ikut terhitung (termasuk di dashboard ini)."
+        title={`Produk terjual hari ini (${data.data.total})`}
+        subtitle={
+          data.data.belum > 0
+            ? `${data.data.belum} produk belum dipetakan — petakan agar profit bersihnya ikut terhitung.`
+            : "Semua produk hari ini sudah dipetakan; profit bersihnya terhitung."
+        }
       />
       <div className="divide-y divide-line">
-        {unm.data.contoh.map((p) => (
+        {data.data.produk.map((p) => (
           <div key={p.skuId} className="flex flex-wrap items-center gap-2 py-2">
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm text-ink" title={p.nama}>{p.nama}</div>
               <div className="text-[11px] text-ink-3">
-                SKU {p.skuId} · {p.count}× di order
+                {p.qty}x terjual{p.masterName ? ` · ${p.masterName}` : ""}
               </div>
             </div>
-            <Select
-              className="w-auto min-w-[200px]"
-              value={sel[p.skuId] ?? ""}
-              onChange={(e) => setSel((st) => ({ ...st, [p.skuId]: e.target.value }))}
-            >
-              <option value="">Pilih master…</option>
-              {(masters.data ?? []).map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name} ({m.sku})
-                </option>
-              ))}
-            </Select>
-            <Button
-              size="sm"
-              variant="outline"
-              icon="link"
-              loading={busy === p.skuId}
-              disabled={!sel[p.skuId]}
-              onClick={() => petakan(p.skuId)}
-            >
-              Petakan
-            </Button>
+            {p.mapped ? (
+              <span
+                className={`text-xs font-semibold tabular-nums ${
+                  (p.profitBersih ?? 0) < 0 ? "text-red-600" : "text-emerald-700"
+                }`}
+                title="Estimasi profit bersih hari ini untuk produk ini (logika menu HPP)."
+              >
+                {p.profitBersih != null ? `profit ${rupiah(p.profitBersih)}` : "profit —"}
+              </span>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Select
+                  className="w-auto min-w-[190px]"
+                  value={sel[p.skuId] ?? ""}
+                  onChange={(e) => setSel((st) => ({ ...st, [p.skuId]: e.target.value }))}
+                >
+                  <option value="">Pilih master…</option>
+                  {(masters.data ?? []).map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} ({m.sku})
+                    </option>
+                  ))}
+                </Select>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  icon="link"
+                  loading={busy === p.skuId}
+                  disabled={!sel[p.skuId]}
+                  onClick={() => petakan(p.skuId)}
+                >
+                  Petakan
+                </Button>
+              </div>
+            )}
           </div>
         ))}
       </div>
-      {unm.data.total > unm.data.contoh.length && (
-        <div className="mt-2 text-[11px] text-ink-3">
-          Menampilkan {unm.data.contoh.length} dari {unm.data.total}. Sisanya bisa dipetakan di menu Master Produk.
-        </div>
-      )}
     </Card>
   );
 }
