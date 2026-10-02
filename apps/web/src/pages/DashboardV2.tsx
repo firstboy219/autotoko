@@ -109,7 +109,8 @@ interface Data {
   penjualanHariIni: {
     pesanan: number;
     nominal: number;
-    perToko: { shopId: string | null; nama: string; pesanan: number; nominal: number }[];
+    profitBersih: number | null;
+    perToko: { shopId: string | null; nama: string; pesanan: number; nominal: number; profit?: number | null }[];
   };
 }
 
@@ -453,6 +454,12 @@ export default function DashboardV2() {
                 {data.penjualanHariIni.pesanan} pesanan masuk hari ini
                 <span> · dari toko yang tersinkron order</span>
               </div>
+              {data.penjualanHariIni.profitBersih != null && (
+                <div className="mt-1 text-sm font-semibold tabular-nums text-emerald-700">
+                  Est. profit bersih: {rupiah(data.penjualanHariIni.profitBersih)}
+                  <span className="ml-1 text-[10px] font-normal text-ink-3">dari produk termapping HPP</span>
+                </div>
+              )}
             </div>
             <Link to="/orders" className="text-xs text-brand-ink hover:underline whitespace-nowrap">
               Lihat pesanan →
@@ -469,6 +476,7 @@ export default function DashboardV2() {
                   <span className="truncate text-ink-2">{t.nama}</span>
                   <span className="whitespace-nowrap tabular-nums text-ink">
                     {t.pesanan} pesanan · {rupiah(t.nominal)}
+                    {t.profit != null && <span className="text-emerald-700"> · profit {rupiah(t.profit)}</span>}
                   </span>
                 </div>
               ))}

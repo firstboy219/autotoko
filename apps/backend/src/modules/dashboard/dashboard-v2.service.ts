@@ -3,6 +3,7 @@ import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders, shops } from "../../database/schema/index.js";
 import { PendingTasksService } from "./pending-tasks.service.js";
+import { OrderProfitService } from "../costing/order-profit.service.js";
 
 /**
  * Angka untuk Dashboard v2.
@@ -27,6 +28,7 @@ export class DashboardV2Service {
   constructor(
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly pending: PendingTasksService,
+    private readonly orderProfit: OrderProfitService,
   ) {}
 
   /** UTC instant of today's 00:00 in Asia/Jakarta (UTC+7, no DST). */
@@ -67,7 +69,36 @@ export class DashboardV2Service {
         return { shopId: r.shopId, nama: r.nama, pesanan: p, nominal: n };
       })
       .sort((a, b) => b.nominal - a.nominal);
-    return { pesanan, nominal, perToko };
+
+    // Est. profit bersih HARI INI (logika menu HPP & Harga Jual) — hanya item
+    // yang produknya dikenali (OrderProfitService: peta manual + derivasi Master
+    // Postingan). Order yang produknya belum dimapping tidak dihitung.
+    const ctx = await this.orderProfit.loadContext(userId);
+    const itemRows = await this.db
+      .select({ shopId: orders.shopId, items: orders.items })
+      .from(orders)
+      .where(and(eq(orders.userId, userId), gte(orders.createdAt, start)));
+    let profitBersih = 0;
+    let adaProfit = false;
+    const profitByShop = new Map<string, number>();
+    for (const r of itemRows) {
+      const np = this.orderProfit.netProfitNumber(r.items, ctx);
+      if (np == null) continue;
+      profitBersih += np;
+      adaProfit = true;
+      const k = r.shopId ?? "";
+      profitByShop.set(k, (profitByShop.get(k) ?? 0) + np);
+    }
+    const perTokoProfit = perToko.map((t) => ({
+      ...t,
+      profit: profitByShop.has(t.shopId ?? "") ? Math.round(profitByShop.get(t.shopId ?? "")!) : null,
+    }));
+    return {
+      pesanan,
+      nominal,
+      profitBersih: adaProfit ? Math.round(profitBersih) : null,
+      perToko: perTokoProfit,
+    };
   }
 
   async overview(userId: string, from: string, to: string) {

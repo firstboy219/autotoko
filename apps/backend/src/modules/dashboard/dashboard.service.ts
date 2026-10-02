@@ -9,13 +9,17 @@ import {
   bomItems,
   masterProducts,
 } from "../../database/schema/index.js";
+import { OrderProfitService } from "../costing/order-profit.service.js";
 
 const WALLET_LOW_THRESHOLD = 150000; // IDR; below this → low-wallet alert
 const TOKEN_EXPIRY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000; // warn 3 days ahead
 
 @Injectable()
 export class DashboardService {
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly orderProfit: OrderProfitService,
+  ) {}
 
   /** UTC instant of today's 00:00 in Asia/Jakarta (UTC+7, no DST). */
   private jakartaStartOfDay(): Date {
@@ -101,9 +105,26 @@ export class DashboardService {
       .from(shops)
       .where(and(eq(shops.userId, userId), eq(shops.shopStatus, "active")));
 
+    // Est. profit bersih hari ini (menu HPP & Harga Jual) utk produk yang dikenali.
+    const ctx = await this.orderProfit.loadContext(userId);
+    const itemRows = await this.db
+      .select({ items: orders.items })
+      .from(orders)
+      .where(and(eq(orders.userId, userId), gte(orders.createdAt, start)));
+    let profit = 0;
+    let adaProfit = false;
+    for (const r of itemRows) {
+      const np = this.orderProfit.netProfitNumber(r.items, ctx);
+      if (np != null) {
+        profit += np;
+        adaProfit = true;
+      }
+    }
+
     return {
       today_orders: today?.orders ?? 0,
       today_revenue: today?.revenue ?? "0",
+      today_net_profit: adaProfit ? String(Math.round(profit)) : null,
       active_shops: activeShops?.count ?? 0,
       total_orders: all?.orders ?? 0,
       total_revenue: all?.revenue ?? "0",
