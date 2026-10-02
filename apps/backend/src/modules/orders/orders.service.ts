@@ -4,8 +4,7 @@ import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders, orderSettings, resiScans, resiScanCodes, shops, marketplaceSkuMap, masterProducts } from "../../database/schema/index.js";
 import { parseStatusConfig, deriveStatus, MP_STATUS_LABEL } from "../marketplace-sync/status-config.js";
 import { AdminSettingsService } from "../admin-settings/admin-settings.service.js";
-import { CostingService } from "../costing/costing.service.js";
-import { calculatePublishPricing } from "@autotoko/shared";
+import { OrderProfitService, type ProfitContext } from "../costing/order-profit.service.js";
 
 export interface ListOrdersOpts {
   status?: FulfillmentStatus;
@@ -31,25 +30,12 @@ export const FULFILLMENT_STATUSES = [
 ] as const;
 export type FulfillmentStatus = (typeof FULFILLMENT_STATUSES)[number];
 
-type PricingBasis = {
-  productId: string;
-  hppCents: number;
-  publishPrice: number | null;
-  marketplaceFeeRate: number;
-  eventRate: number;
-  affiliatorRate: number;
-  adsRate: number;
-  adsFixedCents: number;
-  sedekahRate: number;
-  resellerRate: number;
-};
-
 @Injectable()
 export class OrdersService {
   constructor(
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly settings: AdminSettingsService,
-    private readonly costing: CostingService,
+    private readonly orderProfit: OrderProfitService,
   ) {}
 
   /** Normalisasi kunci resi: huruf besar, hanya alfanumerik (samakan dgn resi_scans.resi). */
@@ -73,48 +59,6 @@ export class OrdersService {
     }
     return null;
   }
-  /**
-   * Est. Pencairan = ESTIMASI PROFIT BERSIH per order, memakai logika menu HPP &
-   * Harga Jual: harga jual aktual tiap item (salePrice) dihitung lewat
-   * calculatePublishPricing dengan HPP + rate costing master-nya, lalu x qty.
-   * HANYA item yang SKU-nya sudah dimapping ke master produk ber-costing yang
-   * dihitung; order tanpa satu pun item termapping -> null (kolom kosong).
-   */
-  private estPencairan(
-    items: unknown,
-    skuToMasterId: Map<string, string>,
-    basisByMaster: Map<string, PricingBasis>,
-  ): string | null {
-    if (!Array.isArray(items)) return null;
-    let total = 0;
-    let adaMapped = false;
-    for (const it of items) {
-      const o2 = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
-      const skuId = o2.skuId != null ? String(o2.skuId) : "";
-      const mid = skuId ? skuToMasterId.get(skuId) : undefined;
-      if (!mid) continue;
-      const basis = basisByMaster.get(mid);
-      if (!basis) continue;
-      const salePrice = Number(o2.salePrice ?? o2.sale_price ?? 0);
-      const qty = Number(o2.qty ?? o2.quantity ?? 0) || 0;
-      if (!Number.isFinite(salePrice) || salePrice <= 0 || qty <= 0) continue;
-      const pr = calculatePublishPricing({
-        publishPriceCents: Math.round(salePrice * 100),
-        hppCents: basis.hppCents,
-        marketplaceFeeRate: basis.marketplaceFeeRate,
-        eventRate: basis.eventRate,
-        affiliatorRate: basis.affiliatorRate,
-        adsRate: basis.adsRate,
-        adsFixedCents: basis.adsFixedCents,
-        sedekahRate: basis.sedekahRate,
-        resellerRate: basis.resellerRate,
-      });
-      total += (pr.netProfitCents / 100) * qty;
-      adaMapped = true;
-    }
-    return adaMapped ? String(Math.round(total)) : null;
-  }
-
   private prioOf(o: { raw?: unknown }): number | null {
     const n = Number(this.rawObj(o).fulfillment_priority_level);
     return Number.isFinite(n) ? n : null;
@@ -201,23 +145,13 @@ export class OrdersService {
 
     // Peta skuId (varian marketplace) -> nama master produk AutoToko, dari
     // marketplace_sku_map. Dipakai menampilkan nama master di tiap item order.
-    const skuMasterRows = await this.db
-      .select({ sku: marketplaceSkuMap.sku, nama: masterProducts.name, mid: marketplaceSkuMap.masterProductId })
-      .from(marketplaceSkuMap)
-      .innerJoin(masterProducts, eq(masterProducts.id, marketplaceSkuMap.masterProductId))
-      .where(eq(marketplaceSkuMap.userId, userId));
-    const skuMaster = new Map(skuMasterRows.map((r) => [String(r.sku), r.nama]));
-    const skuToMasterId = new Map(skuMasterRows.map((r) => [String(r.sku), r.mid] as const));
-    // Profit bersih per master (logika menu HPP & Harga Jual) utk kolom Est. Pencairan.
-    const basisByMaster = new Map(
-      (await this.costing.pricingBasis(userId)).map((b) => [b.productId, b] as const),
-    );
+    // Konteks profit (manual sku-map + derivasi Master Postingan + basis costing).
+    const profitCtx: ProfitContext = await this.orderProfit.loadContext(userId);
     const enrichItems = (items: unknown): unknown => {
       if (!Array.isArray(items)) return items;
       return items.map((it) => {
         const o2 = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
-        const sku = o2.skuId != null ? String(o2.skuId) : "";
-        return { ...o2, masterName: sku ? skuMaster.get(sku) ?? null : null };
+        return { ...o2, masterName: this.orderProfit.masterNameForItem(o2, profitCtx) };
       });
     };
 
@@ -292,7 +226,7 @@ export class OrdersService {
         isCod: this.isCodOf(o),
         shipDeadlineMs: this.deadlineOf(o),
         priorityLevel: this.prioOf(o),
-        estPencairan: this.estPencairan(o.items, skuToMasterId, basisByMaster),
+        estPencairan: this.orderProfit.netProfitForItems(o.items, profitCtx),
         shopName: o.shopId ? namaToko.get(o.shopId) ?? null : null,
         items: enrichItems(o.items),
       })),
