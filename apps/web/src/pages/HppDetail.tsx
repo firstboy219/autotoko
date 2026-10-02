@@ -138,6 +138,7 @@ export function HppDetail() {
         <div className="space-y-4">
           <HppSection productId={id} data={data} onChange={reload} />
           <PublishSection productId={id} data={data} onChange={reload} />
+          <MarketplacePriceSync productId={id} />
         </div>
       )}
     </Layout>
@@ -1464,6 +1465,109 @@ function PackingSection({
           </tbody>
         </Table>
       </TableWrap>
+    </Card>
+  );
+}
+
+
+interface PriceStatusResp {
+  publishPrice: number | null;
+  total: number;
+  shops: { shop: string | null; productId: string; harga: (number | null)[]; sesuai: boolean; adaSku: boolean; error?: string }[];
+}
+interface PushPriceResp {
+  publishPrice: number;
+  total: number;
+  ok: number;
+  hasil: { shop: string | null; status: string; jumlah?: number; reason?: string }[];
+}
+
+/**
+ * Harga di Marketplace: terapkan harga publish master ke listing termapping, dan
+ * lihat toko mana yang belum ikut harga HPP. Terapkan = tindakan nyata (prices/update).
+ */
+function MarketplacePriceSync({ productId }: { productId: string }) {
+  const toast = useToast();
+  const [status, setStatus] = useState<PriceStatusResp | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [pushing, setPushing] = useState(false);
+
+  async function cek() {
+    setLoading(true);
+    try {
+      setStatus(await api.get<PriceStatusResp>(`/master-postings/master-products/${productId}/price-status`));
+    } catch (e) {
+      toast((e as Error).message || "Gagal cek status", "danger");
+    } finally {
+      setLoading(false);
+    }
+  }
+  async function terapkan() {
+    setPushing(true);
+    try {
+      const r = await api.post<PushPriceResp>(`/master-postings/master-products/${productId}/push-price`, {});
+      toast(`Harga diterapkan ke ${r.ok}/${r.total} toko`, r.ok === r.total ? "success" : "warning");
+      await cek();
+    } catch (e) {
+      toast((e as Error).message || "Gagal menerapkan harga", "danger");
+    } finally {
+      setPushing(false);
+    }
+  }
+  const hargaStr = (h: (number | null)[]) => h.map((x) => (x != null ? rupiah(x) : "?")).join(", ");
+
+  return (
+    <Card padded={false}>
+      <CardHeader
+        title="Harga di Marketplace"
+        subtitle="Terapkan harga publish ke listing yang termapping, dan lihat toko mana yang belum mengikuti."
+        action={
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" loading={loading} onClick={cek}>
+              Cek status
+            </Button>
+            <Button size="sm" variant="filled" icon="upload" loading={pushing} onClick={terapkan}>
+              Terapkan harga ke semua
+            </Button>
+          </div>
+        }
+      />
+      <div className="p-5">
+        {!status ? (
+          <div className="text-sm text-ink-3">
+            Klik "Cek status" untuk melihat harga tiap toko dibanding harga publish master; "Terapkan" akan mengirim
+            harga publish ke semua listing yang termapping (tindakan nyata di marketplace).
+          </div>
+        ) : status.total === 0 ? (
+          <div className="text-sm text-ink-2">
+            Produk ini belum dipetakan ke listing marketplace mana pun (lewat Master Postingan), jadi tak ada yang bisa
+            diperbarui.
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="text-xs text-ink-3">
+              Harga publish master:{" "}
+              <b className="text-ink tabular-nums">{status.publishPrice != null ? rupiah(status.publishPrice) : "—"}</b>
+            </div>
+            {status.shops.map((sh, i) => (
+              <div key={i} className="flex flex-wrap items-center justify-between gap-2 border-t border-line py-1.5 text-xs">
+                <span className="text-ink-2">{sh.shop ?? sh.productId}</span>
+                <span className="tabular-nums">
+                  {sh.error ? (
+                    <span className="text-red-600">{sh.error}</span>
+                  ) : !sh.adaSku ? (
+                    <span className="text-ink-3">SKU tak cocok dgn listing</span>
+                  ) : sh.sesuai ? (
+                    <span className="text-emerald-700">sesuai ({hargaStr(sh.harga)})</span>
+                  ) : (
+                    <span className="text-amber-700 font-medium">belum ikut ({hargaStr(sh.harga)})</span>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </Card>
   );
 }

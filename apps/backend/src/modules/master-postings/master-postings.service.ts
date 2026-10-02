@@ -1452,6 +1452,160 @@ export class MasterPostingsService {
     return { items: [...byId.values()], matched, unmatched };
   }
 
+  /** Harga publish master dari product_costing (rupiah) atau null. */
+  private async publishPriceOf(userId: string, masterProductId: string): Promise<number | null> {
+    const [mp] = await this.db
+      .select({ id: masterProducts.id })
+      .from(masterProducts)
+      .where(and(eq(masterProducts.id, masterProductId), eq(masterProducts.userId, userId)))
+      .limit(1);
+    if (!mp) throw new NotFoundException("Master produk tidak ditemukan");
+    const [c] = await this.db
+      .select({ p: productCosting.publishPrice })
+      .from(productCosting)
+      .where(eq(productCosting.masterProductId, masterProductId))
+      .limit(1);
+    return c?.p != null ? Number(c.p) : null;
+  }
+
+  /** Listing marketplace (toko + productId) yang memuat master ini + posting-SKU-nya. */
+  private async masterListingTargets(userId: string, masterProductId: string) {
+    const psRows = await this.db
+      .select({ postingId: masterPostingSkus.masterPostingId, combo: masterPostingSkus.combo, sku: masterPostingSkus.sku })
+      .from(masterPostingSkus)
+      .where(and(eq(masterPostingSkus.userId, userId), eq(masterPostingSkus.masterProductId, masterProductId)));
+    if (!psRows.length) return [] as { shop: typeof shops.$inferSelect; productId: string; skus: { combo: unknown; sku: string | null }[] }[];
+    const byPosting = new Map<string, { combo: unknown; sku: string | null }[]>();
+    for (const r of psRows) {
+      const a = byPosting.get(r.postingId) ?? [];
+      a.push({ combo: r.combo, sku: r.sku });
+      byPosting.set(r.postingId, a);
+    }
+    const postingIds = [...byPosting.keys()];
+    const maps = await this.db
+      .select()
+      .from(masterPostingMappings)
+      .where(
+        and(
+          eq(masterPostingMappings.userId, userId),
+          inArray(masterPostingMappings.masterPostingId, postingIds),
+          eq(masterPostingMappings.marketplace, "tiktok"),
+        ),
+      );
+    const live = maps.filter((m) => m.status !== "create" && m.productId);
+    const shopIds = [...new Set(live.map((m) => m.shopId))];
+    const shopRows = shopIds.length ? await this.db.select().from(shops).where(inArray(shops.id, shopIds)) : [];
+    const shopById = new Map(shopRows.map((x) => [x.id, x] as const));
+    const targets: { shop: typeof shops.$inferSelect; productId: string; skus: { combo: unknown; sku: string | null }[] }[] = [];
+    for (const m of live) {
+      const shop = shopById.get(m.shopId);
+      if (!shop?.accessToken || !shop.shopCipher) continue;
+      targets.push({ shop, productId: m.productId, skus: byPosting.get(m.masterPostingId) ?? [] });
+    }
+    return targets;
+  }
+
+  /** GET produk live dgn 1x refresh token bila perlu; kembalikan produk + shop. */
+  private async bacaProdukLive(
+    userId: string,
+    shop: typeof shops.$inferSelect,
+    productId: string,
+    appKey: string,
+    appSecret: string,
+  ): Promise<{ product: Record<string, any>; shop: typeof shops.$inferSelect }> {
+    const mk = (sh: typeof shops.$inferSelect) =>
+      new TikTokClient(appKey, appSecret, this.crypto.decrypt(sh.accessToken!), sh.shopCipher);
+    let cur = shop;
+    let segar = false;
+    for (;;) {
+      try {
+        const p = (await mk(cur).get(`/product/202309/products/${productId}`)) as Record<string, any>;
+        return { product: p, shop: cur };
+      } catch (e) {
+        if (e instanceof TikTokApiError && e.tokenBermasalah && !segar) {
+          segar = true;
+          await this.shops.refreshOne(userId, cur.id);
+          const [f] = await this.db.select().from(shops).where(eq(shops.id, cur.id)).limit(1);
+          if (f) cur = f;
+          continue;
+        }
+        throw e;
+      }
+    }
+  }
+
+  /** Status harga master ini di tiap listing marketplace (LIVE): sesuai harga publish atau belum. */
+  async marketplacePriceStatus(userId: string, masterProductId: string) {
+    const publishPrice = await this.publishPriceOf(userId, masterProductId);
+    const targets = await this.masterListingTargets(userId, masterProductId);
+    const { appKey, appSecret } = await this.tiktok.credentials();
+    const shopsOut: {
+      shop: string | null;
+      productId: string;
+      harga: (number | null)[];
+      sesuai: boolean;
+      adaSku: boolean;
+      error?: string;
+    }[] = [];
+    for (const t of targets) {
+      try {
+        const { product } = await this.bacaProdukLive(userId, t.shop, t.productId, appKey, appSecret);
+        const liveSkus = Array.isArray(product?.skus) ? product.skus : [];
+        const harga: (number | null)[] = [];
+        for (const ps of t.skus) {
+          const ls = this.matchLiveSku(ps, liveSkus, t.skus.length === 1);
+          if (ls?.id) {
+            const a = Number(ls.price?.sale_price ?? ls.price?.tax_exclusive_price ?? NaN);
+            harga.push(Number.isFinite(a) ? a : null);
+          }
+        }
+        const sesuai =
+          publishPrice != null &&
+          harga.length > 0 &&
+          harga.every((h) => h != null && Math.round(h) === Math.round(publishPrice));
+        shopsOut.push({ shop: t.shop.shopName, productId: t.productId, harga, sesuai, adaSku: harga.length > 0 });
+      } catch (e) {
+        shopsOut.push({ shop: t.shop.shopName, productId: t.productId, harga: [], sesuai: false, adaSku: false, error: (e as Error).message.slice(0, 80) });
+      }
+    }
+    return { publishPrice, total: shopsOut.length, shops: shopsOut };
+  }
+
+  /** Terapkan harga publish master ke SEMUA listing marketplace yang memuatnya. */
+  async pushPublishPriceToMarketplace(userId: string, masterProductId: string) {
+    const publishPrice = await this.publishPriceOf(userId, masterProductId);
+    if (publishPrice == null || publishPrice <= 0)
+      throw new BadRequestException("Set harga publish master di menu HPP & Harga Jual dulu.");
+    const targets = await this.masterListingTargets(userId, masterProductId);
+    const { appKey, appSecret } = await this.tiktok.credentials();
+    const hasil: { shop: string | null; status: "ok" | "failed" | "skipped"; jumlah?: number; reason?: string }[] = [];
+    for (const t of targets) {
+      try {
+        const { product, shop } = await this.bacaProdukLive(userId, t.shop, t.productId, appKey, appSecret);
+        const liveSkus = Array.isArray(product?.skus) ? product.skus : [];
+        const items: { id: string; price: { amount: string; currency: string } }[] = [];
+        for (const ps of t.skus) {
+          const ls = this.matchLiveSku(ps, liveSkus, t.skus.length === 1);
+          if (ls?.id)
+            items.push({ id: String(ls.id), price: { amount: String(Math.round(publishPrice)), currency: (ls.price?.currency as string) || "IDR" } });
+        }
+        const byId = new Map(items.map((it) => [it.id, it] as const));
+        const dedup = [...byId.values()];
+        if (!dedup.length) {
+          hasil.push({ shop: t.shop.shopName, status: "skipped", reason: "SKU tak cocok dgn listing" });
+          continue;
+        }
+        const mk = (sh: typeof shops.$inferSelect) =>
+          new TikTokClient(appKey, appSecret, this.crypto.decrypt(sh.accessToken!), sh.shopCipher);
+        await mk(shop).post(`/product/202309/products/${t.productId}/prices/update`, { skus: dedup });
+        hasil.push({ shop: t.shop.shopName, status: "ok", jumlah: dedup.length });
+      } catch (e) {
+        hasil.push({ shop: t.shop.shopName, status: "failed", reason: (e as Error).message.slice(0, 80) });
+      }
+    }
+    return { publishPrice, total: targets.length, ok: hasil.filter((h) => h.status === "ok").length, hasil };
+  }
+
   private async tandaiMapping(mappingId: string, status: string, message: string): Promise<void> {
     await this.db
       .update(masterPostingMappings)

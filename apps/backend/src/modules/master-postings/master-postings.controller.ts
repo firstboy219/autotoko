@@ -69,6 +69,18 @@ export class MasterPostingsController {
     return { success: true, data: await this.svc.setMasterPublishPrice(uid(req), id, Number(price)) };
   }
 
+  /** Status harga master ini di tiap listing marketplace (live). */
+  @Get("master-products/:id/price-status")
+  async priceStatus(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.marketplacePriceStatus(uid(req), id) };
+  }
+
+  /** Terapkan harga publish master ke semua listing marketplace yang memuatnya. */
+  @Post("master-products/:id/push-price")
+  async pushPrice(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.pushPublishPriceToMarketplace(uid(req), id) };
+  }
+
   /** Penjualan 30 hari per toko termapping. */
   @Get(":id/sales")
   async sales(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
