@@ -162,6 +162,7 @@ function HppSection({
   const [suggest, setSuggest] = useState<{ suggested: number | null; basedOnOrders: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [copying, setCopying] = useState(false);
 
   // One draft per row, held here rather than inside the rows, so a single
   // Save can see every change. Keyed by bom item id.
@@ -263,9 +264,30 @@ function HppSection({
         subtitle="Takaran bahan baku untuk 1 pcs produk, dikali harga satuannya."
         action={
           <div className="flex items-center gap-3">
-            {!adding && data.materials.length > 0 && (
-              <Button size="sm" variant="tonal" icon="plus" onClick={() => setAdding(true)}>
+            {!adding && !copying && data.materials.length > 0 && (
+              <Button
+                size="sm"
+                variant="tonal"
+                icon="plus"
+                onClick={() => {
+                  setAdding(true);
+                  setCopying(false);
+                }}
+              >
                 Tambah Bahan
+              </Button>
+            )}
+            {!adding && !copying && (
+              <Button
+                size="sm"
+                variant="outline"
+                icon="copy"
+                onClick={() => {
+                  setCopying(true);
+                  setAdding(false);
+                }}
+              >
+                Tiru dari produk lain
               </Button>
             )}
             <Link
@@ -290,16 +312,46 @@ function HppSection({
         />
       )}
 
+      {copying && (
+        <CopyMaterialsForm
+          productId={productId}
+          onDone={() => {
+            setCopying(false);
+            onChange();
+          }}
+          onCancel={() => setCopying(false)}
+        />
+      )}
+
       {!data.materials.length ? (
-        !adding && (
+        !adding && !copying && (
           <EmptyState
             icon="beaker"
             title="Belum ada bahan baku"
-            description="Tambahkan bahan beserta takarannya untuk 1 pcs produk, lalu isi harga satuannya."
+            description="Tambahkan bahan satu per satu, atau tiru daftar bahan dari produk lain lalu edit seperlunya."
             action={
-              <Button variant="filled" icon="plus" onClick={() => setAdding(true)}>
-                Tambah Bahan Baku
-              </Button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  variant="filled"
+                  icon="plus"
+                  onClick={() => {
+                    setAdding(true);
+                    setCopying(false);
+                  }}
+                >
+                  Tambah Bahan Baku
+                </Button>
+                <Button
+                  variant="outline"
+                  icon="copy"
+                  onClick={() => {
+                    setCopying(true);
+                    setAdding(false);
+                  }}
+                >
+                  Tiru dari produk lain
+                </Button>
+              </div>
             }
           />
         )
@@ -662,6 +714,92 @@ function AddMaterialForm({
       <div className="flex gap-2 mt-4">
         <Button variant="filled" icon="check" loading={busy} disabled={!valid}>
           Tambah Bahan
+        </Button>
+        <Button type="button" variant="text" onClick={onCancel} disabled={busy}>
+          Batal
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function CopyMaterialsForm({
+  productId,
+  onDone,
+  onCancel,
+}: {
+  productId: string;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const toast = useToast();
+  const products = useFetch<
+    { productId: string; sku: string; name: string; materialCount: number }[]
+  >("/costing");
+  const [sourceId, setSourceId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const options = (products.data ?? []).filter(
+    (p) => p.productId !== productId && p.materialCount > 0,
+  );
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!sourceId) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api.post<{ copied: number; skipped: number; total: number }>(
+        `/costing/${productId}/materials/copy-from`,
+        { sourceProductId: sourceId },
+      );
+      toast(
+        r.skipped
+          ? `${r.copied} bahan ditiru, ${r.skipped} dilewati (sudah ada) - tinggal edit`
+          : `${r.copied} bahan ditiru - tinggal edit sesuai produk ini`,
+        "success",
+      );
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="border-b border-line bg-canvas p-5">
+      <div className="text-sm font-medium text-ink mb-1">Tiru bahan baku dari produk lain</div>
+      <div className="text-[11px] text-ink-3 mb-3">
+        Menyalin daftar bahan + takaran + harga satuannya ke produk ini sebagai titik awal. Produk
+        yang ditiru tidak berubah, dan bahan yang sudah ada di sini tidak digandakan.
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Produk sumber" required hint="Hanya produk yang sudah punya bahan baku.">
+          <Select value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
+            <option value="">
+              {products.loading
+                ? "Memuat produk..."
+                : options.length === 0
+                  ? "Belum ada produk lain yang punya bahan"
+                  : "Pilih produk..."}
+            </option>
+            {options.map((pr) => (
+              <option key={pr.productId} value={pr.productId}>
+                {pr.name} ({pr.sku}) - {pr.materialCount} bahan
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+      {err && (
+        <div className="mt-3">
+          <InlineAlert tone="danger">{err}</InlineAlert>
+        </div>
+      )}
+      <div className="flex gap-2 mt-4">
+        <Button variant="filled" icon="copy" loading={busy} disabled={!sourceId}>
+          Tiru bahan
         </Button>
         <Button type="button" variant="text" onClick={onCancel} disabled={busy}>
           Batal

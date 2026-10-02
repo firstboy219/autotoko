@@ -806,6 +806,56 @@ export class CostingService {
   }
 
   /**
+   * Tiru (salin) daftar bahan baku dari produk LAIN ke produk ini sebagai titik
+   * awal yang tinggal diedit. TIDAK menyentuh produk sumber. Baris yang sudah
+   * ada di resep target (materialId sama, atau nama sama untuk baris lama tanpa
+   * katalog) dilewati supaya tak dobel. Field supplier/stok/restock tidak ikut
+   * disalin — itu data per-produk; hanya bahan + takaran + harga satuan yang
+   * relevan untuk HPP yang ditiru.
+   */
+  async copyMaterialsFrom(userId: string, targetProductId: string, sourceProductId: string) {
+    if (!sourceProductId) throw new BadRequestException("Pilih produk yang mau ditiru.");
+    if (targetProductId === sourceProductId)
+      throw new BadRequestException("Produk sumber dan tujuan sama.");
+    await this.getProductOrThrow(userId, targetProductId);
+    await this.getProductOrThrow(userId, sourceProductId); // bukti kepemilikan sumber
+    const norm = (v: string) => v.trim().toLowerCase().replace(/\s+/g, " ");
+    const sourceLines = await this.db
+      .select()
+      .from(bomItems)
+      .where(eq(bomItems.masterProductId, sourceProductId));
+    const targetLines = await this.db
+      .select({ materialId: bomItems.materialId, materialName: bomItems.materialName })
+      .from(bomItems)
+      .where(eq(bomItems.masterProductId, targetProductId));
+    const takenIds = new Set(targetLines.map((t) => t.materialId).filter((x): x is string => !!x));
+    const takenNames = new Set(targetLines.map((t) => norm(t.materialName)));
+    const toInsert: (typeof bomItems.$inferInsert)[] = [];
+    let skipped = 0;
+    for (const sline of sourceLines) {
+      const dup = sline.materialId
+        ? takenIds.has(sline.materialId)
+        : takenNames.has(norm(sline.materialName));
+      if (dup) {
+        skipped++;
+        continue;
+      }
+      toInsert.push({
+        masterProductId: targetProductId,
+        materialId: sline.materialId,
+        materialName: sline.materialName,
+        quantity: sline.quantity,
+        unit: sline.unit,
+        unitCost: sline.unitCost,
+      });
+      if (sline.materialId) takenIds.add(sline.materialId);
+      else takenNames.add(norm(sline.materialName));
+    }
+    if (toInsert.length) await this.db.insert(bomItems).values(toInsert);
+    return { copied: toInsert.length, skipped, total: sourceLines.length };
+  }
+
+  /**
    * Finds a catalogue material by normalised name, or creates it.
    *
    * Matching on the normalised name is what stops "Botol" and "botol" becoming

@@ -183,6 +183,16 @@ export class CostingController {
     return ok(await this.costing.addMaterial(uid(req), productId, dto));
   }
 
+  /** Tiru daftar bahan baku dari produk lain (tanpa mengubah produk sumber). */
+  @Post(":productId/materials/copy-from")
+  async copyMaterials(
+    @Req() req: FastifyRequest,
+    @Param("productId") productId: string,
+    @Body("sourceProductId") sourceProductId: string,
+  ) {
+    return ok(await this.costing.copyMaterialsFrom(uid(req), productId, sourceProductId));
+  }
+
   @Patch("materials/:bomItemId")
   async updateMaterial(
     @Req() req: FastifyRequest,
