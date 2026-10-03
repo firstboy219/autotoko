@@ -897,6 +897,7 @@ interface MasterOpt {
 interface TodayProd {
   skuId: string;
   nama: string;
+  varian?: string;
   productId: string | null;
   qty: number;
   mapped: boolean;
@@ -954,7 +955,8 @@ function ProdukTerjualHariIni({ tgl }: { tgl: string }) {
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm text-ink" title={p.nama}>{p.nama}</div>
               <div className="text-[11px] text-ink-3">
-                {p.qty}x terjual{p.masterName ? ` · ${p.masterName}` : ""}
+                {p.qty}x terjual{p.varian ? ` · varian: ${p.varian}` : ""}
+                {p.masterName ? ` · ${p.masterName}` : ""}
               </div>
             </div>
             {p.mapped ? (
@@ -1006,12 +1008,14 @@ interface SalesByDate {
   nominal: number;
   profitBersih: number | null;
   perToko: { shopId: string | null; nama: string; pesanan: number; nominal: number; profit?: number | null }[];
+  perMaster?: { nama: string; nominal: number; qty: number; profit: number }[];
 }
 interface OrderLite {
   id: string;
   marketplaceOrderId: string;
   buyerName: string | null;
   totalAmount: string | null;
+  estPencairan?: string | null;
   fulfillmentStatus: string;
   items?: { name?: string; masterName?: string | null; qty?: number }[] | null;
 }
@@ -1045,8 +1049,13 @@ function ShopOrders({ shopId, tgl }: { shopId: string; tgl: string }) {
               </span>
             )}
           </span>
-          <span className="whitespace-nowrap tabular-nums text-ink">
-            {o.totalAmount != null ? rupiah(o.totalAmount) : "—"}
+          <span className="whitespace-nowrap tabular-nums text-right">
+            <span className="text-ink">{o.totalAmount != null ? rupiah(o.totalAmount) : "—"}</span>
+            {o.estPencairan != null && (
+              <span className={`ml-2 ${Number(o.estPencairan) < 0 ? "text-red-600" : "text-emerald-700"}`}>
+                profit {rupiah(o.estPencairan)}
+              </span>
+            )}
           </span>
         </div>
       ))}
@@ -1091,11 +1100,17 @@ function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => 
               </div>
             )}
           </div>
+          {(d.perToko.length > 0 || (d.perMaster?.length ?? 0) > 0) && (
+            <div className="mt-3 flex flex-wrap gap-6 border-t border-line pt-3">
+              <KomposisiBar title="Komposisi penjualan per toko" rows={d.perToko} />
+              <KomposisiBar title="Komposisi penjualan per master produk" rows={d.perMaster ?? []} />
+            </div>
+          )}
           {d.perToko.length === 0 ? (
             <div className="mt-3 text-xs text-ink-3">Belum ada pesanan pada tanggal ini.</div>
           ) : (
             <div className="mt-3 border-t border-line pt-2">
-              <div className="mb-1 text-[11px] font-medium text-ink-3">Komposisi per toko (klik untuk lihat pesanan)</div>
+              <div className="mb-1 text-[11px] font-medium text-ink-3">Rincian per toko (klik untuk lihat pesanan)</div>
               {d.perToko.map((t) => {
                 const key = t.shopId ?? t.nama;
                 const open = expand === key;
@@ -1134,5 +1149,36 @@ function PenjualanBlok() {
       <PenjualanHarian tgl={tgl} setTgl={setTgl} />
       <ProdukTerjualHariIni tgl={tgl} />
     </>
+  );
+}
+
+/** Grafik komposisi sederhana: bar horizontal proporsional per entri (nominal). */
+function KomposisiBar({ title, rows }: { title: string; rows: { nama: string; nominal: number }[] }) {
+  const top = rows.filter((r) => r.nominal > 0).slice(0, 6);
+  if (!top.length) return null;
+  const max = Math.max(1, ...top.map((r) => r.nominal));
+  const total = top.reduce((a, r) => a + r.nominal, 0) || 1;
+  return (
+    <div className="min-w-[200px] flex-1">
+      <div className="mb-1.5 text-[11px] font-medium text-ink-3">{title}</div>
+      <div className="space-y-1.5">
+        {top.map((r, i) => (
+          <div key={i}>
+            <div className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="truncate text-ink-2" title={r.nama}>{r.nama}</span>
+              <span className="whitespace-nowrap tabular-nums text-ink-3">
+                {rupiah(r.nominal)} · {Math.round((r.nominal / total) * 100)}%
+              </span>
+            </div>
+            <div className="mt-0.5 h-1.5 rounded-full bg-canvas">
+              <div
+                className="h-1.5 rounded-full bg-[#2a78d6]"
+                style={{ width: `${Math.max(3, (r.nominal / max) * 100)}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

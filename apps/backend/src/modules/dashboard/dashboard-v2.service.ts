@@ -82,23 +82,50 @@ export class DashboardV2Service {
     let profitBersih = 0;
     let adaProfit = false;
     const profitByShop = new Map<string, number>();
+    const byMaster = new Map<string, { nama: string; nominal: number; qty: number; profit: number }>();
     for (const r of itemRows) {
-      const np = this.orderProfit.netProfitNumber(r.items, ctx);
-      if (np == null) continue;
-      profitBersih += np;
-      adaProfit = true;
-      const k = r.shopId ?? "";
-      profitByShop.set(k, (profitByShop.get(k) ?? 0) + np);
+      const items = Array.isArray(r.items) ? r.items : [];
+      let orderProfit = 0;
+      let orderAda = false;
+      for (const it of items) {
+        const o2 = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
+        const m = this.orderProfit.resolveItemMaster(o2, ctx);
+        const np = this.orderProfit.netProfitForItem(o2, ctx);
+        const qty = Number(o2.qty ?? o2.quantity ?? 0) || 0;
+        const sub = Number(o2.subtotal ?? 0) || (Number(o2.salePrice ?? o2.sale_price ?? 0) || 0) * qty;
+        if (np != null) {
+          orderProfit += np;
+          orderAda = true;
+        }
+        if (m) {
+          const e = byMaster.get(m.mid) ?? { nama: m.name ?? "(tanpa nama)", nominal: 0, qty: 0, profit: 0 };
+          e.nominal += sub;
+          e.qty += qty;
+          if (np != null) e.profit += np;
+          byMaster.set(m.mid, e);
+        }
+      }
+      if (orderAda) {
+        profitBersih += orderProfit;
+        adaProfit = true;
+        const k = r.shopId ?? "";
+        profitByShop.set(k, (profitByShop.get(k) ?? 0) + orderProfit);
+      }
     }
     const perTokoProfit = perToko.map((t) => ({
       ...t,
       profit: profitByShop.has(t.shopId ?? "") ? Math.round(profitByShop.get(t.shopId ?? "")!) : null,
     }));
+    const perMaster = [...byMaster.values()]
+      .map((e) => ({ nama: e.nama, nominal: Math.round(e.nominal), qty: e.qty, profit: Math.round(e.profit) }))
+      .sort((a, b) => b.nominal - a.nominal)
+      .slice(0, 10);
     return {
       pesanan,
       nominal,
       profitBersih: adaProfit ? Math.round(profitBersih) : null,
       perToko: perTokoProfit,
+      perMaster,
     };
   }
 

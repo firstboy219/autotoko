@@ -364,7 +364,7 @@ export class OrdersService {
     const rows = await this.db.select({ items: orders.items }).from(orders).where(cond);
     const map = new Map<
       string,
-      { skuId: string; nama: string; productId: string | null; qty: number; mapped: boolean; masterName: string | null; profit: number; profitAda: boolean }
+      { skuId: string; nama: string; varian: string; productId: string | null; qty: number; mapped: boolean; masterName: string | null; profit: number; profitAda: boolean }
     >();
     for (const r of rows) {
       const items = Array.isArray(r.items) ? r.items : [];
@@ -378,6 +378,7 @@ export class OrdersService {
           map.get(skuId) ?? {
             skuId,
             nama: String(o2.name ?? o2.skuName ?? skuId),
+            varian: String(o2.skuName ?? ""),
             productId: o2.productId != null ? String(o2.productId) : null,
             qty: 0,
             mapped: false,
@@ -403,6 +404,7 @@ export class OrdersService {
       .map((e) => ({
         skuId: e.skuId,
         nama: e.nama,
+        varian: e.varian,
         productId: e.productId,
         qty: e.qty,
         mapped: e.mapped,
