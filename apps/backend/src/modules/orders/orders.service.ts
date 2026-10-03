@@ -343,7 +343,7 @@ export class OrdersService {
    * (jika dikenali ke master) profit bersihnya; yang belum dikenali ditandai agar
    * bisa dipetakan. Dipakai kartu dashboard "Produk terjual hari ini".
    */
-  async produkHariIni(userId: string, dateStr?: string) {
+  async produkHariIni(userId: string, dateStr?: string, toStr?: string) {
     const ctx = await this.orderProfit.loadContext(userId);
     let start: Date;
     let end: Date | null = null;
@@ -357,6 +357,16 @@ export class OrdersService {
     } else {
       const jak = new Date(Date.now() + 7 * 3600 * 1000);
       start = new Date(Date.UTC(jak.getUTCFullYear(), jak.getUTCMonth(), jak.getUTCDate()) - 7 * 3600 * 1000);
+    }
+    if (toStr) {
+      const tp = (toStr || "").split("-");
+      const ty = Number(tp[0]);
+      const tm = Number(tp[1]);
+      const td = Number(tp[2]);
+      if (tp.length === 3 && Number.isFinite(ty) && Number.isFinite(tm) && Number.isFinite(td)) {
+        const te = new Date(Date.UTC(ty, tm - 1, td) - 7 * 3600 * 1000);
+        end = new Date(te.getTime() + 24 * 3600 * 1000);
+      }
     }
     const base = [
       eq(orders.userId, userId),

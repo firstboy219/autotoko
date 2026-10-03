@@ -916,8 +916,8 @@ interface TodayResp {
  * dikenali ke master -> tampilkan profit bersihnya; kalau belum -> minta user
  * memetakannya (dropdown master + Petakan) agar profitnya ikut terhitung.
  */
-function ProdukTerjualHariIni({ tgl }: { tgl: string }) {
-  const data = useFetch<TodayResp>(`/orders/today-products?date=${tgl}`);
+function ProdukTerjualHariIni({ from, to }: { from: string; to: string }) {
+  const data = useFetch<TodayResp>(`/orders/today-products?date=${from}&to=${to}`);
   const masters = useFetch<MasterOpt[]>("/master-postings/master-products");
   const toast = useToast();
   const [sel, setSel] = useState<Record<string, string>>({});
@@ -949,7 +949,7 @@ function ProdukTerjualHariIni({ tgl }: { tgl: string }) {
   return (
     <Card className="mb-4">
       <CardHeader
-        title={`Produk terjual ${tgl === todayJak() ? "hari ini" : tgl} (${data.data.total})`}
+        title={`Produk terjual ${from === to ? (from === todayJak() ? "hari ini" : from) : `${from} s/d ${to}`} (${data.data.total})`}
         subtitle={
           data.data.belum > 0
             ? `${data.data.belum} produk belum dipetakan — petakan agar profit bersihnya ikut terhitung.`
@@ -1075,11 +1075,11 @@ function rpShort(v: number): string {
 }
 
 /** Pesanan satu toko pada tanggal terpilih (lazy saat baris toko di-expand). */
-function ShopOrders({ shopId, tgl }: { shopId: string; tgl: string }) {
-  const start = new Date(`${tgl}T00:00:00+07:00`);
-  const end = new Date(start.getTime() + 24 * 3600 * 1000);
+function ShopOrders({ shopId, from, to }: { shopId: string; from: string; to: string }) {
+  const start = new Date(`${from}T00:00:00+07:00`);
+  const end = new Date(new Date(`${to}T00:00:00+07:00`).getTime() + 24 * 3600 * 1000);
   const orders = useFetch<OrderLite[]>(
-    `/orders?shopId=${shopId}&dateFrom=${encodeURIComponent(start.toISOString())}&dateTo=${encodeURIComponent(end.toISOString())}&limit=200`,
+    `/orders?shopId=${shopId}&dateFrom=${encodeURIComponent(start.toISOString())}&dateTo=${encodeURIComponent(end.toISOString())}&limit=300`,
   );
   if (orders.loading) return <div className="pb-2 pl-5 text-[11px] text-ink-3">Memuat pesanan…</div>;
   const list = orders.data ?? [];
@@ -1115,45 +1115,71 @@ function ShopOrders({ shopId, tgl }: { shopId: string; tgl: string }) {
 }
 
 /** Kartu Penjualan: bisa pilih tanggal lain + expand pesanan per toko. */
+interface BucketResp {
+  granularity: "day" | "month";
+  from?: string;
+  to?: string;
+  buckets: { key: string; label: string; pesanan: number; nominal: number; profit: number }[];
+}
 function deltaPct(cur: number, prev: number | null | undefined): number | null {
   if (prev == null) return null;
   if (prev === 0) return cur > 0 ? 100 : 0;
   return Math.round(((cur - prev) / prev) * 100);
 }
-function Kpi({ label, value, pct, tone }: { label: string; value: string; pct: number | null; tone?: "profit" }) {
+/** Geser tanggal YYYY-MM-DD (WIB) sebanyak n hari. */
+function shiftDays(dateStr: string, n: number): string {
+  const base = new Date(`${dateStr}T00:00:00+07:00`).getTime() + n * 86400000;
+  return new Date(base + 7 * 3600 * 1000).toISOString().slice(0, 10);
+}
+function Kpi({ label, value, pct, tone, cmp }: { label: string; value: string; pct: number | null; tone?: "profit"; cmp?: string }) {
   const up = (pct ?? 0) >= 0;
+  const lbl = cmp ?? "vs kemarin";
   return (
     <div className="rounded-lg border border-line px-3 py-2">
       <div className="text-[10px] uppercase tracking-wide text-ink-3">{label}</div>
       <div className={`mt-0.5 text-lg font-semibold tabular-nums ${tone === "profit" ? "text-emerald-700" : "text-ink"}`}>{value}</div>
       <div className="mt-0.5 text-[10px]">
         {pct == null ? (
-          <span className="text-ink-3">vs kemarin: —</span>
+          <span className="text-ink-3">{lbl}: —</span>
         ) : (
           <span className={up ? "text-emerald-700" : "text-red-600"}>
-            {up ? "▲" : "▼"} {Math.abs(pct)}% <span className="text-ink-3">vs kemarin</span>
+            {up ? "▲" : "▼"} {Math.abs(pct)}% <span className="text-ink-3">{lbl}</span>
           </span>
         )}
       </div>
     </div>
   );
 }
-function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => void }) {
-  const sales = useFetch<SalesByDate>(`/dashboard/sales-by-date?date=${tgl}`);
-  const timeline = useFetch<TimelineResp>(`/dashboard/sales-timeline?date=${tgl}`);
-  const prevStr = new Date(
-    new Date(`${tgl}T00:00:00+07:00`).getTime() - 24 * 3600 * 1000 + 7 * 3600 * 1000,
-  )
-    .toISOString()
-    .slice(0, 10);
-  const prev = useFetch<SalesByDate>(`/dashboard/sales-by-date?date=${prevStr}`);
+function PenjualanHarian({
+  from,
+  to,
+  setFrom,
+  setTo,
+}: {
+  from: string;
+  to: string;
+  setFrom: (v: string) => void;
+  setTo: (v: string) => void;
+}) {
+  const sameDay = from === to;
+  const sales = useFetch<SalesByDate>(`/dashboard/sales-range?from=${from}&to=${to}`);
+  const timeline = useFetch<TimelineResp>(sameDay ? `/dashboard/sales-timeline?date=${from}` : null);
+  const buckets = useFetch<BucketResp>(sameDay ? null : `/dashboard/sales-buckets?from=${from}&to=${to}`);
+  const lenDays =
+    Math.round(
+      (new Date(`${to}T00:00:00+07:00`).getTime() - new Date(`${from}T00:00:00+07:00`).getTime()) / 86400000,
+    ) + 1;
+  const prevTo = shiftDays(from, -1);
+  const prevFrom = shiftDays(prevTo, -(lenDays - 1));
+  const prev = useFetch<SalesByDate>(`/dashboard/sales-range?from=${prevFrom}&to=${prevTo}`);
   const [expand, setExpand] = useState<string | null>(null);
   const [showAnalytics, setShowAnalytics] = useState(true);
   const d = sales.data;
   const p = prev.data;
-  const isToday = tgl === todayJak();
+  const T = todayJak();
   const rugi = (d?.perMaster ?? []).filter((m) => m.profit < 0);
   const sepi = (() => {
+    if (!sameDay) return [] as number[];
     const tl = timeline.data;
     if (!tl) return [] as number[];
     const cand: { h: number; v: number }[] = [];
@@ -1166,7 +1192,7 @@ function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => 
   function exportCsv() {
     if (!d) return;
     const rows: string[] = [];
-    rows.push(`Ringkasan Penjualan,${d.tanggal ?? tgl}`);
+    rows.push(`Ringkasan Penjualan,${from} s/d ${to}`);
     rows.push("");
     rows.push("Metrik,Nilai");
     rows.push(`Pesanan,${d.pesanan}`);
@@ -1182,49 +1208,93 @@ function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => 
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `penjualan-${d.tanggal ?? tgl}.csv`;
+    a.download = `penjualan-${from}_${to}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
+  const presets: { label: string; from: string; to: string }[] = [
+    { label: "Hari ini", from: T, to: T },
+    { label: "7 hari", from: shiftDays(T, -6), to: T },
+    { label: "30 hari", from: shiftDays(T, -29), to: T },
+    { label: "3 bulan", from: shiftDays(T, -89), to: T },
+    { label: "6 bulan", from: shiftDays(T, -179), to: T },
+    { label: "12 bulan", from: shiftDays(T, -364), to: T },
+  ];
+  const judul = sameDay ? (from === T ? "Penjualan hari ini" : `Penjualan ${from}`) : `Penjualan ${from} s/d ${to}`;
+  const cmpLabel = sameDay ? "vs kemarin" : "vs periode sblm";
   return (
     <Card className="mb-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="text-sm font-medium text-ink">Penjualan {isToday ? "hari ini" : ""}</div>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-medium text-ink">{judul}</div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {presets.map((ps) => {
+            const active = ps.from === from && ps.to === to;
+            return (
+              <button
+                key={ps.label}
+                type="button"
+                onClick={() => {
+                  setFrom(ps.from);
+                  setTo(ps.to);
+                  setExpand(null);
+                }}
+                className={`rounded-md px-2 py-0.5 text-[11px] ${active ? "bg-brand text-white" : "border border-line text-ink-2 hover:bg-canvas"}`}
+              >
+                {ps.label}
+              </button>
+            );
+          })}
           {d && (
             <button
               type="button"
               onClick={exportCsv}
-              className="rounded-lg border border-line px-2 py-1 text-xs text-ink-2 hover:bg-canvas"
-              title="Ekspor ringkasan tanggal ini ke CSV"
+              className="rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-2 hover:bg-canvas"
+              title="Ekspor ringkasan rentang ini ke CSV"
             >
-              Ekspor CSV
+              CSV
             </button>
           )}
-          <input
-            type="date"
-            value={tgl}
-            max={todayJak()}
-            onChange={(e) => {
-              setTgl(e.target.value || todayJak());
-              setExpand(null);
-            }}
-            className="rounded-lg border border-line px-2 py-1 text-xs"
-          />
         </div>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-ink-3">
+        <input
+          type="date"
+          value={from}
+          max={to}
+          onChange={(e) => {
+            const v = e.target.value || T;
+            setFrom(v);
+            if (v > to) setTo(v);
+            setExpand(null);
+          }}
+          className="rounded-md border border-line px-2 py-1"
+        />
+        <span>s/d</span>
+        <input
+          type="date"
+          value={to}
+          min={from}
+          max={T}
+          onChange={(e) => {
+            setTo(e.target.value || T);
+            setExpand(null);
+          }}
+          className="rounded-md border border-line px-2 py-1"
+        />
       </div>
       {sales.loading || !d ? (
         <div className="mt-3 text-sm text-ink-3">Memuat…</div>
       ) : (
         <>
           <div className="mt-2 grid grid-cols-3 gap-2">
-            <Kpi label="Omzet" value={rupiah(d.nominal)} pct={deltaPct(d.nominal, p?.nominal)} />
-            <Kpi label="Pesanan" value={String(d.pesanan)} pct={deltaPct(d.pesanan, p?.pesanan)} />
+            <Kpi label="Omzet" value={rupiah(d.nominal)} pct={deltaPct(d.nominal, p?.nominal)} cmp={cmpLabel} />
+            <Kpi label="Pesanan" value={String(d.pesanan)} pct={deltaPct(d.pesanan, p?.pesanan)} cmp={cmpLabel} />
             <Kpi
               label="Profit bersih"
               value={rupiah(d.profitBersih ?? 0)}
               pct={deltaPct(d.profitBersih ?? 0, p?.profitBersih ?? null)}
               tone="profit"
+              cmp={cmpLabel}
             />
           </div>
           {rugi.length > 0 && (
@@ -1253,10 +1323,18 @@ function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => 
           </button>
           {showAnalytics && (
             <>
-              {timeline.data && (
+              {sameDay ? (
+                timeline.data && (
+                  <div className="mt-2 border-t border-line pt-3">
+                    <TimelineChart data={timeline.data} />
+                  </div>
+                )
+              ) : buckets.data ? (
                 <div className="mt-2 border-t border-line pt-3">
-                  <TimelineChart data={timeline.data} />
+                  <BucketChart data={buckets.data} />
                 </div>
+              ) : (
+                <div className="mt-2 border-t border-line pt-3 text-sm text-ink-3">Memuat grafik…</div>
               )}
               {(d.perToko.length > 0 || (d.perMaster?.length ?? 0) > 0) && (
                 <div className="mt-3 flex flex-wrap gap-6 border-t border-line pt-3">
@@ -1266,7 +1344,7 @@ function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => 
               )}
               <ProfitRanking rows={d.perMaster ?? []} />
               {d.perToko.length === 0 ? (
-                <div className="mt-3 text-xs text-ink-3">Belum ada pesanan pada tanggal ini.</div>
+                <div className="mt-3 text-xs text-ink-3">Belum ada pesanan pada rentang ini.</div>
               ) : (
                 <div className="mt-3 border-t border-line pt-2">
                   <div className="mb-1 text-[11px] font-medium text-ink-3">Rincian per toko (klik untuk lihat pesanan)</div>
@@ -1288,7 +1366,7 @@ function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => 
                             {t.profit != null && <span className="text-emerald-700"> · profit {rupiah(t.profit)}</span>}
                           </span>
                         </button>
-                        {open && t.shopId && <ShopOrders shopId={t.shopId} tgl={tgl} />}
+                        {open && t.shopId && <ShopOrders shopId={t.shopId} from={from} to={to} />}
                       </div>
                     );
                   })}
@@ -1301,15 +1379,121 @@ function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => 
     </Card>
   );
 }
-
-/** Satukan tanggal kartu Penjualan & Produk terjual: ganti tanggal -> keduanya ikut. */
+/** Satukan rentang tanggal kartu Penjualan & Produk terjual. */
 function PenjualanBlok() {
-  const [tgl, setTgl] = useState(todayJak());
+  const [from, setFrom] = useState(todayJak());
+  const [to, setTo] = useState(todayJak());
   return (
     <>
-      <PenjualanHarian tgl={tgl} setTgl={setTgl} />
-      <ProdukTerjualHariIni tgl={tgl} />
+      <PenjualanHarian from={from} to={to} setFrom={setFrom} setTo={setTo} />
+      <ProdukTerjualHariIni from={from} to={to} />
     </>
+  );
+}
+/** Grafik batang per-hari / per-bulan untuk rentang lintas waktu. */
+function BucketChart({ data }: { data: BucketResp }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const b = data.buckets ?? [];
+  if (!b.length) return <div className="text-[11px] text-ink-3">Tidak ada data pada rentang ini.</div>;
+  const max = Math.max(1, ...b.map((x) => x.nominal));
+  const scaleMax = max * 1.14;
+  const W = 480;
+  const H = 158;
+  const padL = 8;
+  const padR = 8;
+  const padT = 24;
+  const padB = 20;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const bw = plotW / b.length;
+  const bx = (i: number) => padL + i * bw;
+  const totalNominal = b.reduce((a, x) => a + x.nominal, 0);
+  const totalProfit = b.reduce((a, x) => a + x.profit, 0);
+  const totalPesanan = b.reduce((a, x) => a + x.pesanan, 0);
+  let bestI = 0;
+  for (let i = 1; i < b.length; i++) if ((b[i]?.profit ?? 0) > (b[bestI]?.profit ?? 0)) bestI = i;
+  const sel = hover ?? bestI;
+  const cur = b[sel];
+  const showLabels = b.length <= 16;
+  const labelEvery = Math.max(1, Math.ceil(b.length / 12));
+  return (
+    <div>
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[11px] font-medium text-ink-3">Penjualan per {data.granularity === "day" ? "hari" : "bulan"}</div>
+        <div className="flex items-center gap-3 text-[10px] text-ink-3">
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2.5 w-2 rounded-sm" style={{ background: "linear-gradient(#5a9be6,#2a78d6)" }} /> Omzet
+          </span>
+          <span className="text-emerald-700">profit bersih (angka di atas bar)</span>
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full select-none" onMouseLeave={() => setHover(null)}>
+        <defs>
+          <linearGradient id="bkBar" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#5a9be6" />
+            <stop offset="100%" stopColor="#2a78d6" />
+          </linearGradient>
+          <linearGradient id="bkBarHi" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#8fc0f5" />
+            <stop offset="100%" stopColor="#1e63b8" />
+          </linearGradient>
+        </defs>
+        {[0.5, 1].map((f, k) => (
+          <line
+            key={k}
+            x1={padL}
+            y1={padT + plotH - f * plotH}
+            x2={W - padR}
+            y2={padT + plotH - f * plotH}
+            stroke="currentColor"
+            className="text-line"
+            strokeWidth="1"
+            strokeDasharray="2 3"
+            opacity="0.6"
+          />
+        ))}
+        {b.map((x, i) => {
+          const h = (x.nominal / scaleMax) * plotH;
+          const top = padT + plotH - h;
+          const on = i === sel;
+          return (
+            <g key={i}>
+              <rect x={bx(i) + bw * 0.16} y={top} width={bw * 0.68} height={Math.max(0, h)} rx="1.5" fill={on ? "url(#bkBarHi)" : "url(#bkBar)"} />
+              {showLabels && x.nominal > 0 && (
+                <text x={bx(i) + bw / 2} y={top - 2.5} textAnchor="middle" style={{ fontSize: "6.5px" }} fill={x.profit < 0 ? "#dc2626" : "#059669"}>
+                  {rpShort(x.profit)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        <line x1={padL} y1={padT + plotH} x2={W - padR} y2={padT + plotH} stroke="currentColor" className="text-line" strokeWidth="1" />
+        {b.map((x, i) =>
+          i % labelEvery === 0 || i === b.length - 1 ? (
+            <text key={i} x={bx(i) + bw / 2} y={H - 6} textAnchor="middle" className="fill-current text-ink-3" style={{ fontSize: "7px" }}>
+              {x.label}
+            </text>
+          ) : null,
+        )}
+        {b.map((_, i) => (
+          <rect key={i} x={bx(i)} y={padT} width={bw} height={plotH} fill="transparent" onMouseEnter={() => setHover(i)} />
+        ))}
+      </svg>
+      <div className="mt-1.5 text-[11px]">
+        {hover == null ? (
+          <div className="text-ink-2">
+            Total: <b className="text-ink tabular-nums">{totalPesanan}</b> pesanan · <b className="text-ink">{rupiah(totalNominal)}</b> omzet ·{" "}
+            <span className={`font-semibold ${totalProfit < 0 ? "text-red-600" : "text-emerald-700"}`}>profit {rupiah(totalProfit)}</span>
+            <span className="text-ink-3"> · ter-untung: {cur?.label}</span>
+          </div>
+        ) : (
+          <div className="text-ink-2">
+            <b className="text-ink">{cur?.label}</b> · {cur?.pesanan} pesanan · {rupiah(cur?.nominal ?? 0)} ·{" "}
+            <span className={`font-semibold ${(cur?.profit ?? 0) < 0 ? "text-red-600" : "text-emerald-700"}`}>profit {rupiah(cur?.profit ?? 0)}</span>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

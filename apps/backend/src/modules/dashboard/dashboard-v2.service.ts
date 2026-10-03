@@ -240,6 +240,107 @@ export class DashboardV2Service {
     };
   }
 
+  /** Awal hari (WIB) dari string YYYY-MM-DD; fallback hari ini. */
+  private jakDay(dateStr: string): Date {
+    const parts = (dateStr || "").split("-");
+    const y = Number(parts[0]);
+    const mo = Number(parts[1]);
+    const da = Number(parts[2]);
+    if (parts.length === 3 && Number.isFinite(y) && Number.isFinite(mo) && Number.isFinite(da)) {
+      return new Date(Date.UTC(y, mo - 1, da) - 7 * 3600 * 1000);
+    }
+    return this.jakartaStartOfDay();
+  }
+
+  /** Penjualan + profit untuk RENTANG tanggal (WIB, inklusif from..to). */
+  async salesByRange(userId: string, fromStr: string, toStr: string) {
+    const start = this.jakDay(fromStr);
+    let ts = this.jakDay(toStr);
+    if (ts.getTime() < start.getTime()) ts = start;
+    const end = new Date(ts.getTime() + 24 * 3600 * 1000);
+    const data = await this.penjualanTanggal(userId, start, end);
+    return { from: fromStr, to: toStr, ...data };
+  }
+
+  /**
+   * Seri penjualan untuk grafik, granularitas OTOMATIS dari rentang:
+   * span 0 hari -> (dipakai hourly via salesTimeline, bukan sini);
+   * <= 62 hari -> per HARI; selain itu -> per BULAN. Tiap bucket: pesanan,
+   * nominal, profit bersih (HPP). Order dibatalkan dikecualikan.
+   */
+  async salesBuckets(userId: string, fromStr: string, toStr: string) {
+    const fs = this.jakDay(fromStr);
+    let ts = this.jakDay(toStr);
+    if (ts.getTime() < fs.getTime()) ts = fs;
+    const spanDays = Math.round((ts.getTime() - fs.getTime()) / 86_400_000);
+    const gran: "day" | "month" = spanDays <= 62 ? "day" : "month";
+    const end = new Date(ts.getTime() + 24 * 3600 * 1000);
+    const ctx = await this.orderProfit.loadContext(userId);
+    const rows = await this.db
+      .select({ createdAt: orders.createdAt, items: orders.items, totalAmount: orders.totalAmount })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.userId, userId),
+          ne(orders.fulfillmentStatus, "dibatalkan"),
+          gte(orders.createdAt, fs),
+          lt(orders.createdAt, end),
+        ),
+      );
+    const map = new Map<string, { pesanan: number; nominal: number; profit: number }>();
+    for (const r of rows) {
+      if (!r.createdAt) continue;
+      const wib = new Date(new Date(r.createdAt).getTime() + 7 * 3600 * 1000);
+      const key = gran === "day" ? wib.toISOString().slice(0, 10) : wib.toISOString().slice(0, 7);
+      const e = map.get(key) ?? { pesanan: 0, nominal: 0, profit: 0 };
+      e.pesanan += 1;
+      e.nominal += Number(r.totalAmount) || 0;
+      const np = this.orderProfit.netProfitNumber(r.items, ctx);
+      if (np != null) e.profit += np;
+      map.set(key, e);
+    }
+    const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+    const buckets: { key: string; label: string; pesanan: number; nominal: number; profit: number }[] = [];
+    if (gran === "day") {
+      for (let t = fs.getTime(); t <= ts.getTime(); t += 86_400_000) {
+        const wib = new Date(t + 7 * 3600 * 1000);
+        const key = wib.toISOString().slice(0, 10);
+        const e = map.get(key) ?? { pesanan: 0, nominal: 0, profit: 0 };
+        buckets.push({
+          key,
+          label: `${wib.getUTCDate()}/${wib.getUTCMonth() + 1}`,
+          pesanan: e.pesanan,
+          nominal: Math.round(e.nominal),
+          profit: Math.round(e.profit),
+        });
+      }
+    } else {
+      const fwib = new Date(fs.getTime() + 7 * 3600 * 1000);
+      const twib = new Date(ts.getTime() + 7 * 3600 * 1000);
+      let Y = fwib.getUTCFullYear();
+      let M = fwib.getUTCMonth();
+      const endY = twib.getUTCFullYear();
+      const endM = twib.getUTCMonth();
+      while (Y < endY || (Y === endY && M <= endM)) {
+        const key = `${Y}-${String(M + 1).padStart(2, "0")}`;
+        const e = map.get(key) ?? { pesanan: 0, nominal: 0, profit: 0 };
+        buckets.push({
+          key,
+          label: `${MONTHS[M]} '${String(Y).slice(2)}`,
+          pesanan: e.pesanan,
+          nominal: Math.round(e.nominal),
+          profit: Math.round(e.profit),
+        });
+        M += 1;
+        if (M > 11) {
+          M = 0;
+          Y += 1;
+        }
+      }
+    }
+    return { granularity: gran, from: fromStr, to: toStr, buckets };
+  }
+
   async overview(userId: string, from: string, to: string) {
     const hari = Math.max(
       1,

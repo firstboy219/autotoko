@@ -145,6 +145,30 @@ export class DashboardController {
     return { success: true, data: await this.cache.wrap(`salesdate:${u}:${d}`, 30000, () => this.v2Service.salesByDate(u, d)) };
   }
 
+  @Get("sales-range")
+  async salesRange(
+    @Req() req: FastifyRequest,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ): Promise<ApiResponse<unknown>> {
+    const u = uid(req);
+    const f = from ?? new Date().toISOString().slice(0, 10);
+    const t = to ?? f;
+    return { success: true, data: await this.cache.wrap(`salerng:${u}:${f}:${t}`, 30000, () => this.v2Service.salesByRange(u, f, t)) };
+  }
+
+  @Get("sales-buckets")
+  async salesBuckets(
+    @Req() req: FastifyRequest,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ): Promise<ApiResponse<unknown>> {
+    const u = uid(req);
+    const f = from ?? new Date().toISOString().slice(0, 10);
+    const t = to ?? f;
+    return { success: true, data: await this.cache.wrap(`salebkt:${u}:${f}:${t}`, 60000, () => this.v2Service.salesBuckets(u, f, t)) };
+  }
+
   @Get("sales-timeline")
   async salesTimeline(@Req() req: FastifyRequest, @Query("date") date?: string): Promise<ApiResponse<unknown>> {
     const u = uid(req);
