@@ -1155,6 +1155,7 @@ function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => 
               <KomposisiPie title="Komposisi penjualan per master produk" rows={d.perMaster ?? []} />
             </div>
           )}
+          <ProfitRanking rows={d.perMaster ?? []} />
           {d.perToko.length === 0 ? (
             <div className="mt-3 text-xs text-ink-3">Belum ada pesanan pada tanggal ini.</div>
           ) : (
@@ -1300,6 +1301,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
   const jam2 = (h: number) => String(h).padStart(2, "0");
   const gridLines = [0.5, 1];
   const totalProfit = profit.reduce((a, b) => a + b, 0);
+  const totalPesanan = hari.reduce((a, b) => a + b, 0);
   return (
     <div>
       <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
@@ -1376,18 +1378,61 @@ function TimelineChart({ data }: { data: TimelineResp }) {
           <rect key={i} x={x(i)} y={padT} width={bw} height={plotH} fill="transparent" onMouseEnter={() => setHover(i)} />
         ))}
       </svg>
-      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-[11px]">
-        <div className="text-ink-2">
-          <b className="text-ink">{jam2(sel)}.00</b>
-          {hover == null && <span className="text-ink-3"> (jam teramai bulan ini)</span>} · {hari[sel] ?? 0} pesanan ·{" "}
-          <span className={`font-medium ${(profit[sel] ?? 0) < 0 ? "text-red-600" : "text-emerald-700"}`}>
-            profit {rupiah(profit[sel] ?? 0)}
-          </span>
-          <span className="text-ink-3"> · rata² bln {data.rataBulan?.[sel] ?? 0}/jam</span>
-        </div>
-        <div className="tabular-nums text-ink-3">
-          Total profit hari ini: <span className="font-medium text-emerald-700">{rupiah(totalProfit)}</span>
-        </div>
+      <div className="mt-1.5 text-[11px]">
+        {hover == null ? (
+          <div className="text-ink-2">
+            Hari ini: <b className="text-ink tabular-nums">{totalPesanan}</b> pesanan ·{" "}
+            <span className={`font-semibold tabular-nums ${totalProfit < 0 ? "text-red-600" : "text-emerald-700"}`}>
+              profit {rupiah(totalProfit)}
+            </span>
+            <span className="text-ink-3"> · jam teramai bln {jam2(data.puncakBulan)}.00 · (arahkan kursor utk rincian per jam)</span>
+          </div>
+        ) : (
+          <div className="text-ink-2">
+            <b className="text-ink">{jam2(sel)}.00</b> · {hari[sel] ?? 0} pesanan ·{" "}
+            <span className={`font-semibold tabular-nums ${(profit[sel] ?? 0) < 0 ? "text-red-600" : "text-emerald-700"}`}>
+              profit {rupiah(profit[sel] ?? 0)}
+            </span>
+            <span className="text-ink-3"> · rata² bln {data.rataBulan?.[sel] ?? 0} pesanan/jam</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Grafik produk paling menguntungkan (profit bersih dari HPP), bar horizontal. */
+function ProfitRanking({ rows }: { rows: { nama: string; profit: number }[] }) {
+  const data = rows
+    .filter((r) => r.profit !== 0)
+    .sort((a, b) => b.profit - a.profit)
+    .slice(0, 6);
+  if (!data.length) return null;
+  const max = Math.max(1, ...data.map((r) => Math.abs(r.profit)));
+  return (
+    <div className="mt-3 border-t border-line pt-3">
+      <div className="mb-1.5 text-[11px] font-medium text-ink-3">Produk paling menguntungkan (profit bersih)</div>
+      <div className="space-y-1.5">
+        {data.map((r, i) => (
+          <div key={i}>
+            <div className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="truncate text-ink-2" title={r.nama}>
+                {i + 1}. {r.nama}
+              </span>
+              <span
+                className={`whitespace-nowrap tabular-nums font-medium ${r.profit < 0 ? "text-red-600" : "text-emerald-700"}`}
+              >
+                {rupiah(r.profit)}
+              </span>
+            </div>
+            <div className="mt-0.5 h-1.5 rounded-full bg-canvas">
+              <div
+                className={`h-1.5 rounded-full ${r.profit < 0 ? "bg-red-500" : "bg-emerald-500"}`}
+                style={{ width: `${Math.max(3, (Math.abs(r.profit) / max) * 100)}%` }}
+              />
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
