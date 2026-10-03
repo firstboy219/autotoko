@@ -153,6 +153,66 @@ export class DashboardV2Service {
     return { tanggal: dateStr, ...data };
   }
 
+  /**
+   * Timeline per jam (0-23, WIB) untuk tanggal terpilih: jumlah order per jam
+   * HARI ITU dibanding RATA-RATA per jam sepanjang bulan itu (pola jam ramai).
+   * Order dibatalkan dikecualikan.
+   */
+  async salesTimeline(userId: string, dateStr: string) {
+    const parts = (dateStr || "").split("-");
+    const y = Number(parts[0]);
+    const mo = Number(parts[1]);
+    const da = Number(parts[2]);
+    let dayStart: Date;
+    if (parts.length === 3 && Number.isFinite(y) && Number.isFinite(mo) && Number.isFinite(da)) {
+      dayStart = new Date(Date.UTC(y, mo - 1, da) - 7 * 3600 * 1000);
+    } else {
+      dayStart = this.jakartaStartOfDay();
+    }
+    const wib = new Date(dayStart.getTime() + 7 * 3600 * 1000);
+    const Y = wib.getUTCFullYear();
+    const M = wib.getUTCMonth();
+    const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
+    const monthStart = new Date(Date.UTC(Y, M, 1) - 7 * 3600 * 1000);
+    const monthEnd = new Date(Date.UTC(Y, M + 1, 1) - 7 * 3600 * 1000);
+    const arr = (x: unknown): Array<Record<string, unknown>> =>
+      Array.isArray(x) ? (x as any) : ((x as any)?.rows ?? []);
+
+    const dayRows = await this.db.execute(sql`
+      SELECT extract(hour from (created_at at time zone 'Asia/Jakarta'))::int AS h, count(*)::int AS n
+      FROM orders
+      WHERE user_id = ${userId}::uuid AND fulfillment_status <> 'dibatalkan'
+        AND created_at >= ${dayStart.toISOString()}::timestamptz AND created_at < ${dayEnd.toISOString()}::timestamptz
+      GROUP BY 1`);
+    const monthRows = await this.db.execute(sql`
+      SELECT extract(hour from (created_at at time zone 'Asia/Jakarta'))::int AS h, count(*)::int AS n
+      FROM orders
+      WHERE user_id = ${userId}::uuid AND fulfillment_status <> 'dibatalkan'
+        AND created_at >= ${monthStart.toISOString()}::timestamptz AND created_at < ${monthEnd.toISOString()}::timestamptz
+      GROUP BY 1`);
+    const activeRows = await this.db.execute(sql`
+      SELECT count(distinct (created_at at time zone 'Asia/Jakarta')::date)::int AS d
+      FROM orders
+      WHERE user_id = ${userId}::uuid AND fulfillment_status <> 'dibatalkan'
+        AND created_at >= ${monthStart.toISOString()}::timestamptz AND created_at < ${monthEnd.toISOString()}::timestamptz`);
+
+    const hariIni = Array<number>(24).fill(0);
+    for (const r of arr(dayRows)) {
+      const h = Number(r.h);
+      if (h >= 0 && h < 24) hariIni[h] = Number(r.n) || 0;
+    }
+    const monthHour = Array<number>(24).fill(0);
+    for (const r of arr(monthRows)) {
+      const h = Number(r.h);
+      if (h >= 0 && h < 24) monthHour[h] = Number(r.n) || 0;
+    }
+    const activeDays = Math.max(1, Number(arr(activeRows)[0]?.d) || 1);
+    const rataBulan = monthHour.map((n) => Math.round((n / activeDays) * 10) / 10);
+    let puncakBulan = 0;
+    for (let h = 1; h < 24; h++) if (rataBulan[h]! > rataBulan[puncakBulan]!) puncakBulan = h;
+    return { tanggal: dateStr, hariIni, rataBulan, puncakBulan, activeDays };
+  }
+
   async overview(userId: string, from: string, to: string) {
     const hari = Math.max(
       1,

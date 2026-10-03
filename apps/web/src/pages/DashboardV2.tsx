@@ -1045,6 +1045,13 @@ interface SalesByDate {
   perToko: { shopId: string | null; nama: string; pesanan: number; nominal: number; profit?: number | null }[];
   perMaster?: { nama: string; nominal: number; qty: number; profit: number }[];
 }
+interface TimelineResp {
+  tanggal?: string;
+  hariIni: number[];
+  rataBulan: number[];
+  puncakBulan: number;
+  activeDays: number;
+}
 interface OrderLite {
   id: string;
   marketplaceOrderId: string;
@@ -1101,6 +1108,7 @@ function ShopOrders({ shopId, tgl }: { shopId: string; tgl: string }) {
 /** Kartu Penjualan: bisa pilih tanggal lain + expand pesanan per toko. */
 function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => void }) {
   const sales = useFetch<SalesByDate>(`/dashboard/sales-by-date?date=${tgl}`);
+  const timeline = useFetch<TimelineResp>(`/dashboard/sales-timeline?date=${tgl}`);
   const [expand, setExpand] = useState<string | null>(null);
   const d = sales.data;
   const isToday = tgl === todayJak();
@@ -1135,6 +1143,11 @@ function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => 
               </div>
             )}
           </div>
+          {timeline.data && (
+            <div className="mt-3 border-t border-line pt-3">
+              <TimelineChart data={timeline.data} />
+            </div>
+          )}
           {(d.perToko.length > 0 || (d.perMaster?.length ?? 0) > 0) && (
             <div className="mt-3 flex flex-wrap gap-6 border-t border-line pt-3">
               <KomposisiPie title="Komposisi penjualan per toko" rows={d.perToko} />
@@ -1255,6 +1268,97 @@ function KomposisiPie({ title, rows }: { title: string; rows: { nama: string; no
             </div>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Grafik timeline pesanan per jam (0-23 WIB): bar = hari terpilih, garis = rata-rata bulan. */
+function TimelineChart({ data }: { data: TimelineResp }) {
+  const hari = data.hariIni ?? [];
+  const bulan = data.rataBulan ?? [];
+  const max = Math.max(1, ...hari, ...bulan);
+  const W = 480;
+  const H = 120;
+  const padL = 20;
+  const padR = 6;
+  const padT = 8;
+  const padB = 18;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const bw = plotW / 24;
+  const x = (i: number) => padL + i * bw;
+  const yv = (v: number) => padT + plotH - (v / max) * plotH;
+  const linePts = bulan.map((v, i) => `${(x(i) + bw / 2).toFixed(1)},${yv(v).toFixed(1)}`).join(" ");
+  const totalHari = hari.reduce((a, b) => a + b, 0);
+  const jam2 = (h: number) => String(h).padStart(2, "0");
+  return (
+    <div>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[11px] font-medium text-ink-3">Timeline pesanan per jam</div>
+        <div className="flex items-center gap-3 text-[10px] text-ink-3">
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2 w-2 rounded-sm bg-[#2a78d6]" /> Hari ini ({totalHari})
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-0.5 w-3 bg-[#eb6834]" /> Rata² bulan ini
+          </span>
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Timeline pesanan per jam">
+        <line
+          x1={padL}
+          y1={padT + plotH}
+          x2={W - padR}
+          y2={padT + plotH}
+          stroke="currentColor"
+          className="text-line"
+          strokeWidth="1"
+        />
+        <rect
+          x={x(data.puncakBulan)}
+          y={padT}
+          width={bw}
+          height={plotH}
+          className="fill-current text-canvas"
+          opacity="0.7"
+        />
+        {hari.map((v, i) => {
+          const h = (v / max) * plotH;
+          return (
+            <rect
+              key={i}
+              x={x(i) + bw * 0.18}
+              y={padT + plotH - h}
+              width={bw * 0.64}
+              height={Math.max(0, h)}
+              rx="1"
+              fill="#2a78d6"
+            >
+              <title>{`${jam2(i)}:00 — ${v} pesanan (hari ini); rata² bulan ${bulan[i] ?? 0}`}</title>
+            </rect>
+          );
+        })}
+        <polyline points={linePts} fill="none" stroke="#eb6834" strokeWidth="1.5" />
+        {[0, 3, 6, 9, 12, 15, 18, 21, 23].map((hh) => (
+          <text
+            key={hh}
+            x={x(hh) + bw / 2}
+            y={H - 5}
+            textAnchor="middle"
+            className="fill-current text-ink-3"
+            style={{ fontSize: "8px" }}
+          >
+            {hh}
+          </text>
+        ))}
+      </svg>
+      <div className="mt-1 text-[11px] text-ink-2">
+        Jam teramai bulan ini: <b className="text-ink">{jam2(data.puncakBulan)}.00</b>
+        <span className="text-ink-3">
+          {" "}
+          (rata² {data.rataBulan?.[data.puncakBulan] ?? 0} pesanan/jam dari {data.activeDays} hari aktif)
+        </span>
       </div>
     </div>
   );

@@ -145,6 +145,13 @@ export class DashboardController {
     return { success: true, data: await this.cache.wrap(`salesdate:${u}:${d}`, 30000, () => this.v2Service.salesByDate(u, d)) };
   }
 
+  @Get("sales-timeline")
+  async salesTimeline(@Req() req: FastifyRequest, @Query("date") date?: string): Promise<ApiResponse<unknown>> {
+    const u = uid(req);
+    const d = date ?? new Date().toISOString().slice(0, 10);
+    return { success: true, data: await this.cache.wrap(`saletl:${u}:${d}`, 60000, () => this.v2Service.salesTimeline(u, d)) };
+  }
+
   @Get("daily-series")
   async dailySeries(@Req() req: FastifyRequest, @Query("days") days?: string): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.dashboard.dailySeries(uid(req), Number(days) || 14) };
