@@ -141,17 +141,14 @@ export class OrderProfitService {
     return n == null ? null : String(Math.round(n));
   }
 
-  /** Profit bersih SATU item pesanan (rupiah) atau null bila tak dikenali/ber-costing. */
-  netProfitForItem(item: Record<string, unknown>, ctx: ProfitContext): number | null {
+  /** Profit bersih per 1 unit DI HARGA PUBLISH master (angka menu HPP & Harga Jual), atau null. */
+  unitProfitForItem(item: Record<string, unknown>, ctx: ProfitContext): number | null {
     const m = this.resolveItemMaster(item, ctx);
     if (!m) return null;
     const basis = ctx.basisByMaster.get(m.mid);
-    if (!basis) return null;
-    const salePrice = Number(item.salePrice ?? item.sale_price ?? 0);
-    const qty = Number(item.qty ?? item.quantity ?? 0) || 0;
-    if (!Number.isFinite(salePrice) || salePrice <= 0 || qty <= 0) return null;
+    if (!basis || basis.publishPrice == null || basis.publishPrice <= 0) return null;
     const pr = calculatePublishPricing({
-      publishPriceCents: Math.round(salePrice * 100),
+      publishPriceCents: Math.round(basis.publishPrice * 100),
       hppCents: basis.hppCents,
       marketplaceFeeRate: basis.marketplaceFeeRate,
       eventRate: basis.eventRate,
@@ -161,7 +158,21 @@ export class OrderProfitService {
       sedekahRate: basis.sedekahRate,
       resellerRate: basis.resellerRate,
     });
-    return (pr.netProfitCents / 100) * qty;
+    return pr.netProfitCents / 100;
+  }
+
+  /**
+   * Profit bersih SATU item pesanan (rupiah) = profit per unit DI HARGA PUBLISH
+   * master (angka menu HPP) x qty terjual. SENGAJA pakai harga publish, bukan harga
+   * jual aktual order (yg bisa terdiskon besar), supaya konsisten dengan menu HPP.
+   * null bila tak dikenali / master belum punya harga publish.
+   */
+  netProfitForItem(item: Record<string, unknown>, ctx: ProfitContext): number | null {
+    const perUnit = this.unitProfitForItem(item, ctx);
+    if (perUnit == null) return null;
+    const qty = Number(item.qty ?? item.quantity ?? 0) || 0;
+    if (qty <= 0) return null;
+    return perUnit * qty;
   }
 
   /** Versi numerik (rupiah) — dipakai dashboard utk menjumlah lintas order. */
@@ -171,26 +182,11 @@ export class OrderProfitService {
     let ada = false;
     for (const it of items) {
       const o2 = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
-      const m = this.resolveItemMaster(o2, ctx);
-      if (!m) continue;
-      const basis = ctx.basisByMaster.get(m.mid);
-      if (!basis) continue;
-      const salePrice = Number(o2.salePrice ?? o2.sale_price ?? 0);
-      const qty = Number(o2.qty ?? o2.quantity ?? 0) || 0;
-      if (!Number.isFinite(salePrice) || salePrice <= 0 || qty <= 0) continue;
-      const pr = calculatePublishPricing({
-        publishPriceCents: Math.round(salePrice * 100),
-        hppCents: basis.hppCents,
-        marketplaceFeeRate: basis.marketplaceFeeRate,
-        eventRate: basis.eventRate,
-        affiliatorRate: basis.affiliatorRate,
-        adsRate: basis.adsRate,
-        adsFixedCents: basis.adsFixedCents,
-        sedekahRate: basis.sedekahRate,
-        resellerRate: basis.resellerRate,
-      });
-      total += (pr.netProfitCents / 100) * qty;
-      ada = true;
+      const np = this.netProfitForItem(o2, ctx);
+      if (np != null) {
+        total += np;
+        ada = true;
+      }
     }
     return ada ? total : null;
   }
