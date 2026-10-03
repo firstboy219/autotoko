@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, gte, inArray, lt, lte, notInArray, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, lte, ne, notInArray, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders, orderSettings, resiScans, resiScanCodes, shops, marketplaceSkuMap, masterProducts } from "../../database/schema/index.js";
 import { parseStatusConfig, deriveStatus, MP_STATUS_LABEL } from "../marketplace-sync/status-config.js";
@@ -358,13 +358,16 @@ export class OrdersService {
       const jak = new Date(Date.now() + 7 * 3600 * 1000);
       start = new Date(Date.UTC(jak.getUTCFullYear(), jak.getUTCMonth(), jak.getUTCDate()) - 7 * 3600 * 1000);
     }
-    const cond = end
-      ? and(eq(orders.userId, userId), gte(orders.createdAt, start), lt(orders.createdAt, end))
-      : and(eq(orders.userId, userId), gte(orders.createdAt, start));
+    const base = [
+      eq(orders.userId, userId),
+      gte(orders.createdAt, start),
+      ne(orders.fulfillmentStatus, "dibatalkan"),
+    ];
+    const cond = end ? and(...base, lt(orders.createdAt, end)) : and(...base);
     const rows = await this.db.select({ items: orders.items }).from(orders).where(cond);
     const map = new Map<
       string,
-      { skuId: string; nama: string; varian: string; productId: string | null; qty: number; mapped: boolean; masterName: string | null; profit: number; profitAda: boolean }
+      { skuId: string; nama: string; varian: string; productId: string | null; qty: number; mapped: boolean; masterId: string | null; masterName: string | null; profit: number; profitAda: boolean }
     >();
     for (const r of rows) {
       const items = Array.isArray(r.items) ? r.items : [];
@@ -382,6 +385,7 @@ export class OrdersService {
             productId: o2.productId != null ? String(o2.productId) : null,
             qty: 0,
             mapped: false,
+            masterId: null as string | null,
             masterName: null as string | null,
             profit: 0,
             profitAda: false,
@@ -389,6 +393,7 @@ export class OrdersService {
         e.qty += qty;
         if (m) {
           e.mapped = true;
+          e.masterId = m.mid;
           e.masterName = m.name;
           const np = this.orderProfit.netProfitForItem(o2, ctx);
           if (np != null) {
@@ -408,6 +413,7 @@ export class OrdersService {
         productId: e.productId,
         qty: e.qty,
         mapped: e.mapped,
+        masterId: e.masterId,
         masterName: e.masterName,
         profitBersih: e.mapped && e.profitAda ? Math.round(e.profit) : null,
       }));

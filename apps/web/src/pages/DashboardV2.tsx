@@ -898,6 +898,7 @@ interface TodayProd {
   skuId: string;
   nama: string;
   varian?: string;
+  masterId?: string | null;
   productId: string | null;
   qty: number;
   mapped: boolean;
@@ -921,6 +922,7 @@ function ProdukTerjualHariIni({ tgl }: { tgl: string }) {
   const toast = useToast();
   const [sel, setSel] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Set<string>>(new Set());
 
   if (data.loading || !data.data || data.data.total === 0) return null;
 
@@ -930,7 +932,12 @@ function ProdukTerjualHariIni({ tgl }: { tgl: string }) {
     setBusy(skuId);
     try {
       await api.post("/products/variants/link", { skuId, masterId: mid });
-      toast("Dipetakan — profit produk ini kini ikut terhitung", "success");
+      toast("Mapping disimpan — profit produk ini ikut terhitung", "success");
+      setEditing((st) => {
+        const ns = new Set(st);
+        ns.delete(skuId);
+        return ns;
+      });
       await data.reload();
     } catch (e) {
       toast((e as Error).message || "Gagal memetakan", "danger");
@@ -959,15 +966,27 @@ function ProdukTerjualHariIni({ tgl }: { tgl: string }) {
                 {p.masterName ? ` · ${p.masterName}` : ""}
               </div>
             </div>
-            {p.mapped ? (
-              <span
-                className={`text-xs font-semibold tabular-nums ${
-                  (p.profitBersih ?? 0) < 0 ? "text-red-600" : "text-emerald-700"
-                }`}
-                title="Estimasi profit bersih hari ini untuk produk ini (logika menu HPP)."
-              >
-                {p.profitBersih != null ? `profit ${rupiah(p.profitBersih)}` : "profit —"}
-              </span>
+            {p.mapped && !editing.has(p.skuId) ? (
+              <div className="flex items-center gap-2">
+                <span
+                  className={`text-xs font-semibold tabular-nums ${
+                    (p.profitBersih ?? 0) < 0 ? "text-red-600" : "text-emerald-700"
+                  }`}
+                  title="Estimasi profit bersih (logika menu HPP)."
+                >
+                  {p.profitBersih != null ? `profit ${rupiah(p.profitBersih)}` : "profit —"}
+                </span>
+                <Button
+                  size="sm"
+                  variant="text"
+                  onClick={() => {
+                    setEditing((st) => new Set(st).add(p.skuId));
+                    setSel((st) => ({ ...st, [p.skuId]: p.masterId ?? "" }));
+                  }}
+                >
+                  Ubah
+                </Button>
+              </div>
             ) : (
               <div className="flex items-center gap-2">
                 <Select
@@ -990,8 +1009,24 @@ function ProdukTerjualHariIni({ tgl }: { tgl: string }) {
                   disabled={!sel[p.skuId]}
                   onClick={() => petakan(p.skuId)}
                 >
-                  Petakan
+                  {p.mapped ? "Simpan" : "Petakan"}
                 </Button>
+                {p.mapped && (
+                  <Button
+                    size="sm"
+                    variant="text"
+                    disabled={busy === p.skuId}
+                    onClick={() =>
+                      setEditing((st) => {
+                        const ns = new Set(st);
+                        ns.delete(p.skuId);
+                        return ns;
+                      })
+                    }
+                  >
+                    Batal
+                  </Button>
+                )}
               </div>
             )}
           </div>
@@ -1102,8 +1137,8 @@ function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => 
           </div>
           {(d.perToko.length > 0 || (d.perMaster?.length ?? 0) > 0) && (
             <div className="mt-3 flex flex-wrap gap-6 border-t border-line pt-3">
-              <KomposisiBar title="Komposisi penjualan per toko" rows={d.perToko} />
-              <KomposisiBar title="Komposisi penjualan per master produk" rows={d.perMaster ?? []} />
+              <KomposisiPie title="Komposisi penjualan per toko" rows={d.perToko} />
+              <KomposisiPie title="Komposisi penjualan per master produk" rows={d.perMaster ?? []} />
             </div>
           )}
           {d.perToko.length === 0 ? (
@@ -1152,32 +1187,74 @@ function PenjualanBlok() {
   );
 }
 
-/** Grafik komposisi sederhana: bar horizontal proporsional per entri (nominal). */
-function KomposisiBar({ title, rows }: { title: string; rows: { nama: string; nominal: number }[] }) {
-  const top = rows.filter((r) => r.nominal > 0).slice(0, 6);
-  if (!top.length) return null;
-  const max = Math.max(1, ...top.map((r) => r.nominal));
-  const total = top.reduce((a, r) => a + r.nominal, 0) || 1;
+const PIE_COLORS = [
+  "#2a78d6",
+  "#eb6834",
+  "#1baf7a",
+  "#eda100",
+  "#9b5de5",
+  "#ef476f",
+  "#06d6a0",
+  "#118ab2",
+];
+
+/** Grafik komposisi (donut) proporsional per entri (nominal) + legenda nilai & %. */
+function KomposisiPie({ title, rows }: { title: string; rows: { nama: string; nominal: number }[] }) {
+  const sorted = rows.filter((r) => r.nominal > 0).sort((a, b) => b.nominal - a.nominal);
+  if (!sorted.length) return null;
+  // Gabung sisanya jadi "Lainnya" supaya donut tak terlalu ramai.
+  const top = sorted.slice(0, 7);
+  const sisa = sorted.slice(7);
+  const data =
+    sisa.length > 0
+      ? [...top, { nama: "Lainnya", nominal: sisa.reduce((a, r) => a + r.nominal, 0) }]
+      : top;
+  const total = data.reduce((a, r) => a + r.nominal, 0) || 1;
+  const C = 2 * Math.PI * 42;
+  let acc = 0;
   return (
-    <div className="min-w-[200px] flex-1">
-      <div className="mb-1.5 text-[11px] font-medium text-ink-3">{title}</div>
-      <div className="space-y-1.5">
-        {top.map((r, i) => (
-          <div key={i}>
-            <div className="flex items-center justify-between gap-2 text-[11px]">
-              <span className="truncate text-ink-2" title={r.nama}>{r.nama}</span>
-              <span className="whitespace-nowrap tabular-nums text-ink-3">
+    <div className="min-w-[220px] flex-1">
+      <div className="mb-2 text-[11px] font-medium text-ink-3">
+        {title} <span className="text-ink-2">· {rupiah(total)}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <svg viewBox="0 0 100 100" className="h-24 w-24 shrink-0 -rotate-90" role="img" aria-label={title}>
+          {data.map((r, i) => {
+            const frac = r.nominal / total;
+            const dash = Math.max(0, frac * C - 1.2); // 1.2 gap antar segmen
+            const seg = (
+              <circle
+                key={i}
+                cx="50"
+                cy="50"
+                r="42"
+                fill="none"
+                stroke={PIE_COLORS[i % PIE_COLORS.length]}
+                strokeWidth="15"
+                strokeDasharray={`${dash} ${C - dash}`}
+                strokeDashoffset={-acc * C}
+              />
+            );
+            acc += frac;
+            return seg;
+          })}
+        </svg>
+        <div className="min-w-0 flex-1 space-y-0.5">
+          {data.map((r, i) => (
+            <div key={i} className="flex items-center gap-1.5 text-[11px]">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ background: PIE_COLORS[i % PIE_COLORS.length] }}
+              />
+              <span className="truncate text-ink-2" title={r.nama}>
+                {r.nama}
+              </span>
+              <span className="ml-auto whitespace-nowrap tabular-nums text-ink-3">
                 {rupiah(r.nominal)} · {Math.round((r.nominal / total) * 100)}%
               </span>
             </div>
-            <div className="mt-0.5 h-1.5 rounded-full bg-canvas">
-              <div
-                className="h-1.5 rounded-full bg-[#2a78d6]"
-                style={{ width: `${Math.max(3, (r.nominal / max) * 100)}%` }}
-              />
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </div>
   );

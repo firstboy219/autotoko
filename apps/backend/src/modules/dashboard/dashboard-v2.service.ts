@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, eq, gte, lt, lte, sql } from "drizzle-orm";
+import { and, eq, gte, lt, lte, ne, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders, shops } from "../../database/schema/index.js";
 import { PendingTasksService } from "./pending-tasks.service.js";
@@ -45,9 +45,12 @@ export class DashboardV2Service {
    * sini -- angkanya bisa 0 walau pencairan tetap berjalan.
    */
   private async penjualanTanggal(userId: string, start: Date, end: Date | null) {
-    const cond = end
-      ? and(eq(orders.userId, userId), gte(orders.createdAt, start), lt(orders.createdAt, end))
-      : and(eq(orders.userId, userId), gte(orders.createdAt, start));
+    const base = [
+      eq(orders.userId, userId),
+      gte(orders.createdAt, start),
+      ne(orders.fulfillmentStatus, "dibatalkan"),
+    ];
+    const cond = end ? and(...base, lt(orders.createdAt, end)) : and(...base);
     const rows = await this.db
       .select({
         shopId: orders.shopId,
