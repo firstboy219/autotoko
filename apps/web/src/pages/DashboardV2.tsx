@@ -1119,7 +1119,8 @@ interface BucketResp {
   granularity: "day" | "month";
   from?: string;
   to?: string;
-  buckets: { key: string; label: string; pesanan: number; nominal: number; profit: number }[];
+  buckets: { key: string; label: string; pesanan: number; nominal: number; profit: number; compare?: number }[];
+  busiestDay?: { label: string; pesanan: number; nominal: number } | null;
 }
 function deltaPct(cur: number, prev: number | null | undefined): number | null {
   if (prev == null) return null;
@@ -1395,7 +1396,7 @@ function BucketChart({ data }: { data: BucketResp }) {
   const [hover, setHover] = useState<number | null>(null);
   const b = data.buckets ?? [];
   if (!b.length) return <div className="text-[11px] text-ink-3">Tidak ada data pada rentang ini.</div>;
-  const max = Math.max(1, ...b.map((x) => x.nominal));
+  const max = Math.max(1, ...b.map((x) => x.nominal), ...b.map((x) => x.compare ?? 0));
   const scaleMax = max * 1.14;
   const W = 480;
   const H = 158;
@@ -1416,6 +1417,7 @@ function BucketChart({ data }: { data: BucketResp }) {
   const cur = b[sel];
   const showLabels = b.length <= 16;
   const labelEvery = Math.max(1, Math.ceil(b.length / 12));
+  const hasCompare = b.some((x) => (x.compare ?? 0) > 0);
   return (
     <div>
       <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
@@ -1424,6 +1426,11 @@ function BucketChart({ data }: { data: BucketResp }) {
           <span className="flex items-center gap-1">
             <span className="inline-block h-2.5 w-2 rounded-sm" style={{ background: "linear-gradient(#5a9be6,#2a78d6)" }} /> Omzet
           </span>
+          {data.granularity === "day" && (
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-0.5 w-3" style={{ background: "#eb6834" }} /> Biasanya / hari (4 mgg)
+            </span>
+          )}
           <span className="text-emerald-700">profit bersih (angka di atas bar)</span>
         </div>
       </div>
@@ -1468,6 +1475,21 @@ function BucketChart({ data }: { data: BucketResp }) {
           );
         })}
         <line x1={padL} y1={padT + plotH} x2={W - padR} y2={padT + plotH} stroke="currentColor" className="text-line" strokeWidth="1" />
+        {hasCompare && (
+          <polyline
+            points={b
+              .map(
+                (x, i) =>
+                  `${(bx(i) + bw / 2).toFixed(1)},${(padT + plotH - Math.min(plotH, ((x.compare ?? 0) / scaleMax) * plotH)).toFixed(1)}`,
+              )
+              .join(" ")}
+            fill="none"
+            stroke="#eb6834"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+            opacity="0.9"
+          />
+        )}
         {b.map((x, i) =>
           i % labelEvery === 0 || i === b.length - 1 ? (
             <text key={i} x={bx(i) + bw / 2} y={H - 6} textAnchor="middle" className="fill-current text-ink-3" style={{ fontSize: "7px" }}>
@@ -1484,12 +1506,16 @@ function BucketChart({ data }: { data: BucketResp }) {
           <div className="text-ink-2">
             Total: <b className="text-ink tabular-nums">{totalPesanan}</b> pesanan · <b className="text-ink">{rupiah(totalNominal)}</b> omzet ·{" "}
             <span className={`font-semibold ${totalProfit < 0 ? "text-red-600" : "text-emerald-700"}`}>profit {rupiah(totalProfit)}</span>
-            <span className="text-ink-3"> · ter-untung: {cur?.label}</span>
+            <span className="text-ink-3">
+              {" "}· ter-untung: {cur?.label}
+              {data.busiestDay ? ` · hari teramai: ${data.busiestDay.label} (~${data.busiestDay.pesanan} pesanan)` : ""}
+            </span>
           </div>
         ) : (
           <div className="text-ink-2">
             <b className="text-ink">{cur?.label}</b> · {cur?.pesanan} pesanan · {rupiah(cur?.nominal ?? 0)} ·{" "}
             <span className={`font-semibold ${(cur?.profit ?? 0) < 0 ? "text-red-600" : "text-emerald-700"}`}>profit {rupiah(cur?.profit ?? 0)}</span>
+            {cur?.compare ? <span className="text-ink-3"> · biasanya hari ini {rupiah(cur.compare)}</span> : null}
           </div>
         )}
       </div>

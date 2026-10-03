@@ -300,7 +300,56 @@ export class DashboardV2Service {
       map.set(key, e);
     }
     const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
-    const buckets: { key: string; label: string; pesanan: number; nominal: number; profit: number }[] = [];
+    // Pembanding per-HARI: MEDIAN omzet/pesanan tiap hari-dalam-seminggu selama 4
+    // minggu terakhir (28 hari = 4x tiap weekday, termasuk hari kosong), supaya
+    // "hari biasanya" tahan outlier/impor massal & kelihatan hari teramai.
+    let avgNom: number[] = [];
+    let busiestDay: { label: string; pesanan: number; nominal: number } | null = null;
+    if (gran === "day") {
+      const DOW = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+      const winStart = new Date(end.getTime() - 28 * 86_400_000);
+      const wrows = await this.db
+        .select({ createdAt: orders.createdAt, totalAmount: orders.totalAmount })
+        .from(orders)
+        .where(
+          and(
+            eq(orders.userId, userId),
+            ne(orders.fulfillmentStatus, "dibatalkan"),
+            gte(orders.createdAt, winStart),
+            lt(orders.createdAt, end),
+          ),
+        );
+      const perDate = new Map<string, { nom: number; pes: number }>();
+      for (const r of wrows) {
+        if (!r.createdAt) continue;
+        const key = new Date(new Date(r.createdAt).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+        const e = perDate.get(key) ?? { nom: 0, pes: 0 };
+        e.nom += Number(r.totalAmount) || 0;
+        e.pes += 1;
+        perDate.set(key, e);
+      }
+      const wkNom: number[][] = [[], [], [], [], [], [], []];
+      const wkPes: number[][] = [[], [], [], [], [], [], []];
+      for (let t = winStart.getTime(); t < end.getTime(); t += 86_400_000) {
+        const w = new Date(t + 7 * 3600 * 1000);
+        const wd = w.getUTCDay();
+        const e = perDate.get(w.toISOString().slice(0, 10)) ?? { nom: 0, pes: 0 };
+        (wkNom[wd] ?? []).push(e.nom);
+        (wkPes[wd] ?? []).push(e.pes);
+      }
+      const median = (a: number[]): number => {
+        if (!a.length) return 0;
+        const srt = [...a].sort((x, y) => x - y);
+        const m = Math.floor(srt.length / 2);
+        return srt.length % 2 ? (srt[m] ?? 0) : ((srt[m - 1] ?? 0) + (srt[m] ?? 0)) / 2;
+      };
+      avgNom = wkNom.map((a) => Math.round(median(a)));
+      const medPes = wkPes.map((a) => Math.round(median(a) * 10) / 10);
+      let bi = 0;
+      for (let i = 1; i < 7; i++) if ((medPes[i] ?? 0) > (medPes[bi] ?? 0)) bi = i;
+      if ((medPes[bi] ?? 0) > 0) busiestDay = { label: DOW[bi] ?? "", pesanan: medPes[bi] ?? 0, nominal: avgNom[bi] ?? 0 };
+    }
+    const buckets: { key: string; label: string; pesanan: number; nominal: number; profit: number; compare?: number }[] = [];
     if (gran === "day") {
       for (let t = fs.getTime(); t <= ts.getTime(); t += 86_400_000) {
         const wib = new Date(t + 7 * 3600 * 1000);
@@ -312,6 +361,7 @@ export class DashboardV2Service {
           pesanan: e.pesanan,
           nominal: Math.round(e.nominal),
           profit: Math.round(e.profit),
+          compare: avgNom[wib.getUTCDay()] ?? 0,
         });
       }
     } else {
@@ -338,7 +388,7 @@ export class DashboardV2Service {
         }
       }
     }
-    return { granularity: gran, from: fromStr, to: toStr, buckets };
+    return { granularity: gran, from: fromStr, to: toStr, buckets, busiestDay };
   }
 
   async overview(userId: string, from: string, to: string) {
