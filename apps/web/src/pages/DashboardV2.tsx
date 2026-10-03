@@ -1311,6 +1311,13 @@ function TimelineChart({ data }: { data: TimelineResp }) {
   const gridLines = [0.5, 1];
   const totalProfit = profit.reduce((a, b) => a + b, 0);
   const totalPesanan = hari.reduce((a, b) => a + b, 0);
+  const isToday = (data.tanggal ?? "") === todayJak();
+  const nowWib = new Date(Date.now() + 7 * 3600 * 1000);
+  const nowFrac = nowWib.getUTCHours() + nowWib.getUTCMinutes() / 60;
+  const curHour = Math.min(23, Math.floor(nowFrac));
+  const todayCum = hari.slice(0, curHour + 1).reduce((a, b) => a + b, 0);
+  const avgCum = bulan.slice(0, curHour + 1).reduce((a, b) => a + b, 0);
+  const pacePct = avgCum > 0 ? Math.round((todayCum / avgCum - 1) * 100) : null;
   return (
     <div>
       <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
@@ -1400,15 +1407,51 @@ function TimelineChart({ data }: { data: TimelineResp }) {
         {hari.map((_, i) => (
           <rect key={i} x={x(i)} y={padT} width={bw} height={plotH} fill="transparent" onMouseEnter={() => setHover(i)} />
         ))}
+        {isToday && (
+          <g pointerEvents="none">
+            <line
+              x1={padL + nowFrac * bw}
+              y1={padT - 5}
+              x2={padL + nowFrac * bw}
+              y2={padT + plotH}
+              stroke="currentColor"
+              className="text-ink-2"
+              strokeWidth="1"
+              strokeDasharray="3 2"
+              opacity="0.7"
+            />
+            <text
+              x={Math.min(W - 20, padL + nowFrac * bw + 2)}
+              y={padT - 7}
+              className="fill-current text-ink-2"
+              style={{ fontSize: "7px", fontWeight: 600 }}
+            >
+              sekarang
+            </text>
+          </g>
+        )}
       </svg>
       <div className="mt-1.5 text-[11px]">
         {hover == null ? (
-          <div className="text-ink-2">
-            Hari ini: <b className="text-ink tabular-nums">{totalPesanan}</b> pesanan ·{" "}
-            <span className={`font-semibold tabular-nums ${totalProfit < 0 ? "text-red-600" : "text-emerald-700"}`}>
-              profit {rupiah(totalProfit)}
-            </span>
-            <span className="text-ink-3"> · jam teramai bln {jam2(data.puncakBulan)}.00 · (arahkan kursor utk rincian per jam)</span>
+          <div>
+            <div className="text-ink-2">
+              Hari ini: <b className="text-ink tabular-nums">{totalPesanan}</b> pesanan ·{" "}
+              <span className={`font-semibold tabular-nums ${totalProfit < 0 ? "text-red-600" : "text-emerald-700"}`}>
+                profit {rupiah(totalProfit)}
+              </span>
+              <span className="text-ink-3"> · jam teramai bln {jam2(data.puncakBulan)}.00</span>
+            </div>
+            {isToday && pacePct != null ? (
+              <div className="text-[10px] text-ink-3">
+                Sampai jam {jam2(curHour)}.00: {todayCum} pesanan (biasanya ~{avgCum.toFixed(1)}) —{" "}
+                <span className={pacePct >= 0 ? "font-medium text-emerald-700" : "font-medium text-amber-700"}>
+                  {pacePct >= 0 ? `lebih ramai ${pacePct}%` : `lebih sepi ${Math.abs(pacePct)}%`}
+                </span>{" "}
+                dari rata-rata bulan ini
+              </div>
+            ) : (
+              <div className="text-[10px] text-ink-3">Arahkan kursor ke bar untuk rincian per jam.</div>
+            )}
           </div>
         ) : (
           <div className="text-ink-2">
