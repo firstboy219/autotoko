@@ -1115,83 +1115,186 @@ function ShopOrders({ shopId, tgl }: { shopId: string; tgl: string }) {
 }
 
 /** Kartu Penjualan: bisa pilih tanggal lain + expand pesanan per toko. */
+function deltaPct(cur: number, prev: number | null | undefined): number | null {
+  if (prev == null) return null;
+  if (prev === 0) return cur > 0 ? 100 : 0;
+  return Math.round(((cur - prev) / prev) * 100);
+}
+function Kpi({ label, value, pct, tone }: { label: string; value: string; pct: number | null; tone?: "profit" }) {
+  const up = (pct ?? 0) >= 0;
+  return (
+    <div className="rounded-lg border border-line px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wide text-ink-3">{label}</div>
+      <div className={`mt-0.5 text-lg font-semibold tabular-nums ${tone === "profit" ? "text-emerald-700" : "text-ink"}`}>{value}</div>
+      <div className="mt-0.5 text-[10px]">
+        {pct == null ? (
+          <span className="text-ink-3">vs kemarin: —</span>
+        ) : (
+          <span className={up ? "text-emerald-700" : "text-red-600"}>
+            {up ? "▲" : "▼"} {Math.abs(pct)}% <span className="text-ink-3">vs kemarin</span>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => void }) {
   const sales = useFetch<SalesByDate>(`/dashboard/sales-by-date?date=${tgl}`);
   const timeline = useFetch<TimelineResp>(`/dashboard/sales-timeline?date=${tgl}`);
+  const prevStr = new Date(
+    new Date(`${tgl}T00:00:00+07:00`).getTime() - 24 * 3600 * 1000 + 7 * 3600 * 1000,
+  )
+    .toISOString()
+    .slice(0, 10);
+  const prev = useFetch<SalesByDate>(`/dashboard/sales-by-date?date=${prevStr}`);
   const [expand, setExpand] = useState<string | null>(null);
+  const [showAnalytics, setShowAnalytics] = useState(true);
   const d = sales.data;
+  const p = prev.data;
   const isToday = tgl === todayJak();
+  const rugi = (d?.perMaster ?? []).filter((m) => m.profit < 0);
+  const sepi = (() => {
+    const tl = timeline.data;
+    if (!tl) return [] as number[];
+    const cand: { h: number; v: number }[] = [];
+    for (let h = 8; h <= 21; h++) cand.push({ h, v: tl.rataBulan?.[h] ?? 0 });
+    cand.sort((a, b) => a.v - b.v);
+    return cand.slice(0, 2).map((c) => c.h);
+  })();
+  const pad2 = (h: number) => String(h).padStart(2, "0");
+  const csv = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  function exportCsv() {
+    if (!d) return;
+    const rows: string[] = [];
+    rows.push(`Ringkasan Penjualan,${d.tanggal ?? tgl}`);
+    rows.push("");
+    rows.push("Metrik,Nilai");
+    rows.push(`Pesanan,${d.pesanan}`);
+    rows.push(`Omzet,${d.nominal}`);
+    rows.push(`Profit bersih,${d.profitBersih ?? 0}`);
+    rows.push("");
+    rows.push("Toko,Pesanan,Omzet,Profit");
+    for (const t of d.perToko) rows.push(`${csv(t.nama)},${t.pesanan},${t.nominal},${t.profit ?? ""}`);
+    rows.push("");
+    rows.push("Master Produk,Qty,Omzet,Profit");
+    for (const m of d.perMaster ?? []) rows.push(`${csv(m.nama)},${m.qty},${m.nominal},${m.profit}`);
+    const blob = new Blob(["\ufeff" + rows.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `penjualan-${d.tanggal ?? tgl}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
   return (
     <Card className="mb-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm font-medium text-ink">Penjualan {isToday ? "hari ini" : ""}</div>
-        <input
-          type="date"
-          value={tgl}
-          max={todayJak()}
-          onChange={(e) => {
-            setTgl(e.target.value || todayJak());
-            setExpand(null);
-          }}
-          className="rounded-lg border border-line px-2 py-1 text-xs"
-        />
+        <div className="flex items-center gap-2">
+          {d && (
+            <button
+              type="button"
+              onClick={exportCsv}
+              className="rounded-lg border border-line px-2 py-1 text-xs text-ink-2 hover:bg-canvas"
+              title="Ekspor ringkasan tanggal ini ke CSV"
+            >
+              Ekspor CSV
+            </button>
+          )}
+          <input
+            type="date"
+            value={tgl}
+            max={todayJak()}
+            onChange={(e) => {
+              setTgl(e.target.value || todayJak());
+              setExpand(null);
+            }}
+            className="rounded-lg border border-line px-2 py-1 text-xs"
+          />
+        </div>
       </div>
       {sales.loading || !d ? (
         <div className="mt-3 text-sm text-ink-3">Memuat…</div>
       ) : (
         <>
-          <div className="mt-2 flex flex-wrap items-end gap-x-6 gap-y-1">
-            <div>
-              <div className="text-2xl font-semibold tabular-nums text-ink">{rupiah(d.nominal)}</div>
-              <div className="text-[11px] text-ink-3">{d.pesanan} pesanan</div>
-            </div>
-            {d.profitBersih != null && (
-              <div className="text-sm font-semibold tabular-nums text-emerald-700">
-                Est. profit bersih: {rupiah(d.profitBersih)}
-                <span className="ml-1 text-[10px] font-normal text-ink-3">dari produk termapping HPP</span>
-              </div>
-            )}
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            <Kpi label="Omzet" value={rupiah(d.nominal)} pct={deltaPct(d.nominal, p?.nominal)} />
+            <Kpi label="Pesanan" value={String(d.pesanan)} pct={deltaPct(d.pesanan, p?.pesanan)} />
+            <Kpi
+              label="Profit bersih"
+              value={rupiah(d.profitBersih ?? 0)}
+              pct={deltaPct(d.profitBersih ?? 0, p?.profitBersih ?? null)}
+              tone="profit"
+            />
           </div>
-          {timeline.data && (
-            <div className="mt-3 border-t border-line pt-3">
-              <TimelineChart data={timeline.data} />
+          {rugi.length > 0 && (
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">
+              ⚠ {rugi.length} produk RUGI (di bawah HPP):{" "}
+              {rugi
+                .slice(0, 3)
+                .map((m) => `${m.nama} (${rupiah(m.profit)})`)
+                .join(", ")}
+              {rugi.length > 3 ? ` +${rugi.length - 3} lagi` : ""}
             </div>
           )}
-          {(d.perToko.length > 0 || (d.perMaster?.length ?? 0) > 0) && (
-            <div className="mt-3 flex flex-wrap gap-6 border-t border-line pt-3">
-              <KomposisiPie title="Komposisi penjualan per toko" rows={d.perToko} />
-              <KomposisiPie title="Komposisi penjualan per master produk" rows={d.perMaster ?? []} />
+          {sepi.length > 0 && (
+            <div className="mt-2 text-[11px] text-ink-3">
+              💡 Jam sepi (kandidat promo/flash sale):{" "}
+              <b className="text-ink-2">{sepi.map((h) => pad2(h) + ".00").join(", ")}</b>
             </div>
           )}
-          <ProfitRanking rows={d.perMaster ?? []} />
-          {d.perToko.length === 0 ? (
-            <div className="mt-3 text-xs text-ink-3">Belum ada pesanan pada tanggal ini.</div>
-          ) : (
-            <div className="mt-3 border-t border-line pt-2">
-              <div className="mb-1 text-[11px] font-medium text-ink-3">Rincian per toko (klik untuk lihat pesanan)</div>
-              {d.perToko.map((t) => {
-                const key = t.shopId ?? t.nama;
-                const open = expand === key;
-                return (
-                  <div key={key} className="border-b border-line last:border-0">
-                    <button
-                      type="button"
-                      onClick={() => setExpand(open ? null : key)}
-                      className="flex w-full items-center justify-between gap-3 py-1.5 text-left text-xs hover:bg-canvas"
-                    >
-                      <span className="flex items-center gap-1 truncate text-ink-2">
-                        <Icon name="chevronDown" size={12} className={open ? "" : "-rotate-90"} /> {t.nama}
-                      </span>
-                      <span className="whitespace-nowrap tabular-nums text-ink">
-                        {t.pesanan} pesanan · {rupiah(t.nominal)}
-                        {t.profit != null && <span className="text-emerald-700"> · profit {rupiah(t.profit)}</span>}
-                      </span>
-                    </button>
-                    {open && t.shopId && <ShopOrders shopId={t.shopId} tgl={tgl} />}
-                  </div>
-                );
-              })}
-            </div>
+          <button
+            type="button"
+            onClick={() => setShowAnalytics((v) => !v)}
+            className="mt-3 flex items-center gap-1 text-[11px] font-medium text-brand-ink"
+          >
+            <Icon name="chevronDown" size={12} className={showAnalytics ? "" : "-rotate-90"} />
+            {showAnalytics ? "Sembunyikan analitik" : "Tampilkan analitik"}
+          </button>
+          {showAnalytics && (
+            <>
+              {timeline.data && (
+                <div className="mt-2 border-t border-line pt-3">
+                  <TimelineChart data={timeline.data} />
+                </div>
+              )}
+              {(d.perToko.length > 0 || (d.perMaster?.length ?? 0) > 0) && (
+                <div className="mt-3 flex flex-wrap gap-6 border-t border-line pt-3">
+                  <KomposisiPie title="Komposisi penjualan per toko" rows={d.perToko} />
+                  <KomposisiPie title="Komposisi penjualan per master produk" rows={d.perMaster ?? []} />
+                </div>
+              )}
+              <ProfitRanking rows={d.perMaster ?? []} />
+              {d.perToko.length === 0 ? (
+                <div className="mt-3 text-xs text-ink-3">Belum ada pesanan pada tanggal ini.</div>
+              ) : (
+                <div className="mt-3 border-t border-line pt-2">
+                  <div className="mb-1 text-[11px] font-medium text-ink-3">Rincian per toko (klik untuk lihat pesanan)</div>
+                  {d.perToko.map((t) => {
+                    const key = t.shopId ?? t.nama;
+                    const open = expand === key;
+                    return (
+                      <div key={key} className="border-b border-line last:border-0">
+                        <button
+                          type="button"
+                          onClick={() => setExpand(open ? null : key)}
+                          className="flex w-full items-center justify-between gap-3 py-1.5 text-left text-xs hover:bg-canvas"
+                        >
+                          <span className="flex items-center gap-1 truncate text-ink-2">
+                            <Icon name="chevronDown" size={12} className={open ? "" : "-rotate-90"} /> {t.nama}
+                          </span>
+                          <span className="whitespace-nowrap tabular-nums text-ink">
+                            {t.pesanan} pesanan · {rupiah(t.nominal)}
+                            {t.profit != null && <span className="text-emerald-700"> · profit {rupiah(t.profit)}</span>}
+                          </span>
+                        </button>
+                        {open && t.shopId && <ShopOrders shopId={t.shopId} tgl={tgl} />}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
           )}
         </>
       )}
@@ -1468,7 +1571,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
 }
 
 /** Grafik produk paling menguntungkan (profit bersih dari HPP), bar horizontal. */
-function ProfitRanking({ rows }: { rows: { nama: string; profit: number; qty?: number }[] }) {
+function ProfitRanking({ rows }: { rows: { nama: string; profit: number; qty?: number; nominal?: number }[] }) {
   const data = rows
     .filter((r) => r.profit !== 0)
     .sort((a, b) => b.profit - a.profit)
@@ -1490,6 +1593,9 @@ function ProfitRanking({ rows }: { rows: { nama: string; profit: number; qty?: n
                 className={`whitespace-nowrap tabular-nums font-medium ${r.profit < 0 ? "text-red-600" : "text-emerald-700"}`}
               >
                 {rupiah(r.profit)}
+                {r.nominal && r.nominal > 0 ? (
+                  <span className="font-normal text-ink-3"> · {Math.round((r.profit / r.nominal) * 100)}% margin</span>
+                ) : null}
               </span>
             </div>
             <div className="mt-0.5 h-1.5 rounded-full bg-canvas">
