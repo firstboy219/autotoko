@@ -1065,6 +1065,14 @@ interface OrderLite {
 function todayJak(): string {
   return new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
 }
+/** Rupiah ringkas: 45rb, 1,2jt. */
+function rpShort(v: number): string {
+  const a = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
+  if (a >= 1_000_000) return sign + (a / 1_000_000).toFixed(1).replace(".0", "") + "jt";
+  if (a >= 1_000) return sign + Math.round(a / 1_000) + "rb";
+  return String(Math.round(v));
+}
 
 /** Pesanan satu toko pada tanggal terpilih (lazy saat baris toko di-expand). */
 function ShopOrders({ shopId, tgl }: { shopId: string; tgl: string }) {
@@ -1283,17 +1291,18 @@ function TimelineChart({ data }: { data: TimelineResp }) {
   const profit = data.profitHariIni ?? [];
   const bulan = data.rataBulan ?? [];
   const max = Math.max(1, ...hari, ...bulan);
+  const scaleMax = max * 1.12;
   const W = 480;
-  const H = 128;
+  const H = 150;
   const padL = 20;
   const padR = 8;
-  const padT = 10;
+  const padT = 26;
   const padB = 20;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const bw = plotW / 24;
   const x = (i: number) => padL + i * bw;
-  const yv = (v: number) => padT + plotH - (v / max) * plotH;
+  const yv = (v: number) => padT + plotH - (v / scaleMax) * plotH;
   const cx = (i: number) => x(i) + bw / 2;
   const areaLine = bulan.map((v, i) => `${cx(i).toFixed(1)},${yv(v).toFixed(1)}`).join(" L ");
   const area = `M ${cx(0).toFixed(1)},${(padT + plotH).toFixed(1)} L ${areaLine} L ${cx(23).toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
@@ -1353,7 +1362,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
         <polyline points={bulan.map((v, i) => `${cx(i).toFixed(1)},${yv(v).toFixed(1)}`).join(" ")} fill="none" stroke="#eb6834" strokeWidth="1.5" strokeLinejoin="round" />
         {/* bars hari ini */}
         {hari.map((v, i) => {
-          const h = (v / max) * plotH;
+          const h = (v / scaleMax) * plotH;
           const on = i === sel;
           return (
             <rect
@@ -1365,6 +1374,20 @@ function TimelineChart({ data }: { data: TimelineResp }) {
               rx="1.5"
               fill={on ? "url(#tlBarHi)" : "url(#tlBar)"}
             />
+          );
+        })}
+        {hari.map((v, i) => {
+          if (v <= 0) return null;
+          const top = padT + plotH - (v / scaleMax) * plotH;
+          return (
+            <g key={`lbl${i}`}>
+              <text x={cx(i)} y={top - 9} textAnchor="middle" className="fill-current text-ink-2" style={{ fontSize: "7px", fontWeight: 600 }}>
+                {v}
+              </text>
+              <text x={cx(i)} y={top - 2.5} textAnchor="middle" style={{ fontSize: "6.5px" }} fill={(profit[i] ?? 0) < 0 ? "#dc2626" : "#059669"}>
+                {rpShort(profit[i] ?? 0)}
+              </text>
+            </g>
           );
         })}
         <line x1={padL} y1={padT + plotH} x2={W - padR} y2={padT + plotH} stroke="currentColor" className="text-line" strokeWidth="1" />
@@ -1402,7 +1425,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
 }
 
 /** Grafik produk paling menguntungkan (profit bersih dari HPP), bar horizontal. */
-function ProfitRanking({ rows }: { rows: { nama: string; profit: number }[] }) {
+function ProfitRanking({ rows }: { rows: { nama: string; profit: number; qty?: number }[] }) {
   const data = rows
     .filter((r) => r.profit !== 0)
     .sort((a, b) => b.profit - a.profit)
@@ -1418,6 +1441,7 @@ function ProfitRanking({ rows }: { rows: { nama: string; profit: number }[] }) {
             <div className="flex items-center justify-between gap-2 text-[11px]">
               <span className="truncate text-ink-2" title={r.nama}>
                 {i + 1}. {r.nama}
+                {r.qty ? <span className="text-ink-3"> · {r.qty} pcs</span> : null}
               </span>
               <span
                 className={`whitespace-nowrap tabular-nums font-medium ${r.profit < 0 ? "text-red-600" : "text-emerald-700"}`}

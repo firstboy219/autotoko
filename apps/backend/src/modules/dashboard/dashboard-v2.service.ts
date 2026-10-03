@@ -122,7 +122,7 @@ export class DashboardV2Service {
     const perMaster = [...byMaster.values()]
       .map((e) => ({ nama: e.nama, nominal: Math.round(e.nominal), qty: e.qty, profit: Math.round(e.profit) }))
       .sort((a, b) => b.nominal - a.nominal)
-      .slice(0, 10);
+      .slice(0, 20);
     return {
       pesanan,
       nominal,
