@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { and, eq, gte, lt, lte, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders, shops } from "../../database/schema/index.js";
 import { PendingTasksService } from "./pending-tasks.service.js";
@@ -44,8 +44,10 @@ export class DashboardV2Service {
    * tabel orders. Toko yang tidak menyinkronkan order tidak menyumbang di
    * sini -- angkanya bisa 0 walau pencairan tetap berjalan.
    */
-  private async penjualanHariIni(userId: string) {
-    const start = this.jakartaStartOfDay();
+  private async penjualanTanggal(userId: string, start: Date, end: Date | null) {
+    const cond = end
+      ? and(eq(orders.userId, userId), gte(orders.createdAt, start), lt(orders.createdAt, end))
+      : and(eq(orders.userId, userId), gte(orders.createdAt, start));
     const rows = await this.db
       .select({
         shopId: orders.shopId,
@@ -55,7 +57,7 @@ export class DashboardV2Service {
       })
       .from(orders)
       .leftJoin(shops, eq(shops.id, orders.shopId))
-      .where(and(eq(orders.userId, userId), gte(orders.createdAt, start)))
+      .where(cond)
       .groupBy(orders.shopId, shops.displayName, shops.shopName);
 
     let pesanan = 0;
@@ -70,14 +72,13 @@ export class DashboardV2Service {
       })
       .sort((a, b) => b.nominal - a.nominal);
 
-    // Est. profit bersih HARI INI (logika menu HPP & Harga Jual) — hanya item
-    // yang produknya dikenali (OrderProfitService: peta manual + derivasi Master
-    // Postingan). Order yang produknya belum dimapping tidak dihitung.
+    // Est. profit bersih (logika menu HPP & Harga Jual) — hanya item yg produknya
+    // dikenali ke master ber-costing. Order yg belum dimapping tidak dihitung.
     const ctx = await this.orderProfit.loadContext(userId);
     const itemRows = await this.db
       .select({ shopId: orders.shopId, items: orders.items })
       .from(orders)
-      .where(and(eq(orders.userId, userId), gte(orders.createdAt, start)));
+      .where(cond);
     let profitBersih = 0;
     let adaProfit = false;
     const profitByShop = new Map<string, number>();
@@ -99,6 +100,27 @@ export class DashboardV2Service {
       profitBersih: adaProfit ? Math.round(profitBersih) : null,
       perToko: perTokoProfit,
     };
+  }
+
+  private async penjualanHariIni(userId: string) {
+    return this.penjualanTanggal(userId, this.jakartaStartOfDay(), null);
+  }
+
+  /** Penjualan + profit untuk SATU tanggal (YYYY-MM-DD, waktu Jakarta). */
+  async salesByDate(userId: string, dateStr: string) {
+    const parts = (dateStr || "").split("-");
+    const y = Number(parts[0]);
+    const mo = Number(parts[1]);
+    const da = Number(parts[2]);
+    let start: Date;
+    if (parts.length === 3 && Number.isFinite(y) && Number.isFinite(mo) && Number.isFinite(da)) {
+      start = new Date(Date.UTC(y, mo - 1, da) - 7 * 3600 * 1000);
+    } else {
+      start = this.jakartaStartOfDay();
+    }
+    const end = new Date(start.getTime() + 24 * 3600 * 1000);
+    const data = await this.penjualanTanggal(userId, start, end);
+    return { tanggal: dateStr, ...data };
   }
 
   async overview(userId: string, from: string, to: string) {

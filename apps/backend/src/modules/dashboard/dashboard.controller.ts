@@ -138,6 +138,13 @@ export class DashboardController {
     };
   }
 
+  @Get("sales-by-date")
+  async salesByDate(@Req() req: FastifyRequest, @Query("date") date?: string): Promise<ApiResponse<unknown>> {
+    const u = uid(req);
+    const d = date ?? new Date().toISOString().slice(0, 10);
+    return { success: true, data: await this.cache.wrap(`salesdate:${u}:${d}`, 30000, () => this.v2Service.salesByDate(u, d)) };
+  }
+
   @Get("daily-series")
   async dailySeries(@Req() req: FastifyRequest, @Query("days") days?: string): Promise<ApiResponse<unknown>> {
     return { success: true, data: await this.dashboard.dailySeries(uid(req), Number(days) || 14) };

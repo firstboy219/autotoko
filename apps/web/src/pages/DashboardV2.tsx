@@ -443,48 +443,7 @@ export default function DashboardV2() {
         subtitle="Uang yang masuk, ke mana perginya, dan seberapa boleh angkanya dipercaya."
       />
 
-      {data && (
-        <Card className="mb-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xs text-ink-3">Penjualan hari ini</div>
-              <div className="mt-1 text-2xl font-semibold tabular-nums text-ink">
-                {rupiah(data.penjualanHariIni.nominal)}
-              </div>
-              <div className="mt-0.5 text-[11px] text-ink-3">
-                {data.penjualanHariIni.pesanan} pesanan masuk hari ini
-                <span> · dari toko yang tersinkron order</span>
-              </div>
-              {data.penjualanHariIni.profitBersih != null && (
-                <div className="mt-1 text-sm font-semibold tabular-nums text-emerald-700">
-                  Est. profit bersih: {rupiah(data.penjualanHariIni.profitBersih)}
-                  <span className="ml-1 text-[10px] font-normal text-ink-3">dari produk termapping HPP</span>
-                </div>
-              )}
-            </div>
-            <Link to="/orders" className="text-xs text-brand-ink hover:underline whitespace-nowrap">
-              Lihat pesanan →
-            </Link>
-          </div>
-          {data.penjualanHariIni.perToko.length > 0 && (
-            <div className="mt-3 border-t border-line pt-3 space-y-1.5">
-              <div className="text-[11px] font-medium text-ink-3">Komposisi per toko</div>
-              {data.penjualanHariIni.perToko.map((t) => (
-                <div
-                  key={t.shopId ?? t.nama}
-                  className="flex items-center justify-between gap-3 text-xs"
-                >
-                  <span className="truncate text-ink-2">{t.nama}</span>
-                  <span className="whitespace-nowrap tabular-nums text-ink">
-                    {t.pesanan} pesanan · {rupiah(t.nominal)}
-                    {t.profit != null && <span className="text-emerald-700"> · profit {rupiah(t.profit)}</span>}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
+      <PenjualanHarian />
 
       <ProdukTerjualHariIni />
 
@@ -1038,6 +997,134 @@ function ProdukTerjualHariIni() {
           </div>
         ))}
       </div>
+    </Card>
+  );
+}
+
+
+interface SalesByDate {
+  tanggal?: string;
+  pesanan: number;
+  nominal: number;
+  profitBersih: number | null;
+  perToko: { shopId: string | null; nama: string; pesanan: number; nominal: number; profit?: number | null }[];
+}
+interface OrderLite {
+  id: string;
+  marketplaceOrderId: string;
+  buyerName: string | null;
+  totalAmount: string | null;
+  fulfillmentStatus: string;
+  items?: { name?: string; masterName?: string | null; qty?: number }[] | null;
+}
+function todayJak(): string {
+  return new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+/** Pesanan satu toko pada tanggal terpilih (lazy saat baris toko di-expand). */
+function ShopOrders({ shopId, tgl }: { shopId: string; tgl: string }) {
+  const start = new Date(`${tgl}T00:00:00+07:00`);
+  const end = new Date(start.getTime() + 24 * 3600 * 1000);
+  const orders = useFetch<OrderLite[]>(
+    `/orders?shopId=${shopId}&dateFrom=${encodeURIComponent(start.toISOString())}&dateTo=${encodeURIComponent(end.toISOString())}&limit=200`,
+  );
+  if (orders.loading) return <div className="pb-2 pl-5 text-[11px] text-ink-3">Memuat pesanan…</div>;
+  const list = orders.data ?? [];
+  if (!list.length) return <div className="pb-2 pl-5 text-[11px] text-ink-3">Tak ada pesanan pada tanggal ini.</div>;
+  return (
+    <div className="space-y-1 pb-2 pl-5">
+      {list.map((o) => (
+        <div key={o.id} className="flex items-center justify-between gap-2 text-[11px]">
+          <span className="truncate text-ink-2">
+            #{o.marketplaceOrderId} · {o.buyerName ?? "—"}
+            {Array.isArray(o.items) && o.items.length > 0 && (
+              <span className="text-ink-3">
+                {" · "}
+                {o.items
+                  .map((it) => `${it.masterName ?? it.name ?? ""}${it.qty ? ` x${it.qty}` : ""}`)
+                  .join(", ")
+                  .slice(0, 60)}
+              </span>
+            )}
+          </span>
+          <span className="whitespace-nowrap tabular-nums text-ink">
+            {o.totalAmount != null ? rupiah(o.totalAmount) : "—"}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Kartu Penjualan: bisa pilih tanggal lain + expand pesanan per toko. */
+function PenjualanHarian() {
+  const [tgl, setTgl] = useState(todayJak());
+  const sales = useFetch<SalesByDate>(`/dashboard/sales-by-date?date=${tgl}`);
+  const [expand, setExpand] = useState<string | null>(null);
+  const d = sales.data;
+  const isToday = tgl === todayJak();
+  return (
+    <Card className="mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-sm font-medium text-ink">Penjualan {isToday ? "hari ini" : ""}</div>
+        <input
+          type="date"
+          value={tgl}
+          max={todayJak()}
+          onChange={(e) => {
+            setTgl(e.target.value || todayJak());
+            setExpand(null);
+          }}
+          className="rounded-lg border border-line px-2 py-1 text-xs"
+        />
+      </div>
+      {sales.loading || !d ? (
+        <div className="mt-3 text-sm text-ink-3">Memuat…</div>
+      ) : (
+        <>
+          <div className="mt-2 flex flex-wrap items-end gap-x-6 gap-y-1">
+            <div>
+              <div className="text-2xl font-semibold tabular-nums text-ink">{rupiah(d.nominal)}</div>
+              <div className="text-[11px] text-ink-3">{d.pesanan} pesanan</div>
+            </div>
+            {d.profitBersih != null && (
+              <div className="text-sm font-semibold tabular-nums text-emerald-700">
+                Est. profit bersih: {rupiah(d.profitBersih)}
+                <span className="ml-1 text-[10px] font-normal text-ink-3">dari produk termapping HPP</span>
+              </div>
+            )}
+          </div>
+          {d.perToko.length === 0 ? (
+            <div className="mt-3 text-xs text-ink-3">Belum ada pesanan pada tanggal ini.</div>
+          ) : (
+            <div className="mt-3 border-t border-line pt-2">
+              <div className="mb-1 text-[11px] font-medium text-ink-3">Komposisi per toko (klik untuk lihat pesanan)</div>
+              {d.perToko.map((t) => {
+                const key = t.shopId ?? t.nama;
+                const open = expand === key;
+                return (
+                  <div key={key} className="border-b border-line last:border-0">
+                    <button
+                      type="button"
+                      onClick={() => setExpand(open ? null : key)}
+                      className="flex w-full items-center justify-between gap-3 py-1.5 text-left text-xs hover:bg-canvas"
+                    >
+                      <span className="flex items-center gap-1 truncate text-ink-2">
+                        <Icon name="chevronDown" size={12} className={open ? "" : "-rotate-90"} /> {t.nama}
+                      </span>
+                      <span className="whitespace-nowrap tabular-nums text-ink">
+                        {t.pesanan} pesanan · {rupiah(t.nominal)}
+                        {t.profit != null && <span className="text-emerald-700"> · profit {rupiah(t.profit)}</span>}
+                      </span>
+                    </button>
+                    {open && t.shopId && <ShopOrders shopId={t.shopId} tgl={tgl} />}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
     </Card>
   );
 }
