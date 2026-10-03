@@ -121,8 +121,8 @@ export class OrdersController {
   }
 
   @Get("today-products")
-  async todayProducts(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
-    return { success: true, data: await this.orders.produkHariIni(uid(req)) };
+  async todayProducts(@Req() req: FastifyRequest, @Query("date") date?: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.produkHariIni(uid(req), date) };
   }
 
   @Get("unmapped-products")

@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, gte, inArray, lte, notInArray, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, lte, notInArray, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 import { orders, orderSettings, resiScans, resiScanCodes, shops, marketplaceSkuMap, masterProducts } from "../../database/schema/index.js";
 import { parseStatusConfig, deriveStatus, MP_STATUS_LABEL } from "../marketplace-sync/status-config.js";
@@ -343,14 +343,25 @@ export class OrdersService {
    * (jika dikenali ke master) profit bersihnya; yang belum dikenali ditandai agar
    * bisa dipetakan. Dipakai kartu dashboard "Produk terjual hari ini".
    */
-  async produkHariIni(userId: string) {
+  async produkHariIni(userId: string, dateStr?: string) {
     const ctx = await this.orderProfit.loadContext(userId);
-    const jak = new Date(Date.now() + 7 * 3600 * 1000);
-    const start = new Date(Date.UTC(jak.getUTCFullYear(), jak.getUTCMonth(), jak.getUTCDate()) - 7 * 3600 * 1000);
-    const rows = await this.db
-      .select({ items: orders.items })
-      .from(orders)
-      .where(and(eq(orders.userId, userId), gte(orders.createdAt, start)));
+    let start: Date;
+    let end: Date | null = null;
+    const parts = (dateStr || "").split("-");
+    const y = Number(parts[0]);
+    const mo = Number(parts[1]);
+    const da = Number(parts[2]);
+    if (dateStr && parts.length === 3 && Number.isFinite(y) && Number.isFinite(mo) && Number.isFinite(da)) {
+      start = new Date(Date.UTC(y, mo - 1, da) - 7 * 3600 * 1000);
+      end = new Date(start.getTime() + 24 * 3600 * 1000);
+    } else {
+      const jak = new Date(Date.now() + 7 * 3600 * 1000);
+      start = new Date(Date.UTC(jak.getUTCFullYear(), jak.getUTCMonth(), jak.getUTCDate()) - 7 * 3600 * 1000);
+    }
+    const cond = end
+      ? and(eq(orders.userId, userId), gte(orders.createdAt, start), lt(orders.createdAt, end))
+      : and(eq(orders.userId, userId), gte(orders.createdAt, start));
+    const rows = await this.db.select({ items: orders.items }).from(orders).where(cond);
     const map = new Map<
       string,
       { skuId: string; nama: string; productId: string | null; qty: number; mapped: boolean; masterName: string | null; profit: number; profitAda: boolean }

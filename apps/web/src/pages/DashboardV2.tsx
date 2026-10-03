@@ -443,9 +443,7 @@ export default function DashboardV2() {
         subtitle="Uang yang masuk, ke mana perginya, dan seberapa boleh angkanya dipercaya."
       />
 
-      <PenjualanHarian />
-
-      <ProdukTerjualHariIni />
+      <PenjualanBlok />
 
       {/* Akses cepat: pintasan ke tugas yang paling sering dibuka dari dashboard. */}
       <div className="mb-4">
@@ -916,8 +914,8 @@ interface TodayResp {
  * dikenali ke master -> tampilkan profit bersihnya; kalau belum -> minta user
  * memetakannya (dropdown master + Petakan) agar profitnya ikut terhitung.
  */
-function ProdukTerjualHariIni() {
-  const data = useFetch<TodayResp>("/orders/today-products");
+function ProdukTerjualHariIni({ tgl }: { tgl: string }) {
+  const data = useFetch<TodayResp>(`/orders/today-products?date=${tgl}`);
   const masters = useFetch<MasterOpt[]>("/master-postings/master-products");
   const toast = useToast();
   const [sel, setSel] = useState<Record<string, string>>({});
@@ -943,7 +941,7 @@ function ProdukTerjualHariIni() {
   return (
     <Card className="mb-4">
       <CardHeader
-        title={`Produk terjual hari ini (${data.data.total})`}
+        title={`Produk terjual ${tgl === todayJak() ? "hari ini" : tgl} (${data.data.total})`}
         subtitle={
           data.data.belum > 0
             ? `${data.data.belum} produk belum dipetakan — petakan agar profit bersihnya ikut terhitung.`
@@ -1057,8 +1055,7 @@ function ShopOrders({ shopId, tgl }: { shopId: string; tgl: string }) {
 }
 
 /** Kartu Penjualan: bisa pilih tanggal lain + expand pesanan per toko. */
-function PenjualanHarian() {
-  const [tgl, setTgl] = useState(todayJak());
+function PenjualanHarian({ tgl, setTgl }: { tgl: string; setTgl: (v: string) => void }) {
   const sales = useFetch<SalesByDate>(`/dashboard/sales-by-date?date=${tgl}`);
   const [expand, setExpand] = useState<string | null>(null);
   const d = sales.data;
@@ -1126,5 +1123,16 @@ function PenjualanHarian() {
         </>
       )}
     </Card>
+  );
+}
+
+/** Satukan tanggal kartu Penjualan & Produk terjual: ganti tanggal -> keduanya ikut. */
+function PenjualanBlok() {
+  const [tgl, setTgl] = useState(todayJak());
+  return (
+    <>
+      <PenjualanHarian tgl={tgl} setTgl={setTgl} />
+      <ProdukTerjualHariIni tgl={tgl} />
+    </>
   );
 }
