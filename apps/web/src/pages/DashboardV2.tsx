@@ -1048,6 +1048,7 @@ interface SalesByDate {
 interface TimelineResp {
   tanggal?: string;
   hariIni: number[];
+  profitHariIni?: number[];
   rataBulan: number[];
   puncakBulan: number;
   activeDays: number;
@@ -1273,92 +1274,120 @@ function KomposisiPie({ title, rows }: { title: string; rows: { nama: string; no
   );
 }
 
-/** Grafik timeline pesanan per jam (0-23 WIB): bar = hari terpilih, garis = rata-rata bulan. */
+/** Grafik timeline pesanan per jam (0-23 WIB) — interaktif: bar hari terpilih
+ *  (hover tampilkan pesanan + profit bersih HPP) + area rata-rata bulan. */
 function TimelineChart({ data }: { data: TimelineResp }) {
+  const [hover, setHover] = useState<number | null>(null);
   const hari = data.hariIni ?? [];
+  const profit = data.profitHariIni ?? [];
   const bulan = data.rataBulan ?? [];
   const max = Math.max(1, ...hari, ...bulan);
   const W = 480;
-  const H = 120;
+  const H = 128;
   const padL = 20;
-  const padR = 6;
-  const padT = 8;
-  const padB = 18;
+  const padR = 8;
+  const padT = 10;
+  const padB = 20;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const bw = plotW / 24;
   const x = (i: number) => padL + i * bw;
   const yv = (v: number) => padT + plotH - (v / max) * plotH;
-  const linePts = bulan.map((v, i) => `${(x(i) + bw / 2).toFixed(1)},${yv(v).toFixed(1)}`).join(" ");
-  const totalHari = hari.reduce((a, b) => a + b, 0);
+  const cx = (i: number) => x(i) + bw / 2;
+  const areaLine = bulan.map((v, i) => `${cx(i).toFixed(1)},${yv(v).toFixed(1)}`).join(" L ");
+  const area = `M ${cx(0).toFixed(1)},${(padT + plotH).toFixed(1)} L ${areaLine} L ${cx(23).toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
+  const sel = hover ?? data.puncakBulan;
   const jam2 = (h: number) => String(h).padStart(2, "0");
+  const gridLines = [0.5, 1];
+  const totalProfit = profit.reduce((a, b) => a + b, 0);
   return (
     <div>
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
         <div className="text-[11px] font-medium text-ink-3">Timeline pesanan per jam</div>
         <div className="flex items-center gap-3 text-[10px] text-ink-3">
           <span className="flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-sm bg-[#2a78d6]" /> Hari ini ({totalHari})
+            <span className="inline-block h-2.5 w-2 rounded-sm bg-gradient-to-b from-[#4f93e0] to-[#2a78d6]" /> Hari ini
           </span>
           <span className="flex items-center gap-1">
             <span className="inline-block h-0.5 w-3 bg-[#eb6834]" /> Rata² bulan ini
           </span>
         </div>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Timeline pesanan per jam">
-        <line
-          x1={padL}
-          y1={padT + plotH}
-          x2={W - padR}
-          y2={padT + plotH}
-          stroke="currentColor"
-          className="text-line"
-          strokeWidth="1"
-        />
-        <rect
-          x={x(data.puncakBulan)}
-          y={padT}
-          width={bw}
-          height={plotH}
-          className="fill-current text-canvas"
-          opacity="0.7"
-        />
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full select-none"
+        role="img"
+        aria-label="Timeline pesanan per jam"
+        onMouseLeave={() => setHover(null)}
+      >
+        <defs>
+          <linearGradient id="tlBar" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#5a9be6" />
+            <stop offset="100%" stopColor="#2a78d6" />
+          </linearGradient>
+          <linearGradient id="tlBarHi" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#8fc0f5" />
+            <stop offset="100%" stopColor="#1e63b8" />
+          </linearGradient>
+        </defs>
+        {gridLines.map((f, k) => (
+          <line
+            key={k}
+            x1={padL}
+            y1={padT + plotH - f * plotH}
+            x2={W - padR}
+            y2={padT + plotH - f * plotH}
+            stroke="currentColor"
+            className="text-line"
+            strokeWidth="1"
+            strokeDasharray="2 3"
+            opacity="0.6"
+          />
+        ))}
+        {/* highlight kolom terpilih */}
+        <rect x={x(sel)} y={padT} width={bw} height={plotH} rx="2" className="fill-current text-canvas" opacity="0.8" />
+        {/* area + garis rata-rata bulan */}
+        <path d={area} fill="#eb6834" opacity="0.12" />
+        <polyline points={bulan.map((v, i) => `${cx(i).toFixed(1)},${yv(v).toFixed(1)}`).join(" ")} fill="none" stroke="#eb6834" strokeWidth="1.5" strokeLinejoin="round" />
+        {/* bars hari ini */}
         {hari.map((v, i) => {
           const h = (v / max) * plotH;
+          const on = i === sel;
           return (
             <rect
               key={i}
-              x={x(i) + bw * 0.18}
+              x={x(i) + bw * 0.16}
               y={padT + plotH - h}
-              width={bw * 0.64}
+              width={bw * 0.68}
               height={Math.max(0, h)}
-              rx="1"
-              fill="#2a78d6"
-            >
-              <title>{`${jam2(i)}:00 — ${v} pesanan (hari ini); rata² bulan ${bulan[i] ?? 0}`}</title>
-            </rect>
+              rx="1.5"
+              fill={on ? "url(#tlBarHi)" : "url(#tlBar)"}
+            />
           );
         })}
-        <polyline points={linePts} fill="none" stroke="#eb6834" strokeWidth="1.5" />
+        <line x1={padL} y1={padT + plotH} x2={W - padR} y2={padT + plotH} stroke="currentColor" className="text-line" strokeWidth="1" />
         {[0, 3, 6, 9, 12, 15, 18, 21, 23].map((hh) => (
-          <text
-            key={hh}
-            x={x(hh) + bw / 2}
-            y={H - 5}
-            textAnchor="middle"
-            className="fill-current text-ink-3"
-            style={{ fontSize: "8px" }}
-          >
+          <text key={hh} x={cx(hh)} y={H - 5} textAnchor="middle" className="fill-current text-ink-3" style={{ fontSize: "8px" }}>
             {hh}
           </text>
         ))}
+        {/* hover capture per jam */}
+        {hari.map((_, i) => (
+          <rect key={i} x={x(i)} y={padT} width={bw} height={plotH} fill="transparent" onMouseEnter={() => setHover(i)} />
+        ))}
       </svg>
-      <div className="mt-1 text-[11px] text-ink-2">
-        Jam teramai bulan ini: <b className="text-ink">{jam2(data.puncakBulan)}.00</b>
-        <span className="text-ink-3">
-          {" "}
-          (rata² {data.rataBulan?.[data.puncakBulan] ?? 0} pesanan/jam dari {data.activeDays} hari aktif)
-        </span>
+      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-[11px]">
+        <div className="text-ink-2">
+          <b className="text-ink">{jam2(sel)}.00</b>
+          {hover == null && <span className="text-ink-3"> (jam teramai bulan ini)</span>} · {hari[sel] ?? 0} pesanan ·{" "}
+          <span className={`font-medium ${(profit[sel] ?? 0) < 0 ? "text-red-600" : "text-emerald-700"}`}>
+            profit {rupiah(profit[sel] ?? 0)}
+          </span>
+          <span className="text-ink-3"> · rata² bln {data.rataBulan?.[sel] ?? 0}/jam</span>
+        </div>
+        <div className="tabular-nums text-ink-3">
+          Total profit hari ini: <span className="font-medium text-emerald-700">{rupiah(totalProfit)}</span>
+        </div>
       </div>
     </div>
   );

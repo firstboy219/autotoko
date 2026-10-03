@@ -210,7 +210,34 @@ export class DashboardV2Service {
     const rataBulan = monthHour.map((n) => Math.round((n / activeDays) * 10) / 10);
     let puncakBulan = 0;
     for (let h = 1; h < 24; h++) if (rataBulan[h]! > rataBulan[puncakBulan]!) puncakBulan = h;
-    return { tanggal: dateStr, hariIni, rataBulan, puncakBulan, activeDays };
+    // Profit bersih per jam HARI ITU (logika menu HPP) — bucket per jam WIB.
+    const ctx = await this.orderProfit.loadContext(userId);
+    const dayItemRows = await this.db
+      .select({ createdAt: orders.createdAt, items: orders.items })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.userId, userId),
+          ne(orders.fulfillmentStatus, "dibatalkan"),
+          gte(orders.createdAt, dayStart),
+          lt(orders.createdAt, dayEnd),
+        ),
+      );
+    const profitHariIni = Array<number>(24).fill(0);
+    for (const r of dayItemRows) {
+      const np = this.orderProfit.netProfitNumber(r.items, ctx);
+      if (np == null || !r.createdAt) continue;
+      const wh = new Date(new Date(r.createdAt).getTime() + 7 * 3600 * 1000).getUTCHours();
+      if (wh >= 0 && wh < 24) profitHariIni[wh] = (profitHariIni[wh] ?? 0) + np;
+    }
+    return {
+      tanggal: dateStr,
+      hariIni,
+      profitHariIni: profitHariIni.map((v) => Math.round(v)),
+      rataBulan,
+      puncakBulan,
+      activeDays,
+    };
   }
 
   async overview(userId: string, from: string, to: string) {
