@@ -119,8 +119,8 @@ export class OrdersService {
     if (opts.status) conds.push(eq(orders.fulfillmentStatus, opts.status));
     if (opts.active) conds.push(notInArray(orders.fulfillmentStatus, ["selesai", "dibatalkan"]));
     if (opts.shopId) conds.push(eq(orders.shopId, opts.shopId));
-    if (opts.dateFrom) conds.push(gte(orders.createdAt, opts.dateFrom));
-    if (opts.dateTo) conds.push(lte(orders.createdAt, opts.dateTo));
+    if (opts.dateFrom) conds.push(sql`coalesce(${orders.createdAtMarketplace}, ${orders.createdAt}) >= ${opts.dateFrom.toISOString()}::timestamptz`);
+    if (opts.dateTo) conds.push(sql`coalesce(${orders.createdAtMarketplace}, ${orders.createdAt}) <= ${opts.dateTo.toISOString()}::timestamptz`);
     const dariApi = await this.db
       .select()
       .from(orders)
@@ -370,10 +370,10 @@ export class OrdersService {
     }
     const base = [
       eq(orders.userId, userId),
-      gte(orders.createdAt, start),
+      sql`coalesce(${orders.createdAtMarketplace}, ${orders.createdAt}) >= ${start.toISOString()}::timestamptz`,
       ne(orders.fulfillmentStatus, "dibatalkan"),
     ];
-    const cond = end ? and(...base, lt(orders.createdAt, end)) : and(...base);
+    const cond = end ? and(...base, sql`coalesce(${orders.createdAtMarketplace}, ${orders.createdAt}) < ${end.toISOString()}::timestamptz`) : and(...base);
     const rows = await this.db.select({ items: orders.items }).from(orders).where(cond);
     const map = new Map<
       string,

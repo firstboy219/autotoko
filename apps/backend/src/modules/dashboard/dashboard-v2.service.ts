@@ -40,6 +40,19 @@ export class DashboardV2Service {
   }
 
   /**
+   * Tanggal transaksi = waktu order DI MARKETPLACE (created_at_marketplace),
+   * fallback ke created_at DB untuk ~16 baris lama yang belum tersinkron.
+   * created_at DB adalah waktu impor/insert ke database kita (bisa menumpuk
+   * di satu tanggal saat backfill), jadi JANGAN dipakai sebagai tanggal jual.
+   */
+  private txGte(d: Date) {
+    return sql`coalesce(${orders.createdAtMarketplace}, ${orders.createdAt}) >= ${d.toISOString()}::timestamptz`;
+  }
+  private txLt(d: Date) {
+    return sql`coalesce(${orders.createdAtMarketplace}, ${orders.createdAt}) < ${d.toISOString()}::timestamptz`;
+  }
+
+  /**
    * Penjualan HARI INI (waktu Jakarta): jumlah pesanan + total nominal dari
    * tabel orders. Toko yang tidak menyinkronkan order tidak menyumbang di
    * sini -- angkanya bisa 0 walau pencairan tetap berjalan.
@@ -47,10 +60,10 @@ export class DashboardV2Service {
   private async penjualanTanggal(userId: string, start: Date, end: Date | null) {
     const base = [
       eq(orders.userId, userId),
-      gte(orders.createdAt, start),
+      this.txGte(start),
       ne(orders.fulfillmentStatus, "dibatalkan"),
     ];
-    const cond = end ? and(...base, lt(orders.createdAt, end)) : and(...base);
+    const cond = end ? and(...base, this.txLt(end)) : and(...base);
     const rows = await this.db
       .select({
         shopId: orders.shopId,
@@ -179,22 +192,22 @@ export class DashboardV2Service {
       Array.isArray(x) ? (x as any) : ((x as any)?.rows ?? []);
 
     const dayRows = await this.db.execute(sql`
-      SELECT extract(hour from (created_at at time zone 'Asia/Jakarta'))::int AS h, count(*)::int AS n
+      SELECT extract(hour from (coalesce(created_at_marketplace, created_at) at time zone 'Asia/Jakarta'))::int AS h, count(*)::int AS n
       FROM orders
       WHERE user_id = ${userId}::uuid AND fulfillment_status <> 'dibatalkan'
-        AND created_at >= ${dayStart.toISOString()}::timestamptz AND created_at < ${dayEnd.toISOString()}::timestamptz
+        AND coalesce(created_at_marketplace, created_at) >= ${dayStart.toISOString()}::timestamptz AND coalesce(created_at_marketplace, created_at) < ${dayEnd.toISOString()}::timestamptz
       GROUP BY 1`);
     const monthRows = await this.db.execute(sql`
-      SELECT extract(hour from (created_at at time zone 'Asia/Jakarta'))::int AS h, count(*)::int AS n
+      SELECT extract(hour from (coalesce(created_at_marketplace, created_at) at time zone 'Asia/Jakarta'))::int AS h, count(*)::int AS n
       FROM orders
       WHERE user_id = ${userId}::uuid AND fulfillment_status <> 'dibatalkan'
-        AND created_at >= ${monthStart.toISOString()}::timestamptz AND created_at < ${monthEnd.toISOString()}::timestamptz
+        AND coalesce(created_at_marketplace, created_at) >= ${monthStart.toISOString()}::timestamptz AND coalesce(created_at_marketplace, created_at) < ${monthEnd.toISOString()}::timestamptz
       GROUP BY 1`);
     const activeRows = await this.db.execute(sql`
-      SELECT count(distinct (created_at at time zone 'Asia/Jakarta')::date)::int AS d
+      SELECT count(distinct (coalesce(created_at_marketplace, created_at) at time zone 'Asia/Jakarta')::date)::int AS d
       FROM orders
       WHERE user_id = ${userId}::uuid AND fulfillment_status <> 'dibatalkan'
-        AND created_at >= ${monthStart.toISOString()}::timestamptz AND created_at < ${monthEnd.toISOString()}::timestamptz`);
+        AND coalesce(created_at_marketplace, created_at) >= ${monthStart.toISOString()}::timestamptz AND coalesce(created_at_marketplace, created_at) < ${monthEnd.toISOString()}::timestamptz`);
 
     const hariIni = Array<number>(24).fill(0);
     for (const r of arr(dayRows)) {
@@ -213,21 +226,22 @@ export class DashboardV2Service {
     // Profit bersih per jam HARI ITU (logika menu HPP) — bucket per jam WIB.
     const ctx = await this.orderProfit.loadContext(userId);
     const dayItemRows = await this.db
-      .select({ createdAt: orders.createdAt, items: orders.items })
+      .select({ createdAt: orders.createdAt, createdAtMarketplace: orders.createdAtMarketplace, items: orders.items })
       .from(orders)
       .where(
         and(
           eq(orders.userId, userId),
           ne(orders.fulfillmentStatus, "dibatalkan"),
-          gte(orders.createdAt, dayStart),
-          lt(orders.createdAt, dayEnd),
+          this.txGte(dayStart),
+          this.txLt(dayEnd),
         ),
       );
     const profitHariIni = Array<number>(24).fill(0);
     for (const r of dayItemRows) {
       const np = this.orderProfit.netProfitNumber(r.items, ctx);
-      if (np == null || !r.createdAt) continue;
-      const wh = new Date(new Date(r.createdAt).getTime() + 7 * 3600 * 1000).getUTCHours();
+      const tx = r.createdAtMarketplace ?? r.createdAt;
+      if (np == null || !tx) continue;
+      const wh = new Date(new Date(tx).getTime() + 7 * 3600 * 1000).getUTCHours();
       if (wh >= 0 && wh < 24) profitHariIni[wh] = (profitHariIni[wh] ?? 0) + np;
     }
     return {
@@ -277,20 +291,21 @@ export class DashboardV2Service {
     const end = new Date(ts.getTime() + 24 * 3600 * 1000);
     const ctx = await this.orderProfit.loadContext(userId);
     const rows = await this.db
-      .select({ createdAt: orders.createdAt, items: orders.items, totalAmount: orders.totalAmount })
+      .select({ createdAt: orders.createdAt, createdAtMarketplace: orders.createdAtMarketplace, items: orders.items, totalAmount: orders.totalAmount })
       .from(orders)
       .where(
         and(
           eq(orders.userId, userId),
           ne(orders.fulfillmentStatus, "dibatalkan"),
-          gte(orders.createdAt, fs),
-          lt(orders.createdAt, end),
+          this.txGte(fs),
+          this.txLt(end),
         ),
       );
     const map = new Map<string, { pesanan: number; nominal: number; profit: number }>();
     for (const r of rows) {
-      if (!r.createdAt) continue;
-      const wib = new Date(new Date(r.createdAt).getTime() + 7 * 3600 * 1000);
+      const tx = r.createdAtMarketplace ?? r.createdAt;
+      if (!tx) continue;
+      const wib = new Date(new Date(tx).getTime() + 7 * 3600 * 1000);
       const key = gran === "day" ? wib.toISOString().slice(0, 10) : wib.toISOString().slice(0, 7);
       const e = map.get(key) ?? { pesanan: 0, nominal: 0, profit: 0 };
       e.pesanan += 1;
@@ -309,20 +324,21 @@ export class DashboardV2Service {
       const DOW = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
       const winStart = new Date(end.getTime() - 28 * 86_400_000);
       const wrows = await this.db
-        .select({ createdAt: orders.createdAt, totalAmount: orders.totalAmount })
+        .select({ createdAt: orders.createdAt, createdAtMarketplace: orders.createdAtMarketplace, totalAmount: orders.totalAmount })
         .from(orders)
         .where(
           and(
             eq(orders.userId, userId),
             ne(orders.fulfillmentStatus, "dibatalkan"),
-            gte(orders.createdAt, winStart),
-            lt(orders.createdAt, end),
+            this.txGte(winStart),
+            this.txLt(end),
           ),
         );
       const perDate = new Map<string, { nom: number; pes: number }>();
       for (const r of wrows) {
-        if (!r.createdAt) continue;
-        const key = new Date(new Date(r.createdAt).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+        const tx = r.createdAtMarketplace ?? r.createdAt;
+        if (!tx) continue;
+        const key = new Date(new Date(tx).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
         const e = perDate.get(key) ?? { nom: 0, pes: 0 };
         e.nom += Number(r.totalAmount) || 0;
         e.pes += 1;
