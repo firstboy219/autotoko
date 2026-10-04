@@ -1704,7 +1704,16 @@ interface PushPriceResp {
   publishPrice: number;
   total: number;
   ok: number;
-  hasil: { shop: string | null; status: string; jumlah?: number; reason?: string }[];
+  updated: number;
+  gagal: number;
+  hasil: {
+    shop: string | null;
+    productId: string;
+    status: string;
+    updated?: number;
+    same?: number;
+    reason?: string;
+  }[];
 }
 
 /**
@@ -1716,6 +1725,7 @@ function MarketplacePriceSync({ productId }: { productId: string }) {
   const [status, setStatus] = useState<PriceStatusResp | null>(null);
   const [loading, setLoading] = useState(false);
   const [pushing, setPushing] = useState(false);
+  const [pushResult, setPushResult] = useState<PushPriceResp | null>(null);
 
   async function cek() {
     setLoading(true);
@@ -1731,7 +1741,11 @@ function MarketplacePriceSync({ productId }: { productId: string }) {
     setPushing(true);
     try {
       const r = await api.post<PushPriceResp>(`/master-postings/master-products/${productId}/push-price`, {});
-      toast(`Harga diterapkan ke ${r.ok}/${r.total} toko`, r.ok === r.total ? "success" : "warning");
+      setPushResult(r);
+      const g = r.gagal ?? 0;
+      if (g > 0) toast(`${r.updated} varian diperbarui · ${g} listing GAGAL (lihat detail)`, "warning");
+      else if ((r.updated ?? 0) === 0) toast("Semua harga sudah sama — tak ada yang perlu diperbarui", "success");
+      else toast(`${r.updated} varian diperbarui di ${r.ok} listing`, "success");
       await cek();
     } catch (e) {
       toast((e as Error).message || "Gagal menerapkan harga", "danger");
@@ -1758,6 +1772,32 @@ function MarketplacePriceSync({ productId }: { productId: string }) {
         }
       />
       <div className="p-5">
+        {pushResult && (
+          <div className="mb-3 rounded-lg border border-line bg-canvas p-3 text-xs">
+            <div className="mb-1.5 font-medium text-ink-2">
+              Hasil terapkan: <b className="text-ink">{pushResult.updated}</b> varian diperbarui
+              {pushResult.gagal ? <span className="text-red-600"> · {pushResult.gagal} listing gagal</span> : null}
+            </div>
+            <div className="space-y-1">
+              {pushResult.hasil.map((h, i) => (
+                <div key={i} className="flex flex-wrap items-start justify-between gap-2 border-t border-line pt-1">
+                  <span className="shrink-0 text-ink-2">{h.shop ?? h.productId}</span>
+                  <span className="min-w-0 text-right">
+                    {h.status === "ok" ? (
+                      <span className="text-emerald-700">
+                        diperbarui {h.updated} varian{h.same ? ` · ${h.same} sudah sama` : ""}
+                      </span>
+                    ) : h.status === "skipped" ? (
+                      <span className="text-ink-3">{h.reason ?? "dilewati"}</span>
+                    ) : (
+                      <span className="break-words text-red-600">GAGAL: {h.reason ?? "tidak diketahui"}</span>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {!status ? (
           <div className="text-sm text-ink-3">
             Klik "Cek status" untuk melihat harga tiap toko dibanding harga publish master; "Terapkan" akan mengirim

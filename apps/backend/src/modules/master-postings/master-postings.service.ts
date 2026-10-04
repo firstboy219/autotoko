@@ -1669,41 +1669,62 @@ export class MasterPostingsService {
       throw new BadRequestException("Set harga publish master di menu HPP & Harga Jual dulu.");
     const targets = await this.combinedTargets(userId, masterProductId);
     const { appKey, appSecret } = await this.tiktok.credentials();
-    const hasil: { shop: string | null; status: "ok" | "failed" | "skipped"; jumlah?: number; reason?: string }[] = [];
+    const hasil: {
+      shop: string | null;
+      productId: string;
+      status: "ok" | "failed" | "skipped";
+      updated?: number;
+      same?: number;
+      reason?: string;
+    }[] = [];
+    const target = Math.round(publishPrice);
+    const mk = (sh: typeof shops.$inferSelect) =>
+      new TikTokClient(appKey, appSecret, this.crypto.decrypt(sh.accessToken!), sh.shopCipher);
     for (const t of targets) {
       try {
         const { product, shop } = await this.bacaProdukLive(userId, t.shop, t.productId, appKey, appSecret);
         const liveSkus = Array.isArray(product?.skus) ? product.skus : [];
-        const items: { id: string; price: { amount: string; currency: string } }[] = [];
+        const liveById = new Map(liveSkus.map((ls: any) => [String(ls.id), ls] as const));
+        // Kandidat = HANYA varian yang dipetakan ke master ini (mapping = per varian),
+        // bukan semua varian di listing.
+        const cand: { id: string; currency: string; livePrice: number | null }[] = [];
+        const addCand = (ls: any, fallbackCur?: string) => {
+          if (!ls?.id) return;
+          const lp = Number(ls.price?.sale_price ?? ls.price?.tax_exclusive_price ?? NaN);
+          cand.push({
+            id: String(ls.id),
+            currency: (ls.price?.currency as string) || fallbackCur || "IDR",
+            livePrice: Number.isFinite(lp) ? lp : null,
+          });
+        };
         if (t.directSkuIds?.length) {
-          const liveById = new Map(liveSkus.map((ls: any) => [String(ls.id), ls] as const));
-          for (const d of t.directSkuIds) {
-            const ls = liveById.get(d.id);
-            if (ls?.id)
-              items.push({ id: String(ls.id), price: { amount: String(Math.round(publishPrice)), currency: (ls.price?.currency as string) || d.currency || "IDR" } });
-          }
+          for (const d of t.directSkuIds) addCand(liveById.get(d.id), d.currency);
         } else {
-          for (const ps of t.skus) {
-            const ls = this.matchLiveSku(ps, liveSkus, t.skus.length === 1);
-            if (ls?.id)
-              items.push({ id: String(ls.id), price: { amount: String(Math.round(publishPrice)), currency: (ls.price?.currency as string) || "IDR" } });
-          }
+          for (const ps of t.skus) addCand(this.matchLiveSku(ps, liveSkus, t.skus.length === 1));
         }
-        const byId = new Map(items.map((it) => [it.id, it] as const));
-        const dedup = [...byId.values()];
-        if (!dedup.length) {
-          hasil.push({ shop: t.shop.shopName, status: "skipped", reason: "SKU tak cocok dgn listing" });
+        const uniq = [...new Map(cand.map((c) => [c.id, c] as const)).values()];
+        if (!uniq.length) {
+          hasil.push({ shop: shop.shopName, productId: t.productId, status: "skipped", updated: 0, same: 0, reason: "varian termapping tak ada di listing live" });
           continue;
         }
-        const mk = (sh: typeof shops.$inferSelect) =>
-          new TikTokClient(appKey, appSecret, this.crypto.decrypt(sh.accessToken!), sh.shopCipher);
-        await mk(shop).post(`/product/202309/products/${t.productId}/prices/update`, { skus: dedup });
-        hasil.push({ shop: t.shop.shopName, status: "ok", jumlah: dedup.length });
+        // Hanya varian yang harganya BERBEDA dari harga publish master yang dikirim.
+        const toUpdate = uniq.filter((c) => c.livePrice == null || Math.round(c.livePrice) !== target);
+        const same = uniq.length - toUpdate.length;
+        if (!toUpdate.length) {
+          hasil.push({ shop: shop.shopName, productId: t.productId, status: "skipped", updated: 0, same, reason: "harga sudah sama" });
+          continue;
+        }
+        const items = toUpdate.map((c) => ({ id: c.id, price: { amount: String(target), currency: c.currency } }));
+        await mk(shop).post(`/product/202309/products/${t.productId}/prices/update`, { skus: items });
+        hasil.push({ shop: shop.shopName, productId: t.productId, status: "ok", updated: items.length, same });
       } catch (e) {
-        hasil.push({ shop: t.shop.shopName, status: "failed", reason: (e as Error).message.slice(0, 80) });
+        hasil.push({ shop: t.shop.shopName, productId: t.productId, status: "failed", updated: 0, same: 0, reason: (e as Error).message.slice(0, 300) });
       }
     }
-    return { publishPrice, total: targets.length, ok: hasil.filter((h) => h.status === "ok").length, hasil };
+    const ok = hasil.filter((h) => h.status === "ok").length;
+    const updated = hasil.reduce((a, h) => a + (h.updated ?? 0), 0);
+    const gagal = hasil.filter((h) => h.status === "failed").length;
+    return { publishPrice, total: targets.length, ok, updated, gagal, hasil };
   }
 
   private async tandaiMapping(mappingId: string, status: string, message: string): Promise<void> {
