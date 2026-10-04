@@ -7,6 +7,7 @@ import {
   masterPostingMappings,
   masterProducts,
   marketplaceProducts,
+  marketplaceSkuMap,
   marketplaceSkus,
   productCosting,
   shops,
@@ -1477,13 +1478,85 @@ export class MasterPostingsService {
     return c?.p != null ? Number(c.p) : null;
   }
 
+  /**
+   * Target dari PETA SKU MANUAL (marketplace_sku_map): produk yang dipetakan
+   * lewat menu order/produk (bukan Master Postingan). skuId disimpan langsung,
+   * lokasinya (shop + productId) diambil dari katalog marketplace_skus. Jadi
+   * "update harga ke marketplace" tetap jalan walau tak lewat Master Postingan.
+   */
+  private async manualMapTargets(userId: string, masterProductId: string) {
+    type T = {
+      shop: typeof shops.$inferSelect;
+      productId: string;
+      skus: { combo: unknown; sku: string | null }[];
+      directSkuIds?: { id: string; currency: string }[];
+    };
+    const mapped = await this.db
+      .select({ sku: marketplaceSkuMap.sku })
+      .from(marketplaceSkuMap)
+      .where(
+        and(
+          eq(marketplaceSkuMap.userId, userId),
+          eq(marketplaceSkuMap.masterProductId, masterProductId),
+          eq(marketplaceSkuMap.marketplace, "tiktok"),
+        ),
+      );
+    const skuIds = [...new Set(mapped.map((m) => m.sku).filter((v): v is string => !!v))];
+    if (!skuIds.length) return [] as T[];
+    const cat = await this.db
+      .select({
+        skuId: marketplaceSkus.skuId,
+        productId: marketplaceSkus.productId,
+        shopId: marketplaceSkus.shopId,
+        currency: marketplaceSkus.currency,
+      })
+      .from(marketplaceSkus)
+      .where(
+        and(
+          eq(marketplaceSkus.userId, userId),
+          eq(marketplaceSkus.marketplace, "tiktok"),
+          inArray(marketplaceSkus.skuId, skuIds),
+        ),
+      );
+    const shopIds = [...new Set(cat.map((c) => c.shopId))];
+    const shopRows = shopIds.length
+      ? await this.db.select().from(shops).where(inArray(shops.id, shopIds))
+      : [];
+    const shopById = new Map(shopRows.map((x) => [x.id, x] as const));
+    const byKey = new Map<string, T & { directSkuIds: { id: string; currency: string }[] }>();
+    for (const c of cat) {
+      if (!c.productId) continue;
+      const shop = shopById.get(c.shopId);
+      if (!shop?.accessToken || !shop.shopCipher) continue;
+      const key = c.shopId + "|" + c.productId;
+      let t = byKey.get(key);
+      if (!t) {
+        t = { shop, productId: c.productId, skus: [], directSkuIds: [] };
+        byKey.set(key, t);
+      }
+      if (!t.directSkuIds.some((d) => d.id === c.skuId))
+        t.directSkuIds.push({ id: c.skuId, currency: c.currency || "IDR" });
+    }
+    return [...byKey.values()];
+  }
+
+  /** Gabungan target: Master Postingan + peta SKU manual (dedup per shop+productId). */
+  private async combinedTargets(userId: string, masterProductId: string) {
+    const posting = await this.masterListingTargets(userId, masterProductId);
+    const manual = await this.manualMapTargets(userId, masterProductId);
+    const seen = new Set(posting.map((t) => t.shop.id + "|" + t.productId));
+    const out = [...posting];
+    for (const m of manual) if (!seen.has(m.shop.id + "|" + m.productId)) out.push(m);
+    return out;
+  }
+
   /** Listing marketplace (toko + productId) yang memuat master ini + posting-SKU-nya. */
   private async masterListingTargets(userId: string, masterProductId: string) {
     const psRows = await this.db
       .select({ postingId: masterPostingSkus.masterPostingId, combo: masterPostingSkus.combo, sku: masterPostingSkus.sku })
       .from(masterPostingSkus)
       .where(and(eq(masterPostingSkus.userId, userId), eq(masterPostingSkus.masterProductId, masterProductId)));
-    if (!psRows.length) return [] as { shop: typeof shops.$inferSelect; productId: string; skus: { combo: unknown; sku: string | null }[] }[];
+    if (!psRows.length) return [] as { shop: typeof shops.$inferSelect; productId: string; skus: { combo: unknown; sku: string | null }[]; directSkuIds?: { id: string; currency: string }[] }[];
     const byPosting = new Map<string, { combo: unknown; sku: string | null }[]>();
     for (const r of psRows) {
       const a = byPosting.get(r.postingId) ?? [];
@@ -1505,7 +1578,7 @@ export class MasterPostingsService {
     const shopIds = [...new Set(live.map((m) => m.shopId))];
     const shopRows = shopIds.length ? await this.db.select().from(shops).where(inArray(shops.id, shopIds)) : [];
     const shopById = new Map(shopRows.map((x) => [x.id, x] as const));
-    const targets: { shop: typeof shops.$inferSelect; productId: string; skus: { combo: unknown; sku: string | null }[] }[] = [];
+    const targets: { shop: typeof shops.$inferSelect; productId: string; skus: { combo: unknown; sku: string | null }[]; directSkuIds?: { id: string; currency: string }[] }[] = [];
     for (const m of live) {
       const shop = shopById.get(m.shopId);
       if (!shop?.accessToken || !shop.shopCipher) continue;
@@ -1546,7 +1619,7 @@ export class MasterPostingsService {
   /** Status harga master ini di tiap listing marketplace (LIVE): sesuai harga publish atau belum. */
   async marketplacePriceStatus(userId: string, masterProductId: string) {
     const publishPrice = await this.publishPriceOf(userId, masterProductId);
-    const targets = await this.masterListingTargets(userId, masterProductId);
+    const targets = await this.combinedTargets(userId, masterProductId);
     const { appKey, appSecret } = await this.tiktok.credentials();
     const shopsOut: {
       shop: string | null;
@@ -1561,11 +1634,20 @@ export class MasterPostingsService {
         const { product } = await this.bacaProdukLive(userId, t.shop, t.productId, appKey, appSecret);
         const liveSkus = Array.isArray(product?.skus) ? product.skus : [];
         const harga: (number | null)[] = [];
-        for (const ps of t.skus) {
-          const ls = this.matchLiveSku(ps, liveSkus, t.skus.length === 1);
-          if (ls?.id) {
-            const a = Number(ls.price?.sale_price ?? ls.price?.tax_exclusive_price ?? NaN);
+        if (t.directSkuIds?.length) {
+          const liveById = new Map(liveSkus.map((ls: any) => [String(ls.id), ls] as const));
+          for (const d of t.directSkuIds) {
+            const ls = liveById.get(d.id);
+            const a = Number(ls?.price?.sale_price ?? ls?.price?.tax_exclusive_price ?? NaN);
             harga.push(Number.isFinite(a) ? a : null);
+          }
+        } else {
+          for (const ps of t.skus) {
+            const ls = this.matchLiveSku(ps, liveSkus, t.skus.length === 1);
+            if (ls?.id) {
+              const a = Number(ls.price?.sale_price ?? ls.price?.tax_exclusive_price ?? NaN);
+              harga.push(Number.isFinite(a) ? a : null);
+            }
           }
         }
         const sesuai =
@@ -1585,7 +1667,7 @@ export class MasterPostingsService {
     const publishPrice = await this.publishPriceOf(userId, masterProductId);
     if (publishPrice == null || publishPrice <= 0)
       throw new BadRequestException("Set harga publish master di menu HPP & Harga Jual dulu.");
-    const targets = await this.masterListingTargets(userId, masterProductId);
+    const targets = await this.combinedTargets(userId, masterProductId);
     const { appKey, appSecret } = await this.tiktok.credentials();
     const hasil: { shop: string | null; status: "ok" | "failed" | "skipped"; jumlah?: number; reason?: string }[] = [];
     for (const t of targets) {
@@ -1593,10 +1675,19 @@ export class MasterPostingsService {
         const { product, shop } = await this.bacaProdukLive(userId, t.shop, t.productId, appKey, appSecret);
         const liveSkus = Array.isArray(product?.skus) ? product.skus : [];
         const items: { id: string; price: { amount: string; currency: string } }[] = [];
-        for (const ps of t.skus) {
-          const ls = this.matchLiveSku(ps, liveSkus, t.skus.length === 1);
-          if (ls?.id)
-            items.push({ id: String(ls.id), price: { amount: String(Math.round(publishPrice)), currency: (ls.price?.currency as string) || "IDR" } });
+        if (t.directSkuIds?.length) {
+          const liveById = new Map(liveSkus.map((ls: any) => [String(ls.id), ls] as const));
+          for (const d of t.directSkuIds) {
+            const ls = liveById.get(d.id);
+            if (ls?.id)
+              items.push({ id: String(ls.id), price: { amount: String(Math.round(publishPrice)), currency: (ls.price?.currency as string) || d.currency || "IDR" } });
+          }
+        } else {
+          for (const ps of t.skus) {
+            const ls = this.matchLiveSku(ps, liveSkus, t.skus.length === 1);
+            if (ls?.id)
+              items.push({ id: String(ls.id), price: { amount: String(Math.round(publishPrice)), currency: (ls.price?.currency as string) || "IDR" } });
+          }
         }
         const byId = new Map(items.map((it) => [it.id, it] as const));
         const dedup = [...byId.values()];
