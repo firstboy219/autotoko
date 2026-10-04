@@ -455,7 +455,7 @@ export function Layout({
   if (EMBEDDED) {
     return (
       <ToastHost>
-        <main className="min-h-screen bg-canvas px-3 py-3 font-sans text-ink">{children}</main>
+        <main className="min-h-screen w-full overflow-x-hidden bg-canvas px-3 py-3 font-sans text-ink">{children}</main>
       </ToastHost>
     );
   }

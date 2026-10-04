@@ -1138,7 +1138,7 @@ function Kpi({ label, value, pct, tone, cmp }: { label: string; value: string; p
   return (
     <div className="rounded-lg border border-line px-3 py-2">
       <div className="text-[10px] uppercase tracking-wide text-ink-3">{label}</div>
-      <div className={`mt-0.5 text-lg font-semibold tabular-nums ${tone === "profit" ? "text-emerald-700" : "text-ink"}`}>{value}</div>
+      <div className={`mt-0.5 text-base font-semibold tabular-nums sm:text-lg ${tone === "profit" ? "text-emerald-700" : "text-ink"}`}>{value}</div>
       <div className="mt-0.5 text-[10px]">
         {pct == null ? (
           <span className="text-ink-3">{lbl}: —</span>
@@ -1287,7 +1287,7 @@ function PenjualanHarian({
         <div className="mt-3 text-sm text-ink-3">Memuat…</div>
       ) : (
         <>
-          <div className="mt-2 grid grid-cols-3 gap-2">
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
             <Kpi label="Omzet" value={rupiah(d.nominal)} pct={deltaPct(d.nominal, p?.nominal)} cmp={cmpLabel} />
             <Kpi label="Pesanan" value={String(d.pesanan)} pct={deltaPct(d.pesanan, p?.pesanan)} cmp={cmpLabel} />
             <Kpi
@@ -1359,10 +1359,11 @@ function PenjualanHarian({
                           onClick={() => setExpand(open ? null : key)}
                           className="flex w-full items-center justify-between gap-3 py-1.5 text-left text-xs hover:bg-canvas"
                         >
-                          <span className="flex items-center gap-1 truncate text-ink-2">
-                            <Icon name="chevronDown" size={12} className={open ? "" : "-rotate-90"} /> {t.nama}
+                          <span className="flex min-w-0 flex-1 items-center gap-1 text-ink-2">
+                            <Icon name="chevronDown" size={12} className={`shrink-0 ${open ? "" : "-rotate-90"}`} />
+                            <span className="truncate">{t.nama}</span>
                           </span>
-                          <span className="whitespace-nowrap tabular-nums text-ink">
+                          <span className="shrink-0 text-right tabular-nums text-ink">
                             {t.pesanan} pesanan · {rupiah(t.nominal)}
                             {t.profit != null && <span className="text-emerald-700"> · profit {rupiah(t.profit)}</span>}
                           </span>
@@ -1734,8 +1735,9 @@ function TimelineChart({ data }: { data: TimelineResp }) {
               opacity="0.7"
             />
             <text
-              x={Math.min(W - 20, padL + nowFrac * bw + 2)}
+              x={Math.max(26, Math.min(W - 2, padL + nowFrac * bw - 1))}
               y={padT - 7}
+              textAnchor="end"
               className="fill-current text-ink-2"
               style={{ fontSize: "7px", fontWeight: 600 }}
             >
