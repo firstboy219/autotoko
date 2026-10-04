@@ -222,7 +222,7 @@ export function Hpp() {
                         <Badge tone="success">{r.materialCount} bahan</Badge>
                       )}
                     </TD>
-                    <TD align="right" className="tabular-nums text-ink-2" title="Jumlah Master Postingan yang memuat produk ini">
+                    <TD align="right" className="tabular-nums text-ink-2" title="Jumlah listing marketplace yang memuat produk ini (gabungan Master Postingan + peta SKU manual)">
                       {r.postingCount ?? 0}
                     </TD>
                     {/* From packing scans — the only record of anything

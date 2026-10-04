@@ -169,16 +169,36 @@ export class CostingService {
     const ci = await this.costInputs(userId, ids);
     const { matByProduct, costByProduct, packingFor } = ci;
 
-    // Jumlah Master Postingan yg memuat tiap produk (kolom "Postingan").
-    const postingRows = await this.db
-      .select({
-        mid: masterPostingSkus.masterProductId,
-        c: sql<number>`count(distinct ${masterPostingSkus.masterPostingId})::int`,
-      })
-      .from(masterPostingSkus)
-      .where(and(eq(masterPostingSkus.userId, userId), isNotNull(masterPostingSkus.masterProductId)))
-      .groupBy(masterPostingSkus.masterProductId);
-    const postingByProduct = new Map(postingRows.map((r) => [r.mid, Number(r.c) || 0]));
+    // Jumlah LISTING marketplace NYATA yang memuat tiap produk, dihitung per
+    // listing unik (product_id). Gabungan dua jalur pemetaan: Master Postingan
+    // yang sudah ter-apply (punya product_id live) + peta SKU manual
+    // (marketplace_sku_map -> katalog marketplace_skus). Menghitung "1 template"
+    // bukan angka yang nyata: satu produk bisa tampil di banyak listing/toko.
+    const listingByProduct = new Map<string, Set<string>>();
+    const rowsOf = (x: unknown): Array<Record<string, unknown>> =>
+      Array.isArray(x) ? (x as Array<Record<string, unknown>>) : ((x as { rows?: Array<Record<string, unknown>> })?.rows ?? []);
+    const tambahListing = (mid: unknown, pid: unknown) => {
+      const m = mid == null ? "" : String(mid);
+      const q = pid == null ? "" : String(pid);
+      if (!m || !q) return;
+      const set = listingByProduct.get(m) ?? new Set<string>();
+      set.add(q);
+      listingByProduct.set(m, set);
+    };
+    const manualListings = await this.db.execute(sql`
+      select m.master_product_id as mid, ms.product_id as pid
+      from marketplace_sku_map m
+      join marketplace_skus ms
+        on ms.user_id = m.user_id and ms.marketplace = m.marketplace and ms.sku_id = m.sku
+      where m.user_id = ${userId}::uuid and ms.product_id is not null`);
+    for (const r of rowsOf(manualListings)) tambahListing(r.mid, r.pid);
+    const postingListings = await this.db.execute(sql`
+      select mps.master_product_id as mid, mpm.product_id as pid
+      from master_posting_skus mps
+      join master_posting_mappings mpm on mpm.master_posting_id = mps.master_posting_id
+      where mps.user_id = ${userId}::uuid and mps.master_product_id is not null
+        and mpm.product_id is not null and mpm.status <> 'create'`);
+    for (const r of rowsOf(postingListings)) tambahListing(r.mid, r.pid);
 
     const rows = products.map((p) => {
       const mats = matByProduct.get(p.id) ?? [];
@@ -210,7 +230,7 @@ export class CostingService {
         missingCost: mats.some((m) => m.unitCost <= 0),
         isBundle: bundleCents != null,
         hpp: rupiah(hppCents),
-        postingCount: postingByProduct.get(p.id) ?? 0,
+        postingCount: listingByProduct.get(p.id)?.size ?? 0,
         publishPrice,
         netProfit: pricing ? rupiah(pricing.netProfitCents) : null,
         netMarginRate: pricing ? pricing.netMarginRate : null,
