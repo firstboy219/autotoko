@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useState, useMemo, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
+import { api } from "../lib/api";
 import { BulkCosting } from "../components/BulkCosting";
 import { rupiah } from "../lib/fmt";
 import { Icon } from "../components/Icon";
@@ -14,6 +15,7 @@ import {
   PageHeader,
   Select,
   SkeletonRows,
+  useToast,
   TD,
   TH,
   THead,
@@ -54,6 +56,141 @@ function HubTab({ active, onClick, children }: { active: boolean; onClick: () =>
   );
 }
 
+interface MassRow {
+  productId: string;
+  name: string;
+  publishPrice: number | null;
+  total: number;
+  sesuai: number;
+  belum: number;
+  error: number;
+  takCocok: number;
+  gagal?: string;
+}
+
+/**
+ * Cek harga massal ke marketplace untuk SEMUA produk termapping. Diproses
+ * bertahap (satu produk per permintaan, berurutan) supaya tidak membanjiri API
+ * TikTok; progres + hasil tampil langsung. Bisa dihentikan.
+ */
+function MassPriceCheck({ rows }: { rows: Row[] }) {
+  const toast = useToast();
+  const ids = useMemo(
+    () => rows.filter((r) => (r.postingCount ?? 0) > 0).map((r) => r.productId),
+    [rows],
+  );
+  const [running, setRunning] = useState(false);
+  const [done, setDone] = useState(0);
+  const [results, setResults] = useState<MassRow[]>([]);
+  const cancelRef = useRef(false);
+
+  async function start() {
+    if (!ids.length) {
+      toast("Tak ada produk yang termapping ke listing marketplace.", "info");
+      return;
+    }
+    setRunning(true);
+    setDone(0);
+    setResults([]);
+    cancelRef.current = false;
+    const acc: MassRow[] = [];
+    for (const id of ids) {
+      if (cancelRef.current) break;
+      try {
+        const r = await api.post<MassRow[]>("/master-postings/mass-price-check", { productIds: [id] });
+        if (r && r[0]) acc.push(r[0]);
+      } catch (e) {
+        acc.push({ productId: id, name: "", publishPrice: null, total: 0, sesuai: 0, belum: 0, error: 0, takCocok: 0, gagal: (e as Error).message });
+      }
+      setResults([...acc]);
+      setDone(acc.length);
+    }
+    setRunning(false);
+    if (!cancelRef.current) toast("Cek harga marketplace selesai", "success");
+  }
+  function cancel() {
+    cancelRef.current = true;
+    setRunning(false);
+  }
+
+  const pct = ids.length ? Math.round((done / ids.length) * 100) : 0;
+  const perlu = (r: MassRow) => r.belum + r.error + (r.gagal ? 1 : 0);
+  const sorted = [...results].sort((a, b) => perlu(b) - perlu(a));
+  const okAll = results.filter((r) => r.total > 0 && r.belum === 0 && r.error === 0 && !r.gagal).length;
+  const adaBelum = results.filter((r) => r.belum > 0).length;
+  const adaError = results.filter((r) => r.error > 0 || r.gagal).length;
+
+  return (
+    <Card padded={false} className="mb-4">
+      <CardHeader
+        title="Cek harga ke marketplace (semua produk)"
+        subtitle="Bandingkan harga publish master dengan harga live tiap listing. Diproses bertahap di server agar tak membanjiri API TikTok."
+        action={
+          running ? (
+            <Button size="sm" variant="outline" onClick={cancel}>
+              Hentikan
+            </Button>
+          ) : (
+            <Button size="sm" variant="filled" icon="search" onClick={start} disabled={!ids.length}>
+              Cek harga ({ids.length} produk)
+            </Button>
+          )
+        }
+      />
+      {(running || results.length > 0) && (
+        <div className="p-4">
+          {running && (
+            <div className="mb-3">
+              <div className="mb-1 flex justify-between text-xs text-ink-3">
+                <span>Memeriksa… {done}/{ids.length} produk</span>
+                <span>{pct}%</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-canvas">
+                <div className="h-full rounded-full bg-brand transition-all" style={{ width: pct + "%" }} />
+              </div>
+            </div>
+          )}
+          {results.length > 0 && (
+            <>
+              <div className="mb-1.5 text-xs text-ink-3">
+                <span className="text-emerald-700">{okAll} sesuai semua</span> ·{" "}
+                <span className="text-amber-700">{adaBelum} ada yang belum ikut</span> ·{" "}
+                <span className="text-red-600">{adaError} ada error</span>
+              </div>
+              <div className="space-y-0.5 text-xs">
+                {sorted.map((r) => (
+                  <div key={r.productId} className="flex flex-wrap items-center justify-between gap-2 border-t border-line py-1">
+                    <Link
+                      to={`/hpp/${r.productId}`}
+                      className="min-w-0 flex-1 truncate text-brand-ink hover:underline"
+                      title={r.name}
+                    >
+                      {r.name || r.productId}
+                    </Link>
+                    <span className="shrink-0 text-right tabular-nums">
+                      {r.gagal ? (
+                        <span className="text-red-600">GAGAL: {r.gagal.slice(0, 70)}</span>
+                      ) : (
+                        <>
+                          {r.sesuai > 0 && <span className="text-emerald-700">{r.sesuai} sesuai</span>}
+                          {r.belum > 0 && <span className="text-amber-700"> · {r.belum} belum</span>}
+                          {r.error > 0 && <span className="text-red-600"> · {r.error} error</span>}
+                          {r.takCocok > 0 && <span className="text-ink-3"> · {r.takCocok} tak cocok</span>}
+                          <span className="text-ink-3"> / {r.total} listing</span>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function Hpp() {
   const [tab, setTab] = useState<"hpp" | "produk">("hpp");
   /** "" every brand, "none" the unassigned ones. */
@@ -84,6 +221,8 @@ export function Hpp() {
         <>
 
       <PackingMaterialsCard />
+
+      <MassPriceCheck rows={data ?? []} />
 
       <Card padded={false}>
         <CardHeader

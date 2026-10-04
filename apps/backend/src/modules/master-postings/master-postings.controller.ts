@@ -81,6 +81,15 @@ export class MasterPostingsController {
     return { success: true, data: await this.svc.pushPublishPriceToMarketplace(uid(req), id) };
   }
 
+  /** Cek harga massal (read-only) untuk beberapa produk; dipanggil bertahap oleh frontend. */
+  @Post("mass-price-check")
+  async massPriceCheck(
+    @Req() req: FastifyRequest,
+    @Body() body: { productIds?: string[] },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.massPriceCheck(uid(req), body.productIds ?? []) };
+  }
+
   /** Penjualan 30 hari per toko termapping. */
   @Get(":id/sales")
   async sales(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {

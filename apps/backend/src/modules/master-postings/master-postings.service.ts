@@ -1662,6 +1662,62 @@ export class MasterPostingsService {
     return { publishPrice, total: shopsOut.length, shops: shopsOut };
   }
 
+  /**
+   * Cek harga MASSAL (read-only) untuk beberapa master produk sekaligus.
+   * Dibatasi maksimal beberapa produk per panggilan supaya tak membanjiri API
+   * TikTok; frontend memanggil bertahap (per produk) sambil menampilkan progres.
+   * Hanya membaca harga live, tidak menulis apa pun.
+   */
+  async massPriceCheck(userId: string, productIds: string[]) {
+    const ids = [...new Set((productIds ?? []).filter((v): v is string => !!v))].slice(0, 5);
+    if (!ids.length) return [] as unknown[];
+    const names = await this.db
+      .select({ id: masterProducts.id, name: masterProducts.name })
+      .from(masterProducts)
+      .where(and(eq(masterProducts.userId, userId), inArray(masterProducts.id, ids)));
+    const nameById = new Map(names.map((n) => [n.id, n.name] as const));
+    const out: {
+      productId: string;
+      name: string;
+      publishPrice: number | null;
+      total: number;
+      sesuai: number;
+      belum: number;
+      error: number;
+      takCocok: number;
+      gagal?: string;
+    }[] = [];
+    for (const id of ids) {
+      try {
+        const st = await this.marketplacePriceStatus(userId, id);
+        const sh = st.shops;
+        out.push({
+          productId: id,
+          name: nameById.get(id) ?? "",
+          publishPrice: st.publishPrice,
+          total: st.total,
+          sesuai: sh.filter((x) => x.sesuai).length,
+          belum: sh.filter((x) => !x.sesuai && !x.error && x.adaSku).length,
+          error: sh.filter((x) => !!x.error).length,
+          takCocok: sh.filter((x) => !x.adaSku && !x.error).length,
+        });
+      } catch (e) {
+        out.push({
+          productId: id,
+          name: nameById.get(id) ?? "",
+          publishPrice: null,
+          total: 0,
+          sesuai: 0,
+          belum: 0,
+          error: 0,
+          takCocok: 0,
+          gagal: (e as Error).message.slice(0, 200),
+        });
+      }
+    }
+    return out;
+  }
+
   /** Terapkan harga publish master ke SEMUA listing marketplace yang memuatnya. */
   async pushPublishPriceToMarketplace(userId: string, masterProductId: string) {
     const publishPrice = await this.publishPriceOf(userId, masterProductId);
