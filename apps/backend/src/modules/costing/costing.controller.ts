@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -147,6 +148,15 @@ export class CostingController {
   @Get(":productId")
   async detail(@Req() req: FastifyRequest, @Param("productId") productId: string) {
     return ok(await this.costing.detail(uid(req), productId));
+  }
+
+  @Put(":productId/bundle")
+  async setBundle(
+    @Req() req: FastifyRequest,
+    @Param("productId") productId: string,
+    @Body() body: { items?: { componentProductId: string; quantity: number }[] },
+  ) {
+    return ok(await this.costing.setBundle(uid(req), productId, body.items ?? []));
   }
 
   /**

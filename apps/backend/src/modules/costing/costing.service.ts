@@ -21,6 +21,7 @@ import {
   orders,
   packingMaterials,
   payoutSettings,
+  productBundleItems,
   productCosting,
   productPackingQuantities,
   resiScanItems,
@@ -165,7 +166,8 @@ export class CostingService {
     if (!products.length) return [];
 
     const ids = products.map((p) => p.id);
-    const { matByProduct, costByProduct, packingFor } = await this.costInputs(userId, ids);
+    const ci = await this.costInputs(userId, ids);
+    const { matByProduct, costByProduct, packingFor } = ci;
 
     // Jumlah Master Postingan yg memuat tiap produk (kolom "Postingan").
     const postingRows = await this.db
@@ -190,10 +192,12 @@ export class CostingService {
         packingMaterials: packingFor(p.id),
         avgUnitsPerOrder: cfg ? num(cfg.avgUnitsPerOrder) : 1,
       });
+      const bundleCents = this.bundleHppCents(p.id, ci);
+      const hppCents = bundleCents ?? hpp.hppCents;
       const publishPrice = cfg?.publishPrice != null ? num(cfg.publishPrice) : null;
       const pricing =
         publishPrice != null && cfg
-          ? calculatePublishPricing(this.pricingInput(cfg, publishPrice, hpp.hppCents))
+          ? calculatePublishPricing(this.pricingInput(cfg, publishPrice, hppCents))
           : null;
 
       return {
@@ -204,7 +208,8 @@ export class CostingService {
         // Flagged so the UI can tell "no materials yet" apart from "materials
         // exist but nobody has priced them".
         missingCost: mats.some((m) => m.unitCost <= 0),
-        hpp: rupiah(hpp.hppCents),
+        isBundle: bundleCents != null,
+        hpp: rupiah(hppCents),
         postingCount: postingByProduct.get(p.id) ?? 0,
         publishPrice,
         netProfit: pricing ? rupiah(pricing.netProfitCents) : null,
@@ -287,7 +292,8 @@ export class CostingService {
       .where(eq(masterProducts.userId, userId));
     if (!products.length) return [];
     const ids = products.map((p) => p.id);
-    const { matByProduct, costByProduct, packingFor } = await this.costInputs(userId, ids);
+    const ci = await this.costInputs(userId, ids);
+    const { matByProduct, costByProduct, packingFor } = ci;
     const def = (v: string | number | null | undefined, d: number) => (v == null ? d : num(v));
     return products.map((p) => {
       const cfg = costByProduct.get(p.id);
@@ -300,7 +306,7 @@ export class CostingService {
       });
       return {
         productId: p.id,
-        hppCents: hpp.hppCents,
+        hppCents: this.bundleHppCents(p.id, ci) ?? hpp.hppCents,
         publishPrice: cfg?.publishPrice != null ? num(cfg.publishPrice) : null,
         marketplaceFeeRate: def(cfg?.marketplaceFeeRate, 0.15),
         eventRate: def(cfg?.eventRate, 0.05),
@@ -311,6 +317,66 @@ export class CostingService {
         resellerRate: def(cfg?.resellerRate, 0.2),
       };
     });
+  }
+
+  /** Komponen tiap bundle (bundleId -> daftar komponen). Aman bila tabel
+   * product_bundle_items belum ada (migrasi belum dijalankan). */
+  private async loadBundles(
+    ids: string[],
+  ): Promise<Map<string, { componentId: string; quantity: number }[]>> {
+    const map = new Map<string, { componentId: string; quantity: number }[]>();
+    if (!ids.length) return map;
+    try {
+      const rows = await this.db
+        .select({
+          bundleId: productBundleItems.bundleProductId,
+          componentId: productBundleItems.componentProductId,
+          quantity: productBundleItems.quantity,
+        })
+        .from(productBundleItems)
+        .where(inArray(productBundleItems.bundleProductId, ids));
+      for (const r of rows) {
+        const arr = map.get(r.bundleId) ?? [];
+        arr.push({ componentId: r.componentId, quantity: num(r.quantity) });
+        map.set(r.bundleId, arr);
+      }
+    } catch (e) {
+      if ((e as { code?: string })?.code === "42P01") return map;
+      throw e;
+    }
+    return map;
+  }
+
+  /**
+   * HPP efektif bila produk adalah BUNDLE; null bila bukan bundle.
+   * = Sigma(biaya produksi komponen x qty) + overhead bundle (jasa + packing 1x).
+   * Biaya produksi komponen = bahan + jasa (TANPA packing komponen), karena
+   * komponen dikirim tergabung dalam satu paket bundle.
+   */
+  private bundleHppCents(
+    id: string,
+    ci: {
+      bundlesByProduct: Map<string, { componentId: string; quantity: number }[]>;
+      productionByProduct: Map<string, number>;
+      costByProduct: Map<string, CostingRow>;
+      packingFor: (id: string) => { quantity: number; unitCost: number }[];
+    },
+  ): number | null {
+    const comps = ci.bundlesByProduct.get(id);
+    if (!comps || !comps.length) return null;
+    let prod = 0;
+    for (const comp of comps) {
+      prod += (ci.productionByProduct.get(comp.componentId) ?? 0) * comp.quantity;
+    }
+    const cfg = ci.costByProduct.get(id);
+    const overhead = calculateHpp({
+      materials: [],
+      serviceCostPerPcs: num(cfg?.serviceCostPerPcs),
+      packingCostPerOrder: num(cfg?.packingCostPerOrder),
+      packingMaterials: ci.packingFor(id),
+      avgUnitsPerOrder: 1,
+    }).hppCents;
+    return Math.round(prod) + overhead;
   }
 
   private async costInputs(userId: string, ids: string[]) {
@@ -357,7 +423,21 @@ export class CostingService {
       }));
     };
 
-    return { matByProduct, costByProduct, packingFor };
+    const bundlesByProduct = await this.loadBundles(ids);
+    const productionByProduct = new Map<string, number>();
+    for (const id of ids) {
+      const cfg = costByProduct.get(id);
+      const h = calculateHpp({
+        materials: matByProduct.get(id) ?? [],
+        serviceCostPerPcs: num(cfg?.serviceCostPerPcs),
+        packingCostPerOrder: num(cfg?.packingCostPerOrder),
+        packingMaterials: packingFor(id),
+        avgUnitsPerOrder: cfg ? num(cfg.avgUnitsPerOrder) : 1,
+      });
+      productionByProduct.set(id, h.materialCostCents + h.serviceCostCents);
+    }
+
+    return { matByProduct, costByProduct, packingFor, bundlesByProduct, productionByProduct };
   }
 
   /**
@@ -590,6 +670,53 @@ export class CostingService {
     return { ok: true as const, usingDefault: false };
   }
 
+  /**
+   * Set komponen sebuah produk bundle (replace-all). Validasi: milik tenant,
+   * tak memuat dirinya, komponen valid & bukan bundle lain (maks 1 level).
+   */
+  async setBundle(
+    userId: string,
+    productId: string,
+    items: { componentProductId: string; quantity: number }[],
+  ) {
+    await this.getProductOrThrow(userId, productId);
+    await this.getOrCreateCosting(userId, productId);
+    const compIds = [...new Set(items.map((i) => i.componentProductId))];
+    if (compIds.includes(productId)) {
+      throw new BadRequestException("Bundle tidak boleh memuat dirinya sendiri.");
+    }
+    if (compIds.length) {
+      const owned = await this.db
+        .select({ id: masterProducts.id })
+        .from(masterProducts)
+        .where(and(eq(masterProducts.userId, userId), inArray(masterProducts.id, compIds)));
+      if (owned.length !== compIds.length) {
+        throw new BadRequestException("Ada komponen yang tidak valid.");
+      }
+      const nested = await this.db
+        .select({ id: productBundleItems.bundleProductId })
+        .from(productBundleItems)
+        .where(inArray(productBundleItems.bundleProductId, compIds))
+        .limit(1);
+      if (nested.length) {
+        throw new BadRequestException(
+          "Komponen tidak boleh produk bundling lain (maksimal 1 level).",
+        );
+      }
+    }
+    await this.db.delete(productBundleItems).where(eq(productBundleItems.bundleProductId, productId));
+    if (items.length) {
+      await this.db.insert(productBundleItems).values(
+        items.map((i) => ({
+          bundleProductId: productId,
+          componentProductId: i.componentProductId,
+          quantity: String(Number(i.quantity) > 0 ? Number(i.quantity) : 1),
+        })),
+      );
+    }
+    return this.detail(userId, productId);
+  }
+
   async detail(userId: string, productId: string) {
     const product = await this.getProductOrThrow(userId, productId);
     const cfg = await this.getOrCreateCosting(userId, productId);
@@ -660,6 +787,67 @@ export class CostingService {
     const unitsPerOrder = num(cfg.avgUnitsPerOrder) > 0 ? num(cfg.avgUnitsPerOrder) : 1;
     const packingMaterialPerUnitCents = Math.round(hpp.packingMaterialCostCents / unitsPerOrder);
 
+    // Bundle: HPP = Sigma(produksi komponen x qty) + packing bundle 1x.
+    const bundleComps = (await this.loadBundles([productId])).get(productId) ?? [];
+    let bundle:
+      | {
+          items: {
+            componentProductId: string;
+            name: string;
+            sku: string;
+            quantity: number;
+            productionPerUnit: number;
+            subtotal: number;
+          }[];
+          componentTotal: number;
+          overhead: number;
+          overheadService: number;
+          overheadPacking: number;
+          total: number;
+        }
+      | null = null;
+    let effHppCents = hpp.hppCents;
+    if (bundleComps.length) {
+      const compIds = bundleComps.map((b) => b.componentId);
+      const compInputs = await this.costInputs(userId, compIds);
+      const names = await this.db
+        .select({ id: masterProducts.id, name: masterProducts.name, sku: masterProducts.sku })
+        .from(masterProducts)
+        .where(inArray(masterProducts.id, compIds));
+      const nameById = new Map(names.map((x) => [x.id, x]));
+      let prodTotal = 0;
+      const items = bundleComps.map((b) => {
+        const perUnit = compInputs.productionByProduct.get(b.componentId) ?? 0;
+        const sub = perUnit * b.quantity;
+        prodTotal += sub;
+        const nm = nameById.get(b.componentId);
+        return {
+          componentProductId: b.componentId,
+          name: nm?.name ?? "(produk terhapus)",
+          sku: nm?.sku ?? "",
+          quantity: b.quantity,
+          productionPerUnit: rupiah(Math.round(perUnit)),
+          subtotal: rupiah(Math.round(sub)),
+        };
+      });
+      const overheadCents = calculateHpp({
+        materials: [],
+        serviceCostPerPcs: num(cfg.serviceCostPerPcs),
+        packingCostPerOrder: num(cfg.packingCostPerOrder),
+        packingMaterials: packing.map((p) => ({ quantity: p.quantity, unitCost: p.unitCost })),
+        avgUnitsPerOrder: 1,
+      }).hppCents;
+      effHppCents = Math.round(prodTotal) + overheadCents;
+      bundle = {
+        items,
+        componentTotal: rupiah(Math.round(prodTotal)),
+        overhead: rupiah(overheadCents),
+        overheadService: rupiah(hpp.serviceCostCents),
+        overheadPacking: rupiah(overheadCents - hpp.serviceCostCents),
+        total: rupiah(effHppCents),
+      };
+    }
+
     // A price already set on the master product is the answer to "what do we
     // sell this for" — showing 0 next to it just because the costing row has
     // not been filled in makes the page look wrong and invites re-typing a
@@ -670,7 +858,7 @@ export class CostingService {
     const publishPriceInherited = cfg.publishPrice == null && inheritedPrice != null;
     const pricing =
       publishPrice != null
-        ? calculatePublishPricing(this.pricingInput(cfg, publishPrice, hpp.hppCents))
+        ? calculatePublishPricing(this.pricingInput(cfg, publishPrice, effHppCents))
         : null;
 
     return {
@@ -703,8 +891,9 @@ export class CostingService {
         /** Per shipment, before being spread across the units in it. */
         packingMaterialPerOrder: rupiah(hpp.packingMaterialCostCents),
         packingOtherPerOrder: rupiah(hpp.packingPerOrderCents - hpp.packingMaterialCostCents),
-        total: rupiah(hpp.hppCents),
+        total: rupiah(effHppCents),
       },
+      bundle,
       pricing: pricing ? this.serialisePricing(pricing) : null,
     };
   }

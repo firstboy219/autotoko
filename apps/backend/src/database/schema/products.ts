@@ -554,3 +554,31 @@ export const masterProductCategories = pgTable(
     userIdx: index("master_product_categories_user_idx").on(t.userId, t.shopCategoryId),
   }),
 );
+
+/**
+ * Bundle: satu master produk (bundle) tersusun dari beberapa master produk
+ * KOMPONEN. HPP bundle dihitung dari biaya produksi komponen (bahan + jasa)
+ * x qty, ditambah packing bundle 1x (saat kirim digabung dalam 1 paket).
+ * 1 level: sebuah komponen tidak boleh berupa bundle lain.
+ */
+export const productBundleItems = pgTable(
+  "product_bundle_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    bundleProductId: uuid("bundle_product_id")
+      .notNull()
+      .references(() => masterProducts.id, { onDelete: "cascade" }),
+    componentProductId: uuid("component_product_id")
+      .notNull()
+      .references(() => masterProducts.id, { onDelete: "cascade" }),
+    quantity: numeric("quantity", { precision: 10, scale: 3 }).notNull().default("1"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    bundleIdx: index("product_bundle_items_bundle_idx").on(t.bundleProductId),
+    uniqueComp: unique("product_bundle_items_bundle_comp_unique").on(
+      t.bundleProductId,
+      t.componentProductId,
+    ),
+  }),
+);

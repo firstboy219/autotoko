@@ -104,6 +104,21 @@ interface Detail {
     packingOtherPerOrder: number;
     total: number;
   };
+  bundle: {
+    items: {
+      componentProductId: string;
+      name: string;
+      sku: string;
+      quantity: number;
+      productionPerUnit: number;
+      subtotal: number;
+    }[];
+    componentTotal: number;
+    overhead: number;
+    overheadService: number;
+    overheadPacking: number;
+    total: number;
+  } | null;
   pricing: Pricing | null;
 }
 
@@ -142,6 +157,175 @@ export function HppDetail() {
         </div>
       )}
     </Layout>
+  );
+}
+
+/* --------------------------------------------------------------- bundling */
+
+interface CostingListItem {
+  productId: string;
+  sku: string;
+  name: string;
+  isBundle?: boolean;
+}
+
+function BundleSection({
+  productId,
+  data,
+  onChange,
+}: {
+  productId: string;
+  data: Detail;
+  onChange: () => void;
+}) {
+  const toast = useToast();
+  const candidates = useFetch<CostingListItem[]>("/costing");
+  const [open, setOpen] = useState(!!data.bundle);
+  const [rows, setRows] = useState<{ componentProductId: string; quantity: string }[]>(() =>
+    (data.bundle?.items ?? []).map((i) => ({
+      componentProductId: i.componentProductId,
+      quantity: String(i.quantity),
+    })),
+  );
+  const [picker, setPicker] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setRows(
+      (data.bundle?.items ?? []).map((i) => ({
+        componentProductId: i.componentProductId,
+        quantity: String(i.quantity),
+      })),
+    );
+    if (data.bundle) setOpen(true);
+  }, [data.bundle]);
+
+  const list = candidates.data ?? [];
+  const nameOf = (cid: string) =>
+    data.bundle?.items.find((i) => i.componentProductId === cid)?.name ??
+    list.find((p) => p.productId === cid)?.name ??
+    cid;
+  const opts = list.filter(
+    (p) =>
+      p.productId !== productId &&
+      !p.isBundle &&
+      !rows.some((r) => r.componentProductId === p.productId),
+  );
+
+  function addRow() {
+    if (!picker) return;
+    setRows((r) => [...r, { componentProductId: picker, quantity: "1" }]);
+    setPicker("");
+  }
+  async function save() {
+    setBusy(true);
+    try {
+      const items = rows
+        .filter((r) => r.componentProductId)
+        .map((r) => ({ componentProductId: r.componentProductId, quantity: Number(r.quantity) || 1 }));
+      await api.put(`/costing/${productId}/bundle`, { items });
+      toast("Komponen bundle disimpan", "success");
+      onChange();
+    } catch (e) {
+      toast((e as Error).message || "Gagal menyimpan komponen", "danger");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function removeBundle() {
+    setBusy(true);
+    try {
+      await api.put(`/costing/${productId}/bundle`, { items: [] });
+      setRows([]);
+      setOpen(false);
+      toast("Status bundling dihapus", "success");
+      onChange();
+    } catch (e) {
+      toast((e as Error).message || "Gagal", "danger");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium text-ink">Produk bundling (paket gabungan)</div>
+            <div className="mt-0.5 text-xs text-ink-3">
+              Gabungkan beberapa master produk jadi 1 paket jual. HPP otomatis dari komponen + 1× packing bundle.
+            </div>
+          </div>
+          <Button size="sm" variant="tonal" icon="plus" onClick={() => setOpen(true)}>
+            Jadikan bundling
+          </Button>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card padded={false}>
+      <CardHeader
+        title="Bundling — komponen paket"
+        subtitle="HPP = Σ biaya produksi komponen (tanpa packing masing-masing) + 1× packing bundle."
+        action={
+          <Button size="sm" variant="text" onClick={removeBundle} loading={busy}>
+            Bukan bundle
+          </Button>
+        }
+      />
+      <div className="space-y-3 p-4">
+        {rows.length === 0 && (
+          <div className="text-xs text-ink-3">Belum ada komponen. Tambahkan minimal 1 produk di bawah.</div>
+        )}
+        {rows.map((r, idx) => (
+          <div key={idx} className="flex items-center gap-2">
+            <div className="flex-1 truncate text-sm text-ink">{nameOf(r.componentProductId)}</div>
+            <Input
+              inputMode="decimal"
+              value={r.quantity}
+              onChange={(e) =>
+                setRows((rs) =>
+                  rs.map((x, i) =>
+                    i === idx ? { ...x, quantity: e.target.value.replace(/[^\d.]/g, "") } : x,
+                  ),
+                )
+              }
+              className="w-20 tabular-nums"
+            />
+            <span className="text-xs text-ink-3">pcs</span>
+            <button
+              type="button"
+              onClick={() => setRows((rs) => rs.filter((_, i) => i !== idx))}
+              className="text-ink-3 hover:text-red-600"
+              title="Hapus komponen"
+            >
+              <Icon name="trash" size={16} />
+            </button>
+          </div>
+        ))}
+        <div className="flex items-center gap-2 pt-1">
+          <Select value={picker} onChange={(e) => setPicker(e.target.value)} className="flex-1">
+            <option value="">Pilih produk komponen…</option>
+            {opts.map((o2) => (
+              <option key={o2.productId} value={o2.productId}>
+                {o2.name} ({o2.sku})
+              </option>
+            ))}
+          </Select>
+          <Button size="sm" variant="outline" icon="plus" onClick={addRow} disabled={!picker}>
+            Tambah
+          </Button>
+        </div>
+        <div className="pt-1">
+          <Button variant="filled" loading={busy} onClick={save} disabled={rows.length === 0}>
+            Simpan komponen
+          </Button>
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -259,6 +443,7 @@ function HppSection({
   return (
     <>
     <PackingSection productId={productId} lines={data.packingMaterials ?? []} onChange={onChange} />
+    <BundleSection productId={productId} data={data} onChange={onChange} />
     <Card padded={false}>
       <CardHeader
         title="1 · Harga Pokok Produksi"
@@ -301,6 +486,12 @@ function HppSection({
           </div>
         }
       />
+
+      {data.bundle && (
+        <div className="mx-4 mt-3 rounded-lg border border-amber-200 bg-amber-50/60 px-3.5 py-2 text-xs text-amber-800">
+          Produk ini <b>bundling</b> — resep bahan di bawah diabaikan. HPP dihitung dari komponen (lihat kartu Bundling di atas).
+        </div>
+      )}
 
       {adding && (
         <AddMaterialForm
@@ -518,35 +709,69 @@ function HppSection({
 
         <div className="mt-5 rounded-lg border border-line bg-canvas p-4">
           <dl className="space-y-1.5 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-ink-2">Total bahan baku</dt>
-              <dd className="text-ink tabular-nums">{rupiah(data.hpp.materialCost)}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-ink-2">Biaya jasa produksi</dt>
-              <dd className="text-ink tabular-nums">{rupiah(data.hpp.serviceCost)}</dd>
-            </div>
-            {data.hpp.packingMaterialCost > 0 && (
-              <div className="flex justify-between">
-                <dt className="text-ink-2">
-                  Bahan baku packing{" "}
-                  <span className="text-ink-3">
-                    ({rupiah(data.hpp.packingMaterialPerOrder)}/resi ÷ {data.costing.avgUnitsPerOrder} pcs)
-                  </span>
-                </dt>
-                <dd className="text-ink tabular-nums">{rupiah(data.hpp.packingMaterialCost)}</dd>
-              </div>
-            )}
-            {data.hpp.packingOtherCost > 0 && (
-              <div className="flex justify-between">
-                <dt className="text-ink-2">
-                  Biaya packing lain{" "}
-                  <span className="text-ink-3">
-                    ({rupiah(data.hpp.packingOtherPerOrder)}/resi ÷ {data.costing.avgUnitsPerOrder} pcs)
-                  </span>
-                </dt>
-                <dd className="text-ink tabular-nums">{rupiah(data.hpp.packingOtherCost)}</dd>
-              </div>
+            {data.bundle ? (
+              <>
+                {data.bundle.items.map((it) => (
+                  <div key={it.componentProductId} className="flex justify-between">
+                    <dt className="text-ink-2">
+                      {it.quantity}× {it.name}{" "}
+                      <span className="text-ink-3">@ {rupiah(it.productionPerUnit)}</span>
+                    </dt>
+                    <dd className="text-ink tabular-nums">{rupiah(it.subtotal)}</dd>
+                  </div>
+                ))}
+                <div className="flex justify-between">
+                  <dt className="text-ink-2">Subtotal komponen</dt>
+                  <dd className="text-ink tabular-nums">{rupiah(data.bundle.componentTotal)}</dd>
+                </div>
+                {data.bundle.overheadService > 0 && (
+                  <div className="flex justify-between">
+                    <dt className="text-ink-2">Jasa rakit bundle</dt>
+                    <dd className="text-ink tabular-nums">{rupiah(data.bundle.overheadService)}</dd>
+                  </div>
+                )}
+                {data.bundle.overheadPacking > 0 && (
+                  <div className="flex justify-between">
+                    <dt className="text-ink-2">
+                      Packing bundle <span className="text-ink-3">(1× paket)</span>
+                    </dt>
+                    <dd className="text-ink tabular-nums">{rupiah(data.bundle.overheadPacking)}</dd>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between">
+                  <dt className="text-ink-2">Total bahan baku</dt>
+                  <dd className="text-ink tabular-nums">{rupiah(data.hpp.materialCost)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-ink-2">Biaya jasa produksi</dt>
+                  <dd className="text-ink tabular-nums">{rupiah(data.hpp.serviceCost)}</dd>
+                </div>
+                {data.hpp.packingMaterialCost > 0 && (
+                  <div className="flex justify-between">
+                    <dt className="text-ink-2">
+                      Bahan baku packing{" "}
+                      <span className="text-ink-3">
+                        ({rupiah(data.hpp.packingMaterialPerOrder)}/resi ÷ {data.costing.avgUnitsPerOrder} pcs)
+                      </span>
+                    </dt>
+                    <dd className="text-ink tabular-nums">{rupiah(data.hpp.packingMaterialCost)}</dd>
+                  </div>
+                )}
+                {data.hpp.packingOtherCost > 0 && (
+                  <div className="flex justify-between">
+                    <dt className="text-ink-2">
+                      Biaya packing lain{" "}
+                      <span className="text-ink-3">
+                        ({rupiah(data.hpp.packingOtherPerOrder)}/resi ÷ {data.costing.avgUnitsPerOrder} pcs)
+                      </span>
+                    </dt>
+                    <dd className="text-ink tabular-nums">{rupiah(data.hpp.packingOtherCost)}</dd>
+                  </div>
+                )}
+              </>
             )}
             <div className="flex justify-between pt-2 mt-1 border-t border-line">
               <dt className="font-medium text-ink">Harga Pokok Produksi / pcs</dt>
