@@ -490,6 +490,160 @@ function ImportModal({
 
 /* ------------------------------------------------------------------ editor */
 
+interface CompareShop {
+  shopId: string;
+  shop: string | null;
+  productId?: string;
+  mappingId?: string;
+  hasListing: boolean;
+  mode?: string;
+  error?: string;
+  namaSesuai?: boolean;
+  liveName?: string;
+  deskripsiSesuai?: boolean | null;
+  varianLive?: number;
+  varianTemplate?: number;
+  hargaSesuai?: number;
+  hargaBeda?: number;
+  hargaTakCocok?: number;
+}
+interface CompareResp {
+  template: { name: string; hasDesc: boolean; varianCount: number };
+  shops: CompareShop[];
+  missing: { shopId: string; shop: string | null }[];
+}
+
+/** Bandingkan listing antar toko vs Master Postingan + harga HPP, lalu samakan. */
+function CompareShops({ postingId, onReload }: { postingId: string; onReload: () => void }) {
+  const toast = useToast();
+  const [data, setData] = useState<CompareResp | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function run() {
+    setLoading(true);
+    try {
+      setData(await api.get<CompareResp>(`/master-postings/${postingId}/compare`));
+    } catch (e) {
+      toast((e as Error).message || "Gagal membandingkan", "danger");
+    } finally {
+      setLoading(false);
+    }
+  }
+  async function samakanHarga() {
+    setBusy("harga");
+    try {
+      const r = await api.post<{ masters: number; updated: number; gagal: number }>(
+        `/master-postings/${postingId}/push-prices`,
+        {},
+      );
+      toast(`Harga HPP: ${r.updated} varian diperbarui${r.gagal ? ` · ${r.gagal} gagal` : ""}`, r.gagal ? "warning" : "success");
+      await run();
+    } catch (e) {
+      toast((e as Error).message || "Gagal samakan harga", "danger");
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function terapkan(mappingId: string) {
+    setBusy(mappingId);
+    try {
+      const r = await api.post<{ ok: number; gagal: number; dilewati: number }>(
+        `/master-postings/${postingId}/mappings/${mappingId}/apply`,
+        { withImages: false },
+      );
+      toast(`Terapkan: ${r.ok} ok · ${r.gagal} gagal · ${r.dilewati} dilewati`, r.gagal ? "warning" : "success");
+      await run();
+      onReload();
+    } catch (e) {
+      toast((e as Error).message || "Gagal terapkan", "danger");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const chip = (label: string, ok: boolean | null | undefined, extra?: string) => (
+    <span
+      className={`rounded px-1.5 py-0.5 text-[11px] ${
+        ok == null ? "bg-canvas text-ink-3" : ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600 font-medium"
+      }`}
+    >
+      {label}
+      {extra ? ` ${extra}` : ok == null ? "" : ok ? " ✓" : " beda"}
+    </span>
+  );
+
+  return (
+    <Card className="mt-4" padded={false}>
+      <CardHeader
+        title="Bandingkan antar toko"
+        subtitle="Acuan = Master Postingan (nama/deskripsi/varian) + harga HPP. Lihat toko mana yang beda, lalu samakan."
+        action={
+          <div className="flex flex-wrap gap-2">
+            {data && (
+              <Button size="sm" variant="filled" loading={busy === "harga"} onClick={samakanHarga}>
+                Samakan harga HPP (semua)
+              </Button>
+            )}
+            <Button size="sm" variant="outline" icon="search" loading={loading} onClick={run}>
+              {data ? "Bandingkan ulang" : "Bandingkan"}
+            </Button>
+          </div>
+        }
+      />
+      {data && (
+        <div className="space-y-2 p-5">
+          {data.shops.length === 0 && data.missing.length === 0 && (
+            <div className="text-sm text-ink-3">Belum ada listing termapping.</div>
+          )}
+          {data.shops.map((s, i) => {
+            const hargaOk = (s.hargaBeda ?? 0) === 0 && (s.hargaTakCocok ?? 0) === 0;
+            const perlu =
+              !s.error &&
+              (s.namaSesuai === false || s.deskripsiSesuai === false || s.varianLive !== s.varianTemplate || !hargaOk);
+            return (
+              <div key={i} className="flex flex-wrap items-center gap-2 border-b border-line pb-2 last:border-0">
+                <span className="min-w-0 flex-1 truncate text-sm text-ink" title={s.shop ?? ""}>
+                  {s.shop ?? s.shopId.slice(0, 8)}
+                  {s.productId && <span className="ml-1 font-mono text-[10px] text-ink-3">…{s.productId.slice(-5)}</span>}
+                </span>
+                {s.error ? (
+                  <span className="text-xs text-red-600">{s.error}</span>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-1">
+                    {chip("Nama", s.namaSesuai)}
+                    {chip("Deskripsi", s.deskripsiSesuai)}
+                    {chip("Varian", s.varianLive === s.varianTemplate, `${s.varianLive}/${s.varianTemplate}`)}
+                    {chip("Harga", hargaOk, hargaOk ? undefined : `${s.hargaBeda}beda${s.hargaTakCocok ? `/${s.hargaTakCocok}?` : ""}`)}
+                    {perlu && s.mappingId ? (
+                      <Button size="sm" variant="outline" loading={busy === s.mappingId} onClick={() => terapkan(s.mappingId!)}>
+                        Samakan
+                      </Button>
+                    ) : (
+                      !perlu && <span className="text-[11px] text-emerald-700">sudah sama</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {data.missing.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800">
+              Belum ada listing di: <b>{data.missing.map((m) => m.shop).join(", ")}</b>. Membuat listing baru otomatis
+              belum didukung (butuh pipeline gambar/kategori TikTok) — buat listing-nya dulu di toko itu lalu Import,
+              atau tambah mapping "Posting baru" di bawah.
+            </div>
+          )}
+          <div className="text-[11px] text-ink-3">
+            "Samakan" per toko = Terapkan (nama, deskripsi, varian, SKU, harga, stok). "Samakan harga HPP" = kirim harga
+            publish HPP ke semua listing. Kolom Harga dibandingkan ke harga publish HPP.
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function Editor({ id, onBack }: { id: string; onBack: () => void }) {
   const [d, setD] = useState<Detail | null>(null);
   const [masters, setMasters] = useState<MasterOpt[]>([]);
@@ -927,6 +1081,8 @@ function Editor({ id, onBack }: { id: string; onBack: () => void }) {
           </TableWrap>
         )}
       </Card>
+
+      <CompareShops postingId={id} onReload={refetch} />
 
       {/* Mapping ke toko */}
       <Card className="mt-4" padded={false}>

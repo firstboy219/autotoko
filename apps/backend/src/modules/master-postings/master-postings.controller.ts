@@ -90,6 +90,18 @@ export class MasterPostingsController {
     return { success: true, data: await this.svc.massPriceCheck(uid(req), body.productIds ?? []) };
   }
 
+  /** Bandingkan listing antar toko terhadap Master Postingan + harga HPP (read-only). */
+  @Get(":id/compare")
+  async comparePosting(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.comparePosting(uid(req), id) };
+  }
+
+  /** Samakan harga publish HPP semua produk dalam posting ke semua listing. */
+  @Post(":id/push-prices")
+  async pushPostingPrices(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.pushPostingPrices(uid(req), id) };
+  }
+
   /** Penjualan 30 hari per toko termapping. */
   @Get(":id/sales")
   async sales(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {

@@ -1463,6 +1463,126 @@ export class MasterPostingsService {
   }
 
   /** Harga publish master dari product_costing (rupiah) atau null. */
+  /**
+   * Bandingkan listing TIAP toko (yang termapping ke posting ini) terhadap
+   * ACUAN = Master Postingan (nama/deskripsi/varian) + harga HPP (publish).
+   * Read-only: baca listing live tiap toko lalu laporkan beda-nya. Juga daftar
+   * toko yang BELUM punya listing untuk posting ini (kandidat dibuatkan).
+   */
+  async comparePosting(userId: string, postingId: string) {
+    const posting = await this.requirePosting(userId, postingId);
+    const norm = (v: unknown) =>
+      String(v ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+    const postingSkus = await this.db
+      .select()
+      .from(masterPostingSkus)
+      .where(eq(masterPostingSkus.masterPostingId, postingId));
+    const templateName = (posting.name ?? "").trim();
+    const templateDescNorm = norm(posting.description ?? "");
+    const masterIds = [...new Set(postingSkus.map((s) => s.masterProductId).filter((v): v is string => !!v))];
+    const pubMap = new Map<string, number | null>();
+    for (const mid of masterIds) {
+      try {
+        pubMap.set(mid, await this.publishPriceOf(userId, mid));
+      } catch {
+        pubMap.set(mid, null);
+      }
+    }
+    const mappings = await this.db
+      .select()
+      .from(masterPostingMappings)
+      .where(and(eq(masterPostingMappings.userId, userId), eq(masterPostingMappings.masterPostingId, postingId)));
+    const allShops = await this.db.select().from(shops).where(eq(shops.userId, userId));
+    const shopById = new Map(allShops.map((x) => [x.id, x] as const));
+    const { appKey, appSecret } = await this.tiktok.credentials();
+
+    const shopsOut: Array<Record<string, unknown>> = [];
+    const mappedShopIds = new Set<string>();
+    for (const m of mappings) {
+      const nama = shopById.get(m.shopId)?.shopName ?? null;
+      if (m.status === "create" || !m.productId) {
+        shopsOut.push({ shopId: m.shopId, shop: nama, hasListing: false, mode: "create" });
+        continue;
+      }
+      mappedShopIds.add(m.shopId);
+      const shop = shopById.get(m.shopId);
+      if (!shop?.accessToken || !shop.shopCipher || m.marketplace !== "tiktok") {
+        shopsOut.push({ shopId: m.shopId, shop: nama, productId: m.productId, hasListing: true, error: "toko tidak tersambung API / marketplace belum didukung" });
+        continue;
+      }
+      try {
+        const { product } = await this.bacaProdukLive(userId, shop, m.productId, appKey, appSecret);
+        const liveTitle = String(product?.title ?? "");
+        const liveSkus = Array.isArray(product?.skus) ? (product.skus as Array<Record<string, any>>) : [];
+        let hargaSesuai = 0;
+        let hargaBeda = 0;
+        let hargaTakCocok = 0;
+        for (const ps of postingSkus) {
+          const ls = this.matchLiveSku({ combo: ps.combo, sku: ps.sku }, liveSkus, postingSkus.length === 1);
+          const pub = ps.masterProductId ? pubMap.get(ps.masterProductId) ?? null : null;
+          const lp = ls?.id ? Number(ls.price?.sale_price ?? ls.price?.tax_exclusive_price ?? NaN) : NaN;
+          if (!ls?.id || pub == null || !Number.isFinite(lp)) {
+            hargaTakCocok += 1;
+            continue;
+          }
+          if (Math.round(lp) === Math.round(pub)) hargaSesuai += 1;
+          else hargaBeda += 1;
+        }
+        shopsOut.push({
+          shopId: m.shopId,
+          shop: nama,
+          productId: m.productId,
+          mappingId: m.id,
+          hasListing: true,
+          namaSesuai: norm(liveTitle) === norm(templateName),
+          liveName: liveTitle.slice(0, 120),
+          deskripsiSesuai: templateDescNorm ? norm(product?.description ?? "") === templateDescNorm : null,
+          varianLive: liveSkus.length,
+          varianTemplate: postingSkus.length,
+          hargaSesuai,
+          hargaBeda,
+          hargaTakCocok,
+        });
+      } catch (e) {
+        shopsOut.push({ shopId: m.shopId, shop: nama, productId: m.productId, hasListing: true, error: (e as Error).message.slice(0, 150) });
+      }
+    }
+    const missing = allShops
+      .filter((sh) => !mappedShopIds.has(sh.id) && !!sh.accessToken && !!sh.shopCipher)
+      .map((sh) => ({ shopId: sh.id, shop: sh.shopName }));
+    return {
+      template: { name: templateName, hasDesc: !!templateDescNorm, varianCount: postingSkus.length },
+      shops: shopsOut,
+      missing,
+    };
+  }
+
+  /**
+   * Samakan HARGA (publish HPP) semua master produk dalam posting ini ke semua
+   * listing-nya. Memakai pushPublishPriceToMarketplace (hanya kirim varian yang
+   * harganya beda; aman). Tulisan nyata ke marketplace.
+   */
+  async pushPostingPrices(userId: string, postingId: string) {
+    await this.requirePosting(userId, postingId);
+    const rows = await this.db
+      .select({ mid: masterPostingSkus.masterProductId })
+      .from(masterPostingSkus)
+      .where(eq(masterPostingSkus.masterPostingId, postingId));
+    const mids = [...new Set(rows.map((r) => r.mid).filter((v): v is string => !!v))];
+    const perMaster: Array<Record<string, unknown>> = [];
+    for (const mid of mids) {
+      try {
+        const r = await this.pushPublishPriceToMarketplace(userId, mid);
+        perMaster.push({ masterProductId: mid, ...r });
+      } catch (e) {
+        perMaster.push({ masterProductId: mid, gagal: (e as Error).message.slice(0, 150) });
+      }
+    }
+    const updated = perMaster.reduce((a, r) => a + (Number(r.updated) || 0), 0);
+    const gagal = perMaster.reduce((a, r) => a + (Number((r as { gagal?: number }).gagal) || 0) + (r.gagal && typeof r.gagal === "string" ? 1 : 0), 0);
+    return { masters: mids.length, updated, gagal, perMaster };
+  }
+
   private async publishPriceOf(userId: string, masterProductId: string): Promise<number | null> {
     const [mp] = await this.db
       .select({ id: masterProducts.id })
