@@ -53,19 +53,38 @@ public class DashboardActivity extends AppCompatActivity {
 
         float d = getResources().getDisplayMetrics().density;
         int pad = (int) (16 * d);
+        // Dipertahankan agar metode lama (tak lagi dipakai) tetap aman dirujuk.
         root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(pad, pad, pad, pad);
-
         status = new TextView(this);
-        status.setTextSize(13);
-        status.setTextColor(abu());
-        root.addView(status);
 
-        ScrollView sv = new ScrollView(this);
-        sv.addView(root);
-        setContentView(NavBawah.bungkus(this, sv, NavBawah.HOME));
-        muat();
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+
+        // Tombol menu DIPERTAHANKAN (permintaan): grid "Menu" di atas.
+        LinearLayout menuWrap = new LinearLayout(this);
+        menuWrap.setOrientation(LinearLayout.VERTICAL);
+        menuWrap.setPadding(pad, (int) (12 * d), pad, (int) (4 * d));
+        menuWrap.addView(gridNavigasi());
+        col.addView(menuWrap, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // Isi dashboard = tampilan WEB (mekanisme & UI sama persis) lewat WebView.
+        // Sesi diserahkan via URL fragment (#t=<jwt>&embed=1): token tidak terkirim
+        // ke server, dan mode embed menyembunyikan navigasi web (pakai menu native).
+        android.webkit.WebView wv = new android.webkit.WebView(this);
+        android.webkit.WebSettings ws = wv.getSettings();
+        ws.setJavaScriptEnabled(true);
+        ws.setDomStorageEnabled(true);
+        wv.setWebViewClient(new android.webkit.WebViewClient());
+        col.addView(wv, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        setContentView(NavBawah.bungkus(this, col, NavBawah.HOME));
+
+        Session s = new Session(this);
+        String base = s.baseUrl();
+        String tok = s.token();
+        wv.loadUrl(base + "/#t=" + (tok == null ? "" : tok) + "&embed=1");
     }
 
     @Override

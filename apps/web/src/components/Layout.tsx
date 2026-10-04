@@ -208,6 +208,20 @@ function matchNav(pathname: string): string | null {
   return best;
 }
 
+/**
+ * Mode embed: dipakai saat dashboard web ditampilkan di dalam WebView APK.
+ * Hanya konten yang dirender (tanpa sidebar/header/nav web) karena navigasi
+ * sudah ditangani tombol menu native APK. Ditandai lewat localStorage oleh
+ * lib/ssoHandoff saat host memuat dengan "#embed=1".
+ */
+const EMBEDDED: boolean = (() => {
+  try {
+    return localStorage.getItem("autotoko_embed") === "1";
+  } catch {
+    return false;
+  }
+})();
+
 export function Layout({
   children,
   title,
@@ -437,6 +451,14 @@ export function Layout({
       </div>
     </>
   );
+
+  if (EMBEDDED) {
+    return (
+      <ToastHost>
+        <main className="min-h-screen bg-canvas px-3 py-3 font-sans text-ink">{children}</main>
+      </ToastHost>
+    );
+  }
 
   return (
     <ToastHost>
