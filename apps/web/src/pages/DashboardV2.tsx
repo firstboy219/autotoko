@@ -1433,7 +1433,7 @@ function BucketChart({ data }: { data: BucketResp }) {
               <span className="inline-block h-0.5 w-3" style={{ background: "#eb6834" }} /> Biasanya / hari (4 mgg)
             </span>
           )}
-          <span className="text-emerald-700">profit bersih (angka di atas bar)</span>
+          <span className="text-ink-3">angka di atas bar: pesanan + <span className="text-emerald-700">profit</span></span>
         </div>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full select-none" onMouseLeave={() => setHover(null)}>
@@ -1468,10 +1468,15 @@ function BucketChart({ data }: { data: BucketResp }) {
           return (
             <g key={i}>
               <rect x={bx(i) + bw * 0.16} y={top} width={bw * 0.68} height={Math.max(0, h)} rx="1.5" fill={on ? "url(#bkBarHi)" : "url(#bkBar)"} />
-              {showLabels && x.nominal > 0 && (
-                <text x={bx(i) + bw / 2} y={top - 2.5} textAnchor="middle" style={{ fontSize: "6.5px" }} fill={x.profit < 0 ? "#dc2626" : "#059669"}>
-                  {rpShort(x.profit)}
-                </text>
+              {showLabels && x.pesanan > 0 && (
+                <>
+                  <text x={bx(i) + bw / 2} y={top - 9} textAnchor="middle" className="fill-current text-ink-2" style={{ fontSize: "7px", fontWeight: 600 }}>
+                    {x.pesanan}
+                  </text>
+                  <text x={bx(i) + bw / 2} y={top - 2.5} textAnchor="middle" style={{ fontSize: "6.5px" }} fill={x.profit < 0 ? "#dc2626" : "#059669"}>
+                    {rpShort(x.profit)}
+                  </text>
+                </>
               )}
             </g>
           );
