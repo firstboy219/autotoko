@@ -1048,6 +1048,7 @@ interface SalesByDate {
 interface TimelineResp {
   tanggal?: string;
   hariIni: number[];
+  terkirimHariIni?: number[];
   profitHariIni?: number[];
   rataBulan: number[];
   puncakBulan: number;
@@ -1625,6 +1626,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
   const gridLines = [0.5, 1];
   const totalProfit = profit.reduce((a, b) => a + b, 0);
   const totalPesanan = hari.reduce((a, b) => a + b, 0);
+  const totalTerkirim = (data.terkirimHariIni ?? []).reduce((a, b) => a + b, 0);
   const isToday = (data.tanggal ?? "") === todayJak();
   const nowWib = new Date(Date.now() + 7 * 3600 * 1000);
   const nowFrac = nowWib.getUTCHours() + nowWib.getUTCMinutes() / 60;
@@ -1638,7 +1640,10 @@ function TimelineChart({ data }: { data: TimelineResp }) {
         <div className="text-[11px] font-medium text-ink-3">Timeline pesanan per jam</div>
         <div className="flex items-center gap-3 text-[10px] text-ink-3">
           <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2 rounded-sm bg-gradient-to-b from-[#4f93e0] to-[#2a78d6]" /> Hari ini
+            <span className="inline-block h-2.5 w-2 rounded-sm bg-gradient-to-b from-[#5a9be6] to-[#2a78d6]" /> Terkirim
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2.5 w-2 rounded-sm" style={{ background: "#d6dbe0" }} /> Belum terkirim
           </span>
           <span className="flex items-center gap-1">
             <span className="inline-block h-0.5 w-3 bg-[#eb6834]" /> Rata² bulan ini
@@ -1684,17 +1689,20 @@ function TimelineChart({ data }: { data: TimelineResp }) {
         {/* bars hari ini */}
         {hari.map((v, i) => {
           const h = (v / scaleMax) * plotH;
+          const t = Math.min(data.terkirimHariIni?.[i] ?? 0, v);
+          const hb = (t / scaleMax) * plotH;
           const on = i === sel;
+          const bx0 = x(i) + bw * 0.16;
+          const bwd = bw * 0.68;
           return (
-            <rect
-              key={i}
-              x={x(i) + bw * 0.16}
-              y={padT + plotH - h}
-              width={bw * 0.68}
-              height={Math.max(0, h)}
-              rx="1.5"
-              fill={on ? "url(#tlBarHi)" : "url(#tlBar)"}
-            />
+            <g key={i}>
+              {/* abu-abu = total pesanan (belum terkirim di atas) */}
+              <rect x={bx0} y={padT + plotH - h} width={bwd} height={Math.max(0, h)} rx="1.5" fill={on ? "#c3cad2" : "#d6dbe0"} />
+              {/* biru = porsi yang sudah terkirim (dari dasar) */}
+              {hb > 0 && (
+                <rect x={bx0} y={padT + plotH - hb} width={bwd} height={Math.max(0, hb)} rx="1.5" fill={on ? "url(#tlBarHi)" : "url(#tlBar)"} />
+              )}
+            </g>
           );
         })}
         {hari.map((v, i) => {
@@ -1751,6 +1759,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
           <div>
             <div className="text-ink-2">
               Hari ini: <b className="text-ink tabular-nums">{totalPesanan}</b> pesanan ·{" "}
+              <b className="tabular-nums text-brand-ink">{totalTerkirim}</b> terkirim ·{" "}
               <span className={`font-semibold tabular-nums ${totalProfit < 0 ? "text-red-600" : "text-emerald-700"}`}>
                 profit {rupiah(totalProfit)}
               </span>
@@ -1770,7 +1779,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
           </div>
         ) : (
           <div className="text-ink-2">
-            <b className="text-ink">{jam2(sel)}.00</b> · {hari[sel] ?? 0} pesanan ·{" "}
+            <b className="text-ink">{jam2(sel)}.00</b> · {hari[sel] ?? 0} pesanan · {data.terkirimHariIni?.[sel] ?? 0} terkirim ·{" "}
             <span className={`font-semibold tabular-nums ${(profit[sel] ?? 0) < 0 ? "text-red-600" : "text-emerald-700"}`}>
               profit {rupiah(profit[sel] ?? 0)}
             </span>

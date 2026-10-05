@@ -192,7 +192,9 @@ export class DashboardV2Service {
       Array.isArray(x) ? (x as any) : ((x as any)?.rows ?? []);
 
     const dayRows = await this.db.execute(sql`
-      SELECT extract(hour from (coalesce(created_at_marketplace, created_at) at time zone 'Asia/Jakarta'))::int AS h, count(*)::int AS n
+      SELECT extract(hour from (coalesce(created_at_marketplace, created_at) at time zone 'Asia/Jakarta'))::int AS h,
+             count(*)::int AS n,
+             count(*) FILTER (WHERE fulfillment_status IN ('dikirim', 'selesai'))::int AS terkirim
       FROM orders
       WHERE user_id = ${userId}::uuid AND fulfillment_status <> 'dibatalkan'
         AND coalesce(created_at_marketplace, created_at) >= ${dayStart.toISOString()}::timestamptz AND coalesce(created_at_marketplace, created_at) < ${dayEnd.toISOString()}::timestamptz
@@ -210,9 +212,13 @@ export class DashboardV2Service {
         AND coalesce(created_at_marketplace, created_at) >= ${monthStart.toISOString()}::timestamptz AND coalesce(created_at_marketplace, created_at) < ${monthEnd.toISOString()}::timestamptz`);
 
     const hariIni = Array<number>(24).fill(0);
+    const terkirimHariIni = Array<number>(24).fill(0);
     for (const r of arr(dayRows)) {
       const h = Number(r.h);
-      if (h >= 0 && h < 24) hariIni[h] = Number(r.n) || 0;
+      if (h >= 0 && h < 24) {
+        hariIni[h] = Number(r.n) || 0;
+        terkirimHariIni[h] = Number((r as Record<string, unknown>).terkirim) || 0;
+      }
     }
     const monthHour = Array<number>(24).fill(0);
     for (const r of arr(monthRows)) {
@@ -247,6 +253,7 @@ export class DashboardV2Service {
     return {
       tanggal: dateStr,
       hariIni,
+      terkirimHariIni,
       profitHariIni: profitHariIni.map((v) => Math.round(v)),
       rataBulan,
       puncakBulan,
