@@ -648,12 +648,67 @@ interface CompareResp {
   missing: { shopId: string; shop: string | null }[];
 }
 
+interface CreatePlan {
+  targetShop: string | null;
+  blueprintShop: string | null;
+  categoryId: string;
+  categoryChain: string;
+  images: number;
+  warehouse: string | null;
+  attrs: number;
+  skus: { seller_sku: string | null; amount: string; qty: number; varian: string }[];
+}
+interface CreateSt {
+  plan?: CreatePlan;
+  warnings?: string[];
+  bisa?: boolean;
+  previewing?: boolean;
+  creating?: boolean;
+  done?: boolean;
+}
+
 /** Bandingkan listing antar toko vs Master Postingan + harga HPP, lalu samakan. */
 function CompareShops({ postingId, onReload }: { postingId: string; onReload: () => void }) {
   const toast = useToast();
   const [data, setData] = useState<CompareResp | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [createState, setCreateState] = useState<Record<string, CreateSt>>({});
+
+  async function preview(shopId: string) {
+    setCreateState((st) => ({ ...st, [shopId]: { ...st[shopId], previewing: true } }));
+    try {
+      const r = await api.post<{ plan: CreatePlan; warnings: string[]; bisa: boolean }>(
+        `/master-postings/${postingId}/create-listing`,
+        { shopId, confirm: false },
+      );
+      setCreateState((st) => ({ ...st, [shopId]: { plan: r.plan, warnings: r.warnings, bisa: r.bisa } }));
+    } catch (e) {
+      toast((e as Error).message || "Gagal pratinjau", "danger");
+      setCreateState((st) => ({ ...st, [shopId]: { ...st[shopId], previewing: false } }));
+    }
+  }
+  async function doCreate(shopId: string) {
+    setCreateState((st) => ({ ...st, [shopId]: { ...st[shopId], creating: true } }));
+    try {
+      const r = await api.post<{ ok?: boolean; productId?: string; reason?: string }>(
+        `/master-postings/${postingId}/create-listing`,
+        { shopId, confirm: true },
+      );
+      if (r.ok) {
+        toast("Listing baru berhasil dibuat di toko", "success");
+        setCreateState((st) => ({ ...st, [shopId]: { done: true } }));
+        await run();
+        onReload();
+      } else {
+        toast(r.reason || "Create tak menghasilkan listing", "warning");
+        setCreateState((st) => ({ ...st, [shopId]: { ...st[shopId], creating: false } }));
+      }
+    } catch (e) {
+      toast((e as Error).message || "Gagal membuat listing", "danger");
+      setCreateState((st) => ({ ...st, [shopId]: { ...st[shopId], creating: false } }));
+    }
+  }
 
   async function run() {
     setLoading(true);
@@ -763,10 +818,47 @@ function CompareShops({ postingId, onReload }: { postingId: string; onReload: ()
             );
           })}
           {data.missing.length > 0 && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800">
-              Belum ada listing di: <b>{data.missing.map((m) => m.shop).join(", ")}</b>. Membuat listing baru otomatis
-              belum didukung (butuh pipeline gambar/kategori TikTok) — buat listing-nya dulu di toko itu lalu Import,
-              atau tambah mapping "Posting baru" di bawah.
+            <div className="space-y-2 rounded-lg border border-line bg-canvas p-3">
+              <div className="text-xs font-medium text-ink-2">Toko belum punya listing untuk postingan ini — buat baru (kloning dari toko lain):</div>
+              {data.missing.map((m) => {
+                const st = createState[m.shopId] ?? {};
+                return (
+                  <div key={m.shopId} className="border-t border-line pt-2 first:border-0 first:pt-0">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm text-ink">{m.shop ?? m.shopId.slice(0, 8)}</span>
+                      {st.done ? (
+                        <span className="text-xs font-medium text-emerald-700">listing dibuat ✓</span>
+                      ) : (
+                        <div className="flex gap-2">
+                          {st.plan && st.bisa && (
+                            <Button size="sm" variant="filled" loading={st.creating} onClick={() => doCreate(m.shopId)}>
+                              Konfirmasi buat
+                            </Button>
+                          )}
+                          <Button size="sm" variant="outline" loading={st.previewing} onClick={() => preview(m.shopId)}>
+                            {st.plan ? "Cek ulang" : "Buat listing"}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    {st.plan && !st.done && (
+                      <div className="mt-1 text-[11px] text-ink-2">
+                        Kloning dari <b>{st.plan.blueprintShop}</b> · kategori {st.plan.categoryChain || st.plan.categoryId} ·{" "}
+                        {st.plan.images} gambar · gudang {st.plan.warehouse ? "ada" : "TIDAK ADA"} · {st.plan.skus.length} SKU
+                        (harga {st.plan.skus.map((x) => x.amount).join(", ")})
+                        {st.warnings && st.warnings.length > 0 && (
+                          <div className="font-medium text-red-600">⚠ {st.warnings.join(" ")}</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              <div className="text-[11px] text-ink-3">
+                Listing baru dikloning dari listing postingan ini di toko lain (cetak biru: kategori/varian/berat/gudang)
+                + gambar, nama &amp; deskripsi dari Master Postingan + harga publish. "Buat listing" = pratinjau dulu
+                (tanpa menulis); "Konfirmasi buat" = benar-benar membuat listing di TikTok.
+              </div>
             </div>
           )}
           <div className="text-[11px] text-ink-3">

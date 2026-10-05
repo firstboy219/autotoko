@@ -1463,6 +1463,190 @@ export class MasterPostingsService {
   }
 
   /** Harga publish master dari product_costing (rupiah) atau null. */
+  /** Ambil warehouse_id toko (dari salah satu listing live toko itu). null bila tak ada. */
+  private async firstWarehouseOfShop(
+    userId: string,
+    shop: typeof shops.$inferSelect,
+    appKey: string,
+    appSecret: string,
+  ): Promise<string | null> {
+    const rows = await this.db.execute(sql`
+      select product_id from marketplace_skus
+      where user_id = ${userId}::uuid and shop_id = ${shop.id}::uuid and marketplace = 'tiktok' and product_id is not null
+      limit 5`);
+    const arr = Array.isArray(rows) ? rows : ((rows as { rows?: unknown[] })?.rows ?? []);
+    for (const r of arr as Array<{ product_id?: string }>) {
+      const pid = r.product_id;
+      if (!pid) continue;
+      try {
+        const { product } = await this.bacaProdukLive(userId, shop, String(pid), appKey, appSecret);
+        const skus = Array.isArray(product?.skus) ? (product.skus as Array<Record<string, any>>) : [];
+        for (const sk of skus) {
+          const wid = Array.isArray(sk.inventory) ? sk.inventory[0]?.warehouse_id : undefined;
+          if (wid) return String(wid);
+        }
+      } catch {
+        /* coba listing berikutnya */
+      }
+    }
+    return null;
+  }
+
+  /**
+   * BUAT listing baru di toko yang belum punya, dengan MENGKLONING struktur dari
+   * listing "saudara" (postingan ini yang sudah tayang di toko lain) + gambar &
+   * nama/deskripsi dari Master Postingan + harga publish HPP + gudang toko tujuan.
+   * confirm=false => DRY-RUN (rencana + peringatan, TANPA menulis). confirm=true =>
+   * unggah gambar ke toko tujuan lalu POST create, lalu catat mapping.
+   */
+  async createListingForShop(userId: string, postingId: string, shopId: string, confirm = false) {
+    const posting = await this.requirePosting(userId, postingId);
+    const [target] = await this.db
+      .select()
+      .from(shops)
+      .where(and(eq(shops.id, shopId), eq(shops.userId, userId)))
+      .limit(1);
+    if (!target) throw new NotFoundException("Toko tujuan tidak ditemukan");
+    if (!target.accessToken || !target.shopCipher) throw new BadRequestException("Toko tujuan tidak tersambung API");
+    const maps = await this.db
+      .select()
+      .from(masterPostingMappings)
+      .where(and(eq(masterPostingMappings.userId, userId), eq(masterPostingMappings.masterPostingId, postingId)));
+    if (maps.some((m) => m.shopId === shopId && m.status !== "create" && m.productId))
+      throw new BadRequestException("Toko ini sudah punya listing untuk postingan ini.");
+    const allShops = await this.db.select().from(shops).where(eq(shops.userId, userId));
+    const shopById = new Map(allShops.map((x) => [x.id, x] as const));
+    const bpMap = maps.find(
+      (m) =>
+        m.status !== "create" &&
+        m.productId &&
+        m.shopId !== shopId &&
+        m.marketplace === "tiktok" &&
+        !!shopById.get(m.shopId)?.accessToken &&
+        !!shopById.get(m.shopId)?.shopCipher,
+    );
+    if (!bpMap)
+      throw new BadRequestException(
+        "Belum ada listing acuan di toko lain untuk postingan ini (butuh minimal 1 listing tayang sebagai cetak biru).",
+      );
+    const { appKey, appSecret } = await this.tiktok.credentials();
+    const bpShop = shopById.get(bpMap.shopId)!;
+    const { product: bp } = await this.bacaProdukLive(userId, bpShop, bpMap.productId, appKey, appSecret);
+    const chains = Array.isArray(bp.category_chains) ? bp.category_chains : [];
+    const categoryId = chains.length ? String(chains[chains.length - 1]?.id ?? "") : bp.category_id ? String(bp.category_id) : "";
+    const tgtWarehouse = await this.firstWarehouseOfShop(userId, target, appKey, appSecret);
+    const postingSkus = await this.db
+      .select()
+      .from(masterPostingSkus)
+      .where(eq(masterPostingSkus.masterPostingId, postingId));
+    const bpSkus = Array.isArray(bp.skus) ? (bp.skus as Array<Record<string, any>>) : [];
+    const pubMap = new Map<string, number | null>();
+    for (const ps of postingSkus) {
+      if (ps.masterProductId && !pubMap.has(ps.masterProductId)) {
+        try {
+          pubMap.set(ps.masterProductId, await this.publishPriceOf(userId, ps.masterProductId));
+        } catch {
+          pubMap.set(ps.masterProductId, null);
+        }
+      }
+    }
+    const skus = postingSkus.map((ps) => {
+      const bpSku = this.matchLiveSku({ combo: ps.combo, sku: ps.sku }, bpSkus, postingSkus.length === 1) ?? bpSkus[0] ?? null;
+      const pub = ps.masterProductId ? pubMap.get(ps.masterProductId) ?? null : null;
+      const amount = Math.round(pub ?? Number(ps.price) ?? 0);
+      const qty = Number(ps.stock) || Number(bpSku?.inventory?.[0]?.quantity) || 0;
+      const sales = Array.isArray(bpSku?.sales_attributes)
+        ? (bpSku!.sales_attributes as Array<Record<string, any>>).map((sa) => ({
+            id: sa.id,
+            name: sa.name,
+            value_id: sa.value_id,
+            value_name: sa.value_name,
+          }))
+        : [];
+      return {
+        sales_attributes: sales,
+        ...(ps.sku ? { seller_sku: ps.sku } : {}),
+        price: { amount: String(amount), currency: (bpSku?.price?.currency as string) || "IDR" },
+        inventory: tgtWarehouse ? [{ warehouse_id: tgtWarehouse, quantity: qty }] : [],
+      };
+    });
+    const productAttributes = MasterPostingsService.gabungAtribut(
+      Array.isArray(bp.product_attributes) ? (bp.product_attributes as Array<Record<string, unknown>>) : [],
+      this.postingProductAttributes(posting),
+    );
+    const imageUrls = ((posting.images?.length
+      ? posting.images
+      : (Array.isArray(bp.main_images) ? bp.main_images : []).map(
+          (i: Record<string, any>) => (Array.isArray(i.url) ? i.url[0] : i.url) ?? "",
+        )) as string[]).filter((u) => !!u);
+
+    const warnings: string[] = [];
+    if (!categoryId) warnings.push("Kategori acuan tak terbaca.");
+    if (!tgtWarehouse) warnings.push("Gudang toko tujuan tak ditemukan (toko ini belum punya listing lain). Buat 1 listing manual dulu di toko ini.");
+    if (!imageUrls.length) warnings.push("Postingan belum punya gambar (TikTok wajib gambar).");
+    if (skus.some((sk) => Number(sk.price.amount) <= 0)) warnings.push("Ada SKU harga 0 — set harga publish HPP dulu.");
+
+    const plan = {
+      targetShop: target.shopName,
+      blueprintShop: bpShop.shopName,
+      categoryId,
+      categoryChain: chains.map((c: Record<string, any>) => c.local_name ?? c.id).join(" > "),
+      images: imageUrls.length,
+      warehouse: tgtWarehouse,
+      attrs: productAttributes.length,
+      packageWeight: bp.package_weight ?? null,
+      skus: skus.map((sk) => ({
+        seller_sku: (sk as { seller_sku?: string }).seller_sku ?? null,
+        amount: sk.price.amount,
+        qty: sk.inventory[0]?.quantity ?? 0,
+        varian: sk.sales_attributes.map((a) => a.value_name).filter(Boolean).join(" / "),
+      })),
+    };
+
+    if (!confirm) return { dryRun: true as const, plan, warnings, bisa: warnings.length === 0 };
+    if (warnings.length)
+      throw new BadRequestException("Belum siap dibuat: " + warnings.join(" "));
+
+    const mk = (sh: typeof shops.$inferSelect) =>
+      new TikTokClient(appKey, appSecret, this.crypto.decrypt(sh.accessToken!), sh.shopCipher);
+    const uris: { uri: string }[] = [];
+    for (const u of imageUrls.slice(0, 9)) {
+      const r = await fetch(u);
+      if (!r.ok) throw new BadRequestException("Gagal unduh gambar postingan: " + u.slice(0, 60));
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      const up = await mk(target).uploadImage(bytes, "image.jpg", "MAIN_IMAGE");
+      if (!up.uri) throw new BadRequestException("Gagal unggah gambar ke toko tujuan.");
+      uris.push({ uri: up.uri });
+    }
+    const body: Record<string, unknown> = {
+      title: (posting.name ?? "").trim().slice(0, 255),
+      description: posting.description ?? "",
+      category_id: categoryId,
+      main_images: uris,
+      skus,
+      package_weight: bp.package_weight,
+    };
+    if (bp.package_dimensions) body.package_dimensions = bp.package_dimensions;
+    if (productAttributes.length) body.product_attributes = productAttributes;
+    let res: Record<string, any>;
+    try {
+      res = (await mk(target).post(`/product/202309/products`, body)) as Record<string, any>;
+    } catch (e) {
+      throw new BadRequestException("Create ditolak TikTok: " + (e as Error).message.slice(0, 250));
+    }
+    const newId = String(res?.product_id ?? res?.id ?? "");
+    if (!newId) return { ok: false, reason: "Create terkirim tapi product_id tak terbaca dari respons." };
+    await this.db.insert(masterPostingMappings).values({
+      userId,
+      masterPostingId: postingId,
+      shopId,
+      marketplace: "tiktok",
+      productId: newId,
+      status: "mapped",
+    });
+    return { ok: true, productId: newId, shop: target.shopName, url: this.listingUrl("tiktok", newId) };
+  }
+
   /**
    * Matriks menyeluruh: SEMUA master postingan x SEMUA toko (tersambung).
    * Hanya dari data mapping (DB) -> cepat & TANPA baca listing live, jadi tak

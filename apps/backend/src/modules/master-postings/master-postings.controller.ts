@@ -108,6 +108,16 @@ export class MasterPostingsController {
     return { success: true, data: await this.svc.pushPostingPrices(uid(req), id) };
   }
 
+  /** Buat listing baru di toko yang belum punya (kloning dari listing saudara). confirm=false => dry-run. */
+  @Post(":id/create-listing")
+  async createListing(
+    @Req() req: FastifyRequest,
+    @Param("id") id: string,
+    @Body() body: { shopId: string; confirm?: boolean },
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.createListingForShop(uid(req), id, body.shopId, !!body.confirm) };
+  }
+
   /** Penjualan 30 hari per toko termapping. */
   @Get(":id/sales")
   async sales(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {
