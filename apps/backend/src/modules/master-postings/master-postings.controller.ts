@@ -90,6 +90,12 @@ export class MasterPostingsController {
     return { success: true, data: await this.svc.massPriceCheck(uid(req), body.productIds ?? []) };
   }
 
+  /** Matriks coverage menyeluruh: postingan x toko (dari mapping; cepat, tanpa baca live). */
+  @Get("compare-all")
+  async compareAll(@Req() req: FastifyRequest): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.svc.compareAllPostings(uid(req)) };
+  }
+
   /** Bandingkan listing antar toko terhadap Master Postingan + harga HPP (read-only). */
   @Get(":id/compare")
   async comparePosting(@Req() req: FastifyRequest, @Param("id") id: string): Promise<ApiResponse<unknown>> {

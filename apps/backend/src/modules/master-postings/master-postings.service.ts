@@ -1464,6 +1464,51 @@ export class MasterPostingsService {
 
   /** Harga publish master dari product_costing (rupiah) atau null. */
   /**
+   * Matriks menyeluruh: SEMUA master postingan x SEMUA toko (tersambung).
+   * Hanya dari data mapping (DB) -> cepat & TANPA baca listing live, jadi tak
+   * membanjiri API. Menjawab "toko mana yang BELUM punya listing untuk tiap
+   * postingan". Detail beda nama/harga tetap lewat comparePosting per postingan.
+   */
+  async compareAllPostings(userId: string) {
+    const [postings, allShops, maps] = await Promise.all([
+      this.db.select({ id: masterPostings.id, name: masterPostings.name }).from(masterPostings).where(eq(masterPostings.userId, userId)),
+      this.db.select().from(shops).where(eq(shops.userId, userId)),
+      this.db
+        .select({
+          postingId: masterPostingMappings.masterPostingId,
+          shopId: masterPostingMappings.shopId,
+          status: masterPostingMappings.status,
+          productId: masterPostingMappings.productId,
+        })
+        .from(masterPostingMappings)
+        .where(eq(masterPostingMappings.userId, userId)),
+    ]);
+    postings.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+    const shopCols = allShops
+      .filter((x) => !!x.accessToken && !!x.shopCipher)
+      .map((x) => ({ shopId: x.id, shop: x.shopName }));
+    const byPosting = new Map<string, Set<string>>();
+    for (const m of maps) {
+      if (m.status === "create" || !m.productId) continue;
+      const set = byPosting.get(m.postingId) ?? new Set<string>();
+      set.add(m.shopId);
+      byPosting.set(m.postingId, set);
+    }
+    const rows = postings.map((p) => {
+      const have = byPosting.get(p.id) ?? new Set<string>();
+      const cells = shopCols.map((sc) => ({ shopId: sc.shopId, ada: have.has(sc.shopId) }));
+      return { postingId: p.id, name: p.name, cells, adaCount: cells.filter((c) => c.ada).length, total: shopCols.length };
+    });
+    const shopSummary = shopCols.map((sc) => ({
+      shopId: sc.shopId,
+      shop: sc.shop,
+      ada: rows.filter((r) => byPosting.get(r.postingId)?.has(sc.shopId)).length,
+      belum: rows.filter((r) => !byPosting.get(r.postingId)?.has(sc.shopId)).length,
+    }));
+    return { shops: shopCols, shopSummary, totalPostings: postings.length, rows };
+  }
+
+  /**
    * Bandingkan listing TIAP toko (yang termapping ke posting ini) terhadap
    * ACUAN = Master Postingan (nama/deskripsi/varian) + harga HPP (publish).
    * Read-only: baca listing live tiap toko lalu laporkan beda-nya. Juga daftar

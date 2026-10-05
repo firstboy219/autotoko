@@ -205,11 +205,134 @@ const STATUS_TONE: Record<string, "success" | "neutral" | "warning" | "danger" |
   skipped: "warning",
 };
 
+interface CompareAllResp {
+  shops: { shopId: string; shop: string | null }[];
+  shopSummary: { shopId: string; shop: string | null; ada: number; belum: number }[];
+  totalPostings: number;
+  rows: { postingId: string; name: string; cells: { shopId: string; ada: boolean }[]; adaCount: number; total: number }[];
+}
+
+/** Matriks menyeluruh: postingan (baris) x toko (kolom). ✓ = listing ada, belum = kurang. */
+function CompareAllMatrix({ onOpen }: { onOpen: (id: string) => void }) {
+  const toast = useToast();
+  const [data, setData] = useState<CompareAllResp | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [onlyGap, setOnlyGap] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setData(await api.get<CompareAllResp>("/master-postings/compare-all"));
+    } catch (e) {
+      toast((e as Error).message || "Gagal memuat matriks", "danger");
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (loading && !data)
+    return (
+      <Card className="mb-4">
+        <div className="text-sm text-ink-3">Memuat matriks…</div>
+      </Card>
+    );
+  if (!data) return null;
+  const rows = onlyGap ? data.rows.filter((r) => r.adaCount < r.total) : data.rows;
+
+  return (
+    <Card className="mb-4" padded={false}>
+      <CardHeader
+        title="Bandingkan postingan semua toko"
+        subtitle={`${data.totalPostings} postingan × ${data.shops.length} toko. ✓ = listing ada di toko itu; "belum" = toko itu belum punya listing untuk postingan tsb.`}
+        action={
+          <label className="flex items-center gap-1.5 text-xs text-ink-2">
+            <input type="checkbox" checked={onlyGap} onChange={(e) => setOnlyGap(e.target.checked)} />
+            Hanya yang belum lengkap
+          </label>
+        }
+      />
+      <TableWrap>
+        <Table className="min-w-[640px]">
+          <THead>
+            <TR>
+              <TH>Postingan</TH>
+              <TH align="center">Toko</TH>
+              {data.shops.map((sh) => (
+                <TH key={sh.shopId} align="center">
+                  <span className="whitespace-nowrap">{sh.shop ?? sh.shopId.slice(0, 6)}</span>
+                </TH>
+              ))}
+            </TR>
+          </THead>
+          <tbody>
+            {rows.length === 0 ? (
+              <TR>
+                <TD>
+                  <span className="text-ink-3">Tidak ada.</span>
+                </TD>
+              </TR>
+            ) : (
+              rows.map((r) => (
+                <TR key={r.postingId}>
+                  <TD>
+                    <button
+                      className="max-w-[260px] truncate text-left text-brand-ink hover:underline"
+                      title={r.name}
+                      onClick={() => onOpen(r.postingId)}
+                    >
+                      {r.name}
+                    </button>
+                  </TD>
+                  <TD align="center">
+                    <span className={`tabular-nums ${r.adaCount < r.total ? "font-medium text-amber-700" : "text-emerald-700"}`}>
+                      {r.adaCount}/{r.total}
+                    </span>
+                  </TD>
+                  {r.cells.map((c) => (
+                    <TD key={c.shopId} align="center">
+                      {c.ada ? (
+                        <span className="text-emerald-700">✓</span>
+                      ) : (
+                        <span className="text-[11px] text-red-500">belum</span>
+                      )}
+                    </TD>
+                  ))}
+                </TR>
+              ))
+            )}
+          </tbody>
+        </Table>
+      </TableWrap>
+      <div className="p-4">
+        <div className="mb-1 text-xs font-medium text-ink-3">Ringkas per toko</div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          {data.shopSummary.map((sh) => (
+            <span
+              key={sh.shopId}
+              className={`rounded px-2 py-0.5 ${sh.belum > 0 ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}
+            >
+              {sh.shop}: {sh.ada} ada{sh.belum > 0 ? ` · ${sh.belum} belum` : ""}
+            </span>
+          ))}
+        </div>
+        <div className="mt-2 text-[11px] text-ink-3">
+          Klik nama postingan untuk lihat detail & samakan nama/harga per toko. Matriks ini dari data mapping (cepat,
+          tanpa baca live); beda nama/harga ada di detail per postingan.
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export function MasterPostingan() {
   const [items, setItems] = useState<ListItem[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [showMatrix, setShowMatrix] = useState(false);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const toast = useToast();
@@ -261,6 +384,9 @@ export function MasterPostingan() {
         subtitle="Template listing yang diikuti semua toko. Ubah master → terapkan sekali ke semua listing marketplace yang termapping."
         actions={
           <>
+            <Button variant="outline" icon="search" onClick={() => setShowMatrix((v) => !v)}>
+              {showMatrix ? "Tutup perbandingan" : "Bandingkan semua toko"}
+            </Button>
             <Button variant="outline" icon="download" onClick={() => setImporting(true)}>
               Impor dari Marketplace
             </Button>
@@ -270,6 +396,15 @@ export function MasterPostingan() {
           </>
         }
       />
+
+      {showMatrix && (
+        <CompareAllMatrix
+          onOpen={(id) => {
+            setShowMatrix(false);
+            setOpenId(id);
+          }}
+        />
+      )}
 
       {items === null ? (
         <Card>
