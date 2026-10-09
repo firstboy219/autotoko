@@ -136,10 +136,22 @@ export class DashboardV2Service {
       .map((e) => ({ nama: e.nama, nominal: Math.round(e.nominal), qty: e.qty, profit: Math.round(e.profit) }))
       .sort((a, b) => b.nominal - a.nominal)
       .slice(0, 20);
+    // % order COD pada rentang yang sama (ikut filter card). COD = raw.is_cod true
+    // atau payment_method "cash on delivery"/"cash" (samakan dgn orders.service.isCodOf).
+    const [codRow] = await this.db
+      .select({
+        cod: sql<number>`count(*) FILTER (WHERE (${orders.raw} ->> 'is_cod') = 'true' OR lower(${orders.paymentMethod}) LIKE '%cash on delivery%' OR lower(${orders.paymentMethod}) = 'cash')::int`,
+      })
+      .from(orders)
+      .where(cond);
+    const codPesanan = Number(codRow?.cod) || 0;
+    const codPct = pesanan > 0 ? Math.round((codPesanan / pesanan) * 100) : 0;
     return {
       pesanan,
       nominal,
       profitBersih: adaProfit ? Math.round(profitBersih) : null,
+      codPesanan,
+      codPct,
       perToko: perTokoProfit,
       perMaster,
     };

@@ -1042,6 +1042,8 @@ interface SalesByDate {
   pesanan: number;
   nominal: number;
   profitBersih: number | null;
+  codPesanan?: number;
+  codPct?: number;
   perToko: { shopId: string | null; nama: string; pesanan: number; nominal: number; profit?: number | null }[];
   perMaster?: { nama: string; nominal: number; qty: number; profit: number }[];
 }
@@ -1299,6 +1301,14 @@ function PenjualanHarian({
               cmp={cmpLabel}
             />
           </div>
+          {d.codPesanan != null && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-ink-2">
+              <span className="rounded-md bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">COD {d.codPct}%</span>
+              <span className="text-ink-3">
+                {d.codPesanan} dari {d.pesanan} pesanan pakai COD
+              </span>
+            </div>
+          )}
           {rugi.length > 0 && (
             <div className="mt-2 rounded-lg border border-red-200 bg-red-50/60 px-3 py-2 text-[11px] text-red-700">
               ⚠ {rugi.length} produk RUGI (di bawah HPP):{" "}
