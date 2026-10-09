@@ -1051,6 +1051,7 @@ interface TimelineResp {
   tanggal?: string;
   hariIni: number[];
   terkirimHariIni?: number[];
+  batalHariIni?: number[];
   profitHariIni?: number[];
   rataBulan: number[];
   puncakBulan: number;
@@ -1122,7 +1123,7 @@ interface BucketResp {
   granularity: "day" | "month";
   from?: string;
   to?: string;
-  buckets: { key: string; label: string; pesanan: number; nominal: number; profit: number; compare?: number }[];
+  buckets: { key: string; label: string; pesanan: number; nominal: number; profit: number; batal?: number; compare?: number }[];
   busiestDay?: { label: string; pesanan: number; nominal: number } | null;
 }
 function deltaPct(cur: number, prev: number | null | undefined): number | null {
@@ -1414,7 +1415,7 @@ function BucketChart({ data }: { data: BucketResp }) {
   const H = 158;
   const padL = 8;
   const padR = 8;
-  const padT = 24;
+  const padT = 30;
   const padB = 20;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
@@ -1423,6 +1424,7 @@ function BucketChart({ data }: { data: BucketResp }) {
   const totalNominal = b.reduce((a, x) => a + x.nominal, 0);
   const totalProfit = b.reduce((a, x) => a + x.profit, 0);
   const totalPesanan = b.reduce((a, x) => a + x.pesanan, 0);
+  const totalBatalBk = b.reduce((a, x) => a + (x.batal ?? 0), 0);
   let bestI = 0;
   for (let i = 1; i < b.length; i++) if ((b[i]?.profit ?? 0) > (b[bestI]?.profit ?? 0)) bestI = i;
   const sel = hover ?? bestI;
@@ -1443,6 +1445,7 @@ function BucketChart({ data }: { data: BucketResp }) {
               <span className="inline-block h-0.5 w-3" style={{ background: "#eb6834" }} /> Biasanya / hari (4 mgg)
             </span>
           )}
+          <span className="flex items-center gap-1"><span className="font-semibold text-red-600">✕</span> Dibatalkan</span>
           <span className="text-ink-3">angka di atas bar: pesanan + <span className="text-emerald-700">profit</span></span>
         </div>
       </div>
@@ -1488,6 +1491,11 @@ function BucketChart({ data }: { data: BucketResp }) {
                   </text>
                 </>
               )}
+              {showLabels && (x.batal ?? 0) > 0 && (
+                <text x={bx(i) + bw / 2} y={top - 16} textAnchor="middle" style={{ fontSize: "6.5px", fontWeight: 700 }} fill="#dc2626">
+                  ✕{x.batal}
+                </text>
+              )}
             </g>
           );
         })}
@@ -1523,6 +1531,7 @@ function BucketChart({ data }: { data: BucketResp }) {
           <div className="text-ink-2">
             Total: <b className="text-ink tabular-nums">{totalPesanan}</b> pesanan · <b className="text-ink">{rupiah(totalNominal)}</b> omzet ·{" "}
             <span className={`font-semibold ${totalProfit < 0 ? "text-red-600" : "text-emerald-700"}`}>profit {rupiah(totalProfit)}</span>
+            {totalBatalBk > 0 && <span className="text-red-600"> · {totalBatalBk} dibatalkan</span>}
             <span className="text-ink-3">
               {" "}· ter-untung: {cur?.label}
               {data.busiestDay ? ` · hari teramai: ${data.busiestDay.label} (~${data.busiestDay.pesanan} pesanan)` : ""}
@@ -1530,7 +1539,8 @@ function BucketChart({ data }: { data: BucketResp }) {
           </div>
         ) : (
           <div className="text-ink-2">
-            <b className="text-ink">{cur?.label}</b> · {cur?.pesanan} pesanan · {rupiah(cur?.nominal ?? 0)} ·{" "}
+            <b className="text-ink">{cur?.label}</b> · {cur?.pesanan} pesanan · {rupiah(cur?.nominal ?? 0)}
+            {(cur?.batal ?? 0) > 0 ? <span className="text-red-600"> · {cur?.batal} batal</span> : null} ·{" "}
             <span className={`font-semibold ${(cur?.profit ?? 0) < 0 ? "text-red-600" : "text-emerald-700"}`}>profit {rupiah(cur?.profit ?? 0)}</span>
             {cur?.compare ? <span className="text-ink-3"> · biasanya hari ini {rupiah(cur.compare)}</span> : null}
           </div>
@@ -1626,7 +1636,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
   const H = 150;
   const padL = 20;
   const padR = 8;
-  const padT = 26;
+  const padT = 32;
   const padB = 20;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
@@ -1642,6 +1652,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
   const totalProfit = profit.reduce((a, b) => a + b, 0);
   const totalPesanan = hari.reduce((a, b) => a + b, 0);
   const totalTerkirim = (data.terkirimHariIni ?? []).reduce((a, b) => a + b, 0);
+  const totalBatal = (data.batalHariIni ?? []).reduce((a, b) => a + b, 0);
   const isToday = (data.tanggal ?? "") === todayJak();
   const nowWib = new Date(Date.now() + 7 * 3600 * 1000);
   const nowFrac = nowWib.getUTCHours() + nowWib.getUTCMinutes() / 60;
@@ -1659,6 +1670,9 @@ function TimelineChart({ data }: { data: TimelineResp }) {
           </span>
           <span className="flex items-center gap-1">
             <span className="inline-block h-2.5 w-2 rounded-sm" style={{ background: "#d6dbe0" }} /> Belum terkirim
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="font-semibold text-red-600">✕</span> Dibatalkan
           </span>
           <span className="flex items-center gap-1">
             <span className="inline-block h-0.5 w-3 bg-[#eb6834]" /> Rata² bulan ini
@@ -1735,6 +1749,20 @@ function TimelineChart({ data }: { data: TimelineResp }) {
           );
         })}
         <line x1={padL} y1={padT + plotH} x2={W - padR} y2={padT + plotH} stroke="currentColor" className="text-line" strokeWidth="1" />
+        {(data.batalHariIni ?? []).map((bt, i) =>
+          bt > 0 ? (
+            <text
+              key={`btl${i}`}
+              x={cx(i)}
+              y={padT + plotH - ((hari[i] ?? 0) / scaleMax) * plotH - 16}
+              textAnchor="middle"
+              style={{ fontSize: "6.5px", fontWeight: 700 }}
+              fill="#dc2626"
+            >
+              ✕{bt}
+            </text>
+          ) : null,
+        )}
         {[0, 3, 6, 9, 12, 15, 18, 21, 23].map((hh) => (
           <text key={hh} x={cx(hh)} y={H - 5} textAnchor="middle" className="fill-current text-ink-3" style={{ fontSize: "8px" }}>
             {hh}
@@ -1775,6 +1803,11 @@ function TimelineChart({ data }: { data: TimelineResp }) {
             <div className="text-ink-2">
               Hari ini: <b className="text-ink tabular-nums">{totalPesanan}</b> pesanan ·{" "}
               <b className="tabular-nums text-brand-ink">{totalTerkirim}</b> terkirim ·{" "}
+              {totalBatal > 0 && (
+                <>
+                  <b className="tabular-nums text-red-600">{totalBatal}</b> dibatalkan ·{" "}
+                </>
+              )}
               <span className={`font-semibold tabular-nums ${totalProfit < 0 ? "text-red-600" : "text-emerald-700"}`}>
                 profit {rupiah(totalProfit)}
               </span>
@@ -1794,7 +1827,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
           </div>
         ) : (
           <div className="text-ink-2">
-            <b className="text-ink">{jam2(sel)}.00</b> · {hari[sel] ?? 0} pesanan · {data.terkirimHariIni?.[sel] ?? 0} terkirim ·{" "}
+            <b className="text-ink">{jam2(sel)}.00</b> · {hari[sel] ?? 0} pesanan · {data.terkirimHariIni?.[sel] ?? 0} terkirim · {data.batalHariIni?.[sel] ?? 0} batal ·{" "}
             <span className={`font-semibold tabular-nums ${(profit[sel] ?? 0) < 0 ? "text-red-600" : "text-emerald-700"}`}>
               profit {rupiah(profit[sel] ?? 0)}
             </span>

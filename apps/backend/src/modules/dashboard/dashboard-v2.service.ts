@@ -205,10 +205,11 @@ export class DashboardV2Service {
 
     const dayRows = await this.db.execute(sql`
       SELECT extract(hour from (coalesce(created_at_marketplace, created_at) at time zone 'Asia/Jakarta'))::int AS h,
-             count(*)::int AS n,
-             count(*) FILTER (WHERE fulfillment_status IN ('dikirim', 'selesai'))::int AS terkirim
+             count(*) FILTER (WHERE fulfillment_status <> 'dibatalkan')::int AS n,
+             count(*) FILTER (WHERE fulfillment_status IN ('dikirim', 'selesai'))::int AS terkirim,
+             count(*) FILTER (WHERE fulfillment_status = 'dibatalkan')::int AS batal
       FROM orders
-      WHERE user_id = ${userId}::uuid AND fulfillment_status <> 'dibatalkan'
+      WHERE user_id = ${userId}::uuid
         AND coalesce(created_at_marketplace, created_at) >= ${dayStart.toISOString()}::timestamptz AND coalesce(created_at_marketplace, created_at) < ${dayEnd.toISOString()}::timestamptz
       GROUP BY 1`);
     const monthRows = await this.db.execute(sql`
@@ -225,11 +226,13 @@ export class DashboardV2Service {
 
     const hariIni = Array<number>(24).fill(0);
     const terkirimHariIni = Array<number>(24).fill(0);
+    const batalHariIni = Array<number>(24).fill(0);
     for (const r of arr(dayRows)) {
       const h = Number(r.h);
       if (h >= 0 && h < 24) {
         hariIni[h] = Number(r.n) || 0;
         terkirimHariIni[h] = Number((r as Record<string, unknown>).terkirim) || 0;
+        batalHariIni[h] = Number((r as Record<string, unknown>).batal) || 0;
       }
     }
     const monthHour = Array<number>(24).fill(0);
@@ -266,6 +269,7 @@ export class DashboardV2Service {
       tanggal: dateStr,
       hariIni,
       terkirimHariIni,
+      batalHariIni,
       profitHariIni: profitHariIni.map((v) => Math.round(v)),
       rataBulan,
       puncakBulan,
@@ -310,23 +314,21 @@ export class DashboardV2Service {
     const end = new Date(ts.getTime() + 24 * 3600 * 1000);
     const ctx = await this.orderProfit.loadContext(userId);
     const rows = await this.db
-      .select({ createdAt: orders.createdAt, createdAtMarketplace: orders.createdAtMarketplace, items: orders.items, totalAmount: orders.totalAmount })
+      .select({ createdAt: orders.createdAt, createdAtMarketplace: orders.createdAtMarketplace, items: orders.items, totalAmount: orders.totalAmount, status: orders.fulfillmentStatus })
       .from(orders)
-      .where(
-        and(
-          eq(orders.userId, userId),
-          ne(orders.fulfillmentStatus, "dibatalkan"),
-          this.txGte(fs),
-          this.txLt(end),
-        ),
-      );
-    const map = new Map<string, { pesanan: number; nominal: number; profit: number }>();
+      .where(and(eq(orders.userId, userId), this.txGte(fs), this.txLt(end)));
+    const map = new Map<string, { pesanan: number; nominal: number; profit: number; batal: number }>();
     for (const r of rows) {
       const tx = r.createdAtMarketplace ?? r.createdAt;
       if (!tx) continue;
       const wib = new Date(new Date(tx).getTime() + 7 * 3600 * 1000);
       const key = gran === "day" ? wib.toISOString().slice(0, 10) : wib.toISOString().slice(0, 7);
-      const e = map.get(key) ?? { pesanan: 0, nominal: 0, profit: 0 };
+      const e = map.get(key) ?? { pesanan: 0, nominal: 0, profit: 0, batal: 0 };
+      if (r.status === "dibatalkan") {
+        e.batal += 1;
+        map.set(key, e);
+        continue;
+      }
       e.pesanan += 1;
       e.nominal += Number(r.totalAmount) || 0;
       const np = this.orderProfit.netProfitNumber(r.items, ctx);
@@ -384,18 +386,19 @@ export class DashboardV2Service {
       for (let i = 1; i < 7; i++) if ((medPes[i] ?? 0) > (medPes[bi] ?? 0)) bi = i;
       if ((medPes[bi] ?? 0) > 0) busiestDay = { label: DOW[bi] ?? "", pesanan: medPes[bi] ?? 0, nominal: avgNom[bi] ?? 0 };
     }
-    const buckets: { key: string; label: string; pesanan: number; nominal: number; profit: number; compare?: number }[] = [];
+    const buckets: { key: string; label: string; pesanan: number; nominal: number; profit: number; batal: number; compare?: number }[] = [];
     if (gran === "day") {
       for (let t = fs.getTime(); t <= ts.getTime(); t += 86_400_000) {
         const wib = new Date(t + 7 * 3600 * 1000);
         const key = wib.toISOString().slice(0, 10);
-        const e = map.get(key) ?? { pesanan: 0, nominal: 0, profit: 0 };
+        const e = map.get(key) ?? { pesanan: 0, nominal: 0, profit: 0, batal: 0 };
         buckets.push({
           key,
           label: `${wib.getUTCDate()}/${wib.getUTCMonth() + 1}`,
           pesanan: e.pesanan,
           nominal: Math.round(e.nominal),
           profit: Math.round(e.profit),
+          batal: e.batal,
           compare: avgNom[wib.getUTCDay()] ?? 0,
         });
       }
@@ -408,13 +411,14 @@ export class DashboardV2Service {
       const endM = twib.getUTCMonth();
       while (Y < endY || (Y === endY && M <= endM)) {
         const key = `${Y}-${String(M + 1).padStart(2, "0")}`;
-        const e = map.get(key) ?? { pesanan: 0, nominal: 0, profit: 0 };
+        const e = map.get(key) ?? { pesanan: 0, nominal: 0, profit: 0, batal: 0 };
         buckets.push({
           key,
           label: `${MONTHS[M]} '${String(Y).slice(2)}`,
           pesanan: e.pesanan,
           nominal: Math.round(e.nominal),
           profit: Math.round(e.profit),
+          batal: e.batal,
         });
         M += 1;
         if (M > 11) {
