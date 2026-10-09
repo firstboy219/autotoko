@@ -343,6 +343,49 @@ export class OrdersService {
    * (jika dikenali ke master) profit bersihnya; yang belum dikenali ditandai agar
    * bisa dipetakan. Dipakai kartu dashboard "Produk terjual hari ini".
    */
+  /**
+   * Hasil akhir transaksi COD: berapa persen yang BERHASIL (selesai/cair) vs yang
+   * GAGAL (diretur / dibatalkan SETELAH barang dikirim). "setelah dikirim" =
+   * punya bukti kirim (awb_generated / tracking_number). Ikut filter audit
+   * (shopId + rentang tanggal transaksi). Dibatalkan SEBELUM kirim dipisah.
+   */
+  async codOutcome(userId: string, opts: { shopId?: string; from?: string; to?: string } = {}) {
+    const COD = sql`((${orders.raw} ->> 'is_cod') = 'true' OR lower(${orders.paymentMethod}) LIKE '%cash on delivery%' OR lower(${orders.paymentMethod}) = 'cash')`;
+    const conds = [eq(orders.userId, userId), COD];
+    if (opts.shopId) conds.push(eq(orders.shopId, opts.shopId));
+    if (opts.from)
+      conds.push(sql`coalesce(${orders.createdAtMarketplace}, ${orders.createdAt}) >= ${new Date(opts.from + "T00:00:00+07:00").toISOString()}::timestamptz`);
+    if (opts.to)
+      conds.push(sql`coalesce(${orders.createdAtMarketplace}, ${orders.createdAt}) < ${new Date(new Date(opts.to + "T00:00:00+07:00").getTime() + 86400000).toISOString()}::timestamptz`);
+    const shippedCancel = sql`(${orders.fulfillmentStatus} = 'retur' OR (${orders.fulfillmentStatus} = 'dibatalkan' AND (${orders.awbGenerated} = true OR ${orders.trackingNumber} IS NOT NULL)))`;
+    const [r] = await this.db
+      .select({
+        berhasil: sql<number>`count(*) FILTER (WHERE ${orders.fulfillmentStatus} = 'selesai')::int`,
+        gagal: sql<number>`count(*) FILTER (WHERE ${shippedCancel})::int`,
+        pending: sql<number>`count(*) FILTER (WHERE ${orders.fulfillmentStatus} = 'dikirim')::int`,
+        batalPraKirim: sql<number>`count(*) FILTER (WHERE ${orders.fulfillmentStatus} = 'dibatalkan' AND ${orders.awbGenerated} = false AND ${orders.trackingNumber} IS NULL)::int`,
+        totalCod: sql<number>`count(*)::int`,
+        nominalBerhasil: sql<number>`coalesce(sum(${orders.totalAmount}) FILTER (WHERE ${orders.fulfillmentStatus} = 'selesai'), 0)::float8`,
+        nominalGagal: sql<number>`coalesce(sum(${orders.totalAmount}) FILTER (WHERE ${shippedCancel}), 0)::float8`,
+      })
+      .from(orders)
+      .where(and(...conds));
+    const berhasil = Number(r?.berhasil) || 0;
+    const gagal = Number(r?.gagal) || 0;
+    const resolved = berhasil + gagal;
+    return {
+      berhasil,
+      gagal,
+      pending: Number(r?.pending) || 0,
+      batalPraKirim: Number(r?.batalPraKirim) || 0,
+      totalCod: Number(r?.totalCod) || 0,
+      resolved,
+      rate: resolved > 0 ? Math.round((berhasil / resolved) * 1000) / 10 : null,
+      nominalBerhasil: Math.round(Number(r?.nominalBerhasil) || 0),
+      nominalGagal: Math.round(Number(r?.nominalGagal) || 0),
+    };
+  }
+
   async produkHariIni(userId: string, dateStr?: string, toStr?: string) {
     const ctx = await this.orderProfit.loadContext(userId);
     let start: Date;

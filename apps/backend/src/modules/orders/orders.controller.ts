@@ -120,6 +120,16 @@ export class OrdersController {
     return { success: true, data: await this.orders.health(uid(req)) };
   }
 
+  @Get("cod-outcome")
+  async codOutcome(
+    @Req() req: FastifyRequest,
+    @Query("shopId") shopId?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.codOutcome(uid(req), { shopId, from, to }) };
+  }
+
   @Get("today-products")
   async todayProducts(
     @Req() req: FastifyRequest,

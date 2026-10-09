@@ -30,6 +30,17 @@ interface Shop {
   marketplace: string;
 }
 
+interface CodOutcome {
+  berhasil: number;
+  gagal: number;
+  pending: number;
+  batalPraKirim: number;
+  totalCod: number;
+  resolved: number;
+  rate: number | null;
+  nominalBerhasil: number;
+  nominalGagal: number;
+}
 interface Audit {
   totals: {
     discan: number;
@@ -134,6 +145,7 @@ export default function AuditPesanan() {
   const [dari, setDari] = useState(awalBulan());
   const [sampai, setSampai] = useState(hariIni());
   const [data, setData] = useState<Audit | null>(null);
+  const [cod, setCod] = useState<CodOutcome | null>(null);
   const [memuat, setMemuat] = useState(false);
   const [mengunggah, setMengunggah] = useState(false);
   const [menarik, setMenarik] = useState(false);
@@ -151,6 +163,7 @@ export default function AuditPesanan() {
       const q = new URLSearchParams({ from: dari, to: sampai });
       if (shopId) q.set("shopId", shopId);
       setData(await api.get<Audit>(`/statements/audit-orders?${q.toString()}`));
+      setCod(await api.get<CodOutcome>(`/orders/cod-outcome?${q.toString()}`));
     } catch (e) {
       toast((e as Error).message, "danger");
     } finally {
@@ -289,6 +302,46 @@ export default function AuditPesanan() {
           </Button>
         </div>
       </Card>
+
+      {cod && cod.totalCod > 0 && (
+        <Card className="mt-4">
+          <CardHeader
+            title="COD: berhasil cair vs gagal (batal/retur setelah dikirim)"
+            subtitle="Dari transaksi COD yang SUDAH dikirim pada rentang & toko terpilih. Batal sebelum dikirim tidak dihitung gagal."
+          />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <div className="text-xs text-ink-3">Tingkat keberhasilan COD</div>
+              <div className="text-2xl font-semibold tabular-nums text-emerald-700">
+                {cod.rate != null ? `${cod.rate}%` : "—"}
+              </div>
+              <div className="text-[11px] text-ink-3">
+                {cod.berhasil} berhasil dari {cod.resolved} yang sudah tuntas
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-ink-3">Berhasil cair (selesai)</div>
+              <div className="text-lg tabular-nums text-ink">{cod.berhasil}</div>
+              <div className="text-[11px] text-emerald-700">{rupiah(cod.nominalBerhasil)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-ink-3">Gagal (batal/retur stlh kirim)</div>
+              <div className="text-lg tabular-nums text-red-600">{cod.gagal}</div>
+              <div className="text-[11px] text-red-600">{rupiah(cod.nominalGagal)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-ink-3">Belum tuntas</div>
+              <div className="text-sm tabular-nums text-ink-2">
+                {cod.pending} masih dikirim · {cod.batalPraKirim} batal pra-kirim
+              </div>
+              <div className="text-[11px] text-ink-3">dari {cod.totalCod} order COD</div>
+            </div>
+          </div>
+          <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-red-100">
+            <div className="h-full bg-emerald-500" style={{ width: `${cod.rate ?? 0}%` }} />
+          </div>
+        </Card>
+      )}
 
       {data && !data.adaPembanding && (
         <div className="mt-4">
