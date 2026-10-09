@@ -265,11 +265,13 @@ export class DashboardV2Service {
       const wh = new Date(new Date(tx).getTime() + 7 * 3600 * 1000).getUTCHours();
       if (wh >= 0 && wh < 24) profitHariIni[wh] = (profitHariIni[wh] ?? 0) + np;
     }
+    const batalEvent = await this.cancelEventCount(userId, dayStart, dayEnd);
     return {
       tanggal: dateStr,
       hariIni,
       terkirimHariIni,
       batalHariIni,
+      batalEvent,
       profitHariIni: profitHariIni.map((v) => Math.round(v)),
       rataBulan,
       puncakBulan,
@@ -305,6 +307,25 @@ export class DashboardV2Service {
    * <= 62 hari -> per HARI; selain itu -> per BULAN. Tiap bucket: pesanan,
    * nominal, profit bersih (HPP). Order dibatalkan dikecualikan.
    */
+  /** Jumlah order DIBATALKAN menurut waktu batal marketplace (cancel_time/update_time)
+   *  dalam jendela [start, end). Sama persis dgn hitungan "Batal hari ini" di menu Order,
+   *  jadi angka dashboard & menu Order bisa direkonsiliasi. Berbeda dgn tanda silang per-bar
+   *  yg mengikuti TANGGAL JUAL order. */
+  private async cancelEventCount(userId: string, start: Date, end: Date): Promise<number> {
+    const [row] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.userId, userId),
+          sql`(${orders.fulfillmentStatus} = 'dibatalkan' OR ${orders.status} IN ('CANCELLED', 'CANCELED'))`,
+          sql`to_timestamp(nullif(coalesce(${orders.raw} ->> 'cancel_time', ${orders.raw} ->> 'update_time'), '')::bigint) >= ${start.toISOString()}::timestamptz`,
+          sql`to_timestamp(nullif(coalesce(${orders.raw} ->> 'cancel_time', ${orders.raw} ->> 'update_time'), '')::bigint) < ${end.toISOString()}::timestamptz`,
+        ),
+      );
+    return Number(row?.n ?? 0);
+  }
+
   async salesBuckets(userId: string, fromStr: string, toStr: string) {
     const fs = this.jakDay(fromStr);
     let ts = this.jakDay(toStr);
@@ -427,7 +448,8 @@ export class DashboardV2Service {
         }
       }
     }
-    return { granularity: gran, from: fromStr, to: toStr, buckets, busiestDay };
+    const batalEvent = await this.cancelEventCount(userId, fs, end);
+    return { granularity: gran, from: fromStr, to: toStr, buckets, busiestDay, batalEvent };
   }
 
   async overview(userId: string, from: string, to: string) {

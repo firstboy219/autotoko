@@ -1052,6 +1052,7 @@ interface TimelineResp {
   hariIni: number[];
   terkirimHariIni?: number[];
   batalHariIni?: number[];
+  batalEvent?: number;
   profitHariIni?: number[];
   rataBulan: number[];
   puncakBulan: number;
@@ -1125,6 +1126,7 @@ interface BucketResp {
   to?: string;
   buckets: { key: string; label: string; pesanan: number; nominal: number; profit: number; batal?: number; compare?: number }[];
   busiestDay?: { label: string; pesanan: number; nominal: number } | null;
+  batalEvent?: number;
 }
 function deltaPct(cur: number, prev: number | null | undefined): number | null {
   if (prev == null) return null;
@@ -1445,7 +1447,7 @@ function BucketChart({ data }: { data: BucketResp }) {
               <span className="inline-block h-0.5 w-3" style={{ background: "#eb6834" }} /> Biasanya / hari (4 mgg)
             </span>
           )}
-          <span className="flex items-center gap-1"><span className="font-semibold text-red-600">✕</span> Dibatalkan</span>
+          <span className="flex items-center gap-1"><span className="font-semibold text-red-600">✕</span> batal (tgl jual)</span>
           <span className="text-ink-3">angka di atas bar: pesanan + <span className="text-emerald-700">profit</span></span>
         </div>
       </div>
@@ -1531,7 +1533,10 @@ function BucketChart({ data }: { data: BucketResp }) {
           <div className="text-ink-2">
             Total: <b className="text-ink tabular-nums">{totalPesanan}</b> pesanan · <b className="text-ink">{rupiah(totalNominal)}</b> omzet ·{" "}
             <span className={`font-semibold ${totalProfit < 0 ? "text-red-600" : "text-emerald-700"}`}>profit {rupiah(totalProfit)}</span>
-            {totalBatalBk > 0 && <span className="text-red-600"> · {totalBatalBk} dibatalkan</span>}
+            {(data.batalEvent ?? 0) > 0 && (
+              <span className="text-red-600"> · {data.batalEvent} batal di periode ini <span className="text-ink-3">(waktu batal TikTok)</span></span>
+            )}
+            {totalBatalBk > 0 && <span className="text-ink-3"> · {totalBatalBk} dari penjualan periode ini</span>}
             <span className="text-ink-3">
               {" "}· ter-untung: {cur?.label}
               {data.busiestDay ? ` · hari teramai: ${data.busiestDay.label} (~${data.busiestDay.pesanan} pesanan)` : ""}
@@ -1672,7 +1677,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
             <span className="inline-block h-2.5 w-2 rounded-sm" style={{ background: "#d6dbe0" }} /> Belum terkirim
           </span>
           <span className="flex items-center gap-1">
-            <span className="font-semibold text-red-600">✕</span> Dibatalkan
+            <span className="font-semibold text-red-600">✕</span> batal (tgl jual)
           </span>
           <span className="flex items-center gap-1">
             <span className="inline-block h-0.5 w-3 bg-[#eb6834]" /> Rata² bulan ini
@@ -1803,9 +1808,15 @@ function TimelineChart({ data }: { data: TimelineResp }) {
             <div className="text-ink-2">
               Hari ini: <b className="text-ink tabular-nums">{totalPesanan}</b> pesanan ·{" "}
               <b className="tabular-nums text-brand-ink">{totalTerkirim}</b> terkirim ·{" "}
+              {(data.batalEvent ?? 0) > 0 && (
+                <>
+                  <b className="tabular-nums text-red-600">{data.batalEvent}</b> batal hari ini{" "}
+                  <span className="text-ink-3">(waktu batal TikTok)</span> ·{" "}
+                </>
+              )}
               {totalBatal > 0 && (
                 <>
-                  <b className="tabular-nums text-red-600">{totalBatal}</b> dibatalkan ·{" "}
+                  <span className="text-ink-3">{totalBatal} dari penjualan hari ini</span> ·{" "}
                 </>
               )}
               <span className={`font-semibold tabular-nums ${totalProfit < 0 ? "text-red-600" : "text-emerald-700"}`}>
