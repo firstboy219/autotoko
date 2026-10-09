@@ -2074,6 +2074,12 @@ export class MasterPostingsService {
       throw new BadRequestException("Set harga publish master di menu HPP & Harga Jual dulu.");
     const targets = await this.combinedTargets(userId, masterProductId);
     const { appKey, appSecret } = await this.tiktok.credentials();
+    const [codCfg] = await this.db
+      .select({ cod: productCosting.codEnabled })
+      .from(productCosting)
+      .where(eq(productCosting.masterProductId, masterProductId))
+      .limit(1);
+    const codEnabled: boolean | null = codCfg?.cod ?? null;
     const hasil: {
       shop: string | null;
       productId: string;
@@ -2081,6 +2087,7 @@ export class MasterPostingsService {
       updated?: number;
       same?: number;
       reason?: string;
+      cod?: string;
     }[] = [];
     const target = Math.round(publishPrice);
     const mk = (sh: typeof shops.$inferSelect) =>
@@ -2126,10 +2133,28 @@ export class MasterPostingsService {
         hasil.push({ shop: t.shop.shopName, productId: t.productId, status: "failed", updated: 0, same: 0, reason: (e as Error).message.slice(0, 300) });
       }
     }
+    // COD (opsional, best-effort): bila seller set codEnabled, coba set is_cod_allowed
+    // via partial_edit lalu VERIFIKASI dgn baca-ulang -> laporkan apa adanya (TikTok
+    // tak punya endpoint COD khusus; kalau diabaikan, dilaporkan "tak berubah").
+    if (codEnabled !== null) {
+      for (const h of hasil) {
+        const t = targets.find((x) => x.productId === h.productId);
+        if (!t) continue;
+        try {
+          await mk(t.shop).post(`/product/202309/products/${t.productId}/partial_edit`, { is_cod_allowed: codEnabled });
+          const after = (await mk(t.shop).get(`/product/202309/products/${t.productId}`)) as Record<string, any>;
+          h.cod = after?.is_cod_allowed === codEnabled
+            ? (codEnabled ? "COD aktif" : "COD mati")
+            : "COD tak berubah (TikTok tak menerima)";
+        } catch (e) {
+          h.cod = `COD gagal: ${(e as Error).message.slice(0, 70)}`;
+        }
+      }
+    }
     const ok = hasil.filter((h) => h.status === "ok").length;
     const updated = hasil.reduce((a, h) => a + (h.updated ?? 0), 0);
     const gagal = hasil.filter((h) => h.status === "failed").length;
-    return { publishPrice, total: targets.length, ok, updated, gagal, hasil };
+    return { publishPrice, total: targets.length, ok, updated, gagal, codEnabled, hasil };
   }
 
   private async tandaiMapping(mappingId: string, status: string, message: string): Promise<void> {

@@ -896,7 +896,7 @@ export class CostingService {
       // is stored, which is null while the product is still inheriting its
       // price from the master product. Sending that through made the page show
       // 0 next to a product that plainly has a price.
-      costing: { ...this.serialiseCosting(cfg), publishPrice },
+      costing: { ...this.serialiseCosting(cfg), publishPrice, codEnabled: cfg.codEnabled ?? null },
       hpp: {
         materialCost: rupiah(hpp.materialCostCents),
         serviceCost: rupiah(hpp.serviceCostCents),
@@ -952,6 +952,7 @@ export class CostingService {
     if (dto.sedekahRate != null) set.sedekahRate = rate(dto.sedekahRate);
     if (dto.resellerRate != null) set.resellerRate = rate(dto.resellerRate);
     if (dto.targetProfitRate != null) set.targetProfitRate = rate(dto.targetProfitRate);
+    if (dto.codEnabled !== undefined) set.codEnabled = dto.codEnabled;
 
     await this.db
       .update(productCosting)

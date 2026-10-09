@@ -493,6 +493,9 @@ export const productCosting = pgTable(
     // The price listed on the marketplace. Null until the seller sets one.
     publishPrice: numeric("publish_price", { precision: 15, scale: 2 }),
 
+    /** COD per produk yg diinginkan seller: null = jangan ubah/ikuti marketplace, true=aktif, false=mati. */
+    codEnabled: boolean("cod_enabled"),
+
     // Withheld by the marketplace, each as a share of the publish price.
     marketplaceFeeRate: numeric("marketplace_fee_rate", { precision: 5, scale: 4 })
       .notNull()

@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsIn,
   IsNumber,
   IsOptional,
@@ -27,6 +28,7 @@ export class UpdateCostingDto {
   @IsOptional() @IsNumber() @Min(RATE.min) @Max(RATE.max) sedekahRate?: number;
   @IsOptional() @IsNumber() @Min(RATE.min) @Max(RATE.max) resellerRate?: number;
   @IsOptional() @IsNumber() @Min(RATE.min) @Max(RATE.max) targetProfitRate?: number;
+  @IsOptional() @IsBoolean() codEnabled?: boolean | null;
 }
 
 /** Only the two costing-relevant fields — full material management (supplier,

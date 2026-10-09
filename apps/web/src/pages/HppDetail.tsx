@@ -56,6 +56,7 @@ interface Costing {
   sedekahRate: number;
   resellerRate: number;
   targetProfitRate: number;
+  codEnabled?: boolean | null;
 }
 interface Pricing {
   publishPrice: number;
@@ -153,7 +154,7 @@ export function HppDetail() {
         <div className="space-y-4">
           <HppSection productId={id} data={data} onChange={reload} />
           <PublishSection productId={id} data={data} onChange={reload} />
-          <MarketplacePriceSync productId={id} />
+          <MarketplacePriceSync productId={id} codEnabled={data.costing.codEnabled ?? null} onChange={reload} />
         </div>
       )}
     </Layout>
@@ -1713,6 +1714,7 @@ interface PushPriceResp {
     updated?: number;
     same?: number;
     reason?: string;
+    cod?: string;
   }[];
 }
 
@@ -1720,12 +1722,33 @@ interface PushPriceResp {
  * Harga di Marketplace: terapkan harga publish master ke listing termapping, dan
  * lihat toko mana yang belum ikut harga HPP. Terapkan = tindakan nyata (prices/update).
  */
-function MarketplacePriceSync({ productId }: { productId: string }) {
+function MarketplacePriceSync({
+  productId,
+  codEnabled: codInit,
+  onChange,
+}: {
+  productId: string;
+  codEnabled?: boolean | null;
+  onChange?: () => void;
+}) {
   const toast = useToast();
   const [status, setStatus] = useState<PriceStatusResp | null>(null);
   const [loading, setLoading] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [pushResult, setPushResult] = useState<PushPriceResp | null>(null);
+  const [cod, setCod] = useState<boolean | null>(codInit ?? null);
+
+  async function saveCod(v: string) {
+    const val = v === "" ? null : v === "on";
+    setCod(val);
+    try {
+      await api.patch(`/costing/${productId}`, { codEnabled: val });
+      toast("Opsi COD disimpan. Kirim ke marketplace lewat \"Terapkan harga ke semua\".", "success");
+      onChange?.();
+    } catch (e) {
+      toast((e as Error).message || "Gagal simpan opsi COD", "danger");
+    }
+  }
 
   async function cek() {
     setLoading(true);
@@ -1772,6 +1795,19 @@ function MarketplacePriceSync({ productId }: { productId: string }) {
         }
       />
       <div className="p-5">
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-canvas px-3 py-2 text-xs">
+          <span className="font-medium text-ink-2">COD listing:</span>
+          <Select
+            value={cod === null ? "" : cod ? "on" : "off"}
+            onChange={(e) => saveCod(e.target.value)}
+            className="min-w-[210px]"
+          >
+            <option value="">Ikuti marketplace (jangan ubah)</option>
+            <option value="on">Aktifkan COD</option>
+            <option value="off">Matikan COD</option>
+          </Select>
+          <span className="text-ink-3">dikirim ke listing saat klik "Terapkan harga ke semua".</span>
+        </div>
         {pushResult && (
           <div className="mb-3 rounded-lg border border-line bg-canvas p-3 text-xs">
             <div className="mb-1.5 font-medium text-ink-2">
@@ -1791,6 +1827,11 @@ function MarketplacePriceSync({ productId }: { productId: string }) {
                       <span className="text-ink-3">{h.reason ?? "dilewati"}</span>
                     ) : (
                       <span className="break-words text-red-600">GAGAL: {h.reason ?? "tidak diketahui"}</span>
+                    )}
+                    {h.cod && (
+                      <span className={`ml-2 ${h.cod.includes("gagal") || h.cod.includes("tak berubah") ? "text-amber-700" : "text-emerald-700"}`}>
+                        · {h.cod}
+                      </span>
                     )}
                   </span>
                 </div>
