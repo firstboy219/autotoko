@@ -30,6 +30,7 @@ const Akun = lazy(() => import("./pages/Akun").then((m) => ({ default: m.Akun })
 const Karyawan = lazy(() => import("./pages/Karyawan"));
 const Rekonsiliasi = lazy(() => import("./pages/Rekonsiliasi"));
 const AuditPesanan = lazy(() => import("./pages/AuditPesanan"));
+const MasterPelanggan = lazy(() => import("./pages/MasterPelanggan"));
 const DashboardV2 = lazy(() => import("./pages/DashboardV2"));
 const Paket = lazy(() => import("./pages/Paket").then((m) => ({ default: m.Paket })));
 const Notifikasi = lazy(() => import("./pages/Notifikasi").then((m) => ({ default: m.Notifikasi })));
@@ -129,6 +130,7 @@ export function App() {
           <Route path="/karyawan" element={<Protected><Karyawan /></Protected>} />
           <Route path="/rekonsiliasi" element={<Protected><Rekonsiliasi /></Protected>} />
           <Route path="/audit-pesanan" element={<Protected><AuditPesanan /></Protected>} />
+          <Route path="/master-pelanggan" element={<Protected><MasterPelanggan /></Protected>} />
           <Route path="/dashboard-v2" element={<Protected><DashboardV2 /></Protected>} />
           <Route path="/dashboard-ringkas" element={<Protected><Dashboard /></Protected>} />
           <Route path="/paket" element={<Protected><Paket /></Protected>} />

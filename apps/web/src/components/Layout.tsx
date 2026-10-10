@@ -16,6 +16,7 @@ export const NAV: NavItem[] = [
   { to: "/master-postingan", label: "Master Postingan", icon: "tag" },
   { to: "/katalog", label: "Kesehatan Katalog", icon: "activity" },
   { to: "/orders", label: "Orders", icon: "cart" },
+  { to: "/master-pelanggan", label: "Master Pelanggan", icon: "users" },
   { to: "/produksi-packing", label: "Produksi & Packing", icon: "package" },
   { to: "/autopilot", label: "Autopilot", icon: "bot" },
   { to: "/chat", label: "Chat Pelanggan", icon: "users" },
@@ -167,7 +168,7 @@ function NotifBell() {
  */
 const DEFAULT_SECTIONS: { id: string; label: string; paths: string[] }[] = [
   { id: "kendali", label: "Pusat Kendali", paths: ["/", "/autopilot"] },
-  { id: "pesanan", label: "Penjualan & Pesanan", paths: ["/orders", "/produksi-packing", "/audit-pesanan"] },
+  { id: "pesanan", label: "Penjualan & Pesanan", paths: ["/orders", "/master-pelanggan", "/produksi-packing", "/audit-pesanan"] },
   { id: "produk", label: "Produk & Katalog", paths: ["/produk", "/master-postingan", "/katalog", "/hpp", "/toko"] },
   { id: "gudang", label: "Gudang & Stok", paths: ["/bom"] },
   { id: "keuangan", label: "Keuangan", paths: ["/pencairan", "/laporan-bagian", "/wallet", "/laporan"] },
