@@ -20,6 +20,7 @@ import {
   THead,
   TR,
 } from "../components/ui";
+import { BuyerBadges, type BuyerFlags } from "../components/BuyerBadges";
 
 interface Cust {
   key: string;
@@ -29,10 +30,14 @@ interface Cust {
   kota: string | null;
   orders: number;
   batal: number;
+  batalPra: number;
+  batalKirim: number;
+  codBatalKirim: number;
   cod: number;
   spend: number;
   firstOrder: string | null;
   lastOrder: string | null;
+  flags: BuyerFlags;
 }
 interface ListResp {
   pelanggan: Cust[];
@@ -121,6 +126,7 @@ export default function MasterPelanggan() {
             <option value="orders">Paling sering order</option>
             <option value="spend">Paling banyak belanja</option>
             <option value="recent">Order terakhir terbaru</option>
+            <option value="risk">Paling berisiko (sering batal)</option>
           </Select>
           <label className="flex items-center gap-1.5 text-xs text-ink-2">
             <input type="checkbox" checked={repeat} onChange={(e) => { setRepeat(e.target.checked); setLimit(50); }} />
@@ -152,6 +158,7 @@ export default function MasterPelanggan() {
                   <TD>
                     <div className="font-medium text-ink">{c.nama ?? "(tanpa nama)"}</div>
                     <div className="text-[11px] text-ink-3">{c.phone ?? c.key}</div>
+                    <div className="mt-0.5"><BuyerBadges flags={c.flags} batalKirim={c.batalKirim} batalPra={c.batalPra} /></div>
                   </TD>
                   <TD className="text-ink-2">{c.kota ?? "—"}</TD>
                   <TD align="right">
@@ -207,6 +214,7 @@ function CustomerDetail({ custKey }: { custKey: string }) {
         <div className="text-base font-semibold text-ink">{d.nama ?? "(tanpa nama)"}</div>
         <div className="text-xs text-ink-3">{d.phone ?? "—"}{d.kota ? ` · ${d.kota}` : ""}</div>
         {d.alamat && <div className="mt-0.5 text-[11px] text-ink-3">{d.alamat}</div>}
+        <div className="mt-1.5"><BuyerBadges flags={d.flags} batalKirim={d.batalKirim} batalPra={d.batalPra} /></div>
       </div>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

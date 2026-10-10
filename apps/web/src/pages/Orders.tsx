@@ -29,6 +29,7 @@ import {
   InlineAlert,
   useToast,
 } from "../components/ui";
+import { BuyerBadges, type BuyerFlags } from "../components/BuyerBadges";
 
 interface OrderItem {
   /** Bentuk sebenarnya yang tersimpan di orders.items (peta-tiktok.ts). */
@@ -88,6 +89,15 @@ interface Order {
   /** URL PDF AWB/resi yang sudah di-cache ke server (backend). */
   awbUrl?: string | null;
   labelPrinted?: boolean;
+  /** Kebiasaan pembeli (backend): potensi gagal / layak disegerakan / baru. */
+  buyer?: {
+    key: string;
+    orders: number;
+    batalPra: number;
+    batalKirim: number;
+    codBatalKirim: number;
+    flags: BuyerFlags;
+  } | null;
 }
 
 type BatchRow = { orderId: string; ok: boolean; orderNo: string | null; error?: string };
@@ -743,6 +753,7 @@ export function Orders() {
                                   return null;
                                 })()}
                                 {o.isCod && <Badge tone="warning">COD</Badge>}
+                                {o.buyer && <BuyerBadges flags={o.buyer.flags} batalKirim={o.buyer.batalKirim} batalPra={o.buyer.batalPra} />}
                                 {o.id === maxValueId && <Badge tone="info">nilai tertinggi</Badge>}
                                 {o.shippingCourier && <span className="text-[11px] text-ink-3">{o.shippingCourier}</span>}
                                 {orderCreatedMs(o) > 0 && (() => { const days = (Date.now() - orderCreatedMs(o)) / 86400000; return <Badge tone={days >= 3 ? "danger" : days >= 1 ? "warning" : "neutral"}>umur {agingText(orderCreatedMs(o))}</Badge>; })()}

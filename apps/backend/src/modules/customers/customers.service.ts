@@ -2,14 +2,35 @@ import { Inject, Injectable } from "@nestjs/common";
 import { sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
 
+/** Ringkasan kebiasaan pembeli yang dipakai lintas-menu (Master Pelanggan + Order). */
+export interface BuyerStat {
+  orders: number;
+  /** Batal SEBELUM dikirim (belum ada AWB/resi). */
+  batalPra: number;
+  /** Gagal SETELAH dikirim: retur, atau dibatalkan padahal sudah ada AWB/resi. */
+  batalKirim: number;
+  /** Bagian dari batalKirim yang COD (paling merugikan: barang jalan, uang tak masuk). */
+  codBatalKirim: number;
+}
+export interface BuyerFlags {
+  /** Order pertama pelanggan ini (belum punya riwayat lain). */
+  baru: boolean;
+  /** Sering batal SETELAH dikirim -> potensi gagal/rugi tinggi. */
+  riskKirim: boolean;
+  /** riskKirim yang didominasi COD. */
+  riskKirimCod: boolean;
+  /** Sering batal SEBELUM dikirim. */
+  riskPra: boolean;
+  /** Pelanggan setia & andal -> layak disegerakan. */
+  setia: boolean;
+}
+
 /**
  * Master Pelanggan: mengelompokkan order berdasarkan pembeli.
  *
  * Kunci pelanggan = `orders.raw->>'user_id'` (buyer user id dari TikTok).
  * Dipilih karena 100% terisi, stabil per-pembeli, dan tetap mengelompokkan
- * order yang nama pembelinya kosong -- berbeda dari pasangan nama+telepon yang
- * ter-mask dan bisa kosong. Nama/telepon/alamat dipakai sebagai LABEL tampilan
- * (ambil nilai non-kosong terbaru), bukan sebagai kunci.
+ * order yang nama pembelinya kosong. Nama/telepon/alamat (ter-mask) hanya LABEL.
  *
  * Semua query memfilter eksplisit `user_id` (selain RLS) sebagai pertahanan.
  */
@@ -21,9 +42,29 @@ export class CustomersService {
   private get codExpr() {
     return sql`((o.raw ->> 'is_cod') = 'true' OR lower(coalesce(o.payment_method, '')) LIKE '%cash on delivery%' OR lower(coalesce(o.payment_method, '')) = 'cash')`;
   }
-
-  /** Alamat TikTok ter-mask berbentuk "Indonesia, Provinsi, Kota, ...". */
+  /** Sudah diserahkan ke kurir (ada AWB atau nomor resi). */
+  private get shippedExpr() {
+    return sql`(o.awb_generated = true OR o.tracking_number IS NOT NULL)`;
+  }
+  private get batalPraExpr() {
+    return sql`(o.fulfillment_status = 'dibatalkan' AND NOT ${this.shippedExpr})`;
+  }
+  private get batalKirimExpr() {
+    return sql`(o.fulfillment_status = 'retur' OR (o.fulfillment_status = 'dibatalkan' AND ${this.shippedExpr}))`;
+  }
+  /** Alamat TikTok ter-mask: "Indonesia, Provinsi, Kota, …". */
   private readonly addrExpr = sql`nullif(o.shipping_address ->> 'full_address', '')`;
+
+  /** Aturan tetap -> badge. Dipakai di Master Pelanggan & halaman Order. */
+  static flagsOf(s: BuyerStat): BuyerFlags {
+    return {
+      baru: s.orders <= 1,
+      riskKirim: s.batalKirim >= 2,
+      riskKirimCod: s.codBatalKirim >= 2,
+      riskPra: s.batalPra >= 2,
+      setia: s.orders >= 4 && s.batalKirim === 0 && s.batalPra <= 1,
+    };
+  }
 
   async list(
     userId: string,
@@ -38,7 +79,9 @@ export class CustomersService {
         ? sql`spend DESC NULLS LAST`
         : opts.sort === "recent"
           ? sql`last_order DESC NULLS LAST`
-          : sql`orders DESC, last_order DESC NULLS LAST`;
+          : opts.sort === "risk"
+            ? sql`batal_kirim DESC, batal_pra DESC, orders DESC`
+            : sql`orders DESC, last_order DESC NULLS LAST`;
     const havingRepeat = opts.repeatOnly ? sql`count(*) > 1` : sql`true`;
     const havingSearch = q
       ? sql`(cust_key ILIKE ${like} OR bool_or(o.buyer_name ILIKE ${like}) OR bool_or(o.buyer_phone ILIKE ${like}))`
@@ -56,6 +99,9 @@ export class CustomersService {
              (array_agg(${this.addrExpr} ORDER BY o.created_at DESC) FILTER (WHERE ${this.addrExpr} IS NOT NULL))[1] AS alamat,
              count(*)::int AS orders,
              count(*) FILTER (WHERE o.fulfillment_status = 'dibatalkan')::int AS batal,
+             count(*) FILTER (WHERE ${this.batalPraExpr})::int AS batal_pra,
+             count(*) FILTER (WHERE ${this.batalKirimExpr})::int AS batal_kirim,
+             count(*) FILTER (WHERE ${this.batalKirimExpr} AND ${this.codExpr})::int AS cod_batal_kirim,
              count(*) FILTER (WHERE ${this.codExpr})::int AS cod,
              coalesce(sum(o.total_amount) FILTER (WHERE o.fulfillment_status <> 'dibatalkan'), 0)::float8 AS spend,
              min(coalesce(o.created_at_marketplace, o.created_at)) AS first_order,
@@ -79,19 +125,31 @@ export class CustomersService {
       ) t
     `)) as unknown as Record<string, unknown>[];
 
-    const list = (rows as unknown as Record<string, unknown>[]).map((r) => ({
-      key: String(r.cust_key),
-      nama: (r.nama as string) ?? null,
-      phone: (r.phone as string) ?? null,
-      alamat: (r.alamat as string) ?? null,
-      kota: this.kotaOf(r.alamat as string | null),
-      orders: Number(r.orders) || 0,
-      batal: Number(r.batal) || 0,
-      cod: Number(r.cod) || 0,
-      spend: Number(r.spend) || 0,
-      firstOrder: r.first_order ? new Date(r.first_order as string).toISOString() : null,
-      lastOrder: r.last_order ? new Date(r.last_order as string).toISOString() : null,
-    }));
+    const list = (rows as unknown as Record<string, unknown>[]).map((r) => {
+      const stat: BuyerStat = {
+        orders: Number(r.orders) || 0,
+        batalPra: Number(r.batal_pra) || 0,
+        batalKirim: Number(r.batal_kirim) || 0,
+        codBatalKirim: Number(r.cod_batal_kirim) || 0,
+      };
+      return {
+        key: String(r.cust_key),
+        nama: (r.nama as string) ?? null,
+        phone: (r.phone as string) ?? null,
+        alamat: (r.alamat as string) ?? null,
+        kota: this.kotaOf(r.alamat as string | null),
+        orders: stat.orders,
+        batal: Number(r.batal) || 0,
+        batalPra: stat.batalPra,
+        batalKirim: stat.batalKirim,
+        codBatalKirim: stat.codBatalKirim,
+        cod: Number(r.cod) || 0,
+        spend: Number(r.spend) || 0,
+        firstOrder: r.first_order ? new Date(r.first_order as string).toISOString() : null,
+        lastOrder: r.last_order ? new Date(r.last_order as string).toISOString() : null,
+        flags: CustomersService.flagsOf(stat),
+      };
+    });
 
     return {
       pelanggan: list,
@@ -104,6 +162,32 @@ export class CustomersService {
     };
   }
 
+  /** Statistik kebiasaan untuk sekumpulan kunci pembeli — dipakai halaman Order. */
+  async statsForKeys(userId: string, keys: string[]): Promise<Map<string, BuyerStat>> {
+    const uniq = [...new Set(keys.filter((k) => k && k.length))];
+    if (!uniq.length) return new Map();
+    const rows = await this.db.execute(sql`
+      SELECT o.raw ->> 'user_id' AS k,
+             count(*)::int AS orders,
+             count(*) FILTER (WHERE ${this.batalPraExpr})::int AS batal_pra,
+             count(*) FILTER (WHERE ${this.batalKirimExpr})::int AS batal_kirim,
+             count(*) FILTER (WHERE ${this.batalKirimExpr} AND ${this.codExpr})::int AS cod_batal_kirim
+      FROM orders o
+      WHERE o.user_id = ${userId} AND o.raw ->> 'user_id' IN (${sql.join(uniq.map((k) => sql`${k}`), sql`, `)})
+      GROUP BY 1
+    `);
+    const map = new Map<string, BuyerStat>();
+    for (const r of rows as unknown as Record<string, unknown>[]) {
+      map.set(String(r.k), {
+        orders: Number(r.orders) || 0,
+        batalPra: Number(r.batal_pra) || 0,
+        batalKirim: Number(r.batal_kirim) || 0,
+        codBatalKirim: Number(r.cod_batal_kirim) || 0,
+      });
+    }
+    return map;
+  }
+
   async detail(userId: string, key: string) {
     const [head] = (await this.db.execute(sql`
       SELECT (array_agg(o.buyer_name ORDER BY o.created_at DESC) FILTER (WHERE o.buyer_name IS NOT NULL AND o.buyer_name <> ''))[1] AS nama,
@@ -111,6 +195,9 @@ export class CustomersService {
              (array_agg(${this.addrExpr} ORDER BY o.created_at DESC) FILTER (WHERE ${this.addrExpr} IS NOT NULL))[1] AS alamat,
              count(*)::int AS orders,
              count(*) FILTER (WHERE o.fulfillment_status = 'dibatalkan')::int AS batal,
+             count(*) FILTER (WHERE ${this.batalPraExpr})::int AS batal_pra,
+             count(*) FILTER (WHERE ${this.batalKirimExpr})::int AS batal_kirim,
+             count(*) FILTER (WHERE ${this.batalKirimExpr} AND ${this.codExpr})::int AS cod_batal_kirim,
              count(*) FILTER (WHERE ${this.codExpr})::int AS cod,
              coalesce(sum(o.total_amount) FILTER (WHERE o.fulfillment_status <> 'dibatalkan'), 0)::float8 AS spend,
              min(coalesce(o.created_at_marketplace, o.created_at)) AS first_order,
@@ -166,18 +253,29 @@ export class CustomersService {
       };
     });
 
+    const stat: BuyerStat = {
+      orders: Number(head?.orders) || 0,
+      batalPra: Number(head?.batal_pra) || 0,
+      batalKirim: Number(head?.batal_kirim) || 0,
+      codBatalKirim: Number(head?.cod_batal_kirim) || 0,
+    };
+
     return {
       key,
       nama: (head?.nama as string) ?? null,
       phone: (head?.phone as string) ?? null,
       alamat: (head?.alamat as string) ?? null,
       kota: this.kotaOf(head?.alamat as string | null),
-      orders: Number(head?.orders) || 0,
+      orders: stat.orders,
       batal: Number(head?.batal) || 0,
+      batalPra: stat.batalPra,
+      batalKirim: stat.batalKirim,
+      codBatalKirim: stat.codBatalKirim,
       cod: Number(head?.cod) || 0,
       spend: Number(head?.spend) || 0,
       firstOrder: head?.first_order ? new Date(head.first_order as string).toISOString() : null,
       lastOrder: head?.last_order ? new Date(head.last_order as string).toISOString() : null,
+      flags: CustomersService.flagsOf(stat),
       daftarOrder: orders,
       produkSering: (prodRows as unknown as Record<string, unknown>[]).map((r) => ({
         nama: String(r.nama),
@@ -187,11 +285,10 @@ export class CustomersService {
     };
   }
 
-  /** Ambil "Kota" dari alamat "Indonesia, Provinsi, Kota, ...". */
+  /** Ambil "Kota" dari alamat "Indonesia, Provinsi, Kota, …". */
   private kotaOf(addr: string | null): string | null {
     if (!addr) return null;
     const parts = addr.split(",").map((s) => s.trim());
-    // parts[0]=Indonesia, [1]=Provinsi, [2]=Kota/Kab
     return parts[2] ?? parts[1] ?? null;
   }
 }

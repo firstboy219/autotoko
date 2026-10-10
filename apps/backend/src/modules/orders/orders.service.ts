@@ -5,6 +5,7 @@ import { orders, orderSettings, resiScans, resiScanCodes, shops, marketplaceSkuM
 import { parseStatusConfig, deriveStatus, MP_STATUS_LABEL } from "../marketplace-sync/status-config.js";
 import { AdminSettingsService } from "../admin-settings/admin-settings.service.js";
 import { OrderProfitService, type ProfitContext } from "../costing/order-profit.service.js";
+import { CustomersService, type BuyerStat } from "../customers/customers.service.js";
 
 export interface ListOrdersOpts {
   status?: FulfillmentStatus;
@@ -36,7 +37,29 @@ export class OrdersService {
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly settings: AdminSettingsService,
     private readonly orderProfit: OrderProfitService,
+    private readonly customers: CustomersService,
   ) {}
+
+  /** Kunci pembeli (buyer user_id TikTok) dari satu baris order. */
+  private buyerKeyOf(o: { raw?: unknown }): string | null {
+    const r = o.raw as Record<string, unknown> | null | undefined;
+    const k = r && typeof r === "object" ? r["user_id"] : undefined;
+    return k != null && String(k) !== "" ? String(k) : null;
+  }
+  /** Ringkasan kebiasaan pembeli + badge, untuk ditempel ke baris order. */
+  private buyerInfoOf(o: { raw?: unknown }, stats: Map<string, BuyerStat>) {
+    const key = this.buyerKeyOf(o);
+    const st = key ? stats.get(key) : undefined;
+    if (!key || !st) return null;
+    return {
+      key,
+      orders: st.orders,
+      batalPra: st.batalPra,
+      batalKirim: st.batalKirim,
+      codBatalKirim: st.codBatalKirim,
+      flags: CustomersService.flagsOf(st),
+    };
+  }
 
   /** Normalisasi kunci resi: huruf besar, hanya alfanumerik (samakan dgn resi_scans.resi). */
   private normResi(s: string | null | undefined): string {
@@ -217,9 +240,14 @@ export class OrdersService {
     const manualTerpilih =
       opts.active || (opts.status && opts.status !== "dikirim") ? [] : barisManual;
 
+    const buyerKeys = dariApi
+      .map((o) => this.buyerKeyOf(o))
+      .filter((k): k is string => !!k);
+    const buyerStats = await this.customers.statsForKeys(userId, buyerKeys);
     return [
       ...dariApi.map((o) => ({
         ...o, sumber: "api" as const,
+        buyer: this.buyerInfoOf(o, buyerStats),
         labelPrinted: Boolean((o as Record<string, unknown>).labelPrinted),
         terscan: terscanIds.has(o.id),
         scanned: terscanIds.has(o.id),

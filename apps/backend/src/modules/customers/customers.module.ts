@@ -7,5 +7,6 @@ import { CustomersService } from "./customers.service.js";
   imports: [AuthModule], // JwtAuthGuard / JwtModule
   controllers: [CustomersController],
   providers: [CustomersService],
+  exports: [CustomersService], // halaman Order memakai statsForKeys()
 })
 export class CustomersModule {}
