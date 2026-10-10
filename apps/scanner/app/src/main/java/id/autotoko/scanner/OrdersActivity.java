@@ -778,6 +778,24 @@ public class OrdersActivity extends AppCompatActivity {
         if (dl > 0 && dl < now) chips.addView(chip("⚠ lewat tenggat", android.graphics.Color.parseColor("#FDE7E7"), android.graphics.Color.parseColor("#B3261E")));
         else if (dl > 0 && dl < endToday) chips.addView(chip("kirim duluan", android.graphics.Color.parseColor("#FFF3E0"), android.graphics.Color.parseColor("#B36A00")));
         if (o.optBoolean("isCod", false)) chips.addView(chip("COD", android.graphics.Color.parseColor("#FFF3E0"), android.graphics.Color.parseColor("#8A5A00")));
+        // Tanda kebiasaan pembeli (backend: field "buyer"): supaya packer tahu
+        // mana order berpotensi gagal & mana yang layak disegerakan.
+        JSONObject buyerRep = o.optJSONObject("buyer");
+        if (buyerRep != null) {
+            JSONObject bf = buyerRep.optJSONObject("flags");
+            if (bf != null) {
+                int bk = buyerRep.optInt("batalKirim", 0);
+                int bp = buyerRep.optInt("batalPra", 0);
+                if (bf.optBoolean("riskKirim", false))
+                    chips.addView(chip("⚠ " + (bf.optBoolean("riskKirimCod", false) ? "sering batal COD stlh kirim" : "sering batal stlh kirim") + (bk > 0 ? " (" + bk + ")" : ""), 0xFFFDE7E7, 0xFFB3261E));
+                if (bf.optBoolean("riskPra", false))
+                    chips.addView(chip("sering batal sblm kirim" + (bp > 0 ? " (" + bp + ")" : ""), 0xFFFFF3E0, 0xFFB36A00));
+                if (bf.optBoolean("setia", false))
+                    chips.addView(chip("★ setia · segerakan", 0xFFE6F4EA, 0xFF1B7F4B));
+                if (bf.optBoolean("baru", false))
+                    chips.addView(chip("pelanggan baru", 0xFFE8F0FE, 0xFF256FB0));
+            }
+        }
         // umur order (dari create-date marketplace) di-HIGHLIGHT: warna makin
         // pekat makin tua (>=3 hari merah, >=1 hari oranye).
         long cmAge = createdMsOf(o);
