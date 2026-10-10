@@ -1065,6 +1065,7 @@ interface OrderLite {
   totalAmount: string | null;
   estPencairan?: string | null;
   fulfillmentStatus: string;
+  isCod?: boolean;
   items?: { name?: string; masterName?: string | null; qty?: number }[] | null;
 }
 function todayJak(): string {
@@ -1094,7 +1095,11 @@ function ShopOrders({ shopId, from, to }: { shopId: string; from: string; to: st
       {list.map((o) => (
         <div key={o.id} className="flex items-center justify-between gap-2 text-[11px]">
           <span className="truncate text-ink-2">
-            #{o.marketplaceOrderId} · {o.buyerName ?? "—"}
+            #{o.marketplaceOrderId}
+            {o.isCod && (
+              <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-semibold text-amber-700 align-middle">COD</span>
+            )}
+            {" · "}{o.buyerName ?? "—"}
             {Array.isArray(o.items) && o.items.length > 0 && (
               <span className="text-ink-3">
                 {" · "}
@@ -1427,6 +1432,7 @@ function BucketChart({ data }: { data: BucketResp }) {
   const totalProfit = b.reduce((a, x) => a + x.profit, 0);
   const totalPesanan = b.reduce((a, x) => a + x.pesanan, 0);
   const totalBatalBk = b.reduce((a, x) => a + (x.batal ?? 0), 0);
+  const cancelMaxBk = Math.max(1, ...b.map((x) => x.batal ?? 0));
   let bestI = 0;
   for (let i = 1; i < b.length; i++) if ((b[i]?.profit ?? 0) > (b[bestI]?.profit ?? 0)) bestI = i;
   const sel = hover ?? bestI;
@@ -1447,7 +1453,7 @@ function BucketChart({ data }: { data: BucketResp }) {
               <span className="inline-block h-0.5 w-3" style={{ background: "#eb6834" }} /> Biasanya / hari (4 mgg)
             </span>
           )}
-          <span className="flex items-center gap-1"><span className="font-semibold text-red-600">✕</span> batal (tgl jual)</span>
+          <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2 rounded-sm" style={{ background: "#ef6a6a" }} /> batal (tgl jual)</span>
           <span className="text-ink-3">angka di atas bar: pesanan + <span className="text-emerald-700">profit</span></span>
         </div>
       </div>
@@ -1480,22 +1486,30 @@ function BucketChart({ data }: { data: BucketResp }) {
           const h = (x.nominal / scaleMax) * plotH;
           const top = padT + plotH - h;
           const on = i === sel;
+          const oc = bx(i) + bw * 0.32;
+          const cb = x.batal ?? 0;
+          const chH = cb > 0 ? Math.max(2, (cb / cancelMaxBk) * plotH * 0.6) : 0;
+          const cTop = padT + plotH - chH;
+          const cc = bx(i) + bw * 0.72;
           return (
             <g key={i}>
-              <rect x={bx(i) + bw * 0.16} y={top} width={bw * 0.68} height={Math.max(0, h)} rx="1.5" fill={on ? "url(#bkBarHi)" : "url(#bkBar)"} />
+              <rect x={bx(i) + bw * 0.10} y={top} width={bw * 0.44} height={Math.max(0, h)} rx="1.5" fill={on ? "url(#bkBarHi)" : "url(#bkBar)"} />
+              {chH > 0 && (
+                <rect x={bx(i) + bw * 0.58} y={cTop} width={bw * 0.28} height={chH} rx="1.5" fill={on ? "#dc2626" : "#ef6a6a"} />
+              )}
               {showLabels && x.pesanan > 0 && (
                 <>
-                  <text x={bx(i) + bw / 2} y={top - 9} textAnchor="middle" className="fill-current text-ink-2" style={{ fontSize: "7px", fontWeight: 600 }}>
+                  <text x={oc} y={top - 9} textAnchor="middle" className="fill-current text-ink-2" style={{ fontSize: "7px", fontWeight: 600 }}>
                     {x.pesanan}
                   </text>
-                  <text x={bx(i) + bw / 2} y={top - 2.5} textAnchor="middle" style={{ fontSize: "6.5px" }} fill={x.profit < 0 ? "#dc2626" : "#059669"}>
+                  <text x={oc} y={top - 2.5} textAnchor="middle" style={{ fontSize: "6.5px" }} fill={x.profit < 0 ? "#dc2626" : "#059669"}>
                     {rpShort(x.profit)}
                   </text>
                 </>
               )}
-              {showLabels && (x.batal ?? 0) > 0 && (
-                <text x={bx(i) + bw / 2} y={top - 16} textAnchor="middle" style={{ fontSize: "6.5px", fontWeight: 700 }} fill="#dc2626">
-                  ✕{x.batal}
+              {showLabels && cb > 0 && (
+                <text x={cc} y={cTop - 2.5} textAnchor="middle" style={{ fontSize: "6.5px", fontWeight: 700 }} fill="#dc2626">
+                  {cb}
                 </text>
               )}
             </g>
@@ -1658,6 +1672,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
   const totalPesanan = hari.reduce((a, b) => a + b, 0);
   const totalTerkirim = (data.terkirimHariIni ?? []).reduce((a, b) => a + b, 0);
   const totalBatal = (data.batalHariIni ?? []).reduce((a, b) => a + b, 0);
+  const cancelMaxTl = Math.max(1, ...(data.batalHariIni ?? []));
   const isToday = (data.tanggal ?? "") === todayJak();
   const nowWib = new Date(Date.now() + 7 * 3600 * 1000);
   const nowFrac = nowWib.getUTCHours() + nowWib.getUTCMinutes() / 60;
@@ -1677,7 +1692,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
             <span className="inline-block h-2.5 w-2 rounded-sm" style={{ background: "#d6dbe0" }} /> Belum terkirim
           </span>
           <span className="flex items-center gap-1">
-            <span className="font-semibold text-red-600">✕</span> batal (tgl jual)
+            <span className="inline-block h-2.5 w-2 rounded-sm" style={{ background: "#ef6a6a" }} /> batal (tgl jual)
           </span>
           <span className="flex items-center gap-1">
             <span className="inline-block h-0.5 w-3 bg-[#eb6834]" /> Rata² bulan ini
@@ -1726,8 +1741,10 @@ function TimelineChart({ data }: { data: TimelineResp }) {
           const t = Math.min(data.terkirimHariIni?.[i] ?? 0, v);
           const hb = (t / scaleMax) * plotH;
           const on = i === sel;
-          const bx0 = x(i) + bw * 0.16;
-          const bwd = bw * 0.68;
+          const bx0 = x(i) + bw * 0.08;
+          const bwd = bw * 0.44;
+          const bt = data.batalHariIni?.[i] ?? 0;
+          const chH = bt > 0 ? Math.max(2, (bt / cancelMaxTl) * plotH * 0.6) : 0;
           return (
             <g key={i}>
               {/* abu-abu = total pesanan (belum terkirim di atas) */}
@@ -1735,6 +1752,15 @@ function TimelineChart({ data }: { data: TimelineResp }) {
               {/* biru = porsi yang sudah terkirim (dari dasar) */}
               {hb > 0 && (
                 <rect x={bx0} y={padT + plotH - hb} width={bwd} height={Math.max(0, hb)} rx="1.5" fill={on ? "url(#tlBarHi)" : "url(#tlBar)"} />
+              )}
+              {/* merah = jumlah dibatalkan (skala sendiri, tgl jual) */}
+              {chH > 0 && (
+                <rect x={x(i) + bw * 0.54} y={padT + plotH - chH} width={bw * 0.30} height={chH} rx="1.5" fill={on ? "#dc2626" : "#ef6a6a"} />
+              )}
+              {chH > 0 && (
+                <text x={x(i) + bw * 0.69} y={padT + plotH - chH - 2.5} textAnchor="middle" style={{ fontSize: "6px", fontWeight: 700 }} fill="#dc2626">
+                  {bt}
+                </text>
               )}
             </g>
           );
@@ -1744,30 +1770,16 @@ function TimelineChart({ data }: { data: TimelineResp }) {
           const top = padT + plotH - (v / scaleMax) * plotH;
           return (
             <g key={`lbl${i}`}>
-              <text x={cx(i)} y={top - 9} textAnchor="middle" className="fill-current text-ink-2" style={{ fontSize: "7px", fontWeight: 600 }}>
+              <text x={x(i) + bw * 0.30} y={top - 9} textAnchor="middle" className="fill-current text-ink-2" style={{ fontSize: "7px", fontWeight: 600 }}>
                 {v}
               </text>
-              <text x={cx(i)} y={top - 2.5} textAnchor="middle" style={{ fontSize: "6.5px" }} fill={(profit[i] ?? 0) < 0 ? "#dc2626" : "#059669"}>
+              <text x={x(i) + bw * 0.30} y={top - 2.5} textAnchor="middle" style={{ fontSize: "6.5px" }} fill={(profit[i] ?? 0) < 0 ? "#dc2626" : "#059669"}>
                 {rpShort(profit[i] ?? 0)}
               </text>
             </g>
           );
         })}
         <line x1={padL} y1={padT + plotH} x2={W - padR} y2={padT + plotH} stroke="currentColor" className="text-line" strokeWidth="1" />
-        {(data.batalHariIni ?? []).map((bt, i) =>
-          bt > 0 ? (
-            <text
-              key={`btl${i}`}
-              x={cx(i)}
-              y={padT + plotH - ((hari[i] ?? 0) / scaleMax) * plotH - 16}
-              textAnchor="middle"
-              style={{ fontSize: "6.5px", fontWeight: 700 }}
-              fill="#dc2626"
-            >
-              ✕{bt}
-            </text>
-          ) : null,
-        )}
         {[0, 3, 6, 9, 12, 15, 18, 21, 23].map((hh) => (
           <text key={hh} x={cx(hh)} y={H - 5} textAnchor="middle" className="fill-current text-ink-3" style={{ fontSize: "8px" }}>
             {hh}
