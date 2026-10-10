@@ -786,10 +786,15 @@ public class OrdersActivity extends AppCompatActivity {
             if (bf != null) {
                 int bk = buyerRep.optInt("batalKirim", 0);
                 int bp = buyerRep.optInt("batalPra", 0);
+                String cod = bf.optBoolean("riskKirimCod", false) ? "COD " : "";
                 if (bf.optBoolean("riskKirim", false))
-                    chips.addView(chip("⚠ " + (bf.optBoolean("riskKirimCod", false) ? "sering batal COD stlh kirim" : "sering batal stlh kirim") + (bk > 0 ? " (" + bk + ")" : ""), 0xFFFDE7E7, 0xFFB3261E));
+                    chips.addView(chip("⚠ sering batal " + cod + "stlh kirim (" + bk + ")", 0xFFFDE7E7, 0xFFB3261E));
+                else if (bf.optBoolean("batalKirim1", false))
+                    chips.addView(chip("⚠ pernah batal " + cod + "stlh kirim (1)", 0xFFFFF3E0, 0xFFB36A00));
                 if (bf.optBoolean("riskPra", false))
-                    chips.addView(chip("sering batal sblm kirim" + (bp > 0 ? " (" + bp + ")" : ""), 0xFFFFF3E0, 0xFFB36A00));
+                    chips.addView(chip("sering batal sblm kirim (" + bp + ")", 0xFFFFF3E0, 0xFFB36A00));
+                else if (bf.optBoolean("batalPra1", false))
+                    chips.addView(chip("pernah batal sblm kirim (1)", 0xFFEEF1F4, getColor(R.color.ink2)));
                 if (bf.optBoolean("setia", false))
                     chips.addView(chip("★ setia · segerakan", 0xFFE6F4EA, 0xFF1B7F4B));
                 if (bf.optBoolean("baru", false))

@@ -15,13 +15,17 @@ export interface BuyerStat {
 export interface BuyerFlags {
   /** Order pertama pelanggan ini (belum punya riwayat lain). */
   baru: boolean;
-  /** Sering batal SETELAH dikirim -> potensi gagal/rugi tinggi. */
+  /** Pernah batal SETELAH dikirim tepat 1x (rugi, tapi belum "sering"). */
+  batalKirim1: boolean;
+  /** Sering (>=2x) batal SETELAH dikirim -> potensi gagal/rugi tinggi. */
   riskKirim: boolean;
-  /** riskKirim yang didominasi COD. */
+  /** Pembatalan setelah kirim menyangkut COD (barang jalan, uang tak masuk). */
   riskKirimCod: boolean;
-  /** Sering batal SEBELUM dikirim. */
+  /** Pernah batal SEBELUM dikirim tepat 1x. */
+  batalPra1: boolean;
+  /** Sering (>=2x) batal SEBELUM dikirim. */
   riskPra: boolean;
-  /** Pelanggan setia & andal -> layak disegerakan. */
+  /** Pelanggan setia & andal (tak pernah batal) -> layak disegerakan. */
   setia: boolean;
 }
 
@@ -59,10 +63,12 @@ export class CustomersService {
   static flagsOf(s: BuyerStat): BuyerFlags {
     return {
       baru: s.orders <= 1,
+      batalKirim1: s.batalKirim === 1,
       riskKirim: s.batalKirim >= 2,
-      riskKirimCod: s.codBatalKirim >= 2,
+      riskKirimCod: s.codBatalKirim >= 1,
+      batalPra1: s.batalPra === 1,
       riskPra: s.batalPra >= 2,
-      setia: s.orders >= 4 && s.batalKirim === 0 && s.batalPra <= 1,
+      setia: s.orders >= 4 && s.batalKirim === 0 && s.batalPra === 0,
     };
   }
 
