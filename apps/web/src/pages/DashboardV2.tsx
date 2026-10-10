@@ -1052,6 +1052,7 @@ interface TimelineResp {
   hariIni: number[];
   terkirimHariIni?: number[];
   batalHariIni?: number[];
+  batalProfitHariIni?: number[];
   batalEvent?: number;
   profitHariIni?: number[];
   rataBulan: number[];
@@ -1129,7 +1130,7 @@ interface BucketResp {
   granularity: "day" | "month";
   from?: string;
   to?: string;
-  buckets: { key: string; label: string; pesanan: number; nominal: number; profit: number; batal?: number; compare?: number }[];
+  buckets: { key: string; label: string; pesanan: number; nominal: number; profit: number; batal?: number; batalProfit?: number; compare?: number }[];
   busiestDay?: { label: string; pesanan: number; nominal: number } | null;
   batalEvent?: number;
 }
@@ -1432,7 +1433,8 @@ function BucketChart({ data }: { data: BucketResp }) {
   const totalProfit = b.reduce((a, x) => a + x.profit, 0);
   const totalPesanan = b.reduce((a, x) => a + x.pesanan, 0);
   const totalBatalBk = b.reduce((a, x) => a + (x.batal ?? 0), 0);
-  const cancelMaxBk = Math.max(1, ...b.map((x) => x.batal ?? 0));
+  const cancelMaxBk = Math.max(1, ...b.map((x) => Math.abs(x.batalProfit ?? 0)));
+  const totalBatalProfitBk = b.reduce((a, x) => a + (x.batalProfit ?? 0), 0);
   let bestI = 0;
   for (let i = 1; i < b.length; i++) if ((b[i]?.profit ?? 0) > (b[bestI]?.profit ?? 0)) bestI = i;
   const sel = hover ?? bestI;
@@ -1453,7 +1455,7 @@ function BucketChart({ data }: { data: BucketResp }) {
               <span className="inline-block h-0.5 w-3" style={{ background: "#eb6834" }} /> Biasanya / hari (4 mgg)
             </span>
           )}
-          <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2 rounded-sm" style={{ background: "#ef6a6a" }} /> batal (tgl jual)</span>
+          <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2 rounded-sm" style={{ background: "#ef6a6a" }} /> potensi profit batal</span>
           <span className="text-ink-3">angka di atas bar: pesanan + <span className="text-emerald-700">profit</span></span>
         </div>
       </div>
@@ -1488,7 +1490,8 @@ function BucketChart({ data }: { data: BucketResp }) {
           const on = i === sel;
           const oc = bx(i) + bw * 0.32;
           const cb = x.batal ?? 0;
-          const chH = cb > 0 ? Math.max(2, (cb / cancelMaxBk) * plotH * 0.6) : 0;
+          const bp = x.batalProfit ?? 0;
+          const chH = bp !== 0 ? Math.max(2, (Math.abs(bp) / cancelMaxBk) * plotH * 0.6) : cb > 0 ? 3 : 0;
           const cTop = padT + plotH - chH;
           const cc = bx(i) + bw * 0.72;
           return (
@@ -1507,9 +1510,9 @@ function BucketChart({ data }: { data: BucketResp }) {
                   </text>
                 </>
               )}
-              {showLabels && cb > 0 && (
+              {showLabels && chH > 0 && (
                 <text x={cc} y={cTop - 2.5} textAnchor="middle" style={{ fontSize: "6.5px", fontWeight: 700 }} fill="#dc2626">
-                  {cb}
+                  {bp !== 0 ? rpShort(bp) : `✕${cb}`}
                 </text>
               )}
             </g>
@@ -1550,7 +1553,9 @@ function BucketChart({ data }: { data: BucketResp }) {
             {(data.batalEvent ?? 0) > 0 && (
               <span className="text-red-600"> · {data.batalEvent} batal di periode ini <span className="text-ink-3">(waktu batal TikTok)</span></span>
             )}
-            {totalBatalBk > 0 && <span className="text-ink-3"> · {totalBatalBk} dari penjualan periode ini</span>}
+            {totalBatalBk > 0 && (
+              <span className="text-ink-3"> · {totalBatalBk} dari penjualan periode ini{totalBatalProfitBk !== 0 ? <span className="text-red-600"> (potensi profit {rupiah(totalBatalProfitBk)})</span> : null}</span>
+            )}
             <span className="text-ink-3">
               {" "}· ter-untung: {cur?.label}
               {data.busiestDay ? ` · hari teramai: ${data.busiestDay.label} (~${data.busiestDay.pesanan} pesanan)` : ""}
@@ -1672,7 +1677,8 @@ function TimelineChart({ data }: { data: TimelineResp }) {
   const totalPesanan = hari.reduce((a, b) => a + b, 0);
   const totalTerkirim = (data.terkirimHariIni ?? []).reduce((a, b) => a + b, 0);
   const totalBatal = (data.batalHariIni ?? []).reduce((a, b) => a + b, 0);
-  const cancelMaxTl = Math.max(1, ...(data.batalHariIni ?? []));
+  const cancelMaxTl = Math.max(1, ...(data.batalProfitHariIni ?? []).map((v) => Math.abs(v)));
+  const totalBatalProfit = (data.batalProfitHariIni ?? []).reduce((a, b) => a + b, 0);
   const isToday = (data.tanggal ?? "") === todayJak();
   const nowWib = new Date(Date.now() + 7 * 3600 * 1000);
   const nowFrac = nowWib.getUTCHours() + nowWib.getUTCMinutes() / 60;
@@ -1692,7 +1698,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
             <span className="inline-block h-2.5 w-2 rounded-sm" style={{ background: "#d6dbe0" }} /> Belum terkirim
           </span>
           <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2 rounded-sm" style={{ background: "#ef6a6a" }} /> batal (tgl jual)
+            <span className="inline-block h-2.5 w-2 rounded-sm" style={{ background: "#ef6a6a" }} /> potensi profit batal
           </span>
           <span className="flex items-center gap-1">
             <span className="inline-block h-0.5 w-3 bg-[#eb6834]" /> Rata² bulan ini
@@ -1744,7 +1750,8 @@ function TimelineChart({ data }: { data: TimelineResp }) {
           const bx0 = x(i) + bw * 0.08;
           const bwd = bw * 0.44;
           const bt = data.batalHariIni?.[i] ?? 0;
-          const chH = bt > 0 ? Math.max(2, (bt / cancelMaxTl) * plotH * 0.6) : 0;
+          const bp = data.batalProfitHariIni?.[i] ?? 0;
+          const chH = bp !== 0 ? Math.max(2, (Math.abs(bp) / cancelMaxTl) * plotH * 0.6) : bt > 0 ? 3 : 0;
           return (
             <g key={i}>
               {/* abu-abu = total pesanan (belum terkirim di atas) */}
@@ -1759,7 +1766,7 @@ function TimelineChart({ data }: { data: TimelineResp }) {
               )}
               {chH > 0 && (
                 <text x={x(i) + bw * 0.69} y={padT + plotH - chH - 2.5} textAnchor="middle" style={{ fontSize: "6px", fontWeight: 700 }} fill="#dc2626">
-                  {bt}
+                  {bp !== 0 ? rpShort(bp) : `✕${bt}`}
                 </text>
               )}
             </g>
@@ -1828,7 +1835,8 @@ function TimelineChart({ data }: { data: TimelineResp }) {
               )}
               {totalBatal > 0 && (
                 <>
-                  <span className="text-ink-3">{totalBatal} dari penjualan hari ini</span> ·{" "}
+                  <span className="text-ink-3">{totalBatal} dari penjualan hari ini</span>
+                  {totalBatalProfit !== 0 && <span className="text-red-600"> (potensi profit {rupiah(totalBatalProfit)})</span>} ·{" "}
                 </>
               )}
               <span className={`font-semibold tabular-nums ${totalProfit < 0 ? "text-red-600" : "text-emerald-700"}`}>
