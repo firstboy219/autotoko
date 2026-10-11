@@ -141,14 +141,41 @@ export class OrderProfitService {
     return n == null ? null : String(Math.round(n));
   }
 
-  /** Profit bersih per 1 unit DI HARGA PUBLISH master (angka menu HPP & Harga Jual), atau null. */
+  /**
+   * Harga jual REAL per unit dari item order (yg tampil di halaman Order):
+   * `salePrice`, atau `subtotal`/qty. null bila item tak membawa harga.
+   */
+  private realUnitPrice(item: Record<string, unknown>): number | null {
+    const sp = Number(item.salePrice);
+    if (Number.isFinite(sp) && sp > 0) return sp;
+    const sub = Number(item.subtotal);
+    const qty = Number(item.qty ?? item.quantity ?? 0) || 0;
+    if (Number.isFinite(sub) && sub > 0 && qty > 0) return sub / qty;
+    return null;
+  }
+
+  /**
+   * Profit bersih per 1 unit. Basis harga = HARGA JUAL REAL dari order (halaman
+   * Order) bila ada, fallback ke harga publish master (menu HPP). Potongan
+   * (marketplace fee/event/affiliator, sedekah, sub-seller, ads) + HPP/bahan baku
+   * tetap dari rumus & rate Master Produk/HPP. null bila master tak ber-costing
+   * atau tak ada harga sama sekali.
+   */
   unitProfitForItem(item: Record<string, unknown>, ctx: ProfitContext): number | null {
     const m = this.resolveItemMaster(item, ctx);
     if (!m) return null;
     const basis = ctx.basisByMaster.get(m.mid);
-    if (!basis || basis.publishPrice == null || basis.publishPrice <= 0) return null;
+    if (!basis) return null;
+    const real = this.realUnitPrice(item);
+    const priceCents =
+      real != null
+        ? Math.round(real * 100)
+        : basis.publishPrice != null && basis.publishPrice > 0
+          ? Math.round(basis.publishPrice * 100)
+          : null;
+    if (priceCents == null || priceCents <= 0) return null;
     const pr = calculatePublishPricing({
-      publishPriceCents: Math.round(basis.publishPrice * 100),
+      publishPriceCents: priceCents,
       hppCents: basis.hppCents,
       marketplaceFeeRate: basis.marketplaceFeeRate,
       eventRate: basis.eventRate,
@@ -162,10 +189,8 @@ export class OrderProfitService {
   }
 
   /**
-   * Profit bersih SATU item pesanan (rupiah) = profit per unit DI HARGA PUBLISH
-   * master (angka menu HPP) x qty terjual. SENGAJA pakai harga publish, bukan harga
-   * jual aktual order (yg bisa terdiskon besar), supaya konsisten dengan menu HPP.
-   * null bila tak dikenali / master belum punya harga publish.
+   * Profit bersih SATU item pesanan (rupiah) = profit per unit (HARGA JUAL REAL
+   * order, rumus + rate menu HPP) x qty terjual. null bila tak dikenali / tak ada harga.
    */
   netProfitForItem(item: Record<string, unknown>, ctx: ProfitContext): number | null {
     const perUnit = this.unitProfitForItem(item, ctx);
