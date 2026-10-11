@@ -35,6 +35,12 @@
             android:screenOrientation="portrait" />
 
         <activity
+            android:name=".MasterProdukWebActivity"
+            android:exported="false"
+            android:label="Master Produk &amp; HPP"
+            android:screenOrientation="portrait" />
+
+        <activity
 
             android:name=".PayoutActivity"
 

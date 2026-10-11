@@ -801,6 +801,23 @@ public class OrdersActivity extends AppCompatActivity {
                     chips.addView(chip("pelanggan baru", 0xFFE8F0FE, 0xFF256FB0));
             }
         }
+        // Produk yg harga jualnya beda dari master HPP -> chip tap = buka Master Produk (web).
+        JSONArray hbeda = o.optJSONArray("hargaBeda");
+        for (int hi = 0; hbeda != null && hi < hbeda.length(); hi++) {
+            JSONObject hb = hbeda.optJSONObject(hi);
+            if (hb == null) continue;
+            final String mid = hb.optString("masterId", "");
+            String nm = hb.optString("nama", "produk");
+            if (nm.length() > 16) nm = nm.substring(0, 16) + "…";
+            TextView cbeda = chip("⚠ harga ≠ master: " + nm, 0xFFFFF3E0, 0xFFB36A00);
+            cbeda.setOnClickListener(v -> {
+                if (mid.isEmpty()) return;
+                Intent itb = new Intent(this, MasterProdukWebActivity.class);
+                itb.putExtra("productId", mid);
+                startActivity(itb);
+            });
+            chips.addView(cbeda);
+        }
         // umur order (dari create-date marketplace) di-HIGHLIGHT: warna makin
         // pekat makin tua (>=3 hari merah, >=1 hari oranye).
         long cmAge = createdMsOf(o);
