@@ -1044,6 +1044,9 @@ interface SalesByDate {
   profitBersih: number | null;
   codPesanan?: number;
   codPct?: number;
+  hargaBeda?: { nama: string; hargaMaster: number; hargaJual: number[]; qty: number; profitHarusnya: number; profitJadi: number; selisih: number }[];
+  profitHarusnya?: number | null;
+  profitJadi?: number | null;
   perToko: { shopId: string | null; nama: string; pesanan: number; nominal: number; profit?: number | null }[];
   perMaster?: { nama: string; nominal: number; qty: number; profit: number }[];
 }
@@ -1187,6 +1190,7 @@ function PenjualanHarian({
   const prev = useFetch<SalesByDate>(`/dashboard/sales-range?from=${prevFrom}&to=${prevTo}`);
   const [expand, setExpand] = useState<string | null>(null);
   const [showAnalytics, setShowAnalytics] = useState(true);
+  const [bedaOpen, setBedaOpen] = useState(false);
   const d = sales.data;
   const p = prev.data;
   const T = todayJak();
@@ -1316,6 +1320,54 @@ function PenjualanHarian({
               <span className="text-ink-3">
                 {d.codPesanan} dari {d.pesanan} pesanan pakai COD
               </span>
+            </div>
+          )}
+          {(d.hargaBeda?.length ?? 0) > 0 && (
+            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setBedaOpen((v) => !v)}
+                className="flex w-full items-start justify-between gap-2 text-left"
+              >
+                <span className="text-amber-900">
+                  <b>{d.hargaBeda!.length}</b> produk terjual beda harga dari master — profit{" "}
+                  <b className="tabular-nums">{rupiah(d.profitHarusnya ?? 0)}</b> → jadi{" "}
+                  <b className="tabular-nums">{rupiah(d.profitJadi ?? 0)}</b>{" "}
+                  <span
+                    className={`font-semibold ${(d.profitJadi ?? 0) - (d.profitHarusnya ?? 0) < 0 ? "text-red-600" : "text-emerald-700"}`}
+                  >
+                    ({(d.profitJadi ?? 0) - (d.profitHarusnya ?? 0) >= 0 ? "+" : ""}
+                    {rupiah((d.profitJadi ?? 0) - (d.profitHarusnya ?? 0))})
+                  </span>
+                </span>
+                <span className="whitespace-nowrap text-amber-700 underline">{bedaOpen ? "tutup" : "rincian"}</span>
+              </button>
+              {bedaOpen && (
+                <div className="mt-2 space-y-1.5 border-t border-amber-200 pt-2">
+                  {d.hargaBeda!.map((h, i) => (
+                    <div key={i} className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-ink">
+                          {h.nama} <span className="text-ink-3">×{h.qty}</span>
+                        </div>
+                        <div className="text-ink-3">
+                          master {rupiah(h.hargaMaster)} · jual {h.hargaJual.map((x) => rupiah(x)).join(", ")}
+                        </div>
+                      </div>
+                      <div className="whitespace-nowrap text-right tabular-nums">
+                        <div>
+                          <span className="text-ink-3">{rupiah(h.profitHarusnya)}</span> →{" "}
+                          <b className="text-ink">{rupiah(h.profitJadi)}</b>
+                        </div>
+                        <div className={h.selisih < 0 ? "text-red-600" : "text-emerald-700"}>
+                          {h.selisih >= 0 ? "+" : ""}
+                          {rupiah(h.selisih)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {rugi.length > 0 && (

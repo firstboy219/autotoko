@@ -189,6 +189,30 @@ export class OrderProfitService {
   }
 
   /**
+   * Profit bersih per unit JIKA dijual di HARGA PUBLISH master (abaikan harga
+   * order) — untuk membandingkan "harusnya" vs "jadi" saat harga jual beda.
+   * null bila master tak punya harga publish.
+   */
+  publishUnitProfitForItem(item: Record<string, unknown>, ctx: ProfitContext): number | null {
+    const m = this.resolveItemMaster(item, ctx);
+    if (!m) return null;
+    const basis = ctx.basisByMaster.get(m.mid);
+    if (!basis || basis.publishPrice == null || basis.publishPrice <= 0) return null;
+    const pr = calculatePublishPricing({
+      publishPriceCents: Math.round(basis.publishPrice * 100),
+      hppCents: basis.hppCents,
+      marketplaceFeeRate: basis.marketplaceFeeRate,
+      eventRate: basis.eventRate,
+      affiliatorRate: basis.affiliatorRate,
+      adsRate: basis.adsRate,
+      adsFixedCents: basis.adsFixedCents,
+      sedekahRate: basis.sedekahRate,
+      resellerRate: basis.resellerRate,
+    });
+    return pr.netProfitCents / 100;
+  }
+
+  /**
    * Profit bersih SATU item pesanan (rupiah) = profit per unit (HARGA JUAL REAL
    * order, rumus + rate menu HPP) x qty terjual. null bila tak dikenali / tak ada harga.
    */

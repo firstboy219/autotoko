@@ -99,6 +99,11 @@ export class DashboardV2Service {
     let adaProfit = false;
     const profitByShop = new Map<string, number>();
     const byMaster = new Map<string, { nama: string; nominal: number; qty: number; profit: number }>();
+    // Produk yg harga jual REAL-nya beda dari harga publish master -> dampak profit.
+    const bedaByMaster = new Map<
+      string,
+      { nama: string; publishPrice: number; qty: number; hargaReal: Set<number>; profitReal: number; profitPublish: number }
+    >();
     for (const r of itemRows) {
       const items = Array.isArray(r.items) ? r.items : [];
       let orderProfit = 0;
@@ -119,6 +124,21 @@ export class DashboardV2Service {
           e.qty += qty;
           if (np != null) e.profit += np;
           byMaster.set(m.mid, e);
+        }
+        const basis = m ? ctx.basisByMaster.get(m.mid) : undefined;
+        if (m && basis && basis.publishPrice && basis.publishPrice > 0 && qty > 0) {
+          const realUnit = (Number(o2.salePrice ?? o2.sale_price ?? 0) || sub / qty) || 0;
+          if (realUnit > 0 && Math.abs(realUnit - basis.publishPrice) / basis.publishPrice >= 0.005) {
+            const pubUnit = this.orderProfit.publishUnitProfitForItem(o2, ctx);
+            const be =
+              bedaByMaster.get(m.mid) ??
+              { nama: m.name ?? "(tanpa nama)", publishPrice: basis.publishPrice, qty: 0, hargaReal: new Set<number>(), profitReal: 0, profitPublish: 0 };
+            be.qty += qty;
+            be.hargaReal.add(Math.round(realUnit));
+            if (np != null) be.profitReal += np;
+            if (pubUnit != null) be.profitPublish += pubUnit * qty;
+            bedaByMaster.set(m.mid, be);
+          }
         }
       }
       if (orderAda) {
@@ -146,6 +166,24 @@ export class DashboardV2Service {
       .where(cond);
     const codPesanan = Number(codRow?.cod) || 0;
     const codPct = pesanan > 0 ? Math.round((codPesanan / pesanan) * 100) : 0;
+    let profitHarusnya = 0;
+    let profitJadi = 0;
+    const hargaBeda = [...bedaByMaster.values()]
+      .map((e) => {
+        profitHarusnya += e.profitPublish;
+        profitJadi += e.profitReal;
+        return {
+          nama: e.nama,
+          hargaMaster: Math.round(e.publishPrice),
+          hargaJual: [...e.hargaReal].sort((a, b) => a - b),
+          qty: e.qty,
+          profitHarusnya: Math.round(e.profitPublish),
+          profitJadi: Math.round(e.profitReal),
+          selisih: Math.round(e.profitReal - e.profitPublish),
+        };
+      })
+      .sort((a, b) => Math.abs(b.selisih) - Math.abs(a.selisih))
+      .slice(0, 20);
     return {
       pesanan,
       nominal,
@@ -154,6 +192,9 @@ export class DashboardV2Service {
       codPct,
       perToko: perTokoProfit,
       perMaster,
+      hargaBeda,
+      profitHarusnya: hargaBeda.length ? Math.round(profitHarusnya) : null,
+      profitJadi: hargaBeda.length ? Math.round(profitJadi) : null,
     };
   }
 
