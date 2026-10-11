@@ -168,6 +168,74 @@ export class CustomersService {
     };
   }
 
+  /**
+   * Komposisi PELANGGAN pada rentang [start, end) (end null = sampai sekarang):
+   * pembeli unik yg punya order tidak-dibatalkan di rentang itu, digolongkan
+   * dgn aturan flagsOf yg sama dgn Master Pelanggan (riwayat SEMUA waktu).
+   * Satu pelanggan = satu golongan; prioritas: sering batal stlh kirim >
+   * pernah batal stlh kirim > sering batal sblm kirim > pernah batal sblm
+   * kirim > setia > baru > repeat biasa.
+   */
+  async segmentasi(userId: string, start: Date, end: Date | null) {
+    const endCond = end
+      ? sql`AND coalesce(o2.created_at_marketplace, o2.created_at) < ${end.toISOString()}::timestamptz`
+      : sql``;
+    const rows = await this.db.execute(sql`
+      WITH inr AS (
+        SELECT DISTINCT o2.raw ->> 'user_id' AS k
+        FROM orders o2
+        WHERE o2.user_id = ${userId}
+          AND nullif(o2.raw ->> 'user_id', '') IS NOT NULL
+          AND o2.fulfillment_status <> 'dibatalkan'
+          AND coalesce(o2.created_at_marketplace, o2.created_at) >= ${start.toISOString()}::timestamptz
+          ${endCond}
+      )
+      SELECT o.raw ->> 'user_id' AS k,
+             count(*)::int AS orders,
+             count(*) FILTER (WHERE ${this.batalPraExpr})::int AS batal_pra,
+             count(*) FILTER (WHERE ${this.batalKirimExpr})::int AS batal_kirim,
+             count(*) FILTER (WHERE ${this.batalKirimExpr} AND ${this.codExpr})::int AS cod_batal_kirim
+      FROM orders o
+      JOIN inr ON inr.k = o.raw ->> 'user_id'
+      WHERE o.user_id = ${userId}
+      GROUP BY 1
+    `);
+    const hitung: Record<string, number> = {
+      riskKirim: 0, batalKirim1: 0, riskPra: 0, batalPra1: 0, setia: 0, baru: 0, biasa: 0,
+    };
+    let total = 0;
+    for (const r of rows as unknown as Record<string, unknown>[]) {
+      const f = CustomersService.flagsOf({
+        orders: Number(r.orders) || 0,
+        batalPra: Number(r.batal_pra) || 0,
+        batalKirim: Number(r.batal_kirim) || 0,
+        codBatalKirim: Number(r.cod_batal_kirim) || 0,
+      });
+      const key = f.riskKirim ? "riskKirim"
+        : f.batalKirim1 ? "batalKirim1"
+        : f.riskPra ? "riskPra"
+        : f.batalPra1 ? "batalPra1"
+        : f.setia ? "setia"
+        : f.baru ? "baru"
+        : "biasa";
+      hitung[key] = (hitung[key] ?? 0) + 1;
+      total += 1;
+    }
+    const LABEL: [string, string][] = [
+      ["baru", "Pelanggan baru"],
+      ["setia", "Pelanggan setia"],
+      ["biasa", "Repeat biasa"],
+      ["batalPra1", "Pernah batal sblm kirim"],
+      ["riskPra", "Sering batal sblm kirim"],
+      ["batalKirim1", "Pernah batal stlh kirim"],
+      ["riskKirim", "Sering batal stlh kirim"],
+    ];
+    return {
+      total,
+      items: LABEL.map(([key, label]) => ({ key, label, jumlah: hitung[key] ?? 0 })),
+    };
+  }
+
   /** Statistik kebiasaan untuk sekumpulan kunci pembeli — dipakai halaman Order. */
   async statsForKeys(userId: string, keys: string[]): Promise<Map<string, BuyerStat>> {
     const uniq = [...new Set(keys.filter((k) => k && k.length))];

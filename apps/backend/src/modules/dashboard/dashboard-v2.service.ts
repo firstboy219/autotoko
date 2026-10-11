@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { and, eq, gte, lt, lte, ne, sql } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
+import { CustomersService } from "../customers/customers.service.js";
 import { orders, shops } from "../../database/schema/index.js";
 import { PendingTasksService } from "./pending-tasks.service.js";
 import { OrderProfitService } from "../costing/order-profit.service.js";
@@ -29,6 +30,7 @@ export class DashboardV2Service {
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly pending: PendingTasksService,
     private readonly orderProfit: OrderProfitService,
+    private readonly customers: CustomersService,
   ) {}
 
   /** UTC instant of today's 00:00 in Asia/Jakarta (UTC+7, no DST). */
@@ -166,6 +168,8 @@ export class DashboardV2Service {
       .where(cond);
     const codPesanan = Number(codRow?.cod) || 0;
     const codPct = pesanan > 0 ? Math.round((codPesanan / pesanan) * 100) : 0;
+    // Komposisi pelanggan (label sama dgn Master Pelanggan); gagal tak boleh merusak card.
+    const segmenPelanggan = await this.customers.segmentasi(userId, start, end).catch(() => null);
     let profitHarusnya = 0;
     let profitJadi = 0;
     const hargaBeda = [...bedaByMaster.values()]
@@ -193,6 +197,7 @@ export class DashboardV2Service {
       perToko: perTokoProfit,
       perMaster,
       hargaBeda,
+      segmenPelanggan,
       profitHarusnya: hargaBeda.length ? Math.round(profitHarusnya) : null,
       profitJadi: hargaBeda.length ? Math.round(profitJadi) : null,
     };

@@ -1045,6 +1045,7 @@ interface SalesByDate {
   codPesanan?: number;
   codPct?: number;
   hargaBeda?: { nama: string; hargaMaster: number; hargaJual: number[]; qty: number; profitHarusnya: number; profitJadi: number; selisih: number }[];
+  segmenPelanggan?: { total: number; items: { key: string; label: string; jumlah: number }[] } | null;
   profitHarusnya?: number | null;
   profitJadi?: number | null;
   perToko: { shopId: string | null; nama: string; pesanan: number; nominal: number; profit?: number | null }[];
@@ -1413,6 +1414,7 @@ function PenjualanHarian({
                 <div className="mt-3 flex flex-wrap gap-6 border-t border-line pt-3">
                   <KomposisiPie title="Komposisi penjualan per toko" rows={d.perToko} />
                   <KomposisiPie title="Komposisi penjualan per master produk" rows={d.perMaster ?? []} />
+                  <SegmenPelangganPie data={d.segmenPelanggan} />
                 </div>
               )}
               <ProfitRanking rows={d.perMaster ?? []} />
@@ -1636,6 +1638,73 @@ const PIE_COLORS = [
   "#06d6a0",
   "#118ab2",
 ];
+
+/** Warna tetap per label pelanggan (sama maknanya dgn badge Master Pelanggan). */
+const SEGMEN_WARNA: Record<string, string> = {
+  baru: "#2a78d6",
+  setia: "#1baf7a",
+  biasa: "#b4bcc5",
+  batalPra1: "#f2c14e",
+  riskPra: "#eda100",
+  batalKirim1: "#f08a6b",
+  riskKirim: "#dc2626",
+};
+
+/** Donut komposisi PELANGGAN (jumlah pelanggan unik + %), label = flagging Master Pelanggan. */
+function SegmenPelangganPie({ data }: { data?: SalesByDate["segmenPelanggan"] }) {
+  const rows = (data?.items ?? []).filter((r) => r.jumlah > 0);
+  const total = rows.reduce((a, r) => a + r.jumlah, 0);
+  if (!data || total <= 0) return null;
+  const C = 2 * Math.PI * 42;
+  let acc = 0;
+  const pct = (n: number) => {
+    const v = (n / total) * 100;
+    return v > 0 && v < 1 ? "<1" : String(Math.round(v));
+  };
+  return (
+    <div className="min-w-[220px] flex-1">
+      <div className="mb-2 text-[11px] font-medium text-ink-3">
+        Komposisi pelanggan <span className="text-ink-2">· {total.toLocaleString("id-ID")} pelanggan</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <svg viewBox="0 0 100 100" className="h-24 w-24 shrink-0 -rotate-90" role="img" aria-label="Komposisi pelanggan">
+          {rows.map((r) => {
+            const frac = r.jumlah / total;
+            const dash = Math.max(0, frac * C - (rows.length > 1 ? 1.2 : 0));
+            const seg = (
+              <circle
+                key={r.key}
+                cx="50"
+                cy="50"
+                r="42"
+                fill="none"
+                stroke={SEGMEN_WARNA[r.key] ?? "#b4bcc5"}
+                strokeWidth="15"
+                strokeDasharray={`${dash} ${C - dash}`}
+                strokeDashoffset={-acc * C}
+              />
+            );
+            acc += frac;
+            return seg;
+          })}
+        </svg>
+        <div className="min-w-0 flex-1 space-y-0.5">
+          {rows.map((r) => (
+            <div key={r.key} className="flex items-center gap-1.5 text-[11px]">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: SEGMEN_WARNA[r.key] ?? "#b4bcc5" }} />
+              <span className="truncate text-ink-2" title={r.label}>
+                {r.label}
+              </span>
+              <span className="ml-auto whitespace-nowrap tabular-nums text-ink-3">
+                {r.jumlah.toLocaleString("id-ID")} · {pct(r.jumlah)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** Grafik komposisi (donut) proporsional per entri (nominal) + legenda nilai & %. */
 function KomposisiPie({ title, rows }: { title: string; rows: { nama: string; nominal: number }[] }) {
