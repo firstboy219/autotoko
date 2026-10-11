@@ -116,6 +116,7 @@ public class PackingListActivity extends AppCompatActivity {
         Map<String, List<JSONObject>> perTahap = new LinkedHashMap<>();
         for (String t : TAHAP) perTahap.put(t, new ArrayList<>());
         Map<String, int[]> produk = new LinkedHashMap<>(); // nama -> {pcs, order}
+        final Map<String, String> idProduk = new LinkedHashMap<>(); // nama -> masterId
         int nOrder = 0, nPcs = 0;
         for (int i = 0; i < all.length(); i++) {
             JSONObject o = all.optJSONObject(i);
@@ -128,6 +129,8 @@ public class PackingListActivity extends AppCompatActivity {
                 if (it == null) continue;
                 int q = Math.max(1, it.optInt("qty", 1));
                 String nm = namaItem(it);
+                String midIt = it.isNull("masterId") ? "" : it.optString("masterId", "");
+                if (!midIt.isEmpty() && !idProduk.containsKey(nm)) idProduk.put(nm, midIt);
                 int[] v = produk.get(nm);
                 if (v == null) { v = new int[2]; produk.put(nm, v); }
                 v[0] += q; v[1] += 1;
@@ -148,7 +151,13 @@ public class PackingListActivity extends AppCompatActivity {
         list.addView(judul("Rekap produk (" + urut.size() + " jenis)"));
         LinearLayout rekap = kotak();
         for (Map.Entry<String, int[]> e : urut) {
-            rekap.addView(baris(e.getValue()[0] + " pcs", e.getKey(), e.getValue()[1] + " order"));
+            final String nmP = e.getKey();
+            final String midP = idProduk.get(nmP);
+            final int pcsP = e.getValue()[0];
+            final int ordP = e.getValue()[1];
+            View br = baris(pcsP + " pcs", nmP, ordP + " order" + (midP != null ? "  ›" : ""));
+            br.setOnClickListener(vw -> tampilBahan(nmP, midP, pcsP, ordP));
+            rekap.addView(br);
         }
         list.addView(rekap);
 
@@ -157,6 +166,112 @@ public class PackingListActivity extends AppCompatActivity {
             if (os == null || os.isEmpty()) continue;
             list.addView(judul(labelTahap(t) + " (" + os.size() + ")"));
             for (JSONObject o : os) list.addView(kartuOrder(o));
+        }
+    }
+
+    private static String fmtQty(double v) {
+        if (v == Math.rint(v)) return String.valueOf((long) v);
+        String t = String.format(Locale.US, "%.3f", v);
+        while (t.endsWith("0")) t = t.substring(0, t.length() - 1);
+        if (t.endsWith(".")) t = t.substring(0, t.length() - 1);
+        return t;
+    }
+
+    /**
+     * Dialog bahan sebuah produk: bahan baku (resep per 1 pcs) + bahan packing
+     * (per paket), lengkap dgn total kebutuhan utk jumlah yg ada di packing list.
+     * Data dari GET /orders/product-materials/:id (nama/qty/satuan; tanpa harga/stok).
+     */
+    private void tampilBahan(String nama, String masterId, int pcs, int paket) {
+        if (masterId == null || masterId.isEmpty()) {
+            android.widget.Toast.makeText(this,
+                    "Produk ini belum dipetakan ke Master Produk, bahannya belum diketahui.",
+                    android.widget.Toast.LENGTH_LONG).show();
+            return;
+        }
+        final LinearLayout isi = new LinearLayout(this);
+        isi.setOrientation(LinearLayout.VERTICAL);
+        isi.setPadding(dp(20), dp(8), dp(20), dp(8));
+        TextView memuat = new TextView(this);
+        memuat.setTextSize(13);
+        memuat.setTextColor(getColor(R.color.ink2));
+        memuat.setText("Memuat bahan…");
+        isi.addView(memuat);
+        ScrollView sv = new ScrollView(this);
+        sv.addView(isi);
+        final androidx.appcompat.app.AlertDialog dlg = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(nama).setView(sv).setPositiveButton("Tutup", null).show();
+        api.produkBahan(masterId, r -> {
+            if (isFinishing() || !dlg.isShowing()) return;
+            isi.removeAllViews();
+            JSONObject dd = (r == null || !r.ok()) ? null : r.data();
+            if (dd == null) {
+                TextView e = new TextView(this);
+                e.setTextSize(13);
+                e.setTextColor(getColor(R.color.ink2));
+                e.setText(r == null ? "Gagal memuat bahan." : r.message("Gagal memuat bahan."));
+                isi.addView(e);
+                return;
+            }
+            if (pcs > 1 || paket > 1) {
+                TextView note = new TextView(this);
+                note.setTextSize(12);
+                note.setTextColor(getColor(R.color.ink2));
+                note.setText("Kebutuhan utk " + pcs + " pcs (" + paket + " paket) di packing list ini.");
+                isi.addView(note);
+            }
+            bagianBahan(isi, "Bahan baku · per 1 pcs", dd.optJSONArray("bahanBaku"), pcs);
+            bagianBahan(isi, "Bahan packing · per paket", dd.optJSONArray("bahanPacking"), paket);
+        });
+    }
+
+    private void bagianBahan(LinearLayout isi, String judulBagian, JSONArray arr, int pengali) {
+        TextView h = new TextView(this);
+        h.setTextSize(12);
+        h.setTypeface(null, Typeface.BOLD);
+        h.setTextColor(getColor(R.color.ink3));
+        h.setPadding(0, dp(12), 0, dp(4));
+        h.setText(judulBagian.toUpperCase(Locale.ROOT));
+        isi.addView(h);
+        if (arr == null || arr.length() == 0) {
+            TextView kosong = new TextView(this);
+            kosong.setTextSize(13);
+            kosong.setTextColor(getColor(R.color.ink3));
+            kosong.setText("Belum ada data di Master Produk.");
+            isi.addView(kosong);
+            return;
+        }
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject b = arr.optJSONObject(i);
+            if (b == null) continue;
+            double q = b.optDouble("qty", 0);
+            String sat = b.optString("satuan", "");
+            if ("null".equals(sat)) sat = "";
+            String suf = sat.isEmpty() ? "" : " " + sat;
+            LinearLayout r = new LinearLayout(this);
+            r.setOrientation(LinearLayout.HORIZONTAL);
+            r.setGravity(Gravity.CENTER_VERTICAL);
+            r.setPadding(0, dp(5), 0, dp(5));
+            TextView a = new TextView(this);
+            a.setTextSize(14);
+            a.setTypeface(null, Typeface.BOLD);
+            a.setTextColor(getColor(R.color.brand));
+            a.setText(fmtQty(q) + suf);
+            r.addView(a, new LinearLayout.LayoutParams(dp(84), ViewGroup.LayoutParams.WRAP_CONTENT));
+            TextView n = new TextView(this);
+            n.setTextSize(13);
+            n.setTextColor(getColor(R.color.ink));
+            n.setText(b.optString("nama", "-"));
+            r.addView(n, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            if (pengali > 1) {
+                TextView tt = new TextView(this);
+                tt.setTextSize(11);
+                tt.setTextColor(getColor(R.color.ink3));
+                tt.setPadding(dp(8), 0, 0, 0);
+                tt.setText("total " + fmtQty(q * pengali) + suf);
+                r.addView(tt);
+            }
+            isi.addView(r);
         }
     }
 
@@ -192,6 +307,23 @@ public class PackingListActivity extends AppCompatActivity {
         String kaki = (resi.isEmpty() || "null".equals(resi) ? "Resi belum ada" : "Resi " + resi)
                 + (o.optBoolean("scanned", false) ? "  ·  sudah discan" : "");
         LinearLayout k = kartu(head, isi.length() == 0 ? "-" : isi.toString(), false);
+        if (items != null && items.length() > 0) {
+            k.removeViewAt(1); // ganti teks gabungan dgn baris item yg bisa diketuk
+            for (int j = 0; j < items.length(); j++) {
+                JSONObject it2 = items.optJSONObject(j);
+                if (it2 == null) continue;
+                final int q2 = Math.max(1, it2.optInt("qty", 1));
+                final String nm2 = namaItem(it2);
+                final String mid2 = it2.isNull("masterId") ? "" : it2.optString("masterId", "");
+                TextView li = new TextView(this);
+                li.setTextSize(13);
+                li.setTextColor(getColor(R.color.ink2));
+                li.setPadding(0, dp(4), 0, dp(2));
+                li.setText(q2 + " x " + nm2 + (mid2.isEmpty() ? "" : "  ›"));
+                li.setOnClickListener(vw -> tampilBahan(nm2, mid2.isEmpty() ? null : mid2, q2, 1));
+                k.addView(li);
+            }
+        }
         TextView f = new TextView(this);
         f.setTextSize(11);
         f.setTextColor(getColor(R.color.ink3));

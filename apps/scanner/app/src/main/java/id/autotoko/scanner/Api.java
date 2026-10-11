@@ -121,6 +121,10 @@ public final class Api {
     public void orders(boolean active, Cb cb) {
         call("GET", session.baseUrl() + "/api/orders" + (active ? "?active=1" : ""), session.token(), null, cb);
     }
+    /** Bahan baku + bahan packing sebuah master produk (nama/qty/satuan saja) utk packer. */
+    public void produkBahan(String masterId, Cb cb) {
+        call("GET", session.baseUrl() + "/api/orders/product-materials/" + masterId, session.token(), null, cb);
+    }
     public void orderBoardSummary(Cb cb) {
         call("GET", session.baseUrl() + "/api/orders/board-summary", session.token(), null, cb);
     }

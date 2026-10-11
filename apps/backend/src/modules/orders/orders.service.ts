@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, lt, lte, ne, notInArray, sql, type SQL } from "drizzle-orm";
 import { DRIZZLE, type Database } from "../../database/database.module.js";
-import { orders, orderSettings, resiScans, resiScanCodes, shops, marketplaceSkuMap, masterProducts } from "../../database/schema/index.js";
+import { orders, orderSettings, resiScans, resiScanCodes, shops, marketplaceSkuMap, masterProducts, bomItems, materials, packingMaterials, productPackingQuantities } from "../../database/schema/index.js";
 import { parseStatusConfig, deriveStatus, MP_STATUS_LABEL } from "../marketplace-sync/status-config.js";
 import { AdminSettingsService } from "../admin-settings/admin-settings.service.js";
 import { OrderProfitService, type ProfitContext } from "../costing/order-profit.service.js";
@@ -174,7 +174,7 @@ export class OrdersService {
       if (!Array.isArray(items)) return items;
       return items.map((it) => {
         const o2 = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
-        return { ...o2, masterName: this.orderProfit.masterNameForItem(o2, profitCtx) };
+        return { ...o2, masterName: this.orderProfit.masterNameForItem(o2, profitCtx), masterId: this.orderProfit.masterIdForItem(o2, profitCtx) };
       });
     };
 
@@ -642,6 +642,64 @@ export class OrdersService {
       perStatus, manual: Number(m?.n ?? 0),
       packedToday: Number(pk?.n ?? 0),
       cancelledToday: Number(cx?.n ?? 0),
+    };
+  }
+
+  /**
+   * Bahan sebuah master produk untuk PACKER: bahan baku (resep per 1 pcs) +
+   * bahan packing (per paket). HANYA nama/qty/satuan -- tanpa harga & stok
+   * (itu urusan owner). Dipasang di /orders supaya staf berizin "order" bisa
+   * membukanya tanpa izin "bahan".
+   */
+  async bahanProduk(userId: string, masterId: string) {
+    const [prod] = await this.db
+      .select({ id: masterProducts.id, name: masterProducts.name })
+      .from(masterProducts)
+      .where(and(eq(masterProducts.id, masterId), eq(masterProducts.userId, userId)))
+      .limit(1);
+    if (!prod) throw new NotFoundException("Produk tidak ditemukan");
+
+    const resep = await this.db
+      .select({
+        nama: bomItems.materialName,
+        satuan: bomItems.unit,
+        qty: bomItems.quantity,
+        katNama: materials.name,
+        katSatuan: materials.unit,
+      })
+      .from(bomItems)
+      .leftJoin(materials, eq(bomItems.materialId, materials.id))
+      .where(eq(bomItems.masterProductId, masterId))
+      .orderBy(bomItems.materialName);
+
+    const pack = await this.db
+      .select({
+        id: packingMaterials.id,
+        nama: materials.name,
+        satuan: materials.unit,
+        defQty: packingMaterials.defaultQuantity,
+      })
+      .from(packingMaterials)
+      .innerJoin(materials, eq(packingMaterials.materialId, materials.id))
+      .where(eq(packingMaterials.userId, userId))
+      .orderBy(materials.name);
+    const ov = await this.db
+      .select({ pid: productPackingQuantities.packingMaterialId, qty: productPackingQuantities.quantity })
+      .from(productPackingQuantities)
+      .where(eq(productPackingQuantities.masterProductId, masterId));
+    const ovMap = new Map(ov.map((r) => [r.pid, Number(r.qty)]));
+
+    const angka = (n: unknown) => Math.round(Number(n) * 1000) / 1000;
+    return {
+      produk: prod.name,
+      bahanBaku: resep.map((r) => ({
+        nama: r.katNama ?? r.nama,
+        qty: angka(r.qty),
+        satuan: r.katSatuan ?? r.satuan ?? "",
+      })),
+      bahanPacking: pack
+        .map((p) => ({ nama: p.nama, qty: angka(ovMap.get(p.id) ?? p.defQty), satuan: p.satuan ?? "" }))
+        .filter((p) => p.qty > 0),
     };
   }
 

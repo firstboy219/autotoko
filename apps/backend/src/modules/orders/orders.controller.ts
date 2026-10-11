@@ -130,6 +130,14 @@ export class OrdersController {
     return { success: true, data: await this.orders.codOutcome(uid(req), { shopId, from, to }) };
   }
 
+  @Get("product-materials/:masterId")
+  async productMaterials(
+    @Req() req: FastifyRequest,
+    @Param("masterId") masterId: string,
+  ): Promise<ApiResponse<unknown>> {
+    return { success: true, data: await this.orders.bahanProduk(uid(req), masterId) };
+  }
+
   @Get("today-products")
   async todayProducts(
     @Req() req: FastifyRequest,

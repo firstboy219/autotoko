@@ -131,6 +131,11 @@ export class OrderProfitService {
     return this.resolveItemMaster(item, ctx)?.name ?? null;
   }
 
+  /** ID master produk utk sebuah item (null bila tak dikenali). */
+  masterIdForItem(item: Record<string, unknown>, ctx: ProfitContext): string | null {
+    return this.resolveItemMaster(item, ctx)?.mid ?? null;
+  }
+
   /**
    * Estimasi PROFIT BERSIH utk kumpulan item pesanan (rupiah, string) atau null
    * bila tak ada satu pun item yang dikenali+ber-costing. Pakai harga jual aktual
