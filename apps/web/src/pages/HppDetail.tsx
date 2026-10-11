@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { calculatePublishPricing, requiredPublishPriceCents } from "@autotoko/shared";
 import { Layout } from "../components/Layout";
 import { useFetch } from "../lib/useFetch";
@@ -128,7 +128,17 @@ const pctStr = (r: number) => (r * 100).toFixed(r * 100 % 1 === 0 ? 0 : 1);
 
 export function HppDetail() {
   const { id } = useParams<{ id: string }>();
+  const [sp] = useSearchParams();
+  const fromBeda = sp.get("beda") === "1";
   const { data, loading, reload } = useFetch<Detail>(id ? `/costing/${id}` : null);
+  useEffect(() => {
+    if (!fromBeda || !data || !id) return;
+    const t = setTimeout(
+      () => document.getElementById("sync-marketplace")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      350,
+    );
+    return () => clearTimeout(t);
+  }, [fromBeda, data, id]);
 
   return (
     <Layout title="Hitung HPP & Harga Jual">
@@ -152,9 +162,17 @@ export function HppDetail() {
         </div>
       ) : (
         <div className="space-y-4">
+          {fromBeda && (
+            <InlineAlert tone="warning">
+              Produk ini <b>terjual dengan harga berbeda</b> dari harga master di halaman ini. Pastikan harga jual di
+              marketplace sudah sesuai master, lalu klik <b>&quot;Terapkan harga ke semua&quot;</b> di bawah agar konsisten.
+            </InlineAlert>
+          )}
           <HppSection productId={id} data={data} onChange={reload} />
           <PublishSection productId={id} data={data} onChange={reload} />
-          <MarketplacePriceSync productId={id} codEnabled={data.costing.codEnabled ?? null} onChange={reload} />
+          <div id="sync-marketplace">
+            <MarketplacePriceSync productId={id} codEnabled={data.costing.codEnabled ?? null} onChange={reload} />
+          </div>
         </div>
       )}
     </Layout>

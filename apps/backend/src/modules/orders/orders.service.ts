@@ -248,6 +248,7 @@ export class OrdersService {
       ...dariApi.map((o) => ({
         ...o, sumber: "api" as const,
         buyer: this.buyerInfoOf(o, buyerStats),
+        hargaBeda: this.orderProfit.itemsPriceDiff(o.items, profitCtx),
         labelPrinted: Boolean((o as Record<string, unknown>).labelPrinted),
         terscan: terscanIds.has(o.id),
         scanned: terscanIds.has(o.id),

@@ -7,6 +7,7 @@ import { useRealtime } from "../lib/realtime";
 import { api } from "../lib/api";
 import { rupiah, dateShort } from "../lib/fmt";
 import { FLOW, SIDE, ALL_FS, FS_LABEL } from "../lib/orderStatus";
+import { Link } from "react-router-dom";
 import { Icon, type IconName } from "../components/Icon";
 import {
   PageHeader,
@@ -98,6 +99,8 @@ interface Order {
     codBatalKirim: number;
     flags: BuyerFlags;
   } | null;
+  /** Item yg harga jualnya beda dari master HPP (backend) -> tautan ke /hpp/:id. */
+  hargaBeda?: { masterId: string; nama: string; hargaMaster: number; hargaJual: number[]; qty: number; profitHarusnya: number; profitJadi: number; selisih: number }[];
 }
 
 type BatchRow = { orderId: string; ok: boolean; orderNo: string | null; error?: string };
@@ -754,6 +757,17 @@ export function Orders() {
                                 })()}
                                 {o.isCod && <Badge tone="warning">COD</Badge>}
                                 {o.buyer && <BuyerBadges flags={o.buyer.flags} batalKirim={o.buyer.batalKirim} batalPra={o.buyer.batalPra} />}
+                                {(o.hargaBeda ?? []).map((h) => (
+                                  <Link
+                                    key={h.masterId}
+                                    to={`/hpp/${h.masterId}?beda=1`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    title={`Terjual ${rupiah(h.hargaJual[0] ?? 0)} vs harga master ${rupiah(h.hargaMaster)} · profit ${rupiah(h.profitHarusnya)} → ${rupiah(h.profitJadi)}. Klik: buka Master Produk & terapkan harga ke marketplace.`}
+                                    className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-200"
+                                  >
+                                    <Icon name="warning" size={12} /> harga ≠ master: {h.nama.length > 16 ? h.nama.slice(0, 16) + "…" : h.nama}
+                                  </Link>
+                                ))}
                                 {o.id === maxValueId && <Badge tone="info">nilai tertinggi</Badge>}
                                 {o.shippingCourier && <span className="text-[11px] text-ink-3">{o.shippingCourier}</span>}
                                 {orderCreatedMs(o) > 0 && (() => { const days = (Date.now() - orderCreatedMs(o)) / 86400000; return <Badge tone={days >= 3 ? "danger" : days >= 1 ? "warning" : "neutral"}>umur {agingText(orderCreatedMs(o))}</Badge>; })()}

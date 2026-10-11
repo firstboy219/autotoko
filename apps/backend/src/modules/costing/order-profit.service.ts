@@ -224,7 +224,64 @@ export class OrderProfitService {
     return perUnit * qty;
   }
 
-  /** Versi numerik (rupiah) — dipakai dashboard utk menjumlah lintas order. */
+  /**
+   * Item pesanan yang HARGA JUAL REAL-nya beda (>=0.5%) dari harga publish master.
+   * Dikelompokkan per master + dampak profit (harusnya di harga master -> jadi di
+   * harga real). Dipakai menandai order & menautkan ke menu Master Produk/HPP.
+   */
+  itemsPriceDiff(
+    items: unknown,
+    ctx: ProfitContext,
+  ): Array<{
+    masterId: string;
+    nama: string;
+    hargaMaster: number;
+    hargaJual: number[];
+    qty: number;
+    profitHarusnya: number;
+    profitJadi: number;
+    selisih: number;
+  }> {
+    if (!Array.isArray(items)) return [];
+    const byMaster = new Map<
+      string,
+      { masterId: string; nama: string; hargaMaster: number; hargaJual: Set<number>; qty: number; profitHarusnya: number; profitJadi: number }
+    >();
+    for (const it of items) {
+      const o2 = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
+      const m = this.resolveItemMaster(o2, ctx);
+      if (!m) continue;
+      const basis = ctx.basisByMaster.get(m.mid);
+      if (!basis || basis.publishPrice == null || basis.publishPrice <= 0) continue;
+      const qty = Number(o2.qty ?? o2.quantity ?? 0) || 0;
+      if (qty <= 0) continue;
+      const realUnit = this.realUnitPrice(o2);
+      if (realUnit == null || realUnit <= 0) continue;
+      if (Math.abs(realUnit - basis.publishPrice) / basis.publishPrice < 0.005) continue;
+      const pubUnit = this.publishUnitProfitForItem(o2, ctx);
+      const realLine = this.netProfitForItem(o2, ctx);
+      const e =
+        byMaster.get(m.mid) ??
+        { masterId: m.mid, nama: m.name ?? "(tanpa nama)", hargaMaster: Math.round(basis.publishPrice), hargaJual: new Set<number>(), qty: 0, profitHarusnya: 0, profitJadi: 0 };
+      e.qty += qty;
+      e.hargaJual.add(Math.round(realUnit));
+      if (pubUnit != null) e.profitHarusnya += pubUnit * qty;
+      if (realLine != null) e.profitJadi += realLine;
+      byMaster.set(m.mid, e);
+    }
+    return [...byMaster.values()].map((e) => ({
+      masterId: e.masterId,
+      nama: e.nama,
+      hargaMaster: e.hargaMaster,
+      hargaJual: [...e.hargaJual].sort((a, b) => a - b),
+      qty: e.qty,
+      profitHarusnya: Math.round(e.profitHarusnya),
+      profitJadi: Math.round(e.profitJadi),
+      selisih: Math.round(e.profitJadi - e.profitHarusnya),
+    }));
+  }
+
+    /** Versi numerik (rupiah) — dipakai dashboard utk menjumlah lintas order. */
   netProfitNumber(items: unknown, ctx: ProfitContext): number | null {
     if (!Array.isArray(items)) return null;
     let total = 0;
