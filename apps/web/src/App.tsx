@@ -63,6 +63,12 @@ function Protected({ children }: { children: ReactNode }) {
   return authed ? <>{children}</> : <Navigate to="/login" replace />;
 }
 
+/** Beranda: tamu melihat halaman depan, yang sudah login langsung ke dashboard. */
+function Home() {
+  const authed = useAuth((s) => s.authenticated);
+  return authed ? <DashboardV2 /> : <Landing />;
+}
+
 function PageLoader() {
   return (
     <div className="h-screen flex items-center justify-center bg-canvas">
@@ -135,7 +141,7 @@ export function App() {
           <Route path="/dashboard-ringkas" element={<Protected><Dashboard /></Protected>} />
           <Route path="/paket" element={<Protected><Paket /></Protected>} />
           <Route path="/notifikasi" element={<Protected><Notifikasi /></Protected>} />
-          <Route path="/" element={<Protected><DashboardV2 /></Protected>} />
+          <Route path="/" element={<Home />} />
           <Route path="/toko" element={<Protected><Toko /></Protected>} />
           <Route path="/produk" element={<Protected><Produk /></Protected>} />
           <Route path="/master-postingan" element={<Protected><MasterPostingan /></Protected>} />
