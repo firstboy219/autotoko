@@ -18,7 +18,7 @@ public final class Session {
     private static final String K_ACCOUNTS = "accounts";
     private static final String K_LOGIN_AT = "login_at";
 
-    public static final String DEFAULT_BASE = "https://viewtoko.cosger.online";
+    public static final String DEFAULT_BASE = "https://autotoko.com";
 
     private final SharedPreferences p;
     private final Context ctx;
