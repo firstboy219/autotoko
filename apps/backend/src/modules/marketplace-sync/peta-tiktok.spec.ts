@@ -132,7 +132,8 @@ describe("petakanPesanan", () => {
     const b = petakanPesanan(PESANAN_ASLI as never);
     expect(b.marketplaceOrderId).toBe("586039731474629791");
     expect(b.status).toBe("AWAITING_COLLECTION");
-    expect(b.fulfillmentStatus).toBe("siap_kirim");
+    // AWAITING_COLLECTION -> "packing" (6af91e5): siap_kirim hanya lewat scan packer.
+    expect(b.fulfillmentStatus).toBe("packing");
     expect(b.commercePlatform).toBe("TOKOPEDIA");
     expect(b.trackingNumber).toBe("JY1649738608");
     expect(b.shippingCourier).toBe("J&T Express");
